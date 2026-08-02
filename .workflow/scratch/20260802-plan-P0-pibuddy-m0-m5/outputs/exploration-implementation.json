@@ -1,0 +1,564 @@
+{
+  "angle": "implementation",
+  "goal": "逐条核实 PiBuddy 审计文档所述缺陷在当前源码中的真实状态，为 M0-M5 需求追踪表提供 file:line 级证据",
+  "project_root": "D:\\selftool\\pi-ui",
+  "truth_source": {
+    "package": "@earendil-works/pi-coding-agent",
+    "version": "0.83.0",
+    "path": "C:\\nvm4w\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent",
+    "verification_method": "直接读取 package.json / dist/*.js / docs/*.md，并用 node 实测 require.resolve 与 spawn ENOENT 行为"
+  },
+  "generated_at": "2026-08-02",
+  "verifications": [
+    {
+      "requirement_id": "RUN-001",
+      "title": "pi-launcher 用 createRequire().resolve 解析 pi 入口，生产环境必然回退全局 pi",
+      "verdict": "confirmed_defect",
+      "confidence": "high",
+      "discovery_source": "bash-scan + runtime-experiment",
+      "evidence": [
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\pi-launcher.ts",
+          "lines": "12-29",
+          "excerpt": "export function buildPiSpawn(): PiSpawn {\n  try {\n    const require = createRequire(import.meta.url);\n    const indexJs = require.resolve(\"@earendil-works/pi-coding-agent\");\n    const cliJs = path.join(path.dirname(indexJs), \"cli.js\");\n    if (fs.existsSync(cliJs)) {\n      return {\n        command: process.execPath,\n        prefixArgs: [cliJs],\n        env: { ...process.env, ELECTRON_RUN_AS_NODE: \"1\" },\n      };\n    }\n  } catch {\n    // 落到全局 pi\n  }\n  const isWin = process.platform === \"win32\";\n  return { command: isWin ? \"pi.cmd\" : \"pi\", shell: isWin };\n}",
+          "note": "catch 块为空，任何 resolve 异常都被静默吞掉直接落到全局 pi"
+        },
+        {
+          "file": "C:\\nvm4w\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent\\package.json",
+          "lines": "13-22",
+          "excerpt": "\"exports\": {\n  \".\": {\n    \"types\": \"./dist/index.d.ts\",\n    \"import\": \"./dist/index.js\"\n  },\n  \"./rpc-entry\": {\n    \"import\": \"./dist/rpc-entry.js\"\n  }\n}",
+          "note": "0.83.0 确有 exports 字段；包根 \".\" 只声明了 types + import 两个条件，没有 require / default / node 条件"
+        },
+        {
+          "file": "runtime-experiment",
+          "lines": "node -e \"createRequire(...).resolve('@earendil-works/pi-coding-agent')\"",
+          "excerpt": "ERR CODE: ERR_PACKAGE_PATH_NOT_EXPORTED\nERR MSG: No \"exports\" main defined in C:\\nvm4w\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent\\package.json",
+          "note": "实测确认：createRequire().resolve 走 require 解析条件，与 import-only 的 exports 映射不匹配，必然抛 ERR_PACKAGE_PATH_NOT_EXPORTED。不是概率问题，是 100% 必然"
+        },
+        {
+          "file": "C:\\nvm4w\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent\\package.json",
+          "lines": "10-12",
+          "excerpt": "\"bin\": { \"pi\": \"dist/cli.js\" },\n\"main\": \"./dist/index.js\",\n\"types\": \"./dist/index.d.ts\"",
+          "note": "legacy main 字段仍在，但一旦存在 exports，Node 就忽略 main。dist/cli.js 与 dist/rpc-entry.js 均实际存在（cli.js 681B、rpc-entry.js 386B，两者都带可执行位）"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\electron-builder.yml",
+          "lines": "6-13",
+          "excerpt": "files:\n  - out/**\n  - package.json\n\n# pi 智能体在运行时会用 Node 直接执行 node_modules 里的 cli.js、\n# 动态加载扩展/技能文件，放进 asar 会破坏这些路径，直接不打 asar\nasar: false\nnpmRebuild: false",
+          "note": "asar:false 已设置（对路径可见性是必要条件）；files 白名单只列了 out/** 与 package.json，未显式包含 node_modules"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\node_modules\\@earendil-works\\pi-coding-agent",
+          "lines": "symlink",
+          "excerpt": "lrwxrwxrwx pi-coding-agent -> /d/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent",
+          "note": "pnpm workspace 采用符号链接 + .pnpm 虚拟store（根 node_modules/@earendil-works 目录不存在）。打包时该 symlink 指向 packages/app 之外的 .pnpm 目录，属于第二重路径风险，与 exports 问题相互独立"
+        }
+      ],
+      "findings": {
+        "exports_field_present": true,
+        "package_root_exported": "仅 import 条件，无 require 条件",
+        "resolve_throws_in_production": "必然抛 ERR_PACKAGE_PATH_NOT_EXPORTED（dev 与 prod 均如此，与 Electron 无关）",
+        "catch_causes_global_fallback": true,
+        "net_effect": "自带的 @earendil-works/pi-coding-agent 依赖形同虚设，运行时永远走系统全局 pi/pi.cmd；未装全局 pi 的机器上启动即失败",
+        "asar_files_impact": "asar:false 正确；但 files 未列 node_modules，且 pnpm symlink 指向 packages/app 之外，即便修好 resolve，生产包内 node_modules 布局仍需另行验证"
+      },
+      "files_to_change": [
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\pi-launcher.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\electron-builder.yml",
+        "D:\\selftool\\pi-ui\\packages\\app\\package.json"
+      ]
+    },
+    {
+      "requirement_id": "SES-001",
+      "title": "sessions-store 的会话目录命名规则与 pi 0.83 实际规则不一致，且不感知自定义 sessionDir",
+      "verdict": "partial",
+      "confidence": "high",
+      "discovery_source": "bash-scan + runtime-experiment",
+      "evidence": [
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\sessions-store.ts",
+          "lines": "19-22",
+          "excerpt": "export function sessionDirFor(workspace: string): string {\n  const seg = workspace.replace(/[\\\\/:]/g, \"-\");\n  return path.join(os.homedir(), \".pi\", \"agent\", \"sessions\", `--${seg}--`);\n}",
+          "note": "只做一次全局替换，未剥离前导分隔符，未做 resolvePath 归一化，homedir/.pi/agent 三段全部硬编码"
+        },
+        {
+          "file": "C:\\nvm4w\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\core\\session-manager.js",
+          "lines": "241-247",
+          "excerpt": "function getDefaultSessionDirPath(cwd, agentDir = getDefaultAgentDir()) {\n    const resolvedCwd = resolvePath(cwd);\n    const resolvedAgentDir = resolvePath(agentDir);\n    const safePath = `--${resolvedCwd.replace(/^[/\\\\]/, \"\").replace(/[/\\\\:]/g, \"-\")}--`;\n    return join(resolvedAgentDir, \"sessions\", safePath);\n}",
+          "note": "pi 真实算法：先 resolvePath 归一化，再 .replace(/^[/\\\\]/,\"\") 剥离前导分隔符，最后才全局替换"
+        },
+        {
+          "file": "runtime-experiment",
+          "lines": "两套算法对拍",
+          "excerpt": "\"D:\\\\x\"              pi= --D--x--            buddy= --D--x--            MATCH\n\"C:\\\\Users\\\\yehh\"    pi= --C--Users-yehh--   buddy= --C--Users-yehh--   MATCH\n\"D:\\\\kt\\\\kol-tihu\"   pi= --D--kt-kol-tihu--  buddy= --D--kt-kol-tihu--  MATCH\n\"/home/u\"           pi= --home-u--          buddy= ---home-u--         MISMATCH\n\"/Users/alice/work\" pi= --Users-alice-work-- buddy= ---Users-alice-work-- MISMATCH",
+          "note": "Windows 路径两者完全一致；POSIX 绝对路径 PiBuddy 多出一个前导 -，导致目录名对不上"
+        },
+        {
+          "file": "C:\\Users\\yehh\\.pi\\agent\\sessions\\",
+          "lines": "真实目录清单",
+          "excerpt": "--C--Users-yehh--\n--C--Users-yehh-Documents-virtual--\n--D--kt-kol-tihu--\n--D--selftool-pi-maestro-flow--",
+          "note": "实盘目录名与上面 Windows 侧计算结果逐字符吻合，佐证对拍结论可信"
+        },
+        {
+          "file": "C:\\nvm4w\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\config.js",
+          "lines": "396-419",
+          "excerpt": "export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;\nexport const ENV_SESSION_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_SESSION_DIR`;\n...\nexport function getAgentDir() {\n    const envDir = process.env[ENV_AGENT_DIR];\n    if (envDir) {\n        return expandTildePath(envDir);\n    }\n    return join(homedir(), CONFIG_DIR_NAME, \"agent\");\n}",
+          "note": "PI_CODING_AGENT_DIR 可整体改写 agent 目录；CONFIG_DIR_NAME 来自 pkg.piConfig.configDir（本版本为 .pi）"
+        },
+        {
+          "file": "C:\\nvm4w\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent\\docs\\settings.md",
+          "lines": "204-210",
+          "excerpt": "| `sessionDir` | string | - | Directory where session files are stored. Accepts absolute or relative paths, plus `~`. |\n...\nWhen multiple sources specify a session directory, precedence is `--session-dir`, `PI_CODING_AGENT_SESSION_DIR`, then `sessionDir` in settings.json.",
+          "note": "三级优先链；PiBuddy 三者一个都不读"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+          "lines": "78-84",
+          "excerpt": "const args = [...(o.spawn.prefixArgs ?? []), \"--mode\", \"rpc\"];\nif (o.session) args.push(\"--session\", o.session);\nif (o.sessionName) args.push(\"--name\", o.sessionName);\nif (o.noSession) args.push(\"--no-session\");",
+          "note": "pi --mode rpc 支持 --session-dir（docs/rpc.md:19），client.ts 未传；即主进程列目录与 pi 写目录是两条独立推断路径，无任何一致性保障"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\sessions-store.ts",
+          "lines": "24-50",
+          "excerpt": "export function listSessions(workspace: string): SessionMeta[] {\n  ...\n  entries = fs.readdirSync(dir, { withFileTypes: true });\n  ...\n  const stat = fs.statSync(filePath);\n  const meta = parseSessionFile(filePath);\n  ...\n}\n\nfunction parseSessionFile(filePath: string): ... {\n  const text = fs.readFileSync(filePath, \"utf8\");\n  const lines = text.split(\"\\n\");",
+          "note": "readdirSync + 每文件 statSync + readFileSync 全量读入内存并 split(\"\\n\") 逐行 JSON.parse，全同步阻塞主进程；由 ipc.ts:127 的 sessions:list 直接调用，且 app.ts 在 agent_settled 每次都触发 refreshSessions"
+        }
+      ],
+      "findings": {
+        "windows_path_D_x": "PiBuddy 与 pi 均产出 --D--x--，一致",
+        "posix_path_home_u": "pi 产出 --home-u--，PiBuddy 产出 ---home-u--，多一个前导 -",
+        "root_cause": "缺少 .replace(/^[/\\\\]/, \"\") 前导分隔符剥离，且缺少 resolvePath 归一化",
+        "env_PI_CODING_AGENT_DIR": "未处理",
+        "env_PI_CODING_AGENT_SESSION_DIR": "未处理",
+        "settings_sessionDir": "未处理（pi settings.json 中的 sessionDir 与 --session-dir 均未打通）",
+        "listSessions_blocking": "确认：readdirSync + statSync + readFileSync 全量同步读取所有 JSONL，逐行 JSON.parse，无分页无上限，运行在主进程",
+        "platform_impact": "Windows 上目录名正确，缺陷在当前开发平台不可见；macOS/Linux 上历史会话列表恒为空"
+      },
+      "files_to_change": [
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\sessions-store.ts",
+        "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts"
+      ]
+    },
+    {
+      "requirement_id": "RUN-002",
+      "title": "无 runtimeId/generation 概念，旧 client 的定时器与 exit 事件跨代污染新会话",
+      "verdict": "confirmed_defect",
+      "confidence": "high",
+      "discovery_source": "bash-scan",
+      "evidence": [
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "14-28",
+          "excerpt": "const clients = new Map<number, PiRpcClient>();\n\nexport function disposeClientFor(webContentsId: number): void {\n  const client = clients.get(webContentsId);\n  if (client) {\n    clients.delete(webContentsId);\n    client.stop();\n  }\n}",
+          "note": "Map 的 key 只有 webContentsId，没有任何代际/运行实例标识"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "36-77",
+          "excerpt": "function makeEventForwarder(wc: WebContents): (e: AgentEvent) => void {\n  let queue: AgentEvent[] = [];\n  let timer: NodeJS.Timeout | null = null;\n\n  const flush = (): void => {\n    timer = null;\n    if (wc.isDestroyed() || queue.length === 0) { queue = []; return; }\n    ...\n    for (const e of collapsed) wc.send(\"pi:event\", e);\n  };\n\n  return (e: AgentEvent) => {\n    queue.push(e);\n    if (!timer) timer = setTimeout(flush, 33);\n  };\n}",
+          "note": "闭包只返回 forwarder 函数，未返回任何 cancel/dispose 句柄；timer 只在 wc.isDestroyed() 时才被视作无害。client 被替换时 timer 无人可清"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "89-104",
+          "excerpt": "ipcMain.handle(\"pi:start\", async (event, opts) => {\n  const wc = event.sender;\n  disposeClientFor(wc.id);\n\n  const client = new PiRpcClient({ ... });\n  client.on(\"event\", makeEventForwarder(wc));\n  client.on(\"ui_request\", (r) => !wc.isDestroyed() && wc.send(\"pi:ui-request\", r));\n  client.on(\"exit\", (code) => !wc.isDestroyed() && wc.send(\"pi:exit\", code));\n  client.start();\n  clients.set(wc.id, client);",
+          "note": "每次 pi:start 都新建一个 forwarder。旧 forwarder 若有 pending 的 33ms timer，会在新 client 已就绪后 flush 旧代事件到同一个 wc"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+          "lines": "104-112",
+          "excerpt": "proc.on(\"exit\", (code) => {\n  this.failAll(new Error(`pi 进程已退出 (code=${code})...`));\n  this.proc = null;\n  this.emit(\"exit\", code);\n});",
+          "note": "stop() 之后进程真正退出时仍会 emit(\"exit\")；ipc.ts:102 注册在旧 client 上的监听器仍活着，把 pi:exit 发给渲染进程"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\stores\\app.ts",
+          "lines": "287-293",
+          "excerpt": "window.piBuddy.pi.onExit(() => {\n  if (started.value) {\n    started.value = false;\n    streaming.value = false;\n    notify(\"error\", \"智能体进程意外退出，请重新开始\");\n  }\n});",
+          "note": "onExit 回调不带任何 runtimeId，无法判别是哪一代进程的退出。旧代进程延迟退出会把刚启动成功的新会话置为 started=false 并弹出误报错误"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+          "lines": "141-144",
+          "excerpt": "private failAll(err: Error): void {\n  for (const p of this.pending.values()) p.reject(err);\n  this.pending.clear();\n}",
+          "note": "pending map 在 proc error / proc exit / stop() 三处都会被 failAll 清空并 reject，这一点是正确的"
+        },
+        {
+          "file": "C:\\nvm4w\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent\\docs\\rpc.md",
+          "lines": "834",
+          "excerpt": "Events are streamed to stdout as JSON lines during agent operation. Events do not generally include an `id` field; `bash_execution_update` includes the `id` of its originating `bash` command when one was provided.",
+          "note": "全文 grep \"sequence\" 命中数 = 0。pi 协议本身不提供 sequence/序号字段，跨代与乱序判别必须由 PiBuddy 侧自行注入"
+        }
+      ],
+      "findings": {
+        "runtimeId_generation_exists": false,
+        "forwarder_timer_cleared_on_client_replace": false,
+        "pending_map_handled_on_exit": "已处理（failAll 在 error/exit/stop 三处 reject 并 clear）",
+        "event_carries_sequence": "pi 协议不提供，PiBuddy 也未自行注入",
+        "concrete_symptom": "1) 旧 forwarder 的 33ms 定时器在新 client 就绪后 flush 旧事件；2) 旧进程延迟退出触发的 pi:exit 会把新会话误置为已退出并弹错误提示"
+      },
+      "files_to_change": [
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+        "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.d.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\stores\\app.ts"
+      ]
+    },
+    {
+      "requirement_id": "RUN-003",
+      "title": "client.ts 缺少超时/取消/stdin 错误处理/背压与缓冲区上限",
+      "verdict": "confirmed_defect",
+      "confidence": "high",
+      "discovery_source": "bash-scan + runtime-experiment",
+      "evidence": [
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+          "lines": "153-165",
+          "excerpt": "send<T = unknown>(command: RpcCommandBase): Promise<RpcResponse<T>> {\n  const id = command.id ?? `c${++this.seq}`;\n  return new Promise<RpcResponse<T>>((resolve, reject) => {\n    this.pending.set(id, { resolve: resolve as (r: RpcResponse) => void, reject });\n    try {\n      this.write({ ...command, id });\n    } catch (err) {\n      this.pending.delete(id);\n      reject(err as Error);\n    }\n  });\n}",
+          "note": "无 timeout 参数、无定时器、无 AbortSignal。pi 若不回响应，Promise 永远 pending，对应的 ipcMain.handle 也永远不 settle，渲染进程按钮永久 loading"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+          "lines": "30-40",
+          "excerpt": "export interface PiClientOptions {\n  spawn: PiSpawn;\n  cwd: string;\n  session?: string;\n  sessionName?: string;\n  noSession?: boolean;\n  provider?: string;\n  model?: string;\n  extraArgs?: string[];\n}",
+          "note": "选项里没有 timeout / signal 字段；全文件 grep AbortSignal / AbortController 零命中"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+          "lines": "146-151",
+          "excerpt": "private write(obj: unknown): void {\n  if (!this.proc || this.proc.exitCode !== null) {\n    throw new Error(\"pi 进程未运行\");\n  }\n  this.proc.stdin.write(JSON.stringify(obj) + \"\\n\");\n}",
+          "note": "1) 未注册 proc.stdin.on(\"error\")，EPIPE/ECONNRESET 会成为未处理的 stream error 事件，直接崩主进程；2) write 返回值被丢弃，无 drain 等待，大 payload（如 base64 图片）连发时无背压控制"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+          "lines": "95-101",
+          "excerpt": "attachJsonlReader(proc.stdout, (line) => this.handleLine(line));\nproc.stderr.on(\"data\", (chunk: Buffer) => {\n  const text = chunk.toString(\"utf8\");\n  this.stderrTail.push(text);\n  if (this.stderrTail.length > 50) this.stderrTail.shift();\n  this.emit(\"stderr\", text);\n});",
+          "note": "stderr 有 50 条环形上限（正确）；stdout 侧无任何上限，且只监听了 stdout/stderr 的 data，未监听它们的 error"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\jsonl.ts",
+          "lines": "13-28",
+          "excerpt": "const decoder = new StringDecoder(\"utf8\");\nlet buffer = \"\";\n\nstream.on(\"data\", (chunk: Buffer | string) => {\n  buffer += typeof chunk === \"string\" ? chunk : decoder.write(chunk);\n\n  for (;;) {\n    const newlineIndex = buffer.indexOf(\"\\n\");\n    if (newlineIndex === -1) break;\n    ...\n  }\n});",
+          "note": "buffer 无长度上限；若下游持续输出无换行内容（畸形输出 / 二进制污染），buffer 无限增长直至 OOM。单行长度也无上限，超长行会整条交给 JSON.parse"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\jsonl.ts",
+          "lines": "4-8",
+          "excerpt": "/**\n * 严格 JSONL 分帧：仅以 LF (\\n) 作为记录分隔符，容忍尾部 \\r。\n * 不能使用 Node readline —— 它还会按 U+2028/U+2029 分行，\n * 而这两个字符在 JSON 字符串中是合法内容（见 pi docs/rpc.md）。\n */",
+          "note": "分帧语义本身与 pi docs/rpc.md:28-37 的 Framing 要求完全吻合，这部分是 already_correct，缺陷仅在缺少上限保护"
+        },
+        {
+          "file": "runtime-experiment",
+          "lines": "spawn ENOENT 行为实测（Node v24, win32）",
+          "excerpt": "sync after spawn: exitCode= null pid= undefined -> running would be true\n[error] exitCode= -4058 killed= false\nSEQUENCE: error:ENOENT -> close:-4058\nFINAL exitCode: -4058\nstdin.write did NOT throw",
+          "note": "关键实测结论：ENOENT 时只触发 error 与 close，绝不触发 exit。因此 client.ts:104 的 proc.on(\"exit\") 永不执行 → this.proc 永远不置 null、emit(\"exit\") 永不发出、渲染进程收不到 pi:exit。running 的取值分两段：spawn 返回后到 error 事件之间 exitCode 为 null 故 running===true；error 事件时 exitCode 已被置为 -4058 故 running===false 并永久保持 false"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+          "lines": "71-73,103",
+          "excerpt": "get running(): boolean {\n  return this.proc !== null && this.proc.exitCode === null;\n}\n...\nproc.on(\"error\", (err) => this.failAll(err));",
+          "note": "error 处理只 failAll，不重置 this.proc、不 emit exit、不向上层暴露原始错误。ipc.ts:26 的 clientFor 只会抛出泛化的「智能体尚未启动」，ENOENT 的真实原因被吞掉"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "103-106",
+          "excerpt": "client.start();\nclients.set(wc.id, client);\n\nconst state = await client.getState();",
+          "note": "clients.set 在 await 之前执行；getState 因 ENOENT 被 failAll reject 后，这个死 client 仍留在 map 中，直到下一次 pi:start 或窗口关闭才被清理"
+        }
+      ],
+      "findings": {
+        "request_timeout": "不存在",
+        "abort_signal": "不存在",
+        "stdin_error_listener": "不存在（EPIPE 会成为未处理 stream error）",
+        "write_backpressure_drain": "不存在（write 返回值被忽略）",
+        "jsonl_single_line_limit": "不存在",
+        "jsonl_cumulative_buffer_limit": "不存在",
+        "jsonl_framing_semantics": "已正确（仅 LF 分帧、容忍尾部 \\r、不用 readline），符合 pi docs/rpc.md Framing 要求",
+        "spawn_enoent_running_value": "error 事件之前为 true，error 事件之后恒为 false；exit 事件永不触发，this.proc 永不置 null，pi:exit 永不发出，死 client 滞留在 clients map"
+      },
+      "files_to_change": [
+        "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+        "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\jsonl.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts"
+      ]
+    },
+    {
+      "requirement_id": "SES-002",
+      "title": "会话切换与发送失败的状态处理缺口",
+      "verdict": "confirmed_defect",
+      "confidence": "high",
+      "discovery_source": "bash-scan",
+      "evidence": [
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\stores\\app.ts",
+          "lines": "428-440",
+          "excerpt": "async function newTask(): Promise<void> {\n  const resp = await window.piBuddy.pi.command({ type: \"new_session\" });\n  if (!resp.success) {\n    notify(\"error\", resp.error ?? \"无法开始新任务\");\n    return;\n  }\n  items.value = [];\n  ...\n}",
+          "note": "只判 resp.success，完全未读取 resp.data.cancelled。pi 侧若因未保存变更弹确认而被用户取消，success 仍为 true，PiBuddy 会照常清空聊天区，UI 与 pi 实际会话状态脱节"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\stores\\app.ts",
+          "lines": "442-461",
+          "excerpt": "async function openSession(meta: SessionMeta): Promise<void> {\n  if (streaming.value) { notify(\"warning\", \"请先停止当前任务，再切换历史会话\"); return; }\n  const resp = await window.piBuddy.pi.command({\n    type: \"switch_session\",\n    sessionPath: meta.path,\n  });\n  if (!resp.success) { notify(\"error\", resp.error ?? \"打开会话失败\"); return; }\n  const messages = await window.piBuddy.pi.command<{ messages: AgentMessage[] }>({ type: \"get_messages\" });\n  if (messages.success && messages.data) loadMessages(messages.data.messages);\n  await refreshState();\n  void refreshStats();\n}",
+          "note": "同样只判 success，未检查 data.cancelled；且 get_messages 失败时静默跳过 loadMessages，聊天区保留上一会话内容，与已切换的 pi 会话不符"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\stores\\app.ts",
+          "lines": "402-421",
+          "excerpt": "const resp = await window.piBuddy.pi.command({\n  type: \"prompt\",\n  message,\n  ...(images.length ? { images } : {}),\n  ...(wasStreaming ? { streamingBehavior: \"steer\" } : {}),\n});\nif (!resp.success) {\n  notify(\"error\", resp.error ?? \"发送失败\");\n  return;\n}",
+          "note": "失败路径是 return（正常 resolve），而非 throw，调用方无从区分成功与失败"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\components\\InputBar.vue",
+          "lines": "133-149",
+          "excerpt": "async function submit(): Promise<void> {\n  if (sending.value) return;\n  const text = store.editorText;\n  if (!text.trim() && images.value.length === 0 && files.value.length === 0) return;\n  sending.value = true;\n  try {\n    await store.send(text, images.value.map(...), files.value);\n    store.editorText = \"\";\n    images.value = [];\n    files.value = [];\n  } finally {\n    sending.value = false;\n  }\n}",
+          "note": "关键交叉证据：store.send 失败时正常 resolve，所以 await 之后的三行清空照常执行 → 草稿文本、图片附件、文件附件全部丢失，用户只看到一条错误提示。另有 try 无 catch，若 send 抛出（如 ipc 抛「智能体尚未启动」）则变成未捕获的 Promise rejection（调用点为 void submit()），用户无任何反馈"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\stores\\app.ts",
+          "lines": "331-347",
+          "excerpt": "// 恢复上次选择的模型与思考力度\nconst saved = settings.value;\nif (\n  saved.provider &&\n  saved.modelId &&\n  (result.state.model?.provider !== saved.provider ||\n    result.state.model?.id !== saved.modelId)\n) {\n  await setModel(saved.provider, saved.modelId, false);\n}\nif (saved.thinkingLevel) {\n  await window.piBuddy.pi.command({\n    type: \"set_thinking_level\",\n    level: saved.thinkingLevel,\n  });\n}",
+          "note": "start(sessionPath) 对新建会话与恢复历史会话走同一段逻辑，无 sessionPath 分支判断。恢复历史会话时用全局 settings 的 provider/modelId/thinkingLevel 无条件覆盖该会话原有的模型与思考力度（session JSONL 中记录的 model/thinkingLevel 被丢弃）。setThinkingLevel 那一支甚至不比较当前值，只要 saved.thinkingLevel 存在就必发"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\stores\\app.ts",
+          "lines": "442-461",
+          "excerpt": "async function openSession(meta: SessionMeta) { ... }",
+          "note": "补充：openSession 走的是 switch_session 命令而非 start()，因此这条路径不触发覆盖；但 init() → start() 以及任何 start(sessionPath) 调用都会触发"
+        }
+      ],
+      "findings": {
+        "newTask_checks_cancelled": false,
+        "openSession_checks_cancelled": false,
+        "draft_preserved_on_send_failure": false,
+        "attachments_preserved_on_send_failure": false,
+        "send_throw_path_handled": "否，InputBar submit 只有 try/finally 没有 catch，抛出路径变成未处理 rejection",
+        "start_overrides_history_session_model": true,
+        "start_overrides_history_thinking_level": true,
+        "start_has_session_branch": false
+      },
+      "files_to_change": [
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\stores\\app.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\components\\InputBar.vue"
+      ]
+    },
+    {
+      "requirement_id": "SEC-002",
+      "title": "IPC 面暴露通用 pi.command 与任意路径文件读取，且无 sender 校验",
+      "verdict": "confirmed_defect",
+      "confidence": "high",
+      "discovery_source": "bash-scan",
+      "evidence": [
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.ts",
+          "lines": "14-22",
+          "excerpt": "pi: {\n  start: (opts: { workspace: string; session?: string }) => invoke(\"pi:start\", opts),\n  command: (command: Record<string, unknown>) => invoke(\"pi:command\", command),\n  uiRespond: (response: Record<string, unknown>) => invoke(\"pi:ui-respond\", response),\n  stop: () => invoke(\"pi:stop\"),\n  ...\n}",
+          "note": "command 参数类型是完全开放的 Record<string, unknown>，没有 type 白名单，也没有任何字段校验"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "115-117",
+          "excerpt": "ipcMain.handle(\"pi:command\", (event, command: RpcCommandBase) => {\n  return clientFor(event.sender.id).send(command);\n});",
+          "note": "主进程侧同样零校验，原样透传到 pi 的 stdin。RpcCommandBase 只是 TS 类型，运行时不做任何约束"
+        },
+        {
+          "file": "C:\\nvm4w\\nodejs\\node_modules\\@earendil-works\\pi-coding-agent\\docs\\rpc.md",
+          "lines": "454-460",
+          "excerpt": "### Bash\n\n#### bash\n\nExecute a shell command and add output to conversation context. ...\n\n```json\n{\"id\": \"req-1\", \"type\": \"bash\", \"command\": \"ls -la\"}\n```",
+          "note": "pi RPC 协议原生提供 bash 命令直执行。因此任何能在渲染进程执行 JS 的攻击者（XSS / 恶意 markdown / 第三方内容）可直接 window.piBuddy.pi.command({type:'bash',command:'...'}) 拿到工作目录下的任意命令执行"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "88-213",
+          "excerpt": "export function registerIpc(): void {\n  ipcMain.handle(\"pi:start\", async (event, opts) => { const wc = event.sender; ... });\n  ipcMain.handle(\"pi:command\", (event, command) => { return clientFor(event.sender.id).send(command); });\n  ...\n}",
+          "note": "全文件 grep senderFrame / validateSender 命中数 = 0。所有 13 个 handler 都只用 event.sender.id，从不校验 event.senderFrame === mainFrame，任何子 frame / iframe 均可发起同样的 IPC"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "156-162",
+          "excerpt": "// 读取本地图片为 base64（供图片附件内联发送给模型）\nipcMain.handle(\"file:read-image\", (_event, filePath: string) => {\n  const mimeType = IMAGE_MIME[path.extname(filePath).toLowerCase()];\n  if (!mimeType) throw new Error(\"不支持的图片格式\");\n  const data = fs.readFileSync(filePath).toString(\"base64\");\n  return { data, mimeType };\n});",
+          "note": "接受渲染进程传入的任意绝对路径，唯一约束是扩展名在 IMAGE_MIME 表里。不限制在 workspace 内、不校验 realpath、不限制文件大小；readFileSync 同步阻塞主进程，且内容以 base64 全量回传"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "164-170",
+          "excerpt": "ipcMain.handle(\"shell:open-path\", (_event, target: string) => {\n  return shell.openPath(target);\n});\n\nipcMain.handle(\"shell:show-in-folder\", (_event, target: string) => {\n  shell.showItemInFolder(target);\n});",
+          "note": "同类问题：shell.openPath 接受任意渲染进程字符串，可用于以系统默认程序打开任意本地文件/可执行体"
+        }
+      ],
+      "findings": {
+        "generic_pi_command_exposed": true,
+        "command_type_allowlist": "不存在（preload 与 main 两侧均无）",
+        "rpc_bash_reachable_from_renderer": true,
+        "senderFrame_validated": false,
+        "file_read_image_accepts_arbitrary_absolute_path": true,
+        "file_read_image_size_limit": "不存在",
+        "shell_open_path_unrestricted": true
+      },
+      "files_to_change": [
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.d.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts"
+      ]
+    },
+    {
+      "requirement_id": "SEC-004",
+      "title": "STT 通道：明文存储 API Key、renderer 可指定任意 baseUrl（SSRF）、无超时与大小限制",
+      "verdict": "confirmed_defect",
+      "confidence": "high",
+      "discovery_source": "bash-scan",
+      "evidence": [
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\settings.ts",
+          "lines": "5-13",
+          "excerpt": "export interface AppSettings {\n  workspace?: string;\n  provider?: string;\n  modelId?: string;\n  thinkingLevel?: string;\n  sttBaseUrl?: string;\n  sttApiKey?: string;\n  sttModel?: string;\n}",
+          "note": "sttApiKey 与普通配置同级存放"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\settings.ts",
+          "lines": "27-32",
+          "excerpt": "export function saveSettings(patch: Partial<AppSettings>): AppSettings {\n  const merged = { ...loadSettings(), ...patch };\n  fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });\n  fs.writeFileSync(settingsPath(), JSON.stringify(merged, null, 2), \"utf8\");\n  return merged;\n}",
+          "note": "确认明文：JSON.stringify 直接写入 userData/settings.json，未使用 safeStorage / keytar，未做任何加密或权限收紧"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "131-134",
+          "excerpt": "ipcMain.handle(\"settings:get\", () => loadSettings());\nipcMain.handle(\"settings:set\", (_event, patch: Partial<AppSettings>) =>\n  saveSettings(patch)\n);",
+          "note": "settings:get 把含明文 sttApiKey 的完整对象回传渲染进程；SettingsModal.vue:26 与 InputBar.vue:112 都在渲染进程持有明文 key"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "173-212",
+          "excerpt": "ipcMain.handle(\"stt:transcribe\", async (_event, req: { baseUrl: string; apiKey: string; model: string; audio: ArrayBuffer; mimeType: string }) => {\n  const form = new FormData();\n  ...\n  const base = req.baseUrl.replace(/\\/+$/, \"\");\n  const resp = await fetch(`${base}/audio/transcriptions`, {\n    method: \"POST\",\n    headers: { Authorization: `Bearer ${req.apiKey}` },\n    body: form,\n  });",
+          "note": "baseUrl 与 apiKey 全部来自渲染进程入参。除去尾部斜杠外无任何处理：不校验协议（http/file/ 等均可）、无域名白名单、不阻断 127.0.0.1 / 169.254.169.254 / 内网段。构成主进程发起的 SSRF，且会把 Bearer token 一并送到攻击者指定的主机"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "200-204",
+          "excerpt": "const resp = await fetch(`${base}/audio/transcriptions`, {\n  method: \"POST\",\n  headers: { Authorization: `Bearer ${req.apiKey}` },\n  body: form,\n});",
+          "note": "fetch 未传 signal / AbortSignal.timeout，无请求超时；对端挂起会导致该 ipcMain.handle 永不 settle"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "185-197",
+          "excerpt": "const form = new FormData();\nconst ext = req.mimeType.includes(\"ogg\") ? \"ogg\" : ...;\nform.append(\"file\", new Blob([req.audio], { type: req.mimeType }), `voice.${ext}`);\nform.append(\"model\", req.model);",
+          "note": "req.audio 直接包成 Blob，未检查 byteLength 上限；req.mimeType 未做白名单，仅用 includes 做后缀推断"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+          "lines": "205-208",
+          "excerpt": "if (!resp.ok) {\n  const detail = await resp.text().catch(() => \"\");\n  throw new Error(`语音转写失败 (${resp.status}): ${detail.slice(0, 200)}`);\n}",
+          "note": "错误分支对响应体做了 slice(0,200) 截断；但成功分支 resp.json() 无大小限制"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\components\\InputBar.vue",
+          "lines": "110-113",
+          "excerpt": "const result = await window.piBuddy.stt.transcribe({\n  baseUrl: s.sttBaseUrl || \"https://api.openai.com/v1\",\n  apiKey: s.sttApiKey!,\n  ...\n});",
+          "note": "默认值只是渲染进程的兜底，攻击者调用 window.piBuddy.stt.transcribe 时可传任意 baseUrl，绕过默认值"
+        }
+      ],
+      "findings": {
+        "stt_api_key_plaintext": true,
+        "api_key_exposed_to_renderer": true,
+        "baseUrl_from_renderer": true,
+        "baseUrl_scheme_or_host_allowlist": "不存在",
+        "ssrf_reachable": true,
+        "request_timeout": "不存在",
+        "audio_size_limit": "不存在",
+        "response_size_limit": "仅错误分支 slice(0,200)，成功分支无限制"
+      },
+      "files_to_change": [
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\settings.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.d.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\components\\InputBar.vue"
+      ]
+    },
+    {
+      "requirement_id": "SEC-001",
+      "title": "BrowserWindow 未沙箱化，且缺少 CSP / 导航与窗口打开 / 权限请求防护",
+      "verdict": "confirmed_defect",
+      "confidence": "high",
+      "discovery_source": "bash-scan",
+      "evidence": [
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\index.ts",
+          "lines": "14-20",
+          "excerpt": "webPreferences: {\n  preload: path.join(import.meta.dirname, \"../preload/index.mjs\"),\n  contextIsolation: true,\n  nodeIntegration: false,\n  sandbox: false,\n},",
+          "note": "实际取值：contextIsolation=true（正确）、nodeIntegration=false（正确）、sandbox=false（显式关闭，为 SEC-001 主问题）。sandbox:false 使 preload 获得完整 Node 能力，preload 层的任何注入都可直达 fs/child_process"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\index.ts",
+          "lines": "5-30",
+          "excerpt": "function createWindow(): void {\n  const win = new BrowserWindow({ ... });\n  const wcId = win.webContents.id;\n  win.on(\"closed\", () => disposeClientFor(wcId));\n\n  if (process.env.ELECTRON_RENDERER_URL) {\n    void win.loadURL(process.env.ELECTRON_RENDERER_URL);\n  } else {\n    void win.loadFile(path.join(import.meta.dirname, \"../renderer/index.html\"));\n  }\n}",
+          "note": "createWindow 全函数内没有任何 webContents 安全钩子。全项目 src/ 下 grep will-navigate / setWindowOpenHandler / setPermissionRequestHandler / webSecurity / Content-Security-Policy，命中数均为 0"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\index.html",
+          "lines": "1-12",
+          "excerpt": "<!doctype html>\n<html lang=\"zh-CN\">\n  <head>\n    <meta charset=\"UTF-8\" />\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n    <title>PiBuddy · AI 办公小助手</title>\n  </head>",
+          "note": "HTML 侧也没有 CSP meta 标签；即 CSP 在 header 与 meta 两条路径上都不存在"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\markdown.ts",
+          "lines": "N/A",
+          "excerpt": "（渲染 LLM 输出的 markdown 管线存在）",
+          "note": "结合 SEC-002：无 CSP + LLM/工具输出渲染 + 通用 pi.command（含 rpc bash）构成完整的「不可信内容 → 任意命令执行」链路"
+        },
+        {
+          "file": "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\index.ts",
+          "lines": "25-27",
+          "excerpt": "if (process.env.ELECTRON_RENDERER_URL) {\n  void win.loadURL(process.env.ELECTRON_RENDERER_URL);\n}",
+          "note": "生产二进制中该环境变量若被设置，仍会加载任意远程 URL，无白名单校验"
+        }
+      ],
+      "findings": {
+        "sandbox": false,
+        "contextIsolation": true,
+        "nodeIntegration": false,
+        "webSecurity": "未显式设置（保持 Electron 默认 true）",
+        "csp_response_header": "不存在",
+        "csp_meta_tag": "不存在",
+        "will_navigate_handler": "不存在",
+        "setWindowOpenHandler": "不存在",
+        "setPermissionRequestHandler": "不存在（应用会调用 getUserMedia 录音，权限请求当前完全无审批）"
+      },
+      "files_to_change": [
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\index.ts",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\index.html",
+        "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.ts"
+      ]
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "confirmed_defect": 6,
+    "partial": 1,
+    "already_correct": 0,
+    "partial_detail": "SES-001 为 partial：Windows 平台目录名与 pi 完全一致（已用实盘目录名佐证），缺陷在 POSIX 平台与自定义 sessionDir 场景才暴露；同条目下的 listSessions 同步阻塞读取为 confirmed_defect",
+    "already_correct_sub_findings": [
+      "pi-sdk/src/jsonl.ts 的 JSONL 分帧语义（仅 LF、容忍尾部 \\r、不用 readline）符合 pi docs/rpc.md Framing 要求",
+      "pi-sdk/src/client.ts:141-144 failAll 在 error/exit/stop 三处正确 reject 并 clear pending map",
+      "pi-sdk/src/client.ts:96-100 stderr 有 50 条环形缓冲上限",
+      "packages/app/src/main/index.ts contextIsolation:true 与 nodeIntegration:false 取值正确",
+      "packages/app/electron-builder.yml asar:false 设置正确"
+    ]
+  },
+  "all_files_to_change_union": [
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\index.ts",
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\ipc.ts",
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\pi-launcher.ts",
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\sessions-store.ts",
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\main\\settings.ts",
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.ts",
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\preload\\index.d.ts",
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\index.html",
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\stores\\app.ts",
+    "D:\\selftool\\pi-ui\\packages\\app\\src\\renderer\\src\\components\\InputBar.vue",
+    "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\client.ts",
+    "D:\\selftool\\pi-ui\\packages\\pi-sdk\\src\\jsonl.ts",
+    "D:\\selftool\\pi-ui\\packages\\app\\electron-builder.yml",
+    "D:\\selftool\\pi-ui\\packages\\app\\package.json"
+  ]
+}

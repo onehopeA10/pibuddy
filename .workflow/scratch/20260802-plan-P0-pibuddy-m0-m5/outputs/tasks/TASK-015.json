@@ -1,0 +1,329 @@
+{
+  "id": "TASK-015",
+  "title": "FS-101 + FS-102 Workspace 文件服务、结构化附件、编辑器冲突检测与 Agent changeset diff",
+  "description": "把「把绝对路径拼进 prompt」换成真正的 workspace 服务：workspace record、lazy 文件树 + watch + ignore + 超大目录与符号链接保护、可取消分页的文件名与内容搜索（重活放 utility process）、CodeMirror 文本编辑（encoding/newline 检测、dirty、显式保存、mtime + content hash 冲突与 compare/reload/overwrite）、所有写操作经 PermissionEngine 与 root containment。附件从「绝对路径字符串」升级为结构化引用（attachment ID / capability / relative-source name / MIME / size / hash / expiry）——当前 stores/app.ts 的 send() 直接把 `- ${f.path}` 拼进消息，这是本任务要删掉的行为。同时建 Agent changeset：把 Agent 的写/edit/delete 归档为可审阅的变更集，支持 file/hunk diff、接受拒绝、批量、在编辑器定位，接受前必须用 before hash 检测外部修改。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "feature",
+  "priority": "high",
+  "effort": "large",
+  "action": "新建 packages/app/src/main/workspace/workspace-store.ts，workspace record 字段固定为 `{ id: string; canonicalRoot: string; displayName: string; trust: 'trusted'|'untrusted'|'unknown'; createdAt: number; lastOpenedAt: number; ignorePolicy: string[]; defaultModel: string | null; permissionRules: PermissionRule[] }`，canonicalRoot 用 `fs.realpathSync.native(root)` 求出；不新建 path-guard.ts、不引入 assertInsideRoot：收容判定一律复用 TASK-007 的 packages/app/src/main/workspace-registry.ts 的 `resolveInWorkspace`（CT-18 —— 原设计的 assertInsideRoot 以 `rel === ''` 额外拒绝 root 自身，与 resolveInWorkspace 对同一输入的判定相反，两套原语各带一套独立测试，必然长期漂移）。所有返回 renderer 的路径一律是 relativePath，禁止返回绝对路径；不新建第二套注册表：在 TASK-007 的 packages/app/src/main/attachment-registry.ts 上扩结构化字段（裁定2），`createAttachment(absPath): { token: string; capability: 'read'|'read-write'; relativePath: string; sourceName: string; mimeType: string; sizeBytes: number; sha256: string; expiresAt: number }` —— 标识字段名统一为 `token`（不是 id / attachmentId），TTL 沿用 ATTACHMENT_TTL_MS = 1800000 的 30 分钟滑动过期，不另设 24h，并把 stores/app.ts 中 `message += \"\\n\\n[用户提供的文件]\\n\" + refs.map((f) => \\`- ${f.path}\\`).join(\"\\n\")` 替换为按 relativePath 呈现的结构化附件清单；新建 workspace/file-editor.ts，`saveFile({ relativePath, content, baseMtimeMs, baseSha256 })` 在写入前重新 stat + hash，任一不匹配即返回 `{ conflict: true, current: { mtimeMs, sha256, preview } }` 而不是覆盖。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/workspace, packages/app/src/main/changeset, packages/app/src/renderer/src/components/workspace",
+  "focus_paths": [
+    "packages/app/src/main/workspace/",
+    "packages/app/src/main/changeset/",
+    "packages/app/src/renderer/src/components/"
+  ],
+  "read_first": [
+    "packages/app/src/renderer/src/stores/app.ts 第 388-422 行（send 里把绝对路径拼进 prompt 的现状）",
+    "packages/app/src/main/ipc.ts 第 136-170 行（dialog:choose-files / file:read-image / shell:open-path 现状）与第 215-234 行（describeFile 返回绝对路径）",
+    "packages/app/src/preload/index.ts 第 34-38 行（file.pathFor 直接把拖拽文件转绝对路径）",
+    "packages/app/src/renderer/src/components/InputBar.vue 第 46-80 行（拖拽与选择文件）",
+    "packages/app/src/main/sessions/session-index.ts（B01 的 SQLite 连接与迁移模式，changeset 表复用同一 DB）",
+    "packages/app/src/main/ipc-guard.ts（A07 的 PermissionEngine 实现：checkFrame/checkPayload/checkRate，接口声明见 packages/contract/src/ports.ts）",
+    "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 FS-101 / FS-102 两节与 M5 出口门禁",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 971-1015 行（tool_execution_start/update/end，changeset 的事件来源）",
+    "packages/contract/src/index.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/contract/src/envelope.ts",
+    "packages/app/src/main/workspace/workspace-store.ts",
+    "packages/app/src/main/workspace-registry.ts（TASK-007 建立的唯一收容原语 resolveInWorkspace，本任务复用而非重写；CT-18）",
+    "packages/app/src/main/workspace/file-tree.ts",
+    "packages/app/src/main/workspace/search-worker.ts",
+    "packages/app/src/main/workspace/file-editor.ts",
+    "packages/app/src/main/attachment-registry.ts（TASK-007 建立的唯一附件注册表，本任务只在其上扩结构化字段；裁定2）",
+    "packages/app/src/main/workspace/workspace-ipc.ts",
+    "packages/app/src/main/changeset/changeset-store.ts",
+    "packages/app/src/main/changeset/apply.ts",
+    "packages/app/src/main/ipc-registry.ts",
+    "packages/app/src/preload/api/workspace.ts",
+    "packages/app/src/preload/api/index.ts",
+    "packages/app/src/renderer/src/stores/workspace.ts",
+    "packages/app/src/renderer/src/components/FileTreePanel.vue",
+    "packages/app/src/renderer/src/components/FileEditorPane.vue",
+    "packages/app/src/renderer/src/components/ChangesetPanel.vue",
+    "packages/app/src/renderer/src/components/AppShell.vue"
+  ],
+  "depends_on": [
+    "TASK-007",
+    "TASK-010",
+    "TASK-014"
+  ],
+  "wave": 12,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "[CT-18 · 收容原语全计划唯一] 不新建 packages/app/src/main/workspace/path-guard.ts（`test ! -e packages/app/src/main/workspace/path-guard.ts`）；收容判定一律复用 TASK-007 的 packages/app/src/main/workspace-registry.ts 的 `resolveInWorkspace`，结构断言 `rg --no-filename -c 'export function resolveInWorkspace' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1 且 `rg --no-filename -c 'assertInsideRoot' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0（原设计的 assertInsideRoot 额外拒绝 rel 为空串即拒绝 root 自身，与 resolveInWorkspace 对同一输入判定相反，且各带一套独立测试）。本任务在 TASK-007 的 packages/app/test/workspace-capability.spec.ts 上追加用例并全部拒绝：`../outside.txt`、指向工作区外的 symlink、Windows junction、`C:/Windows/system32/drivers/etc/hosts` 绝对路径；放行用例：路径中含中文与空格的合法文件、以及 relativePath 为空串（root 自身）",
+      "`test -e packages/app/src/preload/api/workspace.ts && [ \"$(rg -c 'absolutePath|sourcePath|: string; *// *abs' packages/app/src/preload/api/workspace.ts | wc -l)\" -eq 0 ]`（SYS-1：原写法对尚不存在的文件退出码 2）；workspace IPC 返回结构统一为 `{ relativePath: string }`，单测 workspace-ipc.test.ts 断言任一返回值 JSON 序列化后不包含 workspace canonical root 子串",
+      "[裁定2 · 只扩展唯一注册表，不新建第二套] `test ! -e packages/app/src/main/workspace/attachment-store.ts`；本任务在 TASK-007 的 packages/app/src/main/attachment-registry.ts 上扩展结构化字段：其 `createAttachment` 返回对象包含 token / capability / relativePath / sourceName / mimeType / sizeBytes / sha256 / expiresAt 八个字段（单测断言 `Object.keys(result).sort()` 与该八元数组逐项相等；注意标识字段名为 `token`，不是 `id` / `attachmentId` —— 全计划统一称谓为 attachment token，`rg --no-filename -c 'attachmentId' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0）；唯一性结构断言 `rg -l 'ATTACHMENT_TTL_MS' packages/app/src/main | wc -l` 输出 1；`test -e packages/app/src/renderer/src/stores/app.ts && [ \"$(rg -c '用户提供的文件' packages/app/src/renderer/src/stores/app.ts | wc -l)\" -eq 0 ]`（旧的绝对路径拼接已删除）",
+      "编辑冲突：file-editor.test.ts 断言 (a) baseMtimeMs 与 baseSha256 均匹配时写入成功；(b) 仅 mtime 变化但内容 hash 相同时允许写入（避免误报）；(c) 内容 hash 变化时返回 `{ conflict: true }` 且目标文件字节未被修改；(d) 只读目录写入返回 errorCode='permission' 而非抛未捕获异常；(e) 磁盘满（用 fs 写入错误注入 ENOSPC）返回 errorCode='disk'",
+      "encoding/newline：packages/app/src/main/workspace/file-editor.test.ts 断言 detectEncoding() 对 UTF-8 BOM 样本返回 'utf8-bom'、对无 BOM UTF-8 样本返回 'utf8'、对 GBK 样本返回 'gbk'；并断言对 CRLF 样本执行 readFile 后 saveFile，`fs.readFileSync(p,'utf8').split('\\n').slice(0,-1).every(l => l.endsWith('\\r')) === true`（落盘不存在裸 LF 行尾；改用不依赖 look-behind 的等价写法，避免与全计划「禁止 look-around」的约定冲突并规避正则引擎差异）",
+      "搜索可取消分页有上限：packages/app/src/main/workspace/search-worker.ts 运行在 utility process（`utilityProcess.fork` 调用点可 grep 到），`search({ query, limit, cursor, signal })` 返回 `{ items: { relativePath, line, preview }[], nextCursor, truncated }`，单测断言 limit 生效、AbortSignal 取消后 worker 在 200ms 内停止发送结果、单文件 preview 长度 <= 200",
+      "changeset 表与冲突检测：packages/app/src/main/changeset/changeset-store.ts 建表含 `session_id, turn_id, tool_call_id, relative_path, before_sha256, after_sha256, status, created_at`；`acceptChange(id)` 在应用前重算目标文件 sha256，与 before_sha256 不符时返回 `{ conflict: true }` 并要求三方比较；同一 changeset 重复 accept 第二次返回 `{ alreadyApplied: true }`（单测覆盖三条）",
+      "[UI-observable] 用户在左侧文件树展开工作区（超过 5000 项的目录显示「目录过大，已折叠，点击加载」而不是卡死），双击文本文件在 CodeMirror 中打开、编辑后标题显示未保存圆点、Ctrl+S 保存；随后用外部编辑器改同一文件再保存，PiBuddy 弹出冲突对话框提供「查看差异 / 重新载入 / 覆盖」三个动作：点「查看差异」显示 diff 面板且磁盘文件字节未变；点「重新载入」后编辑器缓冲区内容 === 外部编辑器写入的内容；点「覆盖」后磁盘文件内容 === 编辑器缓冲区内容",
+      "[UI-observable] 用户把一个文件拖进输入框，附件条显示的是相对路径与文件名而不是完整绝对路径；发给 Agent 后 Agent 修改该文件，用户在「变更」面板看到该文件的 diff，可逐 hunk 或整文件接受/拒绝、可批量接受、点击可跳到编辑器对应行；若该文件在审阅期间被外部修改，接受时被拦下并提示冲突",
+      "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/workspace src/main/changeset` 退出码 0",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1",
+      "[裁定2 · capability 与过期真的被校验] `rg -c 'expiresAt' packages/app/src/main/attachment-registry.ts` 输出 >= 2（签发处 + 校验处各一）；packages/app/test/attachment-registry.spec.ts 断言 (a) 静置超过 ATTACHMENT_TTL_MS（30 分钟）的 attachment 调 resolveAttachment 返回拒绝，而在 29 分钟时访问一次后第 50 分钟仍成功（滑动续期，裁定2）；(b) capability==='read' 的 attachment 用于写请求时返回拒绝，capability==='readwrite' 时放行 —— 只签发不校验的能力字段等于没有能力控制，且不会有任何报错",
+      "[watch 句柄不泄漏] file-tree.test.ts 断言：对同一目录展开/折叠 200 次后活跃 watcher 数量 === 0；workspace 关闭时所有 watcher 被 close（每次切换 workspace 泄一批 fs.watch 句柄，表现为几小时后文件树停止刷新）",
+      "[ignore 规则真的生效] listDir 对 `node_modules`、`.git` 默认折叠且不递归；file-tree.test.ts 用含 .gitignore 的 fixture 断言（含一条 glob 模式与一条 `!` 否定模式）被忽略的文件不出现在返回项中，且被否定模式重新包含的文件出现",
+      "[搜索结果同样不泄漏绝对路径] search-worker.test.ts 断言 `JSON.stringify(result.items)` 不含 workspace canonicalRoot 子串；该断言必须覆盖 utility process 回传路径（criteria[1] 只覆盖了 workspace-ipc，worker 是另一条独立出口）",
+      "[utility process 生命周期] workspace 关闭时 search-worker 子进程被 kill：单测断言关闭后 `child.killed === true`；连续开关 workspace 20 次后进程数不增长（泄漏的 worker 在 UI 上完全无感，只表现为内存持续上涨）",
+      "[changeset 备份可回滚且 reject 不落盘] apply.test.ts 断言 (a) acceptChange 后 `<userData>/changeset-backup/<changeset_id>` 存在且字节 === 应用前原文件；(b) rejectChange 后目标文件的 mtimeMs 与 sha256 均未变（拒绝不得产生任何磁盘写）",
+      "[unverified 变更禁止一键接受] 当 tool_execution_start 未能抓到某文件的 before 快照时该条变更 status==='unverified'；apply.test.ts 断言对 unverified 调 acceptChange 返回 `{ requiresManualReview: true }` 且未写磁盘，且批量接受会跳过所有 unverified 条目并在返回值中列出（否则一次批量接受会静默覆盖未经校验的外部改动）",
+      "[新增依赖精确版本] package.json 中 codemirror 相关依赖全部为精确版本（无 `^` / `~`），并纳入 TASK-011 产出的 packages/app/scripts/check-update-deps.mjs 的比对范围，`node packages/app/scripts/check-update-deps.mjs` 退出码 0",
+      "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 8 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 8 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 8。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 8` 恒假）",
+      "[send() 签名锁定 · 由 TASK-006 定义] `rg -c 'export async function send\\(opts: SendOptions = \\{\\}\\): Promise<boolean>' packages/app/src/renderer/src/stores/app.ts` 输出 1（该签名被 TASK-006/007/010/014/015 五个任务共同依赖，任一任务改写签名即在此断言上失败）",
+      "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+      "[CT-17 · 预览与附件用同一句柄] 刚拖入的附件可被预览打开：单测断言 `createAttachment` 返回的 token 直接传给 `preview:open` 能成功解析（TASK-016 的 preview handler 接受 attachment token，不接受裸标识也不接受路径）；`rg --no-filename -c 'attachmentId' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0",
+      "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4（文件树注入 sidebar、变更面板注入 main）"
+    ],
+    "verification": "pnpm --filter @pibuddy/app test -- src/main/workspace src/main/changeset && rg -n \"用户提供的文件\" packages/app/src && pnpm --filter @pibuddy/app dev 手工验证：中文空格路径、symlink 越界、5000+ 文件目录、外部修改冲突、只读目录、changeset 接受拒绝",
+    "definition_of_done": "用户能在 PiBuddy 里浏览、搜索和编辑工作文件夹里的文件，两个编辑器同时改同一个文件时不会被悄悄覆盖；把文件交给 Agent 后能看到它改了什么、逐条接受或拒绝，并且 Agent 拿到的是受控的结构化附件而不是任意绝对路径。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/workspace/workspace-store.ts",
+      "action": "create",
+      "target": "WorkspaceStore",
+      "change": "workspace record CRUD（复用 B01 的 SQLite），canonicalRoot 用 realpath，记录 trust / ignorePolicy / defaultModel / permissionRules"
+    },
+    {
+      "path": "packages/app/src/main/workspace-registry.ts",
+      "action": "modify",
+      "target": "复用唯一收容原语",
+      "change": "不新建 path-guard.ts；在 TASK-007 的 workspace-registry.ts 上补 listDir / ignore 规则所需的辅助函数，收容判定仍只有 resolveInWorkspace 一个实现（CT-18）"
+    },
+    {
+      "path": "packages/app/src/main/workspace/file-tree.ts",
+      "action": "create",
+      "target": "listDir()/watch()",
+      "change": "lazy 列目录 + fs.watch 增量刷新 + ignore 规则 + 单目录 5000 项折叠 + symlink/junction 不跟随"
+    },
+    {
+      "path": "packages/app/src/main/workspace/search-worker.ts",
+      "action": "create",
+      "target": "utilityProcess 搜索",
+      "change": "文件名与内容搜索，可取消、分页、结果上限、preview 截断 200 字符"
+    },
+    {
+      "path": "packages/app/src/main/workspace/file-editor.ts",
+      "action": "create",
+      "target": "readFile/saveFile",
+      "change": "encoding 与 newline 检测、dirty 判定、mtime + sha256 冲突检测、错误分类 permission/disk/encoding"
+    },
+    {
+      "path": "packages/app/src/main/attachment-registry.ts",
+      "action": "modify",
+      "target": "在唯一注册表上扩结构化字段",
+      "change": "不新建第二套注册表；在 TASK-007 的 attachment-registry.ts 上补 relativePath / sourceName / mimeType / sizeBytes / sha256 五个字段与 createAttachment 导出，TTL 与撤销语义沿用裁定2（30 分钟滑动过期 + 会话切换/退出显式撤销）"
+    },
+    {
+      "path": "packages/app/src/main/workspace/workspace-ipc.ts",
+      "action": "create",
+      "target": "registerWorkspaceIpc()",
+      "change": "workspace:open / tree:list / tree:watch / search / file:read / file:save / file:mutate（新建重命名移动复制回收站恢复）/ attachment:create"
+    },
+    {
+      "path": "packages/app/src/main/changeset/changeset-store.ts",
+      "action": "create",
+      "target": "ChangesetStore",
+      "change": "从 tool_execution_end 事件抽取写/edit/delete，记录 session/turn/tool、before/after hash、状态与时间"
+    },
+    {
+      "path": "packages/app/src/main/changeset/apply.ts",
+      "action": "create",
+      "target": "acceptChange/rejectChange",
+      "change": "接受前重算 hash 检测外部修改；备份原文件到 <userData>/changeset-backup/；重复应用短路"
+    },
+    {
+      "path": "packages/app/src/main/ipc-registry.ts",
+      "action": "modify",
+      "target": "registerAllIpc()",
+      "change": "追加 registerWorkspaceIpc() 与 registerChangesetIpc()"
+    },
+    {
+      "path": "packages/app/src/preload/api/workspace.ts",
+      "action": "create",
+      "target": "workspace 命名空间",
+      "change": "文件树、搜索、读写、变更集；返回值一律相对路径"
+    },
+    {
+      "path": "packages/app/src/preload/api/index.ts",
+      "action": "modify",
+      "target": "api 聚合",
+      "change": "加入 workspace 命名空间"
+    },
+    {
+      "path": "packages/app/src/preload/index.ts",
+      "action": "modify",
+      "target": "file.pathFor",
+      "change": "移除直接返回绝对路径的 pathFor，改为 `file.createAttachment(file)` 经 main 生成结构化引用"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/workspace.ts",
+      "action": "create",
+      "target": "useWorkspaceStore",
+      "change": "文件树状态、搜索状态、打开的编辑器 tab、dirty 与冲突状态、changeset 列表"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/FileTreePanel.vue",
+      "action": "create",
+      "target": "文件树",
+      "change": "lazy 展开、刷新、ignore 切换、超大目录折叠提示、右键新建/重命名/移动/复制/删除（经 PermissionEngine）"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/FileEditorPane.vue",
+      "action": "create",
+      "target": "CodeMirror 编辑器",
+      "change": "encoding/newline 显示、dirty 圆点、Ctrl+S 保存、冲突对话框（查看差异/重新载入/覆盖）"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ChangesetPanel.vue",
+      "action": "create",
+      "target": "变更审阅面板",
+      "change": "file/hunk diff、接受拒绝、批量、跳到编辑器、大文件与二进制降级提示、冲突拦截提示"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/InputBar.vue",
+      "action": "modify",
+      "target": "附件区",
+      "change": "附件条改显示相对路径与文件名，底层持有 attachment ID"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/app.ts",
+      "action": "modify",
+      "target": "send()",
+      "change": "删除绝对路径拼接，改为按结构化附件生成相对路径清单"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/AppShell.vue",
+      "action": "modify",
+      "target": "布局",
+      "change": "新增文件树 / 编辑器 / 变更三栏可折叠布局"
+    },
+    {
+      "path": "packages/app/src/main/workspace/file-editor.test.ts",
+      "action": "create",
+      "target": "编码/换行单测",
+      "change": "[errata-2 补录] c[4] 与 test.unit[1] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/workspace/search-worker.test.ts",
+      "action": "create",
+      "target": "搜索 worker 单测",
+      "change": "[errata-2 补录] test.unit[2] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/workspace/file-tree.test.ts",
+      "action": "create",
+      "target": "文件树单测",
+      "change": "[errata-2 补录] test.unit[5] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/changeset/apply.test.ts",
+      "action": "create",
+      "target": "变更集应用单测",
+      "change": "[errata-2 补录] test.unit[4] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/test/workspace-capability.spec.ts",
+      "action": "modify",
+      "target": "收容用例追加",
+      "change": "[errata-2 补录] c[0] 逐字要求「在 TASK-007 的 packages/app/test/workspace-capability.spec.ts 上追加用例」（原 test.unit[0] 误指向 c[0] 自身禁止存在的 workspace/path-guard.ts 的同名测试）"
+    },
+    {
+      "path": "packages/app/test/attachment-registry.spec.ts",
+      "action": "modify",
+      "target": "结构化字段用例追加",
+      "change": "[errata-2 补录] c[2] 逐字要求在 TASK-007 的 attachment-registry.ts 上扩展（原 test.unit[3] 误指向 c[2] 自身禁止存在的 workspace/attachment-store.ts 的同名测试）"
+    }
+  ],
+  "implementation": [
+    "先写 path-guard 与其单测（中文空格、symlink、junction、深目录、绝对路径越界），这是 M5 出口门禁最直接的一条",
+    "workspace-store 复用 B01 的 SQLite 连接新增 workspaces 表并做 user_version 迁移",
+    "file-tree：单次只列一层；目录项超过 5000 返回 `{ truncated: true, total }` 由 UI 折叠；`fs.lstatSync` 判定 symlink 后不递归",
+    "search-worker：用 `utilityProcess.fork` 起独立进程，接受 AbortSignal 后向子进程发 'cancel' 并在 200ms 内 kill；结果分页游标为 `${fileIndex}:${lineIndex}`",
+    "file-editor：读时检测 BOM 与 GBK（用 TextDecoder 尝试 + 失败回退），记录 newline 风格；保存时先 stat + hash 再写，不匹配即返回 conflict 结构",
+    "在 attachment-registry.ts 上扩字段：标识仍为 TASK-007 签发的 token（不新增 id 字段），sha256 取全文件，expiresAt 沿用 ATTACHMENT_TTL_MS = 1800000 的 30 分钟滑动过期；resolveAttachment 过期即拒绝、命中即续期（裁定2）",
+    "所有 mutate 操作（新建/重命名/移动/复制/删除/恢复）先过 resolveInWorkspace（TASK-007 的唯一收容原语，CT-18） 再过 PermissionEngine；删除走 shell.trashItem 而非 unlink",
+    "changeset：订阅 tool_execution_end，对文件类工具（write/edit/delete）抽取路径与内容，before hash 取工具执行前的快照（在 tool_execution_start 时抓取），写入 changeset 表",
+    "apply：accept 前重算 hash；不匹配返回 conflict 并提供 current 内容供三方比较；应用前把原文件复制到 changeset-backup/<changeset_id>；状态置 applied 后再次 accept 直接短路",
+    "renderer 三栏布局与 CodeMirror 接入（新增依赖 codemirror 6 系列，版本写精确值并同步 lockfile）",
+    "跑 M5 出口门禁场景清单：中文空格路径、symlink/junction、深目录、超多文件、外部修改、磁盘满、只读目录、两个编辑器并发修改"
+  ],
+  "test": {
+    "commands": [
+      "pnpm --filter @pibuddy/app test -- src/main/workspace src/main/changeset",
+      "pnpm --filter @pibuddy/app typecheck",
+      "rg -n \"用户提供的文件\" packages/app/src"
+    ],
+    "unit": [
+      "packages/app/test/workspace-capability.spec.ts",
+      "packages/app/src/main/workspace/file-editor.test.ts",
+      "packages/app/src/main/workspace/search-worker.test.ts",
+      "packages/app/test/attachment-registry.spec.ts",
+      "packages/app/src/main/changeset/apply.test.ts",
+      "packages/app/src/main/workspace/file-tree.test.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "越界路径 5/5 被拒且合法中文空格路径通过",
+      "外部修改后接受变更被拦下且原文件未被覆盖",
+      "5000+ 文件目录不冻结主线程"
+    ]
+  },
+  "reference": {
+    "pattern": "main 侧守卫 + 相对路径对外，参考现有 ipc.ts 的 describeFile 但反转其绝对路径外泄行为",
+    "files": [
+      "packages/app/src/main/ipc.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "FS-101 与 FS-102 共享同一套 root containment、hash 与冲突语义，拆开会导致两边各写一份哈希与冲突判定；合成一个垂直切片才能验收「交给 Agent → 审阅 changeset → 接受拒绝」这条门禁链路。",
+    "decision_factors": [
+      "当前 send() 直接拼绝对路径，是 M5 要消灭的核心行为",
+      "冲突检测必须与保存路径同一实现，否则编辑器与 changeset 会出现两套判据"
+    ],
+    "tradeoffs": "文件树与编辑器是新增 UI 面积最大的部分，本轮不做多标签会话级布局记忆"
+  },
+  "risks": [
+    "Windows junction 与 symlink 的 realpath 行为差异较大，必须用真实 fixture（mklink /J 与 /D）测试，不能只靠 POSIX 假设",
+    "changeset 的 before hash 依赖在 tool_execution_start 时抓快照；若工具在一次调用中修改多个文件，需按工具参数逐文件抓取，抓取失败时该条变更标记为 unverified 并禁止一键接受",
+    "CodeMirror 6 是新增依赖，需按 UPD-001 的同一纪律写精确版本并进 lockfile；引入前确认与 Vite 7 / Vue 3.5 兼容"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "Workspace 文件服务",
+      "文件编辑与冲突",
+      "结构化附件",
+      "Agent 变更审阅"
+    ],
+    "affected_components": [
+      "main/workspace",
+      "main/changeset",
+      "renderer/workspace"
+    ],
+    "affected_requirements": [
+      "FS-101",
+      "FS-102"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "16h",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": true,
+    "wave": 12
+  },
+  "origin_shard": "B",
+  "origin_id": "TASK-B07"
+}

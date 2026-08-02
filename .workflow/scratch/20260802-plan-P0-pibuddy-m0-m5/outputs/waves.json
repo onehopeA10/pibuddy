@@ -1,0 +1,221 @@
+{
+  "waves": [
+    {
+      "wave": 1,
+      "name": "基线与变更留痕地基",
+      "task_ids": [
+        "TASK-001"
+      ],
+      "milestone_span": [
+        "M0"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-001"
+      ],
+      "entry_condition": "当前工作树无 .git、无任何 *.test.ts、无 CI；tsc --noEmit 是唯一质量闸门",
+      "exit_condition": "git 仓库存在且基线提交为唯一提交，pnpm -w test 退出码 0 且通过用例数 >= 8，fake Pi fixture 九场景可脚本调用，CI 三步齐全且零 secrets 引用，doc/baseline-2026-08-02.md 中 15 项闭环功能逐项打勾"
+    },
+    {
+      "wave": 2,
+      "name": "共享契约与可观测护栏",
+      "task_ids": [
+        "TASK-002"
+      ],
+      "milestone_span": [
+        "M0"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-002"
+      ],
+      "entry_condition": "TASK-001 已交付 vitest 与 fake Pi fixture",
+      "exit_condition": "@pibuddy/contract 可被 main/preload/renderer/SDK 四方 import；PiEnvelope 七字段与 PROTOCOL_VERSION=1 落地且未知版本 fail closed；AppSettings/SessionMeta 各自只剩一处定义；logger 单测证明明文 key 与 prompt 正文不落盘"
+    },
+    {
+      "wave": 3,
+      "name": "Pi runtime 定位与安全窗口",
+      "task_ids": [
+        "TASK-003",
+        "TASK-004"
+      ],
+      "milestone_span": [
+        "M1",
+        "M2"
+      ],
+      "parallel": true,
+      "ui_observable_task_ids": [
+        "TASK-003",
+        "TASK-004"
+      ],
+      "entry_condition": "TASK-002 的契约与 logger 已就位",
+      "exit_condition": "无全局 pi 时 bundled runtime 仍能启动并完成一次问答；sandbox:true + CSP + 导航/窗口打开/权限请求拦截全部有自动化断言；15 项闭环功能手工 smoke 无回归"
+    },
+    {
+      "wave": 4,
+      "name": "runtime 代际状态机",
+      "task_ids": [
+        "TASK-005"
+      ],
+      "milestone_span": [
+        "M1"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-005"
+      ],
+      "entry_condition": "TASK-003 的 buildPiSpawn 与 assertRuntimeHandshake 已就位",
+      "exit_condition": "旧 generation 的 exit / event / ui_request 一律被丢弃且有单测；dispose 取消未决 33ms batch timer；RPC 具备 timeout / AbortSignal / stdin error / 缓冲上限"
+    },
+    {
+      "wave": 5,
+      "name": "会话解析与交互一致性",
+      "task_ids": [
+        "TASK-006"
+      ],
+      "milestone_span": [
+        "M1"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-006"
+      ],
+      "entry_condition": "TASK-005 的 runtimeId/generation 状态机已就位",
+      "exit_condition": "三平台会话目录名与自定义 sessionDir 单测通过；new_session / switch_session 的 data.cancelled 被读取并反馈；发送失败不丢用户输入；打开历史会话不被全局 settings 无提示覆盖 model/thinking"
+    },
+    {
+      "wave": 6,
+      "name": "窄 IPC 接口面与 workspace capability",
+      "task_ids": [
+        "TASK-007"
+      ],
+      "milestone_span": [
+        "M2"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-007"
+      ],
+      "entry_condition": "TASK-005 与 TASK-006 已交付 supervisor 与 SessionRepository",
+      "exit_condition": "pi:command 全项目出现 0 次；渲染进程只持有不透明 workspaceId 与一次性 attachment token；6 类路径逃逸与附件伪装输入全部被拒绝且有单测"
+    },
+    {
+      "wave": 7,
+      "name": "凭据金库与出网管控",
+      "task_ids": [
+        "TASK-008"
+      ],
+      "milestone_span": [
+        "M2"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-008"
+      ],
+      "entry_condition": "TASK-007 的 ipc-guard 前置校验框架已就位",
+      "exit_condition": "sttApiKey 不再明文落盘、settings:get 不再回传明文；STT baseUrl 走 endpoint 白名单并阻断私有网段与非 https；设置写入为原子写；全部有单测"
+    },
+    {
+      "wave": 8,
+      "name": "会话中心与 preload 命名空间分层",
+      "task_ids": [
+        "TASK-009"
+      ],
+      "milestone_span": [
+        "M3"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-009"
+      ],
+      "entry_condition": "M0-M2 全部交付（TASK-001..TASK-008），ipc.ts / preload 已被 A 分片改造完毕",
+      "exit_condition": "SQLite 增量索引取代全量同步扫描且 JSONL 字节未被改写；搜索/rename/pin/archive/回收站可用；preload 拆为 api/<namespace>.ts 且 index.d.ts 由 api 聚合对象推导；渲染进程不见绝对路径"
+    },
+    {
+      "wave": 9,
+      "name": "流式 delta 与更新服务骨架",
+      "task_ids": [
+        "TASK-010",
+        "TASK-011"
+      ],
+      "milestone_span": [
+        "M3",
+        "M4"
+      ],
+      "parallel": true,
+      "ui_observable_task_ids": [
+        "TASK-010",
+        "TASK-011"
+      ],
+      "entry_condition": "TASK-009 的 ipc/registry.ts 与 preload/api 聚合已就位",
+      "exit_condition": "事件按 assistantMessageEvent.delta 拼接且主进程折叠规则不再丢字符（有针对性单测）；展开状态提到 store 不随组件回收丢失；UpdateService 十态状态机 + single-flight + dev 不访问生产 feed，全部有单测"
+    },
+    {
+      "wave": 10,
+      "name": "Extension 生态与发布诊断",
+      "task_ids": [
+        "TASK-012",
+        "TASK-013"
+      ],
+      "milestone_span": [
+        "M3",
+        "M4"
+      ],
+      "parallel": true,
+      "ui_observable_task_ids": [
+        "TASK-012",
+        "TASK-013"
+      ],
+      "entry_condition": "TASK-010 已完成 pi-ipc 分流，TASK-011 已交付 update-service 状态机",
+      "exit_condition": "Extension UI 全方法（含 setWidget/setTitle/dialog timeout）contract tests 通过；三平台产物矩阵与签名 CI 落地且缺凭据时 release job 失败关闭；结构化脱敏日志、support bundle、health check 与 safe mode 可用"
+    },
+    {
+      "wave": 11,
+      "name": "Provider 中心与首次启动向导",
+      "task_ids": [
+        "TASK-014"
+      ],
+      "milestone_span": [
+        "M3"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-014"
+      ],
+      "entry_condition": "TASK-012 的 trust-store 与 TASK-008 的 secret-store 已就位",
+      "exit_condition": "普通用户无需终端即可完成 Provider 配置、模型发现与连通性测试；API key 只存在于 main 侧 secret-store；打开历史会话不被无提示改模型；用量页可导出 CSV/JSON"
+    },
+    {
+      "wave": 12,
+      "name": "Workspace 文件服务与 Agent changeset",
+      "task_ids": [
+        "TASK-015"
+      ],
+      "milestone_span": [
+        "M5"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-015"
+      ],
+      "entry_condition": "TASK-010 与 TASK-014 已完成 InputBar / model-scope 改造",
+      "exit_condition": "附件不再以绝对路径拼进 prompt，改为结构化 attachment（token + capability + hash + expiry）；文件编辑具备 mtime + content hash 冲突检测三动作；changeset 可审阅与接受/拒绝"
+    },
+    {
+      "wave": 13,
+      "name": "受限沙箱预览与 Artifact 仓库",
+      "task_ids": [
+        "TASK-016"
+      ],
+      "milestone_span": [
+        "M5"
+      ],
+      "parallel": false,
+      "ui_observable_task_ids": [
+        "TASK-016"
+      ],
+      "entry_condition": "TASK-015 的 path-guard 与 changeset-store 已就位",
+      "exit_condition": "Office/PDF 转换在受限 utility process 中完成且有硬上限；预览窗口无 Node、无主 preload、无主 session；artifact 有稳定 ID、版本、hash 与回收站；恶意文档不能执行脚本或触达主 renderer"
+    }
+  ]
+}

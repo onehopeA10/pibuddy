@@ -1,0 +1,343 @@
+{
+  "id": "TASK-011",
+  "title": "UPD-001~004 main-only UpdateService：依赖锁定、十态状态机、检测策略与更新 UI",
+  "description": "从零建 main-only 的 UpdateService（当前仓库无 publish 块、无 electron-updater 依赖、无任何更新代码）。renderer 永不接触 feed URL / token / 文件路径 / raw updater，只通过快照 + 带 monotonic stateSequence 的事件订阅拿状态。状态机十态、初始化规则集中且有单测、所有 check/download/install 有 single-flight guard、dev 环境返回 unsupported-in-dev 或注入 fake provider 绝不访问生产更新源。UI 覆盖设置页「关于与更新」、全局 banner、下载进度与 reload 恢复、安装前的运行中任务/未保存草稿/录音检查与「等待任务结束后安装」。按 M4 规格新代码全部落在 src/main/update/ 与独立组件，不堆进 ipc.ts。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "feature",
+  "priority": "high",
+  "effort": "large",
+  "action": "在 packages/app/package.json 的 dependencies 写入精确版本（无 ^）：`\"electron-updater\": \"6.8.9\"`、`\"electron-log\": \"5.4.4\"`，devDependencies 写入 `\"electron-builder\": \"26.15.3\"`；写入前先跑 `npm view electron-updater@6.8.9 version && npm view electron-log@5.4.4 version && npm view electron-builder@26.15.3 version` 确认三者存在，并 `pnpm install` 后用 `pnpm ls --depth 0 --filter @pibuddy/app` 与 pnpm-lock.yaml 交叉核对唯一版本。新建 packages/app/src/main/update/update-types.ts 定义 `export type UpdateStatus = 'unsupported' | 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'waiting-for-agent' | 'installing' | 'error'` 与 `export interface UpdateState { status: UpdateStatus; stateSequence: number; currentVersion: string; candidateVersion: string | null; channel: 'stable' | 'beta'; checkSource: 'auto' | 'manual' | 'startup' | null; lastCheckedAt: number | null; releaseDate: string | null; releaseNotes: string | null; bytesTransferred: number; totalBytes: number; percent: number; bytesPerSecond: number; errorCode: UpdateErrorCode | null; retryable: boolean; dismissedVersion: string | null }`；update-service.ts 的 `private initAutoUpdater()` 按固定顺序执行 `autoUpdater.autoDownload = false;` → `autoUpdater.autoInstallOnAppQuit = false;` → `autoUpdater.channel = channel === 'beta' ? 'beta' : 'latest';` → `autoUpdater.allowPrerelease = channel === 'beta';` → `autoUpdater.allowDowngrade = false;`（allowDowngrade 必须最后一行）。版本真相取 `app.getVersion()`，renderer 侧任何硬编码版本号一律禁止。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/update, packages/app/src/main/lifecycle, packages/app/src/renderer/src/stores/update.ts",
+  "focus_paths": [
+    "packages/app/src/main/update/",
+    "packages/app/src/main/lifecycle/",
+    "packages/app/src/renderer/src/stores/update.ts",
+    "packages/app/src/renderer/src/components/"
+  ],
+  "read_first": [
+    "packages/app/package.json",
+    "pnpm-lock.yaml（仓库根，绝对路径 D:/selftool/pi-ui/pnpm-lock.yaml）（确认 electron-updater / electron-log / electron-builder 的唯一版本）",
+    "packages/app/electron-builder.yml（本任务开始时 TASK-003 已把 asar 改为 true 并用 extraResources 投递 pi-runtime；仍无 publish 块、mac.target 只有 dmg，二者由 TASK-013 补齐——本任务不修改该文件）",
+    "packages/app/src/main/index.ts",
+    "packages/app/src/main/ipc-registry.ts（B01 产出）",
+    "packages/app/src/preload/api/index.ts（B01 产出）",
+    "packages/app/src/renderer/src/components/AppShell.vue",
+    "packages/app/src/renderer/src/components/SettingsModal.vue",
+    "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 UPD-001 / UPD-002 / UPD-003 / UPD-004 四节",
+    "node_modules/electron-updater/out/main.d.ts（确认本版本是否导出 CancellationToken 且 downloadUpdate 接受它）",
+    "packages/contract/src/index.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/contract/src/envelope.ts",
+    "packages/app/src/main/update/update-types.ts",
+    "packages/app/src/main/update/update-errors.ts",
+    "packages/app/src/main/update/update-service.ts",
+    "packages/app/src/main/update/update-ipc.ts",
+    "packages/app/src/main/update/release-integrity.ts",
+    "packages/app/src/main/lifecycle/graceful-shutdown.ts",
+    "packages/app/src/preload/api/update.ts",
+    "packages/app/src/renderer/src/stores/update.ts",
+    "packages/app/src/renderer/src/components/UpdateBanner.vue",
+    "packages/app/src/renderer/src/components/UpdateSettingsPanel.vue",
+    "packages/app/src/renderer/src/components/InstallBlockerDialog.vue",
+    "packages/app/scripts/check-update-deps.mjs"
+  ],
+  "depends_on": [
+    "TASK-001",
+    "TASK-002",
+    "TASK-004",
+    "TASK-007",
+    "TASK-009"
+  ],
+  "wave": 9,
+  "parallel_group": "wave2",
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "packages/app/package.json 中 electron-updater / electron-log / electron-builder 三个版本号均为精确值且不含 `^` 或 `~`；`rg -n \"electron-updater|electron-log|electron-builder\" packages/app/package.json` 输出的三行与 pnpm-lock.yaml 中解析到的版本一一相等（把比对写成 packages/app/scripts/check-update-deps.mjs 并在 test 中调用）",
+      "[CT-22 · UpdateState 归契约包] 十个状态字面量与 UpdateState / UpdateStatus / UpdateErrorCode 类型定义在 packages/contract/src/update.ts：该文件含全部十个字面量 `'unsupported'`、`'idle'`、`'checking'`、`'available'`、`'not-available'`、`'downloading'`、`'downloaded'`、`'waiting-for-agent'`、`'installing'`、`'error'` 与 `'network' | 'disk' | 'permission' | 'signature' | 'metadata' | 'unsupported' | 'unknown'`；结构断言 `rg --no-filename -c 'export type UpdateStatus\\b' packages/contract/src | awk '{s+=$1} END{print s+0}'` 输出 1 且 `rg --no-filename -c 'export type UpdateStatus\\b' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0（原设计在 main/update/update-types.ts 本地声明，与同任务 c[12] 的「跨进程类型一律从 contract 导入」不可同真）；main 侧仅保留不跨进程的内部类型",
+      "初始化顺序单测 update-init.test.ts：用 fake autoUpdater 记录属性赋值顺序，断言赋值序列为 `['autoDownload','autoInstallOnAppQuit','channel','allowPrerelease','allowDowngrade']` 且末值为 `autoDownload===false, autoInstallOnAppQuit===false, allowDowngrade===false`；channel='beta' 时 `channel==='beta' && allowPrerelease===true`，channel='stable' 时 `channel==='latest' && allowPrerelease===false`",
+      "single-flight 单测：并发调用 checkForUpdates 3 次，断言底层 checkForUpdatesAndNotify/checkForUpdates 只被调用 1 次；download 与 install 同理；listener 注册单测断言每个 updater 事件的 listenerCount 恒为 1（重复 init 不叠加）",
+      "dev 保护单测：`app.isPackaged === false` 时 getUpdateState().status === 'unsupported'，且断言 fake autoUpdater 的 setFeedURL / checkForUpdates 调用次数为 0；仅当环境变量 `PIBUDDY_FAKE_UPDATE_FEED` 存在时才注入 fake provider",
+      "`test -e packages/app/src/renderer && test -e packages/app/src/preload && [ \"$(rg -c 'feedURL|setFeedURL|GH_TOKEN|latest.yml' packages/app/src/renderer packages/app/src/preload | wc -l)\" -eq 0 ]`，证明 renderer/preload 不接触 feed 与凭据",
+      "[CT-22 · 两套排序机制职责分离且丢弃规则只实现一遍] 传输层丢弃规则唯一实现：packages/contract/src 导出 `export function shouldAcceptEnvelope(prev, next)`（`rg --no-filename -c 'export function shouldAcceptEnvelope' packages/contract/src | awk '{s+=$1} END{print s+0}'` 输出 1），全部渲染侧 store 一律调用它做 generation/sequence 丢弃（`rg -c 'shouldAcceptEnvelope' packages/app/src/renderer/src/stores/update.ts` 输出 >= 1；`test -e packages/app/src/renderer/src/stores && [ \"$(rg -c 'sequence <= last|sequence < last' packages/app/src/renderer/src/stores | wc -l)\" -eq 0 ]` 确认无第二份手写丢弃逻辑）。stateSequence 是 update 域内的单调计数器，只用于「快照 vs 事件」的对账，不承担传输层去重：单测断言连续 50 次状态变更后所有事件的 stateSequence 严格递增，且 getUpdateState().stateSequence === 50",
+      "检测策略单测 update-schedule.test.ts：用 fake timers 断言 (a) 首次检查在主窗口 ready 后 30_000ms 触发；(b) 之后每次间隔落在 [4h*1.10, 4h*1.20] 区间；(c) 定时器对象上调用过 `.unref()`；(d) 连续网络失败后的重试间隔序列为 15min → 1h → 4h，成功后重置为 4h 基线；(e) manual check 不受静默节流但 500ms 内连点只触发一次",
+      "[取消能力双向断言] packages/app/scripts/check-updater-capability.mjs 检测 electron-updater 是否导出 CancellationToken 并输出 `{ cancelSupported: true|false }`；UpdateBanner.vue 中取消按钮包裹在 `v-if=\"store.cancelSupported\"` 内。组件单测两个方向都断言：(a) cancelSupported=false 时 DOM 中「取消下载」文本节点数 === 0；(b) cancelSupported=true 时该文本节点数 === 1，且点击后 `CancellationToken.prototype.cancel` 的 spy 恰被调用 1 次、随后状态转为 'idle'。原文只有 (a)，唯一机器判据是「缺席」，不实现取消按钮即通过",
+      "[UI-observable] 在 dev 下设置 PIBUDDY_FAKE_UPDATE_FEED 指向本地 fake feed，用户可在设置→「关于与更新」看到当前版本、runtime 版本、channel、自动检查/自动下载开关、上次检查时间与「立即检查」按钮；点击后全局 banner 依次显示 检查中 → 发现新版本(含发布时间与净化后 release notes 与预计大小) → 下载中(百分比/已传输/速度) → 下载完成(立即重启安装 / 稍后)；期间刷新窗口(Ctrl+R)后进度条从 main snapshot 原样恢复而不是回到 idle",
+      "[UI-observable] 当有正在运行的 Agent、未保存草稿或正在录音时点击「立即重启安装」，弹出对话框提供「等待任务结束后安装」「停止任务并安装」「取消」三个选项，选择等待后状态变为 waiting-for-agent 并在收到真实 idle 事件（agent_settled）后才安装；`test -e packages/app/src/main/update/ && [ \"$(rg -c 'setInterval' packages/app/src/main/update/ | wc -l)\" -eq 0 ]`（禁止轮询空转；SYS-1：原写法在目录尚不存在时以退出码 2 结束，会被「任务没做」满足）",
+      "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/update` 退出码 0",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1",
+      "[无订阅者时状态不丢] 单测：在没有任何 renderer 订阅的情况下推进 5 次状态变更，之后首次调用 getUpdateState() 返回第 5 个状态且 stateSequence===5（renderer 是后挂载的，状态若只走事件不进快照，用户刷新窗口会看到 idle 假象）",
+      "[错误映射无 fallthrough] update-errors.test.ts 对 network / disk / permission / signature / metadata / unsupported / unknown 七类各给一个真实 electron-updater 错误样本，断言 mapUpdaterError 返回值与预期码逐一相等，且 switch 的 default 分支返回 `'unknown'` 而非 undefined（返回 undefined 时 UI 会显示空错误且无重试按钮）",
+      "[release notes 纯文本渲染] `test -e packages/app/src/renderer/src/components/UpdateBanner.vue && test -e packages/app/src/renderer/src/components/UpdateSettingsPanel.vue && [ \"$(rg -c 'v-html' packages/app/src/renderer/src/components/UpdateBanner.vue packages/app/src/renderer/src/components/UpdateSettingsPanel.vue | wc -l)\" -eq 0 ]`；update-sanitize.test.ts 断言 `<img src=x onerror=alert(1)>`、`<a href=\"javascript:void(0)\">`、`<script>alert(1)</script>` 三个样本经 sanitize 后输出既不含 `<` 也不含 `javascript:`",
+      "[dismiss 状态归 main] `test -e packages/app/src/renderer/src/stores/update.ts && [ \"$(rg -c 'localStorage|sessionStorage' packages/app/src/renderer/src/stores/update.ts | wc -l)\" -eq 0 ]`；dismissedVersion 与 dismissedUntil 由 main 持久化，单测断言重建 store（模拟重启）后同一 candidate 在 24h 内不再自动弹 banner，但设置页仍显示该版本可用",
+      "[lifecycle 亦无轮询] `test -e packages/app/src/main/lifecycle/graceful-shutdown.ts && [ \"$(rg -c 'setInterval' packages/app/src/main/lifecycle/graceful-shutdown.ts | wc -l)\" -eq 0 ]`；collectBlockers 的 idle 通知基于 agent_settled 事件订阅，单测断言订阅在 blocker 清空后被移除（listenerCount 归 0，防止每次安装尝试泄一个监听器）",
+      "[安装前校验真的会中止] release-integrity.test.ts 断言 (a) candidate semver 不严格大于 app.getVersion() 时返回 ok:false 且 errorCode==='metadata'；(b) 文件 sha512 与 manifest 不符时返回 ok:false 且 errorCode==='signature'；(c) 上述两种情况下 `autoUpdater.quitAndInstall` 的 spy 调用次数均为 0",
+      "[banner 只在三态渲染] UpdateBanner 组件单测遍历十个 UpdateStatus，断言仅 'available' / 'downloaded' / 'error'（且 retryable 或需用户动作）三种下渲染出可见内容，其余七态渲染结果为空（checking / not-available 也弹横幅是纯 UI 噪声，不会有任何测试或类型错误提示）",
+      "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 4 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 4 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 4。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 4` 恒假）",
+      "[外链出口唯一 · 结构断言] `rg --no-filename -c 'shell\\.openExternal' packages/app/src -g '*.ts' -g '*.vue' -g '!**/security/window-policy.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（本任务新增的外链入口一律走 TASK-004 的 openExternalSafely）",
+      "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+      "[推送通道一律经信封与转发器 · 结构断言] `rg --no-filename -c '\\.send\\(\"pi:|\\.send\\(`pi:' packages/app/src/main -g '*.ts' -g '!pi/event-forwarder.ts' | awk '{s+=$1} END{print s+0}'` 输出 0 —— 本任务新增的 main→renderer 推送通道必须经 pi/event-forwarder.ts 发出，从而自动获得 PiEnvelope 包装与 generation/sequence 丢弃规则（near-miss：pi:ui-expire / pi:ui-expire-all 是 TASK-005 之后新增的推送通道，未经信封会绕过渲染侧的过期代丢弃）",
+      "[裁定4 · 不得新建第二个日志器] `rg --no-filename -c 'export function createLogger' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1 且 `test ! -e packages/app/src/main/logging/logger.ts`。本任务锁定的 electron-log 版本仅供 electron-updater 内部使用，PiBuddy 自身日志一律走 TASK-002 的 packages/app/src/main/logger.ts；autoUpdater.logger 以适配器形式接到 createLogger('updater')（`rg -c 'autoUpdater.logger' packages/app/src/main/update/` 输出 >= 1）",
+      "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4（update banner 注入 banner 插槽）"
+    ],
+    "verification": "node packages/app/scripts/check-update-deps.mjs && pnpm --filter @pibuddy/app test -- src/main/update && pnpm --filter @pibuddy/app typecheck && PIBUDDY_FAKE_UPDATE_FEED=https://127.0.0.1:8443/ pnpm --filter @pibuddy/app dev 走一遍 idle→downloaded→安装前检查",
+    "definition_of_done": "用户能在设置里看到版本与更新状态、手动检查、看到新版本说明与下载进度、在下载完成后选择立刻重启或稍后；正在跑任务或有没保存的东西时应用不会把它们扔掉就重启；M4 的签名与真实 N→N+1 更新闭环在本环境记为未验证（not-tested / blocked-by-credential），待签名凭据与 clean VM 齐备后单独验收 —— 用户已于 2026-08-02 确认接受该状态，且该确认不削减 UpdateService 状态机、fake feed 与 docs/product/RELEASE_SETUP.md 的交付要求。"
+  },
+  "files": [
+    {
+      "path": "packages/app/package.json",
+      "action": "modify",
+      "target": "dependencies/devDependencies",
+      "change": "精确写入 electron-updater 6.8.9、electron-log 5.4.4、electron-builder 26.15.3（无 ^），新增 scripts.check-update-deps"
+    },
+    {
+      "path": "packages/app/src/main/update/update-types.ts",
+      "action": "create",
+      "target": "UpdateStatus / UpdateState / UpdateAction",
+      "change": "十态枚举与完整状态字段，含 stateSequence、channel、checkSource、dismissedVersion"
+    },
+    {
+      "path": "packages/app/src/main/update/update-errors.ts",
+      "action": "create",
+      "target": "UpdateErrorCode / mapUpdaterError",
+      "change": "把 updater 原始错误映射为七类码并给出 retryable 与用户可读文案"
+    },
+    {
+      "path": "packages/app/src/main/update/update-service.ts",
+      "action": "create",
+      "target": "UpdateService",
+      "change": "状态机、初始化顺序、single-flight guard、单组 listener、检测调度与退避、快照 + stateSequence 事件广播"
+    },
+    {
+      "path": "packages/app/src/main/update/update-ipc.ts",
+      "action": "create",
+      "target": "registerUpdateIpc()",
+      "change": "getUpdateState / checkForUpdates({source:'manual'}) / downloadUpdate / installAndRestart / setUpdateChannel / setAutoCheck / setAutoDownload / dismissVersion 八个 handler"
+    },
+    {
+      "path": "packages/app/src/main/update/release-integrity.ts",
+      "action": "create",
+      "target": "verifyBeforeInstall()",
+      "change": "安装前校验 candidate 版本 semver 严格大于当前版本、文件存在且 sha512 与 manifest 一致，不一致直接中止并置 errorCode='signature'"
+    },
+    {
+      "path": "packages/app/src/main/lifecycle/graceful-shutdown.ts",
+      "action": "create",
+      "target": "collectBlockers()/requestShutdown()",
+      "change": "汇总 active Agent、未保存草稿、录音中、pending permission 四类阻断项，提供订阅式 idle 通知（基于 agent_settled 事件，禁止轮询）"
+    },
+    {
+      "path": "packages/app/src/main/index.ts",
+      "action": "modify",
+      "target": "whenReady",
+      "change": "创建 UpdateService 单例、注册 update ipc、主窗口 ready-to-show 后 30s 触发首次检查"
+    },
+    {
+      "path": "packages/app/src/main/ipc-registry.ts",
+      "action": "modify",
+      "target": "registerAllIpc()",
+      "change": "追加 registerUpdateIpc()"
+    },
+    {
+      "path": "packages/app/src/preload/api/update.ts",
+      "action": "create",
+      "target": "update 命名空间",
+      "change": "八个动作 + onUpdateEvent 订阅；不暴露任何 feed/token/路径"
+    },
+    {
+      "path": "packages/app/src/preload/api/index.ts",
+      "action": "modify",
+      "target": "api 聚合",
+      "change": "加入 update 命名空间"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/update.ts",
+      "action": "create",
+      "target": "useUpdateStore",
+      "change": "先取 snapshot 再订阅、按 stateSequence 丢弃乱序事件、cancelSupported 能力位、dismiss 24h 逻辑"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/UpdateBanner.vue",
+      "action": "create",
+      "target": "全局更新横幅",
+      "change": "仅在 available / downloaded / 需用户动作的 error 三种情况显示；进度、速度、重试；按能力位决定是否渲染取消按钮"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/UpdateSettingsPanel.vue",
+      "action": "create",
+      "target": "关于与更新",
+      "change": "当前版本 / runtime 版本 / channel / 自动检查与自动下载开关 / 上次检查 / 立即检查 / 错误详情与一键复制诊断"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/InstallBlockerDialog.vue",
+      "action": "create",
+      "target": "安装前阻断对话框",
+      "change": "列出阻断项，提供 等待任务结束后安装 / 停止任务并安装 / 取消 三个动作"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/SettingsModal.vue",
+      "action": "modify",
+      "target": "设置弹窗",
+      "change": "挂载 UpdateSettingsPanel"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/AppShell.vue",
+      "action": "modify",
+      "target": "根布局",
+      "change": "挂载 UpdateBanner 与 InstallBlockerDialog"
+    },
+    {
+      "path": "packages/app/scripts/check-update-deps.mjs",
+      "action": "create",
+      "target": "依赖一致性校验",
+      "change": "比对 package.json 精确版本与 pnpm-lock.yaml 解析版本，不一致退出码 1"
+    },
+    {
+      "path": "packages/contract/src/update.ts",
+      "action": "create",
+      "target": "UpdateState / UpdateStatus / UpdateErrorCode",
+      "change": "[errata-2 补录] c[1] 断言十个状态字面量与类型定义在该文件，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/scripts/check-updater-capability.mjs",
+      "action": "create",
+      "target": "CancellationToken 能力探针",
+      "change": "[errata-2 补录] c[8] 引用该脚本，全计划原无任何 create/modify 条目"
+    },
+    {
+      "path": "packages/app/src/main/update/update-init.test.ts",
+      "action": "create",
+      "target": "updater 初始化单测",
+      "change": "[errata-2 补录] test.unit[0] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/update/update-schedule.test.ts",
+      "action": "create",
+      "target": "检查调度单测",
+      "change": "[errata-2 补录] test.unit[1] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/update/update-singleflight.test.ts",
+      "action": "create",
+      "target": "并发去重单测",
+      "change": "[errata-2 补录] test.unit[2] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/update/release-integrity.test.ts",
+      "action": "create",
+      "target": "发布完整性单测",
+      "change": "[errata-2 补录] test.unit[3] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/update/update-errors.test.ts",
+      "action": "create",
+      "target": "错误分类单测",
+      "change": "[errata-2 补录] test.unit[5] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/update.test.ts",
+      "action": "create",
+      "target": "update store 单测",
+      "change": "[errata-2 补录] test.unit[4] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/update-banner.test.ts",
+      "action": "create",
+      "target": "UpdateBanner 组件单测",
+      "change": "[errata-2 补录] c[8] 的两方向断言载体与 test.unit[6] 引用，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "先核对版本可用性与 lockfile 一致性，把 check-update-deps.mjs 写好并接进 test 流程；三者版本不一致或注册表不存在时停下来报告而不是猜一个版本",
+    "update-types.ts / update-errors.ts 先落类型与错误码，再写 UpdateService，保证状态机是唯一状态源",
+    "initAutoUpdater 按 action 中规定的五步顺序赋值，allowDowngrade=false 必须写在 channel/allowPrerelease 之后（这两个 setter 在 electron-updater 内部可能联动 downgrade）",
+    "single-flight：三个私有字段 `checkInFlight / downloadInFlight / installInFlight`，进入时判空并在 finally 复位",
+    "事件：只在构造函数里注册一次 checking-for-update / update-available / update-not-available / download-progress / update-downloaded / error，注册前先 `autoUpdater.removeAllListeners()` 防重复",
+    "调度：`const t = setTimeout(...); t.unref();` 首次 30s，之后 4h * (1 + 0.1 + Math.random()*0.1)；失败退避 15min→1h→4h，成功清零",
+    "dev/test：`if (!app.isPackaged && !process.env.PIBUDDY_FAKE_UPDATE_FEED) { status='unsupported'; return; }`，fake 分支用 generic provider 指向本地 HTTPS server",
+    "安装前流程：installAndRestart → collectBlockers()；有阻断项时置 waiting-for-agent 或弹 InstallBlockerDialog；等待模式订阅 agent_settled 而非轮询",
+    "release notes 当不可信内容处理：渲染前经 sanitize（只保留纯文本与换行，剥离所有 HTML 标签与链接协议），单测断言 `<img src=x onerror=alert(1)>` 被完全剥离",
+    "renderer store：mounted 时先 `await getUpdateState()` 拿 snapshot 再 subscribe，收到 stateSequence <= 已知值的事件直接 return",
+    "dismiss：同一 candidate 本进程只主动提示一次，「稍后」写入 dismissedVersion + dismissedUntil=now+24h，Settings 页始终可见状态",
+    "跑单测与 fake feed 全流程，并确认现有闭环功能未受影响（本任务不碰 pi 事件链路）"
+  ],
+  "test": {
+    "commands": [
+      "node packages/app/scripts/check-update-deps.mjs",
+      "pnpm --filter @pibuddy/app test -- src/main/update",
+      "pnpm --filter @pibuddy/app typecheck"
+    ],
+    "unit": [
+      "packages/app/src/main/update/update-init.test.ts",
+      "packages/app/src/main/update/update-schedule.test.ts",
+      "packages/app/src/main/update/update-singleflight.test.ts",
+      "packages/app/src/main/update/release-integrity.test.ts",
+      "packages/app/src/renderer/src/stores/update.test.ts",
+      "packages/app/src/main/update/update-errors.test.ts",
+      "packages/app/src/renderer/src/components/update-banner.test.ts"
+    ],
+    "integration": [
+      "本地 HTTPS fake update server + 两个 unsigned 测试版本走 idle→downloaded 全状态"
+    ],
+    "success_metrics": [
+      "属性赋值顺序断言通过",
+      "并发 3 次 check 底层只调 1 次",
+      "reload 后进度从 snapshot 恢复"
+    ]
+  },
+  "reference": {
+    "pattern": "main 单例 service + 快照订阅，参考现有 PiRpcClient 的 EventEmitter 用法但状态集中在 service",
+    "files": [
+      "packages/pi-sdk/src/client.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "更新是唯一一个错了就可能砸掉用户数据的子系统，因此状态与副作用全部收在 main 的单例里，renderer 只读快照；初始化顺序、single-flight 与调度都用单测钉死，因为这些错误在人工点测里几乎不可见。",
+    "decision_factors": [
+      "M4 规格明确要求新代码放 src/main/update/ 而非现有 ipc.ts",
+      "renderer 接触 feed/token 是明确禁止项"
+    ],
+    "tradeoffs": "本任务不产出任何真实可发布产物，只保证运行时逻辑正确；签名、CI 与三平台产物在 TASK-B06"
+  },
+  "risks": [
+    "M4 出口门禁在本环境结构性不可达：无签名凭据、无 clean VM，本任务只能用本地 fake feed + unsigned 测试版本验证状态机，真实 N→N+1 闭环验收状态必须记为 `not-tested (no clean VM)`，不得声称完成",
+    "TASK-003（RUN-001）已把 electron-builder.yml 恢复为 asar: true 并用 extraResources 外置 pi-runtime，差分下载对 asar 内主代码正常生效；但 extraResources 投递的 pi-runtime 目录不参与 blockmap 差分，runtime 体积变化会整体重下，该限制需在 ADR（TASK-013 产出）中如实记录，不得反向把 asar 改回 false",
+    "electron-updater 6.8.9 是否导出可用的 CancellationToken 必须以 node_modules 中的实际 d.ts 为准；不支持就不渲染取消按钮，禁止放无效按钮"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "应用自动更新",
+      "安装前安全检查"
+    ],
+    "affected_components": [
+      "main/update",
+      "main/lifecycle",
+      "renderer/update"
+    ],
+    "affected_requirements": [
+      "UPD-001",
+      "UPD-002",
+      "UPD-003",
+      "UPD-004"
+    ],
+    "adr_ids": [
+      "ADR-0001-update-feed"
+    ]
+  },
+  "meta": {
+    "estimated_time": "14h",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": true,
+    "wave": 9
+  },
+  "origin_shard": "B",
+  "origin_id": "TASK-B05"
+}

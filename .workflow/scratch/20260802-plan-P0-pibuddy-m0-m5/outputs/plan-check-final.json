@@ -1,0 +1,285 @@
+{
+  "verdict": "CRITICAL",
+  "round": "final (post round-3, revision cap reached)",
+  "method_note": "所有结论由本审查独立执行得出，未采信 revision-round-*.json 的自述。共机械抽取并实跑了 190 条可执行断言（覆盖全部 16 个 task），另人工判读结构性/UI 型条目。",
+
+  "verification_of_prior_fixes": [
+    {
+      "id": "CT-05",
+      "claim": "IPC 守卫改为结构性断言，不钉死任何 handler 文件；改前实测 13，故断言当前为假",
+      "independently_verified": true,
+      "how_verified": "在 D:/selftool/pi-ui 实跑 `rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` -> 输出 13，全部位于 packages/app/src/main/ipc.ts。断言当前为假，非恒真。-g '!ipc-guard.ts' 按 basename 匹配，handler 迁目录后仍成立。该断言出现在 TASK-007/008/009/011/012/013/014/015/016 共 9 个 task。",
+      "verdict": "PASS（第一分句）/ FAIL（第二分句）",
+      "residual_defect": "同一条 criteria 的第二分句 `rg -c 'registerHandler(' packages/app/src/main/ipc/<x>-ipc.ts` 把断言重新钉死到了 8 个无任何 task 创建的文件上，见 ISS-01。第一分句修好了，第二分句把同类缺陷又引了回来。"
+    },
+    {
+      "id": "CT-21",
+      "claim": "根唯一 vitest 配置断言已排除 ./source/，且 discovered ⊇ onDisk 为主判据",
+      "independently_verified": true,
+      "how_verified": "实跑 `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` -> 0（根配置尚不存在，断言当前为假，非恒真）；去掉 source 排除后可见 ./source/hermes-studio/vitest.config.ts，确认排除项有效且必要。c[13](b) 的 `node scripts/check-test-discovery.mjs` 退出码 0 且 discovered===onDisk 确为独立闸门，脚本规格在 TASK-001 files[] 中写明（枚举磁盘集合 D 与 vitest 发现集合 F，D ⊄ F 即退出 1 并列出遗漏文件）。",
+      "verdict": "PASS with defect",
+      "residual_defect": "TASK-001 files[] 同时 create 了 vitest.workspace.ts（export default [\"packages/*\"]）与 vitest.config.ts，构成第二套发现机制；CT-21 的 glob 只看 vitest.config.*，对 vitest.workspace.* 完全失明。见 ISS-05。"
+    },
+    {
+      "id": "CT-04",
+      "claim": "collapseEnvelopes 泛型签名能让裸事件 fixture 在 typecheck 阶段失败",
+      "independently_verified": true,
+      "how_verified": "TASK-005 c[7] 建立 `export function collapseEnvelopes(input: PiEnvelope<AgentEvent>[]): PiEnvelope<AgentEvent>[]`；TASK-010 c[0] 用 `rg -c '<逐字签名>' ... 输出 1` 复核，实跑当前 exit=2（文件不存在）故为假、可证伪。裸 AgentEvent 缺 protocolVersion/sequence 等必填字段，赋给 PiEnvelope<AgentEvent>[] 编译期失败，类型约束成立。c[0] 另有两条 `test -e X && [ \"$(rg -c PAT X | wc -l)\" -eq 0 ]` 反向断言，语义已实测正确（rg -c 无命中时不输出、wc -l 得 0；有命中输出 1 行、wc -l 得 1）。",
+      "verdict": "PASS"
+    },
+    {
+      "id": "TASK-013 c[3]",
+      "claim": "look-around 已改写为 ripgrep 可执行的等价条件 `rg -n '^\\s*uses:' <file> | rg -vc '@[0-9a-f]{40}\\s*$'` 输出 0",
+      "independently_verified": true,
+      "how_verified": "构造两份临时样本实跑（测后已删）。样本 A（紧凑列表式 `      - uses: actions/setup-node@v4`）：第一级 `rg -n '^\\s*uses:'` 匹配 0 行、exit=1，整条管道对未固定的 action 完全失明。样本 B（`- name:` + 独立行 `        uses:`）：第一级匹配 2 行，管道输出 1，可用。另实测 `printf 'aaa' | rg -vc 'aaa'` 无输出且 exit=1 —— 计数为 0 时 ripgrep 不打印 \"0\"。",
+      "verdict": "FAIL",
+      "residual_defect": "两处独立缺陷：(1) `^\\s*uses:` 不匹配 GitHub Actions 最常见的紧凑列表式 `- uses: x@v4`，未固定的 action 可静默通过；(2) 通过态永远产不出字面量 \"0\"（空输出 + exit 1），criteria 写的「输出 0」不可达。见 ISS-02。"
+    },
+    {
+      "id": "裁定 1（IPC 单一注册入口）",
+      "claim": "全部 handler 只经 ipc-guard.ts 的 registerHandler 注册，无第二套",
+      "independently_verified": true,
+      "how_verified": "TASK-007 files[] create packages/app/src/main/ipc-guard.ts；9 个 task 带结构断言。但比对全 16 个 task 的 files[] 与 criteria 中出现的 12 个 packages/app/src/main/ipc/*.ts 路径后，只有 sessions-ipc.ts 与 registry.ts 被 TASK-009 create。",
+      "verdict": "FAIL — 见 ISS-01"
+    },
+    {
+      "id": "裁定 4（唯一 logger）",
+      "claim": "logger 只有一份，归 TASK-002",
+      "independently_verified": true,
+      "how_verified": "实跑 `rg --no-filename -c 'export function createLogger' packages/app/src/main | awk sum` -> 0（当前为假、可证伪）。TASK-013 files[] 对 logger.ts / logger-redact.ts 均为 modify 且注明「裁定4：不得新建 main/logging/logger.ts」。全仓无第二处 createLogger / redactSecrets 导出断言（TASK-002 c[10]、TASK-013 c[4]/c[5]、TASK-014 c[21] 均以 sum===1 收口）。",
+      "verdict": "PASS"
+    },
+    {
+      "id": "裁定 2（唯一附件注册表）",
+      "claim": "attachment-registry.ts 全计划唯一，TTL 1800000 滑动续期",
+      "independently_verified": true,
+      "how_verified": "TASK-007 create，唯一 create 点。TASK-007 c[10]、TASK-015 c[2]/c[22]、TASK-016 c[24] 用 `rg -l 'ATTACHMENT_TTL_MS' packages/app/src/main | wc -l` 输出 1 与 attachmentId 计数收口，实跑当前均为 0，可证伪。shell.openPath 出口唯一性断言实跑当前为 1（ipc.ts:165），与 criteria 自称的「改前实测 ipc.ts:16x」吻合。",
+      "verdict": "PASS"
+    },
+    {
+      "id": "裁定 6（契约类型唯一）",
+      "claim": "跨进程类型唯一定义在 @pibuddy/contract，check-contract-uniqueness.mjs 为机器判据",
+      "independently_verified": true,
+      "how_verified": "脚本由 TASK-002 create（files[] 中存在）。规格完整：(a) contract 导出名集合 S 在 app/pi-sdk 中同名 export 即失败；(b) name 匹配 /contract/ 的包恰 1 个；(c) 禁止 '../../../preload/index.d' 跨层 type import；命中时退出码 1 并打印 name:file:line。实跑 TASK-002 c[7] 的 preload/index.d 断言 -> exit=1（当前为假），且实际命中 stores/app.ts:17 与 InputBar.vue:5，与 criteria 自称的「改前实测 2 处」逐字吻合。",
+      "verdict": "PASS"
+    },
+    {
+      "id": "改前实测基线的真实性（抽样 11 项）",
+      "claim": "多条 criteria 标注「改前实测为 X，故此断言当前为假」",
+      "independently_verified": true,
+      "how_verified": "逐条对真实代码复核：preload/index.d 命中 app.ts:17 + InputBar.vue:5（吻合）；pi-launcher.ts createRequire 在 line 1/14（吻合）；`shell: isWin` 在 line 28（吻合）；shell.openPath 在 ipc.ts:165（吻合「16x」）；ipcMain 注册 13 处（吻合）；非 git 仓库（吻合）；pi-sdk client.ts 无 taskkill / 无 --session-dir（吻合「缺失」）；types.ts 无 summarization_retry_*（吻合）；index.html 无 CSP（吻合）。",
+      "verdict": "PASS — 基线是实测的，不是编造的。这是本计划最强的一项质量证据。"
+    }
+  ],
+
+  "sampled_criteria_audit": {
+    "sample_size": 190,
+    "sample_note": "未用 40 条人工抽样，改为机械抽取全部 344 条中所有可执行的 shell 断言（rg / test -e / find / git / node -e，排除 pnpm/vitest/electron 等构建类）共 190 条，在真实工作树上全部实跑，覆盖 16/16 个 task。判据：凡当前已为真的断言即为恒真嫌疑，逐条人工复核其是否为「合法的防回归守卫」还是「冒充修复验证的恒真条」。",
+    "already_true_today": 14,
+    "tautological_found": 2,
+    "details": [
+      {
+        "id": "TASK-003 c[5]",
+        "type": "harmful tautology",
+        "cmd": "test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'catch \\{\\}' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]",
+        "observed": "exit=0（当前已为真）",
+        "why": "真实代码是 `  } catch {` 换行后接注释再 `  }`（line 24-26），正则 `catch \\{\\}` 要求单行 `catch {}`，从未匹配、也永远不会匹配。criteria 自述「原第 24-26 行的空 catch 已消除」——行号对、模式错。该条无论实现者做不做都通过。缓解：同条第二分句（PI_RUNTIME_RESOLVE_FAILED + logger 记录 + pi-launcher.spec.ts）可证伪。"
+      },
+      {
+        "id": "TASK-003 c[18] / TASK-012 c[21]",
+        "type": "blind pattern (partially mitigated)",
+        "cmd": "test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'which pi|command -v pi|fallbackToGlobalPi' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]",
+        "observed": "exit=0（当前已为真）",
+        "why": "CT-11 的目的是「禁止回退全局 pi」，但真实的回退就写在 pi-launcher.ts:27-28 的 `return { command: isWin ? \"pi.cmd\" : \"pi\", shell: isWin }`，三个模式一个都不匹配。守卫对它要消灭的东西失明。缓解：TASK-003 c[4] 的 `shell: isWin|shell: true` 实跑命中同一行，且 c[18] 首句 `rg -c 'runtime-manifest.json' >= 1` 当前为 0、可证伪。"
+      },
+      {
+        "id": "其余 12 条 already-true",
+        "type": "legitimate anti-regression guards",
+        "list": "TASK-009 c[10] workspace_root / c[21] sourcePath；TASK-010 c[5] type:\"steer\" 与 type:\"follow_up\" / c[11] get_entries；TASK-011 c[5] feedURL|GH_TOKEN / c[6] sequence<=last；TASK-012 c[5] exec(|spawn( in renderer / c[11] default: break；TASK-014 c[10] /login；TASK-003 c[14] settings.set({piRuntimeMode",
+        "why": "这些断言守的是「本任务不得引入」的模式，当前为真且应保持为真，属合法的防回归条款，不计为恒真缺陷。"
+      },
+      {
+        "id": "否定型断言写法（62 条）",
+        "type": "verified sound",
+        "why": "轮次 3 把 26 处 `grep -rc` 统一改写为 `test -e <PATH> && [ \"$(rg -c '<PAT>' <PATH> | wc -l)\" -eq 0 ]`。实测语义正确：rg -c 无命中时不输出（wc -l=0），有命中输出 1 行（wc -l=1）；对目录参数则为「命中文件数」。前置 test -e 使路径缺失时短路为 exit 1，fail-closed。该改写是本轮的一项真实改进。"
+      },
+      {
+        "id": "占位符类断言（TASK-007 c[20] / 008 c[17] / 009 c[9] / 010 c[10] / 012 c[10] / 013 c[11] / 014 c[13] / 015 c[10] / 016 c[10]）",
+        "type": "false positive in my extractor",
+        "why": "`rg -c \"from '@pibuddy/contract'\" <file>` 中的 <file> 是全称量化模板（原文：「本任务在 preload/api/ 与 main/ 下新增的每个 .ts 文件」），非未绑定占位。不计为缺陷。"
+      }
+    ]
+  },
+
+  "new_issues_introduced": [
+    "ISS-01（轮次 3 引入，CRITICAL）：CT-05 改写时给每个 task 追加了 `rg -c 'registerHandler(' packages/app/src/main/ipc/<x>-ipc.ts` 分句，把断言钉死到 8 个无人创建的文件上——与该条自述「不钉死任何 handler 文件」直接矛盾。",
+    "ISS-03（轮次 3 引入，CRITICAL）：TASK-013 在 wave 10 把 `node packages/app/scripts/check-pure-js-deps.mjs` 写进 ci.yml，而该脚本由 TASK-016 在 wave 13 才 create。wave 10-12 期间 CI 恒红。",
+    "ISS-02（轮次 3 引入，CRITICAL）：为规避 look-around 而新写的 pin 校验管道两处失效（见 verification_of_prior_fixes/TASK-013 c[3]）。",
+    "ISS-04（HIGH）：TASK-011 c[?] 引用 scripts/check-updater-capability.mjs，无任何 task create，也不在 TASK-011 的 files[] 中。",
+    "ISS-07（HIGH）：TASK-013→TASK-014 新增边本身正确（wave 10→11，无环），但 TASK-014 c[22] 同时引用了 ipc/misc-ipc.ts 与 ipc/providers-ipc.ts，而 TASK-014 自己的 files[] create 的是 providers/providers-ipc.ts——同一 task 内两套路径。"
+  ],
+
+  "criteria_results": {
+    "total": 344,
+    "executed_mechanically": 190,
+    "falsifiable_today": 176,
+    "already_true_today": 14,
+    "harmful_tautologies": 2,
+    "unsatisfiable_as_written": 9,
+    "unsatisfiable_list": "TASK-009 c[19]、TASK-011 c[20]、TASK-012 c[18]、TASK-013 c[19]、TASK-014 c[22]、TASK-015 c[19]、TASK-016 c[20]（ipc/*-ipc.ts 路径不存在）；TASK-001 c[9](b)、TASK-013 c[3]（pin 校验通过态不可达）",
+    "gate_script_specs": {
+      "scripts/check-contract-uniqueness.mjs": "规格完整（三项检查 a/b/c + 退出码 + name:file:line 输出格式），creator=TASK-002",
+      "scripts/check-test-discovery.mjs": "规格完整（D ⊄ F -> 退出 1 并列出遗漏文件），creator=TASK-001",
+      "scripts/check-workflow-pins.mjs": "规格可用但偏薄（遍历 .github/workflows/*.yml，`^\\s*uses:` 且不以 @<40 hex> 结尾即退出 1 报 file:line）——继承了 ISS-02 的 `^\\s*uses:` 盲区，creator=TASK-013",
+      "packages/app/scripts/check-pure-js-deps.mjs": "仅有文件名与一句话，无判定/输出/退出码规格，且 creator=TASK-016 晚于 consumer=TASK-013 三个 wave",
+      "scripts/check-updater-capability.mjs": "无 creator，无 files[] 条目，只在 criteria 正文出现"
+    }
+  },
+
+  "issues": [
+    {
+      "severity": "CRITICAL",
+      "id": "ISS-01",
+      "task_id": ["TASK-009", "TASK-011", "TASK-012", "TASK-013", "TASK-014", "TASK-015", "TASK-016"],
+      "description": "IPC handler 目录归属自相矛盾。criteria 中出现 12 个 packages/app/src/main/ipc/*.ts 路径，但全 16 个 task 的 files[] 只 create 了 sessions-ipc.ts 与 registry.ts。artifacts-ipc / changeset-ipc / diagnostics-ipc / preview-ipc / providers-ipc / resources-ipc / update-ipc / workspace-ipc 这 8 个被断言的文件无任何 create 条目；pi-ipc.ts 与 misc-ipc.ts 只有 modify 无 create。更硬的证据：TASK-011 files[] create 的是 main/update/update-ipc.ts 而 c[20] 断言 main/ipc/update-ipc.ts；TASK-014 files[] create 的是 main/providers/providers-ipc.ts 而 c[22] 断言 main/ipc/providers-ipc.ts。rg 对不存在文件退出 2、awk 求和得 0，`0 >= N` 恒假 —— 这 7 条 criteria 按各自 task 的文件计划永远无法满足。",
+      "suggested_fix": "二选一并全局统一：(A) 保留 TASK-009 建立的 main/ipc/ 目录为唯一 handler 落点，把 TASK-011 files[] 的 update/update-ipc.ts 改为 ipc/update-ipc.ts、TASK-014 的 providers/providers-ipc.ts 改为 ipc/providers-ipc.ts，并在 TASK-010/012/013/015/016 的 files[] 中补齐 pi-ipc.ts、resources-ipc.ts、diagnostics-ipc.ts、misc-ipc.ts、workspace-ipc.ts、changeset-ipc.ts、preview-ipc.ts、artifacts-ipc.ts 的 create 条目；(B) 保留各功能域自带 *-ipc.ts（update/、providers/、…），把 7 条 criteria 的第二分句路径改为对应的真实路径。无论选哪个，都应把第二分句从「钉死文件名」改为结构式：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main -g '*.ts' | awk '{s+=$1} END{print s+0}'` 输出 >= <本 task 前累计 channel 数 + 本 task 新增数>，与第一分句保持同一「不钉死文件」的设计意图。"
+    },
+    {
+      "severity": "CRITICAL",
+      "id": "ISS-02",
+      "task_id": ["TASK-001", "TASK-013"],
+      "description": "GitHub Actions pin 校验的两条 criteria（TASK-001 c[9](b)、TASK-013 c[3]）实测不可用。(1) `rg -n '^\\s*uses:'` 不匹配紧凑列表式 `      - uses: actions/setup-node@v4`——实测在含 3 个 action（2 固定 1 未固定）的样本上匹配 0 行、exit=1，整条管道对未固定 action 完全失明；(2) `rg -vc` 在计数为 0 时不打印 \"0\" 而是空输出并 exit 1，故 criteria 写的「输出 0」这一通过态永远产不出来。同一缺陷会被 check-workflow-pins.mjs 继承，因为其规格逐字复用了 `^\\s*uses:`。",
+      "suggested_fix": "把两条 criteria 与脚本规格统一改为对两种 YAML 写法都成立的形式：`rg -n --no-filename 'uses:\\s*[^ ]+' .github/workflows/ci.yml .github/workflows/release.yml | rg -v '@[0-9a-f]{40}\\s*$' | wc -l` 输出 0（用 wc -l 而非 rg -vc，0 时确定打印 \"0\"；用 `uses:\\s*` 而非 `^\\s*uses:` 覆盖 `- uses:`）。check-workflow-pins.mjs 的规格同步改为「对每行做 /uses:\\s*(\\S+)/ 捕获，捕获值不以 @<40 hex> 结尾即记一次失败，累计 >0 则打印全部 file:line 并 exit 1，否则 exit 0」。"
+    },
+    {
+      "severity": "CRITICAL",
+      "id": "ISS-03",
+      "task_id": ["TASK-013", "TASK-016"],
+      "description": "CI 闸门与脚本交付顺序倒挂。TASK-013（wave 10）的 files[] 明确在 ci.yml 追加 `node packages/app/scripts/check-pure-js-deps.mjs`，但该脚本唯一的 create 条目在 TASK-016（wave 13）。wave 10 完成后到 wave 13 完成前，ci.yml 会引用不存在的脚本，CI 恒定失败，而这段区间恰好覆盖 TASK-014、TASK-015 两个交付 wave 的验收。此外该脚本无任何判定/输出/退出码规格，只有一行文件名。",
+      "suggested_fix": "把 packages/app/scripts/check-pure-js-deps.mjs 的 create 从 TASK-016 前移到 TASK-013 的 files[]（TASK-013 已在改 electron-builder.yml 与 CI，属同一关注点），或把 ci.yml 中该步的追加推迟到 TASK-016。同时补规格：明确它扫描哪些 package.json 字段、如何判定一个依赖是否含原生模块（如检出 binding.gyp / prebuilds/ / .node）、命中时打印什么、退出码取值。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "ISS-04",
+      "task_id": "TASK-011",
+      "description": "TASK-011 的「取消能力双向断言」criteria 依赖 scripts/check-updater-capability.mjs 输出 `{ cancelSupported: true|false }`，但该脚本无任何 task create，也不在 TASK-011 的 files[]（files[] 中只有 packages/app/scripts/check-update-deps.mjs，是另一个脚本）。该 criteria 的 (a)(b) 两个方向都以 cancelSupported 取值为前提，前提不可得则整条无法判定。",
+      "suggested_fix": "在 TASK-011 的 files[] 中补 `{\"path\":\"packages/app/scripts/check-updater-capability.mjs\",\"action\":\"create\",\"change\":\"require('electron-updater') 后断言 typeof CancellationToken === 'function'，向 stdout 打印 JSON {cancelSupported:boolean}，解析失败退出 1\"}`，并让 UpdateService 在初始化时以同一判据设置 store.cancelSupported，避免脚本与运行时两处判定漂移。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "ISS-05",
+      "task_id": "TASK-001",
+      "description": "vitest 配置未真正收敛为一套。TASK-001 files[] 同时 create vitest.workspace.ts（export default [\"packages/*\"]）与 vitest.config.ts（自称「仓库根唯一 vitest 配置」，c[4] 规定其 test.include）。二者是两套互相竞争的发现机制：Vitest 3 中 workspace 文件存在时，各 project 按自身根解析 include，根 config 的 test.include 不再是权威。而 CT-21 的守卫 glob 是 `vitest.config.*`，对 vitest.workspace.* 完全失明——这正是裁定意在消灭的「残留第二套实现」。缓解：check-test-discovery.mjs 的 discovered ⊇ onDisk 闸门会在实际发生漏发现时报警，故未升为 CRITICAL。",
+      "suggested_fix": "删除 vitest.workspace.ts 这一 files[] 条目（Vitest 3.2+ 已弃用 workspace 文件，等价能力用根 config 的 test.projects 表达）；若确需多 project，改为在 vitest.config.ts 内写 test.projects 并把 CT-21 的 glob 扩为 `-name 'vitest.config.*' -o -name 'vitest.workspace.*'`，使守卫覆盖两种文件名。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "ISS-06",
+      "task_id": "TASK-003",
+      "description": "TASK-003 c[5] 首句为恒真（详见 sampled_criteria_audit）。实跑 exit=0：正则 `catch \\{\\}` 要求单行 `catch {}`，而真实代码是 line 24-26 的 `} catch {` + 注释 + `}`。criteria 自述「原第 24-26 行的空 catch 已消除」是错的——它从未匹配过那段代码。这是本轮唯一一条「以修复验证之名写下的恒真断言」。",
+      "suggested_fix": "改为对空 catch 体的多行判据，例如 `test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -U -c 'catch\\s*(\\([^)]*\\))?\\s*\\{\\s*(//[^\\n]*\\s*)*\\}' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（-U 开多行），并在 criteria 中标注「改前实测命中 1 处（line 24-26）」以保持本计划「先实测再落断言」的惯例。"
+    },
+    {
+      "severity": "HIGH",
+      "id": "ISS-07",
+      "task_id": ["TASK-005", "TASK-010"],
+      "description": "packages/app/src/main/pi/event-forwarder.ts 被 TASK-005（wave 4）与 TASK-010（wave 9）双重 create。这正是 TASK-013 c[23] 为 ci.yml 明确设防的 CT-14 类缺陷（「两个任务同时 create 会丢掉本任务的闸门」），但对 event-forwarder.ts 无任何等价守卫。TASK-005 c[7] 断言 dispose 体含 clearTimeout / removeAllListeners / queue = []，TASK-010 无任何 criteria 复核这三项在改写后仍存活。RR-04 已把这段代码标为 critical 级残余风险（33ms 折叠在 delta 语义下静默丢字符），二次 create 会放大它。附带：同一模块的测试落点也不一致——TASK-005 断言 packages/app/test/event-forwarder.spec.ts，TASK-010 断言 packages/app/src/main/pi/event-forwarder.test.ts。",
+      "suggested_fix": "把 TASK-010 files[] 中 event-forwarder.ts 的 action 由 create 改为 modify，并仿照 TASK-013 c[23] 补一条 CT-14 守卫 criteria：「本任务对 event-forwarder.ts 为 modify；改后 dispose 体仍同时 contains 'clearTimeout'、'removeAllListeners'、'queue = []'，且 TASK-005 的 event-forwarder dispose 单测仍通过」。同时统一测试落点到其中一处。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "ISS-08",
+      "task_id": ["TASK-003", "TASK-012"],
+      "description": "CT-11 守卫模式 `which pi|command -v pi|fallbackToGlobalPi` 对它要消灭的对象失明：真实的全局 pi 回退是 pi-launcher.ts:27-28 的 `return { command: isWin ? \"pi.cmd\" : \"pi\", shell: isWin }`。实跑当前已为真。缓解：TASK-003 c[4] 的 `shell: isWin|shell: true` 命中同一行，c[18] 首句 runtime-manifest.json >= 1 当前为 0，二者合起来仍可证伪。",
+      "suggested_fix": "把模式补为 `which pi|command -v pi|fallbackToGlobalPi|command: isWin \\? \"pi\\.cmd\"|\"pi\\.cmd\"`，使守卫直接盯住真实回退表达式。"
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "ISS-09",
+      "task_id": ["TASK-001", "TASK-009", "TASK-010", "TASK-011", "TASK-012", "TASK-013", "TASK-014", "TASK-015", "TASK-016"],
+      "description": "CT-21 的 `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*'` 只排除顶层 node_modules，不排除 packages/*/node_modules。当前实测无误报（pnpm 布局下 packages/*/node_modules 为符号链接，find 默认不跟随），但依赖实现细节。方向为 fail-closed（误报会挡住正确实现），风险可接受。",
+      "suggested_fix": "改为 `find . -name 'vitest.config.*' -not -path '*/node_modules/*' -not -path './source/*' | wc -l`，一次性覆盖任意深度的 node_modules。"
+    },
+    {
+      "severity": "INFO",
+      "id": "ISS-10",
+      "task_id": "TASK-004",
+      "description": "TASK-004 c[6] 首句 `shell.openExternal` 全仓计数为 0，实跑当前已为真（全仓根本没有 openExternal）。但其配对分句 `rg -c 'shell\\.openExternal' packages/app/src/main/security/window-policy.ts >= 1` 当前 exit=2、为假，故整条合取式可证伪。属合法的「出口唯一性 + 防未来逃逸」写法，不计缺陷，仅记录。"
+    }
+  ],
+
+  "structural_checks_recomputed_independently": {
+    "dependency_cycles": "NONE（自建 DFS 三色遍历 16 节点全部边）",
+    "dangling_deps": "NONE",
+    "wave_ordering": "PASS —— 全部依赖边的被依赖方 wave 严格小于依赖方 wave（含轮次 3 新增的 TASK-013(w10) -> TASK-014(w11) 边）",
+    "same_wave_write_intersection": "PASS —— 仅 wave 3(TASK-003×004)、wave 9(TASK-010×011)、wave 10(TASK-012×013) 为并行 wave，三组 files[] 路径集合两两交集为空；其余 10 个 wave 为单 task",
+    "ui_observable_per_delivery_wave": "PASS —— 13 个 wave 每个至少 1 条 [UI-observable]（wave1:1, w2:1, w3:2+2, w4:2, w5:2, w6:3, w7:2, w8:1, w9:1+2, w10:1+1, w11:3, w12:2, w13:2），且抽读的条目描述的均为用户可观察结果（如 TASK-015 c[7] 冲突对话框三个动作各自的磁盘/缓冲区字节断言、TASK-016 c[7] 恶意 Office 样本下 performance.getEntriesByType('resource').length === 0）",
+    "requirement_coverage": "35 条 requirement_traceability 全部有 task_ids，uncovered=0；每条带 evidence_file_line 指向 exploration-*.json 的具体证据位置",
+    "unreachable_gates_honesty": "PASS —— 全 344 条 criteria 中仅 TASK-003 c[17] 触及 packaged 验收，且逐字声明「本机 win-unpacked smoke，非 clean VM，验收状态记 packaged-smoke」。plan.unreachable_exit_gates 列出 M4 三平台签名/公证/clean VM E2E 与 M1 packaged bundle 闸门，状态标注 blocked-by-credential / not-tested，与 doc:455「不能用自签名包冒充正式完成」一致。无任何 criteria 声称 M4 真实 N→N+1 签名闭环可达成。",
+    "mock_or_todo_smell": "NONE —— 对 TODO / 占位 / mock 实现 / stub 实现 / 空按钮 的全量扫描 0 命中",
+    "deferred_requirements_honesty": "PASS —— 13 条，含 M6-M9 的 10 条范围外项，以及两条本计划范围内的诚实降级：SES-101 会话树/分叉可视化 UI 只落数据面（M3 出口门禁部分未覆盖）、M4 签名与 clean VM E2E 记 not-tested/blocked-by-credential",
+    "residual_risks": "4 条以上，RR-01/02/03 为 high、RR-04 为 critical，每条带 exploration-risk.json 的具体行号证据、affected_tasks、why_residual 与 mitigation。RR-04（33ms 折叠在 delta 化后静默丢字符）与本报告 ISS-07 指向同一处代码，二者互相印证。"
+  },
+
+  "confidence": {
+    "overall": 0.62,
+    "dimensions": {
+      "codebase_grounding": 0.93,
+      "requirement_coverage": 0.88,
+      "dependency_and_wave_structure": 0.91,
+      "convergence_falsifiability": 0.71,
+      "internal_consistency": 0.44,
+      "gate_script_specification": 0.55,
+      "honesty_about_unreachable": 0.95,
+      "user_validation": 0.05
+    },
+    "weakest_dimension": "user_validation",
+    "second_weakest_dimension": "internal_consistency",
+    "factors": {
+      "codebase_grounding": "抽样复核的 11 项「改前实测」基线与真实工作树逐条吻合（行号级）；read_first 引用的 Pi SDK 文档路径与行范围实测存在且在文件长度内（providers.md 58-178 of 309，rpc.md 259-278 of 1576）。基线是量出来的，不是编的。",
+      "convergence_falsifiability": "190 条可执行断言中 176 条今日为假、可证伪；14 条已为真中 12 条是合法防回归守卫，仅 2 条是有害恒真。轮次 3 的 `test -e X && [ ... -eq 0 ]` 统一写法经实测语义正确且 fail-closed，是一项真实改进。扣分来自 ISS-06 与 9 条按各自 files[] 不可满足的条目。",
+      "internal_consistency": "这是本轮的主要失分项，且失分几乎全部由轮次 3 的改动引入：CT-05 改写把断言重新钉死到 8 个无人创建的文件；pin 校验重写引入两处新失效；check-pure-js-deps.mjs 的 consumer 早于 creator 三个 wave。轮次 3 修好了「恒真」，代价是引入了「不可满足」。",
+      "gate_script_specification": "check-contract-uniqueness.mjs 与 check-test-discovery.mjs 规格完整可实现；check-workflow-pins.mjs 规格继承了坏正则；check-pure-js-deps.mjs 与 check-updater-capability.mjs 基本只是文件名占位。5 个闸门脚本中 2 个合格、1 个带缺陷、2 个无规格。",
+      "user_validation": "本轮全程 -y。用户未确认过任何一项设计取舍，包括我方代其裁定的六组架构归属（IPC 单一注册入口、附件注册表与其 30 分钟 TTL、workspaceId 派生方式、唯一 logger、会话枚举单一路径、契约类型边界），也未确认 M4 以 blocked-by-credential 状态交付、SES-101 会话树 UI 延期、以及 node:sqlite 探针结果将反向决定 TASK-009 的存储选型。这些都是产品级取舍，不是实现细节。"
+    }
+  },
+
+  "pressure_pass": {
+    "task_id": "TASK-014",
+    "why_highest_complexity": "27 条 criteria（全计划最多）、21 个 files、29 条 read_first（并列最多）、4 条跨 wave 依赖（TASK-008 w7 / TASK-009 w8 / TASK-012 w10 / TASK-013 w10，其中最后一条是轮次 3 新增边）；同时承载 PROV-101 与 UX-101 两个需求域；且是唯一一个要直接写用户主目录既有文件（~/.pi/agent/auth.json）的 task——写坏会破坏用户终端里的 pi，属不可逆事故面。",
+    "read_first_sufficient": true,
+    "read_first_findings": "29 条覆盖了被改文件本体（settings.ts、stores/app.ts、SettingsModal.vue、TopBar.vue、InputBar.vue）、source-of-truth（contract 的 index/ipc-contract/envelope）与三份 Pi SDK 官方文档且带精确行范围（providers.md 58-178 auth.json 形状与 0600 与 Key Resolution 优先级、models.md 1-60 自定义 provider、rpc.md 259-278 get_available_models 的 Model.input 能力）。实测三份文档路径存在且行范围在文件长度内。对本 task 最危险的两处（auth.json 合并写、send() 图片能力前置校验）都给了精确的上游依据。充分。",
+    "convergence_falsifiable": "26/27 可证伪",
+    "action_executable": true,
+    "findings": [
+      "action 极为具体：给出 readAuthFile / writeCredential / testProvider 三个完整函数签名与返回类型联合、固定路径 path.join(os.homedir(),'.pi','agent','auth.json')、写法链 writeJsonAtomic -> chmodSync(0o600)、先读合并以保留 OAuth 条目、写前备份到 <userData>/auth-backup/auth.<epochMs>.json。无「实现 X」「与 Y 对齐」类空转动词。",
+      "CT-09 的命名收敛写得很硬：明确 settings:get 返回体用 sttApiKeyConfigured + sttApiKeyLast4，并逐字禁止引入 sttApiKeySet 这一第三种拼写；c[1] 用 Object.keys(await settings.get()).sort() 与 contract 导出的 APP_SETTINGS_PUBLIC 常量数组比对，是可机械判定的键集合断言，优于自然语言描述。",
+      "CT-26 的处理体现了对 typecheck 的正确利用：要求 send() 保持 Promise<boolean> 签名，使裸 return 在编译期即失败，而不是靠 review 发现。",
+      "c[14] auth.json 写前备份的断言到字节级（备份文件 sha256 === 写入前原文件 sha256），与「不可逆事故必须可验证」的定位匹配。",
+      "唯一失败项 c[22]：断言 `rg -c 'registerHandler(' packages/app/src/main/ipc/misc-ipc.ts packages/app/src/main/ipc/providers-ipc.ts` >= 5，而本 task 的 files[] create 的是 packages/app/src/main/providers/providers-ipc.ts，read_first 里同时列了 providers/providers-ipc.ts 与 ipc/misc-ipc.ts 两套路径。同一 task 内路径分裂，该条按自身文件计划不可满足。这是 ISS-01 在单 task 内最清晰的显影。",
+      "另一处需注意但不判缺陷：c[25] 断言 settings.ts 含 SETTINGS_SCHEMA_VERSION = 2 与 case 1:，依赖 TASK-008 已把版本推到 1；跨 task 的版本号约定未在任何一处集中声明，属隐式契约。建议在 contract 中导出 SETTINGS_SCHEMA_VERSION 常量而非各 task 各写字面量。"
+    ]
+  },
+
+  "readiness_gate": {
+    "blocked": true,
+    "blocking_reasons": [
+      "ISS-01：7 个 task 的 IPC 结构断言按各自 files[] 不可满足，且暴露出「handler 文件到底落在 main/ipc/ 还是各功能域目录」这一未定的架构问题——执行者会在 7 个 task 中各自即兴决定，产生分裂的目录结构。这是唯一一条需要在动工前定死的问题。",
+      "ISS-02：供应链 pin 闸门实测失明，未固定的第三方 action 可静默通过 CI。这是安全闸门，不能带病上线。",
+      "ISS-03：wave 10-12 期间 CI 恒红，会把 TASK-014、TASK-015 两个交付 wave 的验收信号全部污染。"
+    ],
+    "estimated_fix_scope": "三项均为机械修订，不触及任务分解、依赖图、wave 划分或需求覆盖：ISS-01 是一次路径归一（改 7 条 criteria 的分句 + 2 个 files[] 条目，或补 8 条 create 条目）；ISS-02 是一条正则与一处 wc -l 替换（含同步 check-workflow-pins.mjs 规格）；ISS-03 是把一个 files[] 条目从 TASK-016 前移到 TASK-013。ISS-04~07 建议一并处理。预计一轮定向修订即可，无需重新规划。"
+  },
+
+  "execution_recommendation": "not-ready",
+  "execution_recommendation_rationale": "计划的骨架是健康的：依赖无环、wave 序合规、并行 wave 写集不相交、35 条需求零遗漏、不可达门禁诚实标注为 blocked-by-credential/not-tested、抽样的 11 项代码基线与真实工作树行号级吻合、344 条 criteria 中仅 2 条有害恒真。问题集中在轮次 3 自身引入的三处 bookkeeping 缺陷上，其中 ISS-01 还牵出一个真正未定的架构问题。鉴于修订轮次已用尽，建议不再走完整的 plan/check 循环，而是由用户就下方 caveats 中的第 1 项做一次裁决，随后按 issues 中的 suggested_fix 做一轮定向 errata（不重新规划），再进入执行。",
+
+  "caveats_for_user": [
+    "IPC handler 的目录归属（唯一真正需要您拍板的技术取舍）：是把全部 handler 收进 packages/app/src/main/ipc/ 一个目录（跨功能域集中，便于一眼看全攻击面），还是让每个功能域自带 *-ipc.ts（update/、providers/、sessions/…，内聚性更好但攻击面分散）？当前计划两种写法各写了一半，导致 7 个 task 的安全断言失效。两种都可行，但必须选一个。",
+    "M4 将以「未验证」状态交付：三平台签名、公证、clean VM 上的真实 N→N+1 更新闭环全部标记为 blocked-by-credential / not-tested。这是遵照 doc:455「缺失凭据时不能用自签名包冒充正式完成」的规定，我方未擅自降低标准。您需要决定：是先提供 Windows signing identity / Apple Team ID 等凭据把 M4 做实，还是接受 M4 只交付 adapter + fake feed + unsigned artifact + 「缺凭据即 release job 失败关闭」的 CI 行为。",
+    "SES-101 的会话树 / 分叉可视化 UI 被移出本计划：只落 get_session_tree / get_fork_messages 的 IPC 通道与类型，UI 面延期到独立迭代。这意味着 M3 出口门禁中的「分叉」能力只覆盖到数据层。这是我方为控制 TASK-009 规模而做的裁剪，未经您确认。",
+    "存储选型悬于一次探针：TASK-001 会跑 scripts/probe-node-sqlite.mjs 探测 Electron 运行时下 node:sqlite 是否可用，其结果反向决定 TASK-009 的会话索引存储方案与 electron-builder 的 npmRebuild 取值。探针失败时的备选方案（better-sqlite3 原生模块，还是退回 JSON 索引）计划中没有预案，届时需要您在两种权衡（打包复杂度 vs 查询性能）之间选择。",
+    "附件令牌 TTL 定为 30 分钟滑动过期（ATTACHMENT_TTL_MS = 1800000，访问即续期）：这是安全与体验的直接权衡——太短会让用户在长会话里重新拖拽文件，太长会扩大令牌泄露窗口。数值由我方代定，您可能对自家使用场景有不同判断。",
+    "workspaceId 改为「realpath 的 sha256」并持久化到 workspaces.json（替代进程级 UUID）：好处是重启后工作区身份稳定、会话不会失联；副作用是用户重命名或移动工作目录后会被视为一个新的工作区，历史会话不再自动关联。是否接受这一行为变化需要您确认。"
+  ]
+}

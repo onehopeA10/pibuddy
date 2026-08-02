@@ -1,0 +1,1092 @@
+{
+  "tasks": [
+    {
+      "id": "TASK-B01",
+      "title": "SES-101 会话中心：SQLite 增量索引 + 会话管理 UI + preload 命名空间分层",
+      "description": "用 SQLite 增量索引替换 sessions-store.ts 的全量同步扫描（readdirSync + statSync + readFileSync + 全文件 split 逐行 parse），JSONL 仍为唯一真相源、只读不改写。索引提供搜索/rename/pin/archive/restore/回收站/按 workspace-date-model-status 筛选与未读标识，rename 同时经 pi RPC set_session_name 落到会话文件。同时把 preload 拆成 src/preload/api/<namespace>.ts 分层，index.d.ts 改为从 api 聚合对象推导类型，后续里程碑新增命名空间只需新增文件 + 在 api/index.ts 加一行，不再全员抢改 index.d.ts。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "feature",
+      "priority": "high",
+      "effort": "large",
+      "action": "新建 packages/app/src/main/sessions/session-index.ts，导出 `export const SESSION_INDEX_SCHEMA_VERSION = 1` 与 `export class SessionIndex`，内部使用 `import { DatabaseSync } from 'node:sqlite'` 打开 `path.join(app.getPath('userData'), 'session-index.db')`；建表 `CREATE TABLE IF NOT EXISTS sessions (source_path TEXT PRIMARY KEY, workspace_root TEXT NOT NULL, session_id TEXT NOT NULL, scan_offset INTEGER NOT NULL DEFAULT 0, mtime_ms INTEGER NOT NULL, size_bytes INTEGER NOT NULL, content_hash TEXT NOT NULL, name TEXT, preview TEXT, search_blob TEXT, message_count INTEGER NOT NULL DEFAULT 0, token_total INTEGER NOT NULL DEFAULT 0, cost_total REAL NOT NULL DEFAULT 0, model_id TEXT, status TEXT NOT NULL DEFAULT 'active', pinned INTEGER NOT NULL DEFAULT 0, unread INTEGER NOT NULL DEFAULT 0, running INTEGER NOT NULL DEFAULT 0, draft_text TEXT, draft_json TEXT, deleted_at INTEGER, last_indexed_at INTEGER NOT NULL, schema_version INTEGER NOT NULL)`，用 `PRAGMA user_version` 做迁移；导出方法 `syncWorkspace(workspaceRoot: string): { scanned: number; reparsed: number }`、`query(filter: SessionQuery): SessionRow[]`、`rename(sourcePath: string, name: string): void`、`setPinned`、`setStatus(sourcePath, status: 'active'|'archived'|'trashed')`、`purge(sourcePath: string)`、`getDraft(sourcePath): DraftRecord | null`、`saveDraft(sourcePath, draft: DraftRecord)`。增量规则：`if (row && row.mtime_ms === stat.mtimeMs && row.size_bytes === stat.size) continue;` 命中则跳过整文件；未命中时用 `fs.createReadStream(filePath, { start: row?.scan_offset ?? 0, encoding: 'utf8' })` 只解析新增字节并把 `scan_offset` 更新为 `stat.size`。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/sessions, packages/app/src/preload, packages/app/src/renderer/src/stores/sessions.ts",
+      "focus_paths": [
+        "packages/app/src/main/sessions/",
+        "packages/app/src/main/ipc/",
+        "packages/app/src/preload/",
+        "packages/app/src/renderer/src/stores/",
+        "packages/app/src/renderer/src/components/"
+      ],
+      "read_first": [
+        "packages/app/src/main/sessions-store.ts",
+        "packages/app/src/main/ipc.ts",
+        "packages/app/src/preload/index.ts",
+        "packages/app/src/preload/index.d.ts",
+        "packages/app/src/renderer/src/stores/app.ts",
+        "packages/app/src/renderer/src/components/Sidebar.vue",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 531-600 行（get_session_stats / export_html / switch_session）与第 772-790 行（set_session_name）",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/session-format.md",
+        "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 SES-101 小节"
+      ],
+      "depends_on": ["PARTA:M0", "PARTA:M1", "PARTA:M2"],
+      "wave": 1,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/src/main/sessions/session-index.ts 含 `SESSION_INDEX_SCHEMA_VERSION = 1`、`PRAGMA user_version`、`scan_offset` 三个字符串；`rg -n \"readFileSync\\(filePath\" packages/app/src/main/sessions/session-index.ts` 无输出（禁止整文件读入）",
+          "`rg -n \"readdirSync|statSync|readFileSync\" packages/app/src/main/sessions-store.ts` 只剩 0 处：该文件仅保留 `sessionDirFor(workspace: string)` 导出，其余扫描逻辑已删除",
+          "`rg -n \"writeFileSync|appendFileSync|createWriteStream\" packages/app/src/main/sessions/` 无输出，证明 JSONL 真相源只读不改写",
+          "单测 packages/app/src/main/sessions/session-index.test.ts 覆盖：(a) 同一 fixture 目录连续 syncWorkspace 两次，第二次返回 `reparsed === 0`；(b) 向 fixture .jsonl 追加一条 message 行后 syncWorkspace 返回 `reparsed === 1` 且 messageCount+1；(c) 追加后原文件 byte 内容前缀与追加前完全一致（fs.readFileSync 前 N 字节比对）；`pnpm --filter @pibuddy/app test -- src/main/sessions/session-index.test.ts` 退出码 0",
+          "packages/app/src/main/ipc/sessions-ipc.ts 注册且仅注册以下 channel 常量：'sessions:query'、'sessions:rename'、'sessions:set-pinned'、'sessions:set-status'、'sessions:purge'、'sessions:get-draft'、'sessions:save-draft'、'sessions:export-html'；`rg -n \"sessions:list\" packages/app/src` 无输出",
+          "rename 路径在会话为当前活动会话时发送 `{ type: 'set_session_name', name }` 并对 `resp.success === false` 抛错；单测 session-rename.test.ts 用 fake client 断言该命令被发出且索引 name 列被更新",
+          "packages/app/src/preload/api/index.ts 存在并导出 `export const api = { pi, sessions, settings, dialog, file, shell, stt }`；packages/app/src/preload/index.ts 仅剩 `contextBridge.exposeInMainWorld(\"piBuddy\", api)`；packages/app/src/preload/index.d.ts 含 `export type PiBuddyApi = typeof api`（不再逐字段手写签名）",
+          "[UI-observable] 用户在侧边栏输入关键字可搜索到历史会话；右键/更多菜单可 重命名、置顶、归档、移到回收站；切到「回收站」页可恢复或彻底删除；被置顶会话固定在列表顶部；对 500 个 fixture 会话首屏 query 耗时 < 200ms（在 session-index.bench.test.ts 中断言）",
+          "`pnpm --filter @pibuddy/app typecheck` 退出码 0，且 packaged dev 启动后现有闭环功能（会话列表与切换、流式文本、模型切换、费用显示）全部人工回归通过并记录在任务说明里"
+        ],
+        "verification": "pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/sessions && rg -n \"sessions:list|readdirSync\" packages/app/src && pnpm --filter @pibuddy/app dev 手工回归会话搜索/重命名/置顶/归档/回收站",
+        "definition_of_done": "用户可以在 PiBuddy 里搜索、重命名、置顶、归档和恢复历史会话，几百个会话时列表秒开，且这些操作不会改写 pi 的会话文件本身。"
+      },
+      "files": [
+        { "path": "packages/app/src/main/sessions/session-index.ts", "action": "create", "target": "SessionIndex class", "change": "node:sqlite DatabaseSync 索引，含上表 DDL、PRAGMA user_version 迁移、基于 mtime_ms/size_bytes 短路与 scan_offset 增量解析" },
+        { "path": "packages/app/src/main/sessions/session-index.test.ts", "action": "create", "target": "增量索引单测", "change": "fixture 目录 + 两次 sync 断言 reparsed 计数、追加后前缀字节不变" },
+        { "path": "packages/app/src/main/sessions/session-rename.ts", "action": "create", "target": "renameSession()", "change": "活动会话走 set_session_name RPC，非活动会话只写索引 name 列；成功后回写 SessionIndex" },
+        { "path": "packages/app/src/main/ipc/sessions-ipc.ts", "action": "create", "target": "registerSessionsIpc()", "change": "注册 sessions:query / rename / set-pinned / set-status / purge / get-draft / save-draft / export-html 八个 channel" },
+        { "path": "packages/app/src/main/ipc/registry.ts", "action": "create", "target": "registerAllIpc()", "change": "集中调用各 feature 的 register*Ipc()，为 M4/M5 新增能力预留扩展点；由 ipc.ts 调用" },
+        { "path": "packages/app/src/main/sessions-store.ts", "action": "modify", "target": "listSessions / parseSessionFile", "change": "删除 listSessions、parseSessionFile、extractText，仅保留 sessionDirFor" },
+        { "path": "packages/app/src/main/ipc.ts", "action": "modify", "target": "registerIpc()", "change": "移除 sessions:list handler，改为调用 registerAllIpc()；其余 pi/settings/dialog handler 迁到 src/main/ipc/pi-ipc.ts 与 misc-ipc.ts" },
+        { "path": "packages/app/src/preload/api/index.ts", "action": "create", "target": "api 聚合对象", "change": "聚合 pi/sessions/settings/dialog/file/shell/stt 命名空间模块" },
+        { "path": "packages/app/src/preload/api/sessions.ts", "action": "create", "target": "sessions 命名空间", "change": "query/rename/setPinned/setStatus/purge/getDraft/saveDraft/exportHtml 方法，含 DraftRecord 类型导出" },
+        { "path": "packages/app/src/preload/index.ts", "action": "modify", "target": "contextBridge 暴露", "change": "改为从 ./api/index.js 导入 api 并 exposeInMainWorld" },
+        { "path": "packages/app/src/preload/index.d.ts", "action": "modify", "target": "PiBuddyApi", "change": "改为 `export type PiBuddyApi = typeof api` 并保留 SessionRow/DraftRecord 等结构类型" },
+        { "path": "packages/app/src/renderer/src/stores/sessions.ts", "action": "create", "target": "useSessionsStore", "change": "查询条件（search/status/modelId/日期区间）、结果列表、pin/archive/trash/restore/purge 动作、未读与后台运行标识" },
+        { "path": "packages/app/src/renderer/src/components/SessionListPanel.vue", "action": "create", "target": "会话列表面板", "change": "搜索框、筛选器、状态分页（进行中/已归档/回收站）、条目操作菜单、空状态" },
+        { "path": "packages/app/src/renderer/src/components/Sidebar.vue", "action": "modify", "target": "session-list 区块", "change": "替换为 SessionListPanel，openSession 改为传 row.sourcePath" },
+        { "path": "packages/app/src/renderer/src/stores/app.ts", "action": "modify", "target": "refreshSessions / openSession", "change": "refreshSessions 委托给 useSessionsStore().refresh()；openSession 入参改为 { sourcePath: string }" }
+      ],
+      "implementation": [
+        "先跑能力探针：`pnpm --filter @pibuddy/app exec electron -e \"const{DatabaseSync}=require('node:sqlite');console.log(typeof DatabaseSync)\"`；输出 function 则用 node:sqlite，否则改用 better-sqlite3 并在 electron-builder.yml 打开 npmRebuild: true（结论写进 rationale）",
+        "若 PARTA:M0 未提供 vitest：在 packages/app 加 devDependency vitest@3.2.4，新建 packages/app/vitest.config.ts（test.environment='node'、include=['src/**/*.test.ts']），package.json scripts 加 \"test\": \"vitest run\"",
+        "实现 SessionIndex：DDL 与列名严格按 action 字段；content_hash 用 createHash('sha256').update(head).digest('hex').slice(0,32)，head 取文件前 64KB，用于检测被外部截断/重写时强制全量重扫（此时 scan_offset 归零）",
+        "解析 entry 时只识别 type='session'（取 id）、'session_info'（取 name）、'message'（累计 messageCount、抽首条 user 文本做 preview、拼 search_blob 上限 4000 字符、从 assistant.usage 累加 token_total/cost_total、记 model_id）；未知 type 原样跳过，不做任何解释",
+        "query(filter) 生成 SQL：`WHERE workspace_root = ?` + 可选 `AND status = ?` + `AND (name LIKE ?1 OR preview LIKE ?1 OR search_blob LIKE ?1)` + `AND model_id = ?` + `AND mtime_ms BETWEEN ? AND ?`，`ORDER BY pinned DESC, mtime_ms DESC LIMIT ? OFFSET ?`",
+        "回收站语义：setStatus(path,'trashed') 只写 status 与 deleted_at，不删 .jsonl；purge(path) 才调用 shell.trashItem(filePath) 把会话文件移入系统回收站并删除索引行",
+        "sessions:export-html 调用 `{ type: 'export_html', outputPath }`（rpc.md 第 574-596 行），成功后返回 data.path 并由 renderer 调 shell.showInFolder",
+        "拆 preload：新建 src/preload/api/{pi,sessions,settings,dialog,file,shell,stt}.ts，各自导出一个对象；api/index.ts 聚合；index.ts 只留 exposeInMainWorld；index.d.ts 用 typeof 推导",
+        "渲染层：新建 stores/sessions.ts 与 SessionListPanel.vue，Sidebar.vue 换成新面板；保持 store.openSession 调用链不变以免破坏会话切换闭环",
+        "把 draft_text/draft_json 的 get/save API 一并做出来（B02 会消费），DraftRecord 形如 { text: string; attachments: unknown[]; queue: { steering: string[]; followUp: string[] }; updatedAt: number }",
+        "跑 typecheck + 单测 + dev 手工回归清单（流式文本增量、thinking 折叠、tool 卡片展开、图片附件、steer 插话、abort、模型切换、thinking 切换、费用与 context、语音输入、Extension UI 五方法、会话列表与切换）"
+      ],
+      "test": {
+        "commands": [
+          "pnpm --filter @pibuddy/app typecheck",
+          "pnpm --filter @pibuddy/app test -- src/main/sessions",
+          "rg -n \"sessions:list|readdirSync\" packages/app/src"
+        ],
+        "unit": [
+          "packages/app/src/main/sessions/session-index.test.ts",
+          "packages/app/src/main/sessions/session-rename.test.ts",
+          "packages/app/src/main/sessions/session-index.bench.test.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "两次 sync 第二次 reparsed=0",
+          "500 会话 query < 200ms",
+          "JSONL 文件字节前缀不被改写"
+        ]
+      },
+      "reference": {
+        "pattern": "沿用现有 ipcMain.handle + contextBridge 模式，只做分层不换机制",
+        "files": ["packages/app/src/main/ipc.ts", "packages/app/src/preload/index.ts"],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "SES-101 是 M3 出口门禁「恢复/搜索/重命名会话」的载体，且 sessions-store.ts 的全量同步扫描在 agent_settled 每次触发，是当前最确定的性能债；顺手做 preload 分层可以让 B03-B08 六个任务不再争抢 index.d.ts。",
+        "decision_factors": [
+          "本 wave 只有本任务，独占 ipc.ts / preload/index.ts / index.d.ts / stores/app.ts 四个热点文件",
+          "JSONL 只读是 pi 生态兼容的硬约束"
+        ],
+        "tradeoffs": "node:sqlite 在 Electron 43 的可用性需实测；不可用时回退 better-sqlite3 会引入 native rebuild 成本"
+      },
+      "risks": [
+        "node:sqlite 在 Electron 43 可能仍需 flag；探针失败必须换 better-sqlite3 并同步改 electron-builder.yml 的 npmRebuild，不得用 JSON 文件冒充 SQLite 索引",
+        "会话树定位（current leaf / 分支点 / compaction / 模型变化）与 fork/clone/rewind 不静默删分支，本任务只落 get_tree/get_fork_messages 的 IPC 通道与类型，可视化会话树 UI 延期到 B02 之后的独立迭代，需在验收说明中明确标注未完成",
+        "本任务重构 preload，与分片 A 的 contract envelope 可能撞形状；合并前必须先取 PARTA:M1 的实际导出再决定 api 模块内部用哪套类型"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": ["会话中心", "会话搜索与整理"],
+        "affected_components": ["main/sessions", "preload", "renderer/Sidebar"],
+        "affected_requirements": ["SES-101"],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "10h",
+        "risk": "medium",
+        "autonomous": true,
+        "checkpoint": false
+      }
+    },
+    {
+      "id": "TASK-B02",
+      "title": "SES-102 长对话与输入队列：delta 流式、分段消息源、prompt/steer/follow-up 分流与草稿恢复",
+      "description": "把流式从「每帧携带全量累积消息」改成按 assistantMessageEvent.delta 拼接，并同步修正主进程 33ms 折叠逻辑——现有折叠只保留最后一条 message_update，一旦改成 delta 就会静默丢字符。渲染侧用 animation frame 合并 delta，只有完成的消息才进 Markdown 缓存。消息列表改成分段数据源（锚点、跳到底部、未读分界、历史加载失败重试），并把 thinking/tool 展开状态从组件内 ref 提到 store，避免回收组件丢状态。输入侧明确区分 prompt / steer / follow_up 三条 RPC 路径，未发送队列项可编辑删除，草稿与队列按 session 持久化。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "feature",
+      "priority": "high",
+      "effort": "large",
+      "action": "把 packages/app/src/main/ipc.ts 的 makeEventForwarder 抽到 packages/app/src/main/pi/event-forwarder.ts，折叠规则改为：仅当 `prev.type === 'message_update' && e.type === 'message_update' && prev.assistantMessageEvent?.type === e.assistantMessageEvent?.type && ['text_delta','thinking_delta'].includes(e.assistantMessageEvent.type) && prev.assistantMessageEvent.contentIndex === e.assistantMessageEvent.contentIndex` 时才合并，合并结果为 `{ ...e, assistantMessageEvent: { ...e.assistantMessageEvent, delta: (prev.assistantMessageEvent.delta ?? '') + (e.assistantMessageEvent.delta ?? '') } }`；text_start / text_end / thinking_start / thinking_end / toolcall_start / toolcall_delta / toolcall_end / done / error 一律不合并。渲染层 stores/app.ts 的 case 'message_update' 改为把 delta 追加到 `streamBuffer` 并用 `requestAnimationFrame` 调度一次 flush，`message_end` 时才调用 renderMarkdown 写入缓存。发送路径改为：未 streaming → `{ type: 'prompt', message }`；streaming 且用户选「立即插话」→ `{ type: 'steer', message }`；streaming 且选「下一轮处理」→ `{ type: 'follow_up', message }`；任何情况下都不得发出 streaming 中不带 streamingBehavior 的裸 prompt。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/pi, packages/app/src/renderer/src/stores/app.ts, packages/app/src/renderer/src/components",
+      "focus_paths": [
+        "packages/app/src/main/pi/",
+        "packages/app/src/renderer/src/stores/app.ts",
+        "packages/app/src/renderer/src/components/ChatView.vue",
+        "packages/app/src/renderer/src/components/InputBar.vue"
+      ],
+      "read_first": [
+        "packages/app/src/main/ipc.ts 第 30-77 行（makeEventForwarder 与 33ms 折叠注释）",
+        "packages/app/src/renderer/src/stores/app.ts 第 79 行、第 124-240 行（activityTick 与 handleEvent）",
+        "packages/app/src/renderer/src/components/ChatView.vue",
+        "packages/app/src/renderer/src/components/InputBar.vue",
+        "packages/app/src/renderer/src/components/MessageItem.vue 第 48 行（openThinking 组件内 ref）",
+        "packages/app/src/renderer/src/components/ToolActivity.vue 第 10-12 行、第 39 行（expanded ref 与 !run 等同 running）",
+        "packages/app/src/renderer/src/markdown.ts",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 43-136 行（prompt/steer/follow_up/abort）、第 915-956 行（message_update 与 assistantMessageEvent 类型表）、第 1016-1027 行（queue_update）、第 694-723 行（get_entries 与 since 游标）",
+        "packages/app/src/main/sessions/session-index.ts（B01 产出的 getDraft/saveDraft）"
+      ],
+      "depends_on": ["TASK-B01", "PARTA:M1"],
+      "wave": 2,
+      "parallel_group": "wave2",
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/src/main/pi/event-forwarder.ts 含字符串 `'text_delta'`、`'thinking_delta'`、`contentIndex` 与 `delta: (prev` 三段；`rg -n \"collapsed\\[collapsed.length - 1\\] = e;\" packages/app/src/main/pi/event-forwarder.ts` 无输出（旧的整条覆盖式折叠已删除）",
+          "单测 event-forwarder.test.ts：投入 200 条 text_delta（每条 delta 为一个字符，contentIndex 相同）后 flush，断言输出事件数 === 1 且其 assistantMessageEvent.delta 与 200 个字符按序拼接完全相等；再投入 text_delta(idx=0) → text_end → text_delta(idx=1) 序列，断言输出为 3 条且顺序不变",
+          "`rg -n \"activityTick\" packages/app/src/renderer/src/stores/app.ts packages/app/src/renderer/src/components/ChatView.vue` 仍有命中，证明流式滚动驱动没有在重构中被丢掉；并新增 ChatView 单测断言 activityTick 递增时 stickToBottom 为真则 scrollTop 被设为 scrollHeight",
+          "packages/app/src/renderer/src/stores/app.ts 含 `requestAnimationFrame` 与 `streamBuffer`；`rg -n \"renderMarkdown\" packages/app/src/renderer/src/components/MessageItem.vue` 的调用点被 `props.streaming` 分支保护——流式中走纯文本渲染，仅 message_end 后的消息进 Markdown 缓存",
+          "send() 分流单测 send-routing.test.ts：非 streaming 断言发出 `{type:'prompt'}`；streaming + mode='steer' 断言发出 `{type:'steer'}`；streaming + mode='followUp' 断言发出 `{type:'follow_up'}`；且 `rg -n \"streamingBehavior\" packages/app/src/renderer/src/stores/app.ts` 若仍保留兼容分支，必须同时存在 `if (!streamingBehavior) throw` 之类的守卫，禁止发出裸 prompt",
+          "thinking 展开状态与 tool 展开状态存放在 store（含 `openThinking` / `expandedTools` 之类的 reactive 容器，key 为 messageKey/toolCallId），MessageItem.vue 与 ToolActivity.vue 内不再出现 `const expanded = ref(false)` 或 `const openThinking = ref(`",
+          "ToolActivity.vue 对 `!run` 与 `run.status === 'running'` 分开处理：未找到 run 时显示「工具记录已不可用」而非无限转圈；`rg -n \"!run \\|\\| run.status === 'running'\" packages/app/src/renderer/src/components/ToolActivity.vue` 无输出",
+          "[UI-observable] 用户在助手输出中途输入新指令，可以在发送按钮旁选择「立即插话」或「下一轮处理」，队列区显示未发送项且可编辑/删除；关闭并重开应用后同一会话的草稿、附件与未发送队列原样恢复；800 条消息的会话滚动与流式期间主线程无 >200ms 长任务（Performance 面板截图或 PerformanceObserver longtask 断言记录在验收说明）",
+          "`pnpm --filter @pibuddy/app typecheck` 与 `pnpm --filter @pibuddy/app test -- src/main/pi src/renderer` 均退出码 0"
+        ],
+        "verification": "pnpm --filter @pibuddy/app test -- src/main/pi/event-forwarder.test.ts src/renderer/src/stores/send-routing.test.ts && pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app dev 手工验证长回复无丢字、插话两种模式、草稿恢复",
+        "definition_of_done": "长对话中助手回复逐字出现且一个字符都不丢，用户可以选择立刻插话还是等下一轮，未发送的话可以改可以删，关掉应用再打开草稿还在。"
+      },
+      "files": [
+        { "path": "packages/app/src/main/pi/event-forwarder.ts", "action": "create", "target": "makeEventForwarder", "change": "从 ipc.ts 迁入并改成 delta 拼接式折叠，保留 33ms 节拍与 tool_execution_update 同 toolCallId 覆盖式折叠（后者仍是累积语义，可安全覆盖）" },
+        { "path": "packages/app/src/main/pi/event-forwarder.test.ts", "action": "create", "target": "折叠正确性单测", "change": "200 条 delta 拼接无损、跨 contentIndex 不合并、非 delta 事件不合并" },
+        { "path": "packages/app/src/main/ipc/pi-ipc.ts", "action": "modify", "target": "pi:start handler", "change": "改为 import { makeEventForwarder } from '../pi/event-forwarder.js'，删除本地实现" },
+        { "path": "packages/app/src/renderer/src/stores/app.ts", "action": "modify", "target": "handleEvent / send / liveAssistant", "change": "delta 缓冲 + rAF flush；send 三路分流；展开状态容器；未读分界与后台运行标识；草稿与队列经 sessions.saveDraft 持久化" },
+        { "path": "packages/app/src/renderer/src/stores/chat-window.ts", "action": "create", "target": "useChatWindow", "change": "分段数据源：以 get_entries 的 entryId 作游标向前分页，维护锚点、跳到底部、未读分界线与加载失败重试状态" },
+        { "path": "packages/app/src/renderer/src/components/ChatView.vue", "action": "modify", "target": "窗口渲染与滚动", "change": "接入 useChatWindow，保留 activityTick 订阅与 stickToBottom 逻辑，新增「跳到底部」按钮、未读分界线、历史加载失败重试按钮" },
+        { "path": "packages/app/src/renderer/src/components/MessageItem.vue", "action": "modify", "target": "openThinking / 渲染分支", "change": "展开状态改读 store；streaming 时走纯文本渲染，非 streaming 才 renderMarkdown；补复制、重新发送、从此消息分叉、错误详情按钮与 aria 标签" },
+        { "path": "packages/app/src/renderer/src/components/ToolActivity.vue", "action": "modify", "target": "expanded / run 状态", "change": "展开状态改读 store；run 缺失与 running 分开渲染；展开区加 role/aria-expanded" },
+        { "path": "packages/app/src/renderer/src/components/InputBar.vue", "action": "modify", "target": "submit / 队列区", "change": "发送模式选择（立即插话 / 下一轮处理）、未发送队列列表与编辑删除、草稿自动保存（debounce 500ms 调 sessions.saveDraft）" },
+        { "path": "packages/app/src/renderer/src/components/QueuePanel.vue", "action": "create", "target": "队列面板", "change": "展示本地未发送队列（可编辑删除）与已提交给 pi 的队列（queue_update 只读展示，标注不可撤回）" }
+      ],
+      "implementation": [
+        "先写 event-forwarder.test.ts 再改实现：用 200 条单字符 text_delta 断言拼接无损，这是本任务最容易静默回归的点",
+        "迁移 makeEventForwarder 到 src/main/pi/event-forwarder.ts，保留 33ms setTimeout 节拍与 wc.isDestroyed() 保护",
+        "renderer 侧新增 `let streamBuffer = ''` 与 `let rafId: number | null = null`，message_update 只做 `streamBuffer += delta`，rAF 回调里一次性写入 liveAssistant 的目标 content block 并 `activityTick.value++`",
+        "message_start 建立 live 消息骨架；toolcall_start/toolcall_end 直接落 block，不进 delta 缓冲",
+        "message_end 清空 streamBuffer、pushMessage、并触发 renderMarkdown 缓存写入",
+        "新建 stores/chat-window.ts：初始窗口 60 条，向上加载调用 `{ type: 'get_entries', since }`（rpc.md 第 694-723 行），失败时置 loadError 并暴露 retry()",
+        "展开状态上提：store 新增 `const expandedThinking = reactive<Record<string, boolean>>({})` 与 `const expandedTools = reactive<Record<string, boolean>>({})`，key 用 `${messageKey}:${blockIndex}` 与 toolCallId",
+        "InputBar 增加发送模式分段控件（默认「立即插话」），streaming 时才显示；submit 按模式调用 store.send(text, images, files, mode)",
+        "草稿持久化：editorText / images / files / 本地队列变更后 debounce 500ms 调 window.piBuddy.sessions.saveDraft(sessionPath, draft)；start/openSession 后调 getDraft 恢复",
+        "队列语义澄清并落到 UI 文案：pi 的 queue_update 只给字符串数组、无稳定 id，已提交给 pi 的队列项无法删除，因此本地队列（未提交）可编辑删除，已提交队列只读并标注",
+        "回归验证：流式文本增量、thinking 折叠、tool 卡片与展开、图片多模态、steer 插话、abort 停止、markdown 缓存、33ms 事件合并全部人工过一遍"
+      ],
+      "test": {
+        "commands": [
+          "pnpm --filter @pibuddy/app test -- src/main/pi/event-forwarder.test.ts",
+          "pnpm --filter @pibuddy/app test -- src/renderer",
+          "pnpm --filter @pibuddy/app typecheck"
+        ],
+        "unit": [
+          "packages/app/src/main/pi/event-forwarder.test.ts",
+          "packages/app/src/renderer/src/stores/send-routing.test.ts",
+          "packages/app/src/renderer/src/stores/chat-window.test.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "200 条 delta 拼接零丢失",
+          "800 条消息滚动无 >200ms 长任务",
+          "重启后草稿与未发送队列 100% 恢复"
+        ]
+      },
+      "reference": {
+        "pattern": "沿用现有 33ms 批量转发思路，只替换折叠判据",
+        "files": ["packages/app/src/main/ipc.ts", "packages/app/src/renderer/src/stores/app.ts"],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "delta 化是 SES-102 的性能核心（避免 O(n²) 前缀传输解析），但它与主进程折叠逻辑强耦合，必须同一任务同时改；分段数据源而非全量虚拟滚动，是为了不破坏现有 activityTick 滚动闭环与变高消息的稳定性。",
+        "decision_factors": [
+          "message_update 当前携带全量累积消息，是现有折叠正确性的隐含前提",
+          "activityTick 是流式滚动唯一驱动，丢了不报错"
+        ],
+        "tradeoffs": "分段数据源在极端长会话（数万条）下仍不如真正虚拟滚动，但可控且不破坏现有交互；若后续实测不达标再单开任务上虚拟滚动"
+      },
+      "risks": [
+        "delta 折叠若判据写错会静默丢字符——只在长回复偶发、typecheck 与 UI 都不会报错，必须以单测为准而不是肉眼验证",
+        "已提交给 pi 的队列项无法删除（RPC 无对应命令），不得用假的删除按钮冒充；UI 必须明确区分「未发送」与「已提交」",
+        "会话树可视化（分支点 / compaction / 模型变化定位）与 fork/rewind 不静默删分支属于 SES-101/SES-102 交集，本任务只做「从消息分叉」入口，树视图延期，需在验收说明中标注"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": ["长对话渲染", "输入队列", "草稿恢复"],
+        "affected_components": ["main/pi", "renderer/stores/app", "renderer/ChatView", "renderer/InputBar"],
+        "affected_requirements": ["SES-102"],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "12h",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": false
+      }
+    },
+    {
+      "id": "TASK-B03",
+      "title": "EXT-101/EXT-102 Extension UI 全方法覆盖、dialog timeout 与 Pi 资源中心（含 project trust）",
+      "description": "补齐 Extension UI 协议：新增 setWidget / setTitle 处理（当前静默丢弃），实现 dialog timeout（当前全库只有类型声明，没有任何实现，上游超时自行 auto-resolve 后本地 modal 仍挂着且 mask-closable:false，用户点击发出的是失效 id，client.ts:177 直写 stdin 无校验静默吞掉），按 runtime generation 清理僵尸 uiRequests，并给 respondUi 加错误边界（现在 clientFor 抛错会变成未处理 promise rejection）。同时补 5 类被 app.ts:237 静默丢弃的 AgentEvent（含三个连类型都没声明的 summarization_retry_*）。再做 Pi 资源中心第一版：枚举 user/project/package 来源的 packages/extensions/skills/prompts/themes，显示路径版本来源启用状态，支持启停与安装受信 skill，并落地 pi project trust（RPC 模式不弹 trust 提示，必须由 PiBuddy 显示并写 ~/.pi/agent/trust.json 或用 -a/-na 覆盖单次运行）。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "feature",
+      "priority": "high",
+      "effort": "large",
+      "action": "在 packages/app/src/main/extension-ui/ext-ui-service.ts 新建 `class ExtensionUiService`，持有 `Map<string, { request: ExtensionUiRequest; runtimeGeneration: number; timer: NodeJS.Timeout | null }>`；收到带 `timeout` 的 dialog 请求时 `setTimeout(() => this.expire(id), request.timeout)`，到期向 renderer 发 `pi:ui-expire` 并从表中删除；`respond(id, payload)` 先校验 id 是否仍在表中，不在则返回 `{ ok: false, reason: 'expired' }` 而不是直写 stdin；runtime 重启或 session 切换时按 generation 清空整表并广播 `pi:ui-expire-all`。packages/pi-sdk/src/types.ts 的 AgentEvent 联合类型补上 `{ type: 'summarization_retry_scheduled'; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }`、`{ type: 'summarization_retry_attempt_start'; source: 'compaction' | 'branchSummary'; reason?: string }`、`{ type: 'summarization_retry_finished' }`。ExtensionUiRequest 的 widgetKey/widgetLines/widgetPlacement/title 走新增的 widget 与 title 处理分支。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/pi-sdk/src, packages/app/src/main/extension-ui, packages/app/src/main/pi-resources, packages/app/src/renderer/src/components",
+      "focus_paths": [
+        "packages/pi-sdk/src/",
+        "packages/app/src/main/extension-ui/",
+        "packages/app/src/main/pi-resources/",
+        "packages/app/src/renderer/src/components/ExtensionUiHost.vue"
+      ],
+      "read_first": [
+        "packages/app/src/renderer/src/components/ExtensionUiHost.vue",
+        "packages/app/src/renderer/src/stores/app.ts 第 242-278 行（handleUiRequest / respondUi）与第 237 行（default: break 静默丢弃）",
+        "packages/pi-sdk/src/client.ts 第 176-178 行（respondUi 直写 stdin 无校验）",
+        "packages/pi-sdk/src/types.ts 第 209-266 行（AgentEvent 与 ExtensionUiRequest）",
+        "packages/app/src/main/pi-launcher.ts",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 1143-1334 行（Extension UI Protocol 全部方法与响应格式）与第 1100-1129 行（summarization_retry_*）",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/security.md 第 5-38 行（Project Trust：RPC 模式不弹提示、trust.json 按 canonical 目录、-a/-na 覆盖单次运行）",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/packages.md",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/settings.md 第 1-30 行（settings.json 层级与 defaultProjectTrust）"
+      ],
+      "depends_on": ["TASK-B01", "PARTA:M1"],
+      "wave": 3,
+      "parallel_group": "wave3",
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/src/main/extension-ui/ext-ui-service.ts 含 `setTimeout(` 与 `'expired'` 与 `runtimeGeneration`；`rg -n \"timeout\" packages/app/src --type ts -g '!*.test.ts'` 在 extension-ui 目录下有实现命中，不再只出现在 pi-sdk/src/types.ts:250 的类型声明",
+          "contract 单测 ext-ui-contract.test.ts 覆盖 rpc.md 第 1170-1310 行列出的全部 9 个 method（select / confirm / input / editor / notify / setStatus / setWidget / setTitle / set_editor_text），每个断言：请求被路由到对应处理分支，且 4 个 dialog 方法各自能产出 value / confirmed / cancelled 三种响应形状；`pnpm --filter @pibuddy/app test -- src/main/extension-ui` 退出码 0",
+          "timeout 单测：投入 `{ method:'select', timeout: 50 }` 后等待 80ms，断言 (a) renderer 收到 `pi:ui-expire` 且本地 modal 关闭；(b) 此后对该 id 调 respond 返回 `{ ok:false, reason:'expired' }` 且 `client.respondUi` 未被调用（用 spy 断言调用次数为 0）",
+          "runtime 重启单测：generation 从 1 变为 2 后，generation=1 的挂起 dialog 全部被清理，renderer uiRequests 长度为 0，且对旧 id 作答不抛未处理 rejection（`process.on('unhandledRejection')` 计数为 0）",
+          "packages/pi-sdk/src/types.ts 含 `summarization_retry_scheduled`、`summarization_retry_attempt_start`、`summarization_retry_finished` 三个字面量；stores/app.ts 的 handleEvent 对这三个事件写入 statusTexts.summarization（如「正在重试整理对话记忆 (1/3)…」）并在 finished 时清空",
+          "packages/app/src/main/pi-resources/resource-scanner.ts 枚举 `~/.pi/agent/settings.json`、`<workspace>/.pi/settings.json`、`~/.pi/agent/npm/`、`~/.pi/agent/git/` 并对每条资源返回 `{ kind: 'package'|'extension'|'skill'|'prompt'|'theme', name, version, source: 'user'|'project'|'package', path, enabled, conflictWith }`；`rg -n \"exec\\(|execSync\\(|spawn\\(\" packages/app/src/renderer` 无输出（renderer 不得执行任何 package manager 命令）",
+          "安装 skill 只允许经 main 的白名单：packages/app/src/main/pi-resources/package-install.ts 含 `const ALLOWED_SUBCOMMANDS = ['install', 'remove'] as const`，且拒绝包含 `;`、`&&`、`|`、反引号的入参（单测 package-install.test.ts 断言这 4 类注入被拒）",
+          "project trust：packages/app/src/main/pi-resources/trust-store.ts 读写 `~/.pi/agent/trust.json`，`buildPiSpawn` 在无已保存决定且用户选择拒绝时追加 `-na`、选择信任且尚未写入时追加 `-a`；UI 文案含固定字符串「信任不等于工具权限」",
+          "[UI-observable] 用户在「Pi 资源」页看到 user/project/package 三类来源的 skill 与 extension 列表（含路径、版本、来源、启用状态），可开关一个 extension 并在重启 runtime 后生效；可安装一个 skill 并在输入框输入 `/skill:` 时看到它；打开含 .pi 资源的项目时先弹出 trust 对话框，列出将加载的 project resources 与 allow/deny/remember 三个选择；扩展弹窗设置 timeout 到期后本地对话框自动消失并提示「助手已不再等待这个回答」",
+          "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/pi-sdk typecheck` 退出码 0，Extension UI 五方法既有闭环人工回归通过"
+        ],
+        "verification": "pnpm --filter @pibuddy/app test -- src/main/extension-ui src/main/pi-resources && pnpm -r typecheck && 用 examples/extensions 下的 pi 示例扩展在 dev 模式逐个触发 9 个 UI method 与一次 timeout 场景",
+        "definition_of_done": "扩展弹出的任何一种交互 PiBuddy 都能正确显示和回答，超时后弹窗会自己消失而不是骗用户点一个没人接收的按钮；用户能在界面里看到并管理 Pi 的技能与扩展，能安装一个技能，打开新项目时会先被问是否信任。"
+      },
+      "files": [
+        { "path": "packages/pi-sdk/src/types.ts", "action": "modify", "target": "AgentEvent / ExtensionUiRequest", "change": "补 summarization_retry_scheduled/attempt_start/finished 三个事件成员；ExtensionUiRequest 增加 widget/title 字段的必需性说明与 UiMethod 联合类型导出" },
+        { "path": "packages/pi-sdk/src/client.ts", "action": "modify", "target": "respondUi", "change": "改为 `respondUi(response): boolean`，进程未运行或 id 校验失败返回 false 而不是抛错直写 stdin" },
+        { "path": "packages/app/src/main/extension-ui/ext-ui-service.ts", "action": "create", "target": "ExtensionUiService", "change": "挂起表、timeout 定时器、generation 清理、respond 校验、widget/title/status 三类 fire-and-forget 的状态维护" },
+        { "path": "packages/app/src/main/extension-ui/ext-ui-contract.test.ts", "action": "create", "target": "9 method contract tests", "change": "覆盖全部 UI method 与 value/confirmed/cancelled/expired 四种响应路径" },
+        { "path": "packages/app/src/main/ipc/pi-ipc.ts", "action": "modify", "target": "pi:ui-respond handler", "change": "改为委托 ExtensionUiService.respond 并 try/catch 返回结构化结果；新增 pi:ui-expire / pi:ui-expire-all 广播" },
+        { "path": "packages/app/src/main/pi-resources/resource-scanner.ts", "action": "create", "target": "scanPiResources()", "change": "枚举 user/project/package 三来源资源，标注启用状态与同名冲突" },
+        { "path": "packages/app/src/main/pi-resources/package-install.ts", "action": "create", "target": "runPackageCommand()", "change": "白名单子命令 + 参数注入校验 + 输出流式回传，project 资源需先 trust" },
+        { "path": "packages/app/src/main/pi-resources/trust-store.ts", "action": "create", "target": "readTrust/writeTrust", "change": "读写 ~/.pi/agent/trust.json（canonical 目录为 key），并提供 detectProjectResources(workspace) 供 UI 展示将加载内容" },
+        { "path": "packages/app/src/main/pi-launcher.ts", "action": "modify", "target": "buildPiSpawn", "change": "接受 trust 决定参数，按决定追加 -a 或 -na；保持 bundled cli.js 优先与全局 pi 回退不变" },
+        { "path": "packages/app/src/renderer/src/stores/extensionUi.ts", "action": "create", "target": "useExtensionUiStore", "change": "从 app store 迁出 uiRequests / statusTexts，新增 widgets（稳定 key + placement + 高度上限）与 title（产品前缀 + 长度截断）状态" },
+        { "path": "packages/app/src/renderer/src/components/ExtensionUiHost.vue", "action": "modify", "target": "modal 渲染", "change": "订阅 pi:ui-expire 自动关闭；补 aria-label、焦点回归、Esc 取消；超时提示文案" },
+        { "path": "packages/app/src/renderer/src/components/ExtensionWidgetHost.vue", "action": "create", "target": "widget 渲染区", "change": "按 widgetPlacement 渲染在输入框上/下，单 widget 最大高度 30vh 超出滚动，widgetLines 为 undefined 时删除该 key" },
+        { "path": "packages/app/src/renderer/src/components/PiResourcesPanel.vue", "action": "create", "target": "Pi 资源中心", "change": "资源列表 + 启停开关 + 安装/卸载/刷新/打开目录 + 冲突诊断 + trust 状态提示" },
+        { "path": "packages/app/src/renderer/src/components/ProjectTrustDialog.vue", "action": "create", "target": "trust 对话框", "change": "展示来源、将加载的 project resources、allow/deny/remember，并固定文案说明信任不等于工具权限" },
+        { "path": "packages/app/src/renderer/src/components/AppShell.vue", "action": "modify", "target": "根布局", "change": "挂载 ExtensionWidgetHost、PiResourcesPanel 入口与 ProjectTrustDialog" },
+        { "path": "packages/app/src/renderer/src/components/TopBar.vue", "action": "modify", "target": "标题与状态区", "change": "渲染 setTitle 上报的标题（加「PiBuddy · 」前缀并截断到 60 字符）" }
+      ],
+      "implementation": [
+        "先读 rpc.md 第 1143-1334 行核对当前 0.83.0 版本公开的 UI method 全集，把结果写成 `export const EXTENSION_UI_METHODS = [...] as const` 作为 contract test 的唯一来源",
+        "实现 ExtensionUiService：请求入表时记录 runtimeGeneration；带 timeout 的请求挂定时器；expire 时清表 + 广播 + 不向 pi 写任何响应（上游已自行 auto-resolve）",
+        "respond 校验失败返回 { ok:false, reason:'expired'|'no-runtime' }，renderer 收到后 toast「这个请求已经过期」而不是静默",
+        "runtime 重启 / session 切换时调用 service.clearGeneration(prevGen)，广播 pi:ui-expire-all",
+        "pi-sdk：respondUi 返回 boolean；AgentEvent 补三个 summarization_retry_* 成员",
+        "stores/app.ts 的 default 分支改为：把未知事件写入 debug 日志计数器（不再纯 break），并对 turn_start/turn_end/agent_end/bash_execution_update/summarization_retry_* 补显式处理",
+        "widget：以 widgetKey 为稳定 key 存 Map，widgetLines 为空即删除；渲染最大高度 30vh；title：前缀 + 60 字符截断",
+        "资源中心：resource-scanner 读 settings.json（user + project）与 npm/git 安装目录，输出统一结构；同名同来源冲突标记 conflictWith",
+        "安装：package-install 用 execFile（非 shell）执行 settings.json 中的 npmCommand 或默认 npm，子命令白名单 install/remove，入参正则校验拒绝 shell 元字符；执行前若目标为 project 资源则先要求 trust",
+        "trust：detectProjectResources 按 security.md 第 9-16 行列出的判定条件扫描；用户决定写 trust.json（remember）或只影响本次启动（-a/-na）",
+        "回归：Extension UI 既有五方法、语音输入、模型切换、tool 卡片展开必须逐项人工确认未破坏"
+      ],
+      "test": {
+        "commands": [
+          "pnpm --filter @pibuddy/app test -- src/main/extension-ui",
+          "pnpm --filter @pibuddy/app test -- src/main/pi-resources",
+          "pnpm -r typecheck"
+        ],
+        "unit": [
+          "packages/app/src/main/extension-ui/ext-ui-contract.test.ts",
+          "packages/app/src/main/extension-ui/ext-ui-timeout.test.ts",
+          "packages/app/src/main/pi-resources/package-install.test.ts",
+          "packages/app/src/main/pi-resources/trust-store.test.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "9 个 UI method contract test 全绿",
+          "timeout 后 respondUi 调用次数为 0",
+          "shell 注入用例 4/4 被拒"
+        ]
+      },
+      "reference": {
+        "pattern": "沿用 ExtensionUiHost.vue 的 naive-ui modal 单队列渲染，只把状态与生命周期上移到 main",
+        "files": ["packages/app/src/renderer/src/components/ExtensionUiHost.vue"],
+        "examples": "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/examples"
+      },
+      "rationale": {
+        "chosen_approach": "Extension UI 的真实缺陷不是「少两个方法」而是超时与生命周期缺失导致的僵尸弹窗与未处理 rejection，因此把挂起表放到 main 并以 generation 为准；资源中心先做到 M3 出口门禁要求的「安装一个受信 skill」，MCP 管理另开任务。",
+        "decision_factors": [
+          "RPC 模式不弹 trust 提示，产品必须自己补这层",
+          "renderer 直接执行包管理命令是明确禁止项"
+        ],
+        "tradeoffs": "MCP CRUD / OAuth 状态 / tool 列表 / 连接测试本轮不做，M3 出口门禁不含 MCP"
+      },
+      "risks": [
+        "EXT-102 的 MCP 管理（CRUD、启停、连接测试、OAuth 状态、tool 列表、错误诊断）本任务不实现，必须在验收说明中显式标注为未完成，不得用空面板冒充",
+        "pi 0.83.0 的 UI method 全集以 rpc.md 为准，升级 pi 版本后 contract test 需要重新对照，测试里应断言常量表与文档一致而不是硬编码 9",
+        "trust.json 写入是跨应用共享状态，误写会影响用户在终端里的 pi；写入前必须读取并合并已有决定，不得整文件覆盖"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": ["Extension UI", "Pi 资源中心", "Project Trust"],
+        "affected_components": ["pi-sdk", "main/extension-ui", "main/pi-resources", "renderer/components"],
+        "affected_requirements": ["EXT-101", "EXT-102"],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "12h",
+        "risk": "medium",
+        "autonomous": true,
+        "checkpoint": false
+      }
+    },
+    {
+      "id": "TASK-B04",
+      "title": "PROV-101 + UX-101 Provider 与模型中心、用量页与首次启动向导",
+      "description": "复用 pi 的 auth/model registry，让普通用户不用打开终端就能配置账号：API key 写入 ~/.pi/agent/auth.json（0600），自定义 OpenAI 兼容 endpoint 写入 ~/.pi/agent/models.json，模型发现与连通性测试在 main 完成，key 只留 main/vault（PARTA:M2），renderer 只拿状态与脱敏错误。区分全局默认 / workspace 默认 / session 当前模型，打开历史会话不得无提示覆盖其记录的 model 与 thinking。图片发送前按模型 input capabilities 拦截。用量页按日/workspace/model/provider 汇总 token/cost/context/失败率并可导出 CSV/JSON。首次启动向导覆盖 workspace、bundled/external Pi、Provider、project trust、通知、可选语音，并补全局错误分级与状态中心。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "feature",
+      "priority": "high",
+      "effort": "large",
+      "action": "新建 packages/app/src/main/providers/auth-store.ts，导出 `readAuthFile(): Record<string, PiCredential>` 与 `writeCredential(providerId: string, cred: { type: 'api_key'; key: string; env?: Record<string,string> }): void`，路径固定 `path.join(os.homedir(), '.pi', 'agent', 'auth.json')`，写入用 `fs.writeFileSync(p, JSON.stringify(merged, null, 2), { mode: 0o600 })` 且必须先读原文件合并（保留 OAuth 条目）；新建 providers/models-store.ts 管理 `~/.pi/agent/models.json` 的自定义 provider（id/name/baseUrl/api/models[]）；新建 providers/connectivity.ts 导出 `testProvider(providerId): Promise<{ ok: boolean; latencyMs: number; errorCode?: 'auth'|'network'|'model'|'unknown'; redactedMessage?: string }>`，实现里对错误消息执行 `redactSecrets()` 后才返回 renderer。settings.ts 的 sttApiKey 迁移到 PARTA:M2 的 safeStorage vault，`settings:get` 返回体中 sttApiKey 必须替换为 `sttApiKeySet: boolean`。发送图片前在 stores/app.ts 的 send() 增加 `if (images.length && !(currentModel.input ?? []).includes('image')) { notify('warning', '当前模型不支持图片…'); return; }`。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/providers, packages/app/src/main/settings.ts, packages/app/src/renderer/src/stores/providers.ts, 首次启动向导",
+      "focus_paths": [
+        "packages/app/src/main/providers/",
+        "packages/app/src/main/settings.ts",
+        "packages/app/src/renderer/src/components/SettingsModal.vue",
+        "packages/app/src/renderer/src/components/TopBar.vue"
+      ],
+      "read_first": [
+        "packages/app/src/main/settings.ts",
+        "packages/app/src/main/ipc.ts 第 172-212 行（stt:transcribe 的 baseUrl 完全来自 renderer）",
+        "packages/app/src/renderer/src/components/SettingsModal.vue 第 79-82 行（引导用户去终端 /login 的文案，本任务要删掉）",
+        "packages/app/src/renderer/src/stores/app.ts 第 317-355 行（start 后按 settings 覆盖 model / thinkingLevel）",
+        "packages/app/src/renderer/src/components/TopBar.vue",
+        "packages/app/src/renderer/src/components/InputBar.vue",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/providers.md 第 58-178 行（auth.json 形状、0600、Key Resolution、优先级）",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/models.md 第 1-60 行（~/.pi/agent/models.json 自定义 provider）",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 259-278 行（get_available_models 返回的 Model 结构与 input 能力）"
+      ],
+      "depends_on": ["TASK-B01", "TASK-B03", "PARTA:M2"],
+      "wave": 4,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/src/main/providers/auth-store.ts 含 `'.pi', 'agent', 'auth.json'` 与 `mode: 0o600`，且单测 auth-store.test.ts 断言：写入 anthropic 的 api_key 后，原文件中已存在的其它 provider 条目（含一条 OAuth 形状的条目）原样保留",
+          "`rg -n \"apiKey|api_key|sttApiKey\" packages/app/src/preload packages/app/src/renderer` 的命中中不存在任何返回明文 key 的路径；`settings:get` 的返回类型含 `sttApiKeySet: boolean` 且不含 `sttApiKey`（单测 settings-redaction.test.ts 断言返回对象 `Object.keys` 不含 'sttApiKey'）",
+          "stt:transcribe 的 baseUrl 不再来自 renderer：packages/app/src/main/ipc/misc-ipc.ts 中该 handler 入参只剩 `{ audio, mimeType }`，baseUrl/apiKey/model 从 main 侧配置读取，且对 baseUrl 执行 `assertHttpsOrLocalhost(url)` 校验（单测覆盖 http://169.254.169.254、file://、内网 10.x 三个拒绝用例）",
+          "连通性测试返回体经脱敏：connectivity.test.ts 断言当底层错误消息含 `sk-ant-0123456789` 时返回的 redactedMessage 不含该子串",
+          "模型作用域三层可验证：packages/app/src/main/providers/model-scope.ts 导出 `resolveModel({ sessionModel, workspaceDefault, globalDefault })` 且优先级为 session > workspace > global；单测断言打开一条记录了 model=X 的历史会话时函数返回 X，且 stores/app.ts 的 start() 在 `saved.modelId !== state.model.id` 时不再直接调 setModel，而是置 `modelMismatchPrompt` 由 UI 询问",
+          "图片能力拦截：send-image-capability.test.ts 断言当 currentModel.input 不含 'image' 且 images.length > 0 时，`window.piBuddy.pi.command` 未被调用且触发了 warning 通知",
+          "用量页数据来自本地聚合：packages/app/src/main/usage/usage-store.ts 按 (day, workspace_root, provider, model_id) 聚合 token/cost/context/failure_count，导出 `exportCsv(): string` 与 `exportJson(): string`；单测断言 CSV 首行为 `date,workspace,provider,model,input_tokens,output_tokens,cost,failures`",
+          "[UI-observable] 全新用户首次启动看到向导：选择工作文件夹 → 选择使用内置 Pi 还是外部 Pi → 添加一个 Provider（填 API key 或自定义 OpenAI 兼容 endpoint）→ 点「测试连接」看到成功/失败与可读原因 → project trust 选择 → 通知与语音可选项 → 完成后直接可以发出第一条消息，全程不需要打开终端；设置里不再出现「在终端里运行 pi 后用 /login」文案（`rg -n \"/login\" packages/app/src/renderer` 无输出）",
+          "[UI-observable] 打开一条使用了不同模型的历史会话时，顶栏提示「这个会话原来用的是 <model>，是否切换？」并提供保持/切换两个动作，不会静默覆盖；用量页能按日期与 workspace 筛选并导出 CSV",
+          "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/providers src/main/usage` 退出码 0"
+        ],
+        "verification": "pnpm --filter @pibuddy/app test -- src/main/providers src/main/usage && rg -n \"/login\" packages/app/src/renderer && rg -n \"sttApiKey\" packages/app/src/preload packages/app/src/renderer && 清空 userData 后走一遍首次启动向导",
+        "definition_of_done": "一个没用过终端的用户能在 PiBuddy 里从零配好账号、测通连接、选好模型并发出第一条消息；打开旧会话不会被悄悄换模型；用不支持图片的模型时会被拦住而不是发出去报错；能看到自己每天花了多少钱。"
+      },
+      "files": [
+        { "path": "packages/app/src/main/providers/auth-store.ts", "action": "create", "target": "readAuthFile/writeCredential", "change": "合并式读写 ~/.pi/agent/auth.json，0600 权限，保留既有 OAuth 条目" },
+        { "path": "packages/app/src/main/providers/models-store.ts", "action": "create", "target": "自定义 provider CRUD", "change": "读写 ~/.pi/agent/models.json，支持 OpenAI 兼容 endpoint 与模型列表发现" },
+        { "path": "packages/app/src/main/providers/connectivity.ts", "action": "create", "target": "testProvider()", "change": "发一次最小请求测连通，错误分类为 auth/network/model/unknown，消息经 redactSecrets 后返回" },
+        { "path": "packages/app/src/main/providers/model-scope.ts", "action": "create", "target": "resolveModel()", "change": "session > workspace > global 三层解析，返回 mismatch 标记供 UI 询问" },
+        { "path": "packages/app/src/main/providers/providers-ipc.ts", "action": "create", "target": "registerProvidersIpc()", "change": "providers:list / providers:save-key / providers:remove / providers:test / providers:discover-models / providers:set-scope-default" },
+        { "path": "packages/app/src/main/usage/usage-store.ts", "action": "create", "target": "UsageStore", "change": "复用 B01 的 SQLite 连接新增 usage_daily 表，按日/workspace/provider/model 聚合并导出 CSV/JSON" },
+        { "path": "packages/app/src/main/settings.ts", "action": "modify", "target": "AppSettings / loadSettings / saveSettings", "change": "敏感字段迁 vault；settings:get 返回 sttApiKeySet 布尔；新增 workspaceDefaults 与 globalDefaults 字段" },
+        { "path": "packages/app/src/main/ipc/misc-ipc.ts", "action": "modify", "target": "stt:transcribe", "change": "入参只剩 audio/mimeType，端点与 key 从 main 配置读取，baseUrl 走 assertHttpsOrLocalhost 校验" },
+        { "path": "packages/app/src/main/ipc/registry.ts", "action": "modify", "target": "registerAllIpc()", "change": "追加 registerProvidersIpc() 与 registerUsageIpc()" },
+        { "path": "packages/app/src/preload/api/providers.ts", "action": "create", "target": "providers 命名空间", "change": "list/saveKey/remove/test/discoverModels/setScopeDefault/usage 查询与导出" },
+        { "path": "packages/app/src/preload/api/index.ts", "action": "modify", "target": "api 聚合", "change": "加入 providers 命名空间" },
+        { "path": "packages/app/src/renderer/src/stores/providers.ts", "action": "create", "target": "useProvidersStore", "change": "provider 列表、模型能力、连通性结果、作用域默认值、用量数据" },
+        { "path": "packages/app/src/renderer/src/components/OnboardingWizard.vue", "action": "create", "target": "首次启动向导", "change": "6 步：工作文件夹 / Pi runtime 选择 / Provider / 连接测试 / project trust / 通知与语音" },
+        { "path": "packages/app/src/renderer/src/components/ProviderCenter.vue", "action": "create", "target": "Provider 与模型中心", "change": "provider 增删改、key 输入（只写不回显）、自定义 endpoint、模型发现、能力与 context/cost 展示、连通性测试" },
+        { "path": "packages/app/src/renderer/src/components/UsagePanel.vue", "action": "create", "target": "用量页", "change": "按日/workspace/model/provider 汇总表格 + 筛选 + 导出 CSV/JSON" },
+        { "path": "packages/app/src/renderer/src/components/StatusCenter.vue", "action": "create", "target": "状态中心", "change": "runtime / session / 网络与 Provider / context / 后台任务 / update 六类状态，点击展开详情" },
+        { "path": "packages/app/src/renderer/src/components/SettingsModal.vue", "action": "modify", "target": "设置弹窗", "change": "接入 ProviderCenter / UsagePanel，删除终端 /login 引导文案，语音 key 改为「已配置/未配置」状态" },
+        { "path": "packages/app/src/renderer/src/components/TopBar.vue", "action": "modify", "target": "模型选择与状态", "change": "挂载 StatusCenter；模型不匹配提示条；模型能力标签（图片/推理/context/单价）" },
+        { "path": "packages/app/src/renderer/src/components/AppShell.vue", "action": "modify", "target": "首屏分支", "change": "未完成向导时渲染 OnboardingWizard；补 offline / permission-pending / crashed / no-model / no-session 空状态与对应动作" },
+        { "path": "packages/app/src/renderer/src/stores/app.ts", "action": "modify", "target": "send / start", "change": "图片能力拦截；start 时模型不匹配改为提示而非静默覆盖；错误分级（可恢复/需设置/需重启/需导出诊断）" }
+      ],
+      "implementation": [
+        "先用 providers.md 第 107-131 行核对 auth.json 的真实形状与权限要求，写 auth-store 的合并式读写与单测（含 OAuth 条目保留）",
+        "models-store 支持添加自定义 OpenAI 兼容 provider：{ id, name, baseUrl, api: 'openai-completions', models: [] }，并提供 discoverModels 走 GET {baseUrl}/models",
+        "connectivity.testProvider 用最小 chat 请求或 /models 探测，错误分类 auth(401/403) / model(404) / network(ECONN*, 超时) / unknown；返回前统一 redactSecrets",
+        "把 sttApiKey 迁到 PARTA:M2 的 vault，settings:get 返回布尔态；stt:transcribe 改为 main 读配置，baseUrl 校验拒绝非 https 且非 localhost、拒绝私有网段与 file:",
+        "model-scope：settings 新增 globalDefaults.model 与 workspaceDefaults[workspaceRoot].model；打开会话时用会话记录的 model 覆盖并向 UI 报 mismatch",
+        "图片拦截放在 store.send 最前面，用 get_available_models 返回的 Model.input 数组判断，同时给用户「切换到支持图片的模型」的快捷动作",
+        "usage-store：agent_settled 后从 get_session_stats 取增量写入 usage_daily；失败次数从 auto_retry_end(success=false) 与 assistant.stopReason==='error' 累计",
+        "OnboardingWizard 六步，每步都可返回；完成后写 settings.onboardingCompletedAt；未完成时 AppShell 不渲染主界面",
+        "StatusCenter 汇总六类状态，update 状态从 B05 的 stores/update.ts 读取（若该 store 未就绪则显示 unsupported）",
+        "错误分级：新增 friendly.ts 的 classifyError(err) → 'recoverable'|'needs-setting'|'needs-restart'|'needs-diagnostics'，四类分别给重试 / 打开设置 / 重启应用 / 导出诊断包动作",
+        "键盘导航与 aria：向导与所有对话框补 role/aria-labelledby、Tab 序、Esc 关闭与关闭后焦点回归触发元素；补 prefers-reduced-motion 媒体查询关闭过渡动画",
+        "回归：语音输入、模型切换、thinking 切换、费用与 context 显示必须逐项人工确认"
+      ],
+      "test": {
+        "commands": [
+          "pnpm --filter @pibuddy/app test -- src/main/providers src/main/usage",
+          "pnpm --filter @pibuddy/app typecheck",
+          "rg -n \"sttApiKey\" packages/app/src/preload packages/app/src/renderer"
+        ],
+        "unit": [
+          "packages/app/src/main/providers/auth-store.test.ts",
+          "packages/app/src/main/providers/connectivity.test.ts",
+          "packages/app/src/main/providers/model-scope.test.ts",
+          "packages/app/src/main/usage/usage-store.test.ts",
+          "packages/app/src/renderer/src/stores/send-image-capability.test.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "auth.json 合并写入不丢已有条目",
+          "脱敏后返回体不含 key 子串",
+          "SSRF 三个拒绝用例全部通过"
+        ]
+      },
+      "reference": {
+        "pattern": "沿用 pi 自身的 auth.json / models.json 作为唯一凭据真相源，不另建平行体系",
+        "files": ["packages/app/src/main/settings.ts"],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "PROV-101 的目标是「不用终端」，而 pi 的 API key 路径完全是文件驱动的，可以由 main 安全接管；OAuth 订阅登录是交互式 TUI 流程，RPC 无对应命令，本轮如实降级为「检测已有 OAuth 凭据并显示状态 + 引导」。UX-101 与 Provider 中心天然同属首启体验，合并成一个垂直切片才能验收「首次启动到发出第一条消息」。",
+        "decision_factors": [
+          "auth.json 优先级高于环境变量，写文件即可生效",
+          "settings.ts 现在明文写盘且回传 renderer，是必须一并修的安全债"
+        ],
+        "tradeoffs": "OAuth 订阅（Claude Pro/Max、Codex、Copilot 等）本轮不做端内登录"
+      },
+      "risks": [
+        "OAuth 订阅类 provider 端内登录本轮不实现，UI 必须显示「需在终端完成 /login」的真实状态而不是假装支持；该缺口需在验收说明中标注",
+        "写 ~/.pi/agent/auth.json 会影响用户终端里的 pi，必须合并写入并在写前备份一份到 userData",
+        "用量数据依赖 get_session_stats 的增量，pi 侧若在压缩后重置统计会导致跨会话汇总偏差，需在 usage-store 中记录 last_seen_total 做差值并对负值归零"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": ["Provider 与模型中心", "用量统计", "首次启动向导", "全局状态与错误分级"],
+        "affected_components": ["main/providers", "main/usage", "renderer/onboarding", "renderer/settings"],
+        "affected_requirements": ["PROV-101", "UX-101"],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "14h",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": true
+      }
+    },
+    {
+      "id": "TASK-B05",
+      "title": "UPD-001~004 main-only UpdateService：依赖锁定、十态状态机、检测策略与更新 UI",
+      "description": "从零建 main-only 的 UpdateService（当前仓库无 publish 块、无 electron-updater 依赖、无任何更新代码）。renderer 永不接触 feed URL / token / 文件路径 / raw updater，只通过快照 + 带 monotonic sequence 的事件订阅拿状态。状态机十态、初始化规则集中且有单测、所有 check/download/install 有 single-flight guard、dev 环境返回 unsupported-in-dev 或注入 fake provider 绝不访问生产更新源。UI 覆盖设置页「关于与更新」、全局 banner、下载进度与 reload 恢复、安装前的运行中任务/未保存草稿/录音检查与「等待任务结束后安装」。按 M4 规格新代码全部落在 src/main/update/ 与独立组件，不堆进 ipc.ts。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "feature",
+      "priority": "high",
+      "effort": "large",
+      "action": "在 packages/app/package.json 的 dependencies 写入精确版本（无 ^）：`\"electron-updater\": \"6.8.9\"`、`\"electron-log\": \"5.4.4\"`，devDependencies 写入 `\"electron-builder\": \"26.15.3\"`；写入前先跑 `npm view electron-updater@6.8.9 version && npm view electron-log@5.4.4 version && npm view electron-builder@26.15.3 version` 确认三者存在，并 `pnpm install` 后用 `pnpm ls --depth 0 --filter @pibuddy/app` 与 pnpm-lock.yaml 交叉核对唯一版本。新建 packages/app/src/main/update/update-types.ts 定义 `export type UpdateStatus = 'unsupported' | 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'waiting-for-agent' | 'installing' | 'error'` 与 `export interface UpdateState { status: UpdateStatus; sequence: number; currentVersion: string; candidateVersion: string | null; channel: 'stable' | 'beta'; checkSource: 'auto' | 'manual' | 'startup' | null; lastCheckedAt: number | null; releaseDate: string | null; releaseNotes: string | null; bytesTransferred: number; totalBytes: number; percent: number; bytesPerSecond: number; errorCode: UpdateErrorCode | null; retryable: boolean; dismissedVersion: string | null }`；update-service.ts 的 `private initAutoUpdater()` 按固定顺序执行 `autoUpdater.autoDownload = false;` → `autoUpdater.autoInstallOnAppQuit = false;` → `autoUpdater.channel = channel === 'beta' ? 'beta' : 'latest';` → `autoUpdater.allowPrerelease = channel === 'beta';` → `autoUpdater.allowDowngrade = false;`（allowDowngrade 必须最后一行）。版本真相取 `app.getVersion()`，renderer 侧任何硬编码版本号一律禁止。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/update, packages/app/src/main/lifecycle, packages/app/src/renderer/src/stores/update.ts",
+      "focus_paths": [
+        "packages/app/src/main/update/",
+        "packages/app/src/main/lifecycle/",
+        "packages/app/src/renderer/src/stores/update.ts",
+        "packages/app/src/renderer/src/components/"
+      ],
+      "read_first": [
+        "packages/app/package.json",
+        "packages/app/pnpm-lock.yaml 或 D:/selftool/pi-ui/pnpm-lock.yaml（确认 electron-updater / electron-log / electron-builder 的唯一版本）",
+        "packages/app/electron-builder.yml（当前无 publish 块、asar: false、mac.target 只有 dmg）",
+        "packages/app/src/main/index.ts",
+        "packages/app/src/main/ipc/registry.ts（B01 产出）",
+        "packages/app/src/preload/api/index.ts（B01 产出）",
+        "packages/app/src/renderer/src/components/AppShell.vue",
+        "packages/app/src/renderer/src/components/SettingsModal.vue",
+        "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 UPD-001 / UPD-002 / UPD-003 / UPD-004 四节",
+        "node_modules/electron-updater/out/main.d.ts（确认本版本是否导出 CancellationToken 且 downloadUpdate 接受它）"
+      ],
+      "depends_on": ["TASK-B01", "PARTA:M0", "PARTA:M2"],
+      "wave": 2,
+      "parallel_group": "wave2",
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/package.json 中 electron-updater / electron-log / electron-builder 三个版本号均为精确值且不含 `^` 或 `~`；`rg -n \"electron-updater|electron-log|electron-builder\" packages/app/package.json` 输出的三行与 pnpm-lock.yaml 中解析到的版本一一相等（把比对写成 scripts/check-update-deps.mjs 并在 test 中调用）",
+          "packages/app/src/main/update/update-types.ts 含全部十个状态字面量：`'unsupported'`、`'idle'`、`'checking'`、`'available'`、`'not-available'`、`'downloading'`、`'downloaded'`、`'waiting-for-agent'`、`'installing'`、`'error'`；update-errors.ts 含 `'network' | 'disk' | 'permission' | 'signature' | 'metadata' | 'unsupported' | 'unknown'`",
+          "初始化顺序单测 update-init.test.ts：用 fake autoUpdater 记录属性赋值顺序，断言赋值序列为 `['autoDownload','autoInstallOnAppQuit','channel','allowPrerelease','allowDowngrade']` 且末值为 `autoDownload===false, autoInstallOnAppQuit===false, allowDowngrade===false`；channel='beta' 时 `channel==='beta' && allowPrerelease===true`，channel='stable' 时 `channel==='latest' && allowPrerelease===false`",
+          "single-flight 单测：并发调用 checkForUpdates 3 次，断言底层 checkForUpdatesAndNotify/checkForUpdates 只被调用 1 次；download 与 install 同理；listener 注册单测断言每个 updater 事件的 listenerCount 恒为 1（重复 init 不叠加）",
+          "dev 保护单测：`app.isPackaged === false` 时 getUpdateState().status === 'unsupported'，且断言 fake autoUpdater 的 setFeedURL / checkForUpdates 调用次数为 0；仅当环境变量 `PIBUDDY_FAKE_UPDATE_FEED` 存在时才注入 fake provider",
+          "`rg -n \"feedURL|setFeedURL|GH_TOKEN|latest.yml\" packages/app/src/renderer packages/app/src/preload` 无输出，证明 renderer/preload 不接触 feed 与凭据",
+          "sequence 单调性单测：连续 50 次状态变更后所有事件的 sequence 严格递增；renderer store 在收到 sequence 小于已知值的事件时丢弃（stores/update.test.ts 断言）",
+          "检测策略单测 update-schedule.test.ts：用 fake timers 断言 (a) 首次检查在主窗口 ready 后 30_000ms 触发；(b) 之后每次间隔落在 [4h*1.10, 4h*1.20] 区间；(c) 定时器对象上调用过 `.unref()`；(d) 连续网络失败后的重试间隔序列为 15min → 1h → 4h，成功后重置为 4h 基线；(e) manual check 不受静默节流但 500ms 内连点只触发一次",
+          "取消按钮的存在性由能力决定：scripts/check-updater-capability.mjs 检测 electron-updater 是否导出 CancellationToken，UpdateBanner.vue 中取消按钮包裹在 `v-if=\"store.cancelSupported\"` 内；若能力检测为 false 则该按钮不渲染（单测断言 cancelSupported=false 时 DOM 无「取消下载」文本）",
+          "[UI-observable] 在 dev 下设置 PIBUDDY_FAKE_UPDATE_FEED 指向本地 fake feed，用户可在设置→「关于与更新」看到当前版本、runtime 版本、channel、自动检查/自动下载开关、上次检查时间与「立即检查」按钮；点击后全局 banner 依次显示 检查中 → 发现新版本(含发布时间与净化后 release notes 与预计大小) → 下载中(百分比/已传输/速度) → 下载完成(立即重启安装 / 稍后)；期间刷新窗口(Ctrl+R)后进度条从 main snapshot 原样恢复而不是回到 idle",
+          "[UI-observable] 当有正在运行的 Agent、未保存草稿或正在录音时点击「立即重启安装」，弹出对话框提供「等待任务结束后安装」「停止任务并安装」「取消」三个选项，选择等待后状态变为 waiting-for-agent 并在收到真实 idle 事件（agent_settled）后才安装；`rg -n \"setInterval\" packages/app/src/main/update/` 无输出（禁止轮询空转）",
+          "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/update` 退出码 0"
+        ],
+        "verification": "node scripts/check-update-deps.mjs && pnpm --filter @pibuddy/app test -- src/main/update && pnpm --filter @pibuddy/app typecheck && PIBUDDY_FAKE_UPDATE_FEED=https://127.0.0.1:8443/ pnpm --filter @pibuddy/app dev 走一遍 idle→downloaded→安装前检查",
+        "definition_of_done": "用户能在设置里看到版本与更新状态、手动检查、看到新版本说明与下载进度、在下载完成后选择立刻重启或稍后；正在跑任务或有没保存的东西时应用不会把它们扔掉就重启。"
+      },
+      "files": [
+        { "path": "packages/app/package.json", "action": "modify", "target": "dependencies/devDependencies", "change": "精确写入 electron-updater 6.8.9、electron-log 5.4.4、electron-builder 26.15.3（无 ^），新增 scripts.check-update-deps" },
+        { "path": "packages/app/src/main/update/update-types.ts", "action": "create", "target": "UpdateStatus / UpdateState / UpdateAction", "change": "十态枚举与完整状态字段，含 sequence、channel、checkSource、dismissedVersion" },
+        { "path": "packages/app/src/main/update/update-errors.ts", "action": "create", "target": "UpdateErrorCode / mapUpdaterError", "change": "把 updater 原始错误映射为七类码并给出 retryable 与用户可读文案" },
+        { "path": "packages/app/src/main/update/update-service.ts", "action": "create", "target": "UpdateService", "change": "状态机、初始化顺序、single-flight guard、单组 listener、检测调度与退避、快照 + sequence 事件广播" },
+        { "path": "packages/app/src/main/update/update-ipc.ts", "action": "create", "target": "registerUpdateIpc()", "change": "getUpdateState / checkForUpdates({source:'manual'}) / downloadUpdate / installAndRestart / setUpdateChannel / setAutoCheck / setAutoDownload / dismissVersion 八个 handler" },
+        { "path": "packages/app/src/main/update/release-integrity.ts", "action": "create", "target": "verifyBeforeInstall()", "change": "安装前校验 candidate 版本 semver 严格大于当前版本、文件存在且 sha512 与 manifest 一致，不一致直接中止并置 errorCode='signature'" },
+        { "path": "packages/app/src/main/lifecycle/graceful-shutdown.ts", "action": "create", "target": "collectBlockers()/requestShutdown()", "change": "汇总 active Agent、未保存草稿、录音中、pending permission 四类阻断项，提供订阅式 idle 通知（基于 agent_settled 事件，禁止轮询）" },
+        { "path": "packages/app/src/main/index.ts", "action": "modify", "target": "whenReady", "change": "创建 UpdateService 单例、注册 update ipc、主窗口 ready-to-show 后 30s 触发首次检查" },
+        { "path": "packages/app/src/main/ipc/registry.ts", "action": "modify", "target": "registerAllIpc()", "change": "追加 registerUpdateIpc()" },
+        { "path": "packages/app/src/preload/api/update.ts", "action": "create", "target": "update 命名空间", "change": "八个动作 + onUpdateEvent 订阅；不暴露任何 feed/token/路径" },
+        { "path": "packages/app/src/preload/api/index.ts", "action": "modify", "target": "api 聚合", "change": "加入 update 命名空间" },
+        { "path": "packages/app/src/renderer/src/stores/update.ts", "action": "create", "target": "useUpdateStore", "change": "先取 snapshot 再订阅、按 sequence 丢弃乱序事件、cancelSupported 能力位、dismiss 24h 逻辑" },
+        { "path": "packages/app/src/renderer/src/components/UpdateBanner.vue", "action": "create", "target": "全局更新横幅", "change": "仅在 available / downloaded / 需用户动作的 error 三种情况显示；进度、速度、重试；按能力位决定是否渲染取消按钮" },
+        { "path": "packages/app/src/renderer/src/components/UpdateSettingsPanel.vue", "action": "create", "target": "关于与更新", "change": "当前版本 / runtime 版本 / channel / 自动检查与自动下载开关 / 上次检查 / 立即检查 / 错误详情与一键复制诊断" },
+        { "path": "packages/app/src/renderer/src/components/InstallBlockerDialog.vue", "action": "create", "target": "安装前阻断对话框", "change": "列出阻断项，提供 等待任务结束后安装 / 停止任务并安装 / 取消 三个动作" },
+        { "path": "packages/app/src/renderer/src/components/SettingsModal.vue", "action": "modify", "target": "设置弹窗", "change": "挂载 UpdateSettingsPanel" },
+        { "path": "packages/app/src/renderer/src/components/AppShell.vue", "action": "modify", "target": "根布局", "change": "挂载 UpdateBanner 与 InstallBlockerDialog" },
+        { "path": "packages/app/scripts/check-update-deps.mjs", "action": "create", "target": "依赖一致性校验", "change": "比对 package.json 精确版本与 pnpm-lock.yaml 解析版本，不一致退出码 1" }
+      ],
+      "implementation": [
+        "先核对版本可用性与 lockfile 一致性，把 check-update-deps.mjs 写好并接进 test 流程；三者版本不一致或注册表不存在时停下来报告而不是猜一个版本",
+        "update-types.ts / update-errors.ts 先落类型与错误码，再写 UpdateService，保证状态机是唯一状态源",
+        "initAutoUpdater 按 action 中规定的五步顺序赋值，allowDowngrade=false 必须写在 channel/allowPrerelease 之后（这两个 setter 在 electron-updater 内部可能联动 downgrade）",
+        "single-flight：三个私有字段 `checkInFlight / downloadInFlight / installInFlight`，进入时判空并在 finally 复位",
+        "事件：只在构造函数里注册一次 checking-for-update / update-available / update-not-available / download-progress / update-downloaded / error，注册前先 `autoUpdater.removeAllListeners()` 防重复",
+        "调度：`const t = setTimeout(...); t.unref();` 首次 30s，之后 4h * (1 + 0.1 + Math.random()*0.1)；失败退避 15min→1h→4h，成功清零",
+        "dev/test：`if (!app.isPackaged && !process.env.PIBUDDY_FAKE_UPDATE_FEED) { status='unsupported'; return; }`，fake 分支用 generic provider 指向本地 HTTPS server",
+        "安装前流程：installAndRestart → collectBlockers()；有阻断项时置 waiting-for-agent 或弹 InstallBlockerDialog；等待模式订阅 agent_settled 而非轮询",
+        "release notes 当不可信内容处理：渲染前经 sanitize（只保留纯文本与换行，剥离所有 HTML 标签与链接协议），单测断言 `<img src=x onerror=alert(1)>` 被完全剥离",
+        "renderer store：mounted 时先 `await getUpdateState()` 拿 snapshot 再 subscribe，收到 sequence <= 已知值的事件直接 return",
+        "dismiss：同一 candidate 本进程只主动提示一次，「稍后」写入 dismissedVersion + dismissedUntil=now+24h，Settings 页始终可见状态",
+        "跑单测与 fake feed 全流程，并确认现有闭环功能未受影响（本任务不碰 pi 事件链路）"
+      ],
+      "test": {
+        "commands": [
+          "node packages/app/scripts/check-update-deps.mjs",
+          "pnpm --filter @pibuddy/app test -- src/main/update",
+          "pnpm --filter @pibuddy/app typecheck"
+        ],
+        "unit": [
+          "packages/app/src/main/update/update-init.test.ts",
+          "packages/app/src/main/update/update-schedule.test.ts",
+          "packages/app/src/main/update/update-singleflight.test.ts",
+          "packages/app/src/main/update/release-integrity.test.ts",
+          "packages/app/src/renderer/src/stores/update.test.ts"
+        ],
+        "integration": [
+          "本地 HTTPS fake update server + 两个 unsigned 测试版本走 idle→downloaded 全状态"
+        ],
+        "success_metrics": [
+          "属性赋值顺序断言通过",
+          "并发 3 次 check 底层只调 1 次",
+          "reload 后进度从 snapshot 恢复"
+        ]
+      },
+      "reference": {
+        "pattern": "main 单例 service + 快照订阅，参考现有 PiRpcClient 的 EventEmitter 用法但状态集中在 service",
+        "files": ["packages/pi-sdk/src/client.ts"],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "更新是唯一一个错了就可能砸掉用户数据的子系统，因此状态与副作用全部收在 main 的单例里，renderer 只读快照；初始化顺序、single-flight 与调度都用单测钉死，因为这些错误在人工点测里几乎不可见。",
+        "decision_factors": [
+          "M4 规格明确要求新代码放 src/main/update/ 而非现有 ipc.ts",
+          "renderer 接触 feed/token 是明确禁止项"
+        ],
+        "tradeoffs": "本任务不产出任何真实可发布产物，只保证运行时逻辑正确；签名、CI 与三平台产物在 TASK-B06"
+      },
+      "risks": [
+        "M4 出口门禁在本环境结构性不可达：无签名凭据、无 clean VM，本任务只能用本地 fake feed + unsigned 测试版本验证状态机，真实 N→N+1 闭环验收状态必须记为 `not-tested (no clean VM)`，不得声称完成",
+        "asar: false 是 pi 按路径执行 cli.js 的刚性约束，会显著削弱差分下载收益；本任务保留默认差分下载但需在 ADR 中记录该限制（ADR 由 TASK-B06 产出）",
+        "electron-updater 6.8.9 是否导出可用的 CancellationToken 必须以 node_modules 中的实际 d.ts 为准；不支持就不渲染取消按钮，禁止放无效按钮"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": ["应用自动更新", "安装前安全检查"],
+        "affected_components": ["main/update", "main/lifecycle", "renderer/update"],
+        "affected_requirements": ["UPD-001", "UPD-002", "UPD-003", "UPD-004"],
+        "adr_ids": ["ADR-0001-update-feed"]
+      },
+      "meta": {
+        "estimated_time": "14h",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": true
+      }
+    },
+    {
+      "id": "TASK-B06",
+      "title": "UPD-005~007 + OBS-101 三平台产物与签名 CI、结构化日志诊断、更新后 health check 与 safe mode",
+      "description": "补齐打包与发布侧：Windows per-user NSIS（installer + latest.yml + blockmap）、macOS 在 DMG 之外补 updater 必需的 ZIP 与 latest-mac.yml（当前 mac.target 只有 dmg，是自动更新的硬缺口）、Linux AppImage + latest-linux.yml，DEB/RPM 明确降级不伪装自动安装；CI 在原生 runner 上 --publish never 构建、先上传 artifact 最后发布 channel manifest、缺签名凭据时 release job 失败关闭；正式发布不使用第三方 Electron mirror（当前 electron-builder.yml 硬编码 npmmirror，需改为仅开发环境按环境变量启用）。同时落 OBS-101：结构化脱敏日志、日志轮转与总量上限、可预览的一键 support bundle、更新 handoff 的 pending-update / last-known-good marker、更新后首次启动的轻量 health check 与失败进 safe mode。并产出 docs/product/RELEASE_SETUP.md 与更新源 ADR。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "feature",
+      "priority": "high",
+      "effort": "large",
+      "action": "修改 packages/app/electron-builder.yml：mac.target 由 `[dmg]` 改为 `[dmg, zip]` 并加 `hardenedRuntime: true`、`gatekeeperAssess: false`、`entitlements: build/entitlements.mac.plist`、`entitlementsInherit: build/entitlements.mac.plist`、`notarize: true`，`extendInfo.NSMicrophoneUsageDescription: \"PiBuddy 需要使用麦克风来把你说的话转成文字\"`；win.target 保持 nsis 且 nsis.perMachine 保持 false（per-user）；linux.target 改为 `[AppImage, deb]`；新增 `publish` 块使用 `provider: generic` + `url: ${env.PIBUDDY_UPDATE_FEED_URL}` 并把 `electronDownload.mirror` 改为仅当 `${env.PIBUDDY_USE_CN_MIRROR}` 为 true 时生效（在 scripts/build-config.mjs 中拼装，CI 不设该变量）。新建 packages/app/src/main/logging/logger.ts 基于 electron-log 5.4.4，`log.transports.file.maxSize = 5 * 1024 * 1024`、保留最近 7 个文件，导出 `createLogger(scope: 'main'|'pi-runtime'|'updater'|'session-index'|'permission')`，每条日志强制带 `correlationId / runtimeId / sessionId`；新建 logging/redact.ts 导出 `redactSecrets(input: string): string`，至少覆盖 `sk-[A-Za-z0-9_-]{16,}`、`Bearer\\s+\\S+`、`\"key\"\\s*:\\s*\"[^\"]+\"`、`os.homedir()` 绝对路径（替换为 `~`）与 `process.env` 值。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/electron-builder.yml, .github/workflows, packages/app/src/main/logging, packages/app/src/main/diagnostics, packages/app/src/main/health, docs/product",
+      "focus_paths": [
+        "packages/app/electron-builder.yml",
+        ".github/workflows/",
+        "packages/app/src/main/logging/",
+        "packages/app/src/main/diagnostics/",
+        "packages/app/src/main/health/",
+        "docs/product/"
+      ],
+      "read_first": [
+        "packages/app/electron-builder.yml",
+        "packages/app/package.json（TASK-B05 已锁定的三个精确版本）",
+        "packages/app/src/main/index.ts",
+        "packages/app/src/main/update/update-service.ts（TASK-B05 产出的状态机与 marker 写入点）",
+        "packages/app/src/renderer/src/components/SettingsModal.vue",
+        "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 第 430-460 行（OBS-101 / QA-401 / M4 出口门禁 / 必须由产品所有者配置的真实值清单）",
+        "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 UPD-005 / UPD-006 / UPD-007 三节"
+      ],
+      "depends_on": ["TASK-B05"],
+      "wave": 3,
+      "parallel_group": "wave3",
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/electron-builder.yml 中 mac.target 同时包含 `dmg` 与 `zip`；含 `hardenedRuntime: true`、`entitlements: build/entitlements.mac.plist`、`NSMicrophoneUsageDescription`；`rg -n \"npmmirror\" packages/app/electron-builder.yml` 无输出（镜像改由 scripts/build-config.mjs 按 PIBUDDY_USE_CN_MIRROR 注入）",
+          "`pnpm --filter @pibuddy/app dist -- --win nsis --publish never` 后 packages/app/release/ 同时存在 `latest.yml`、`PiBuddy-Setup-*.exe`、`PiBuddy-Setup-*.exe.blockmap` 三个文件；scripts/verify-release-artifacts.mjs 对 win/mac/linux 三个平台各自断言必需文件集合（win: latest.yml + exe + blockmap；mac: latest-mac.yml + *.dmg + *.zip；linux: latest-linux.yml + *.AppImage），缺任一即退出码 1",
+          "缺凭据时 release 关闭：.github/workflows/release.yml 中含形如 `if [ -z \"${WIN_CSC_LINK}\" ]; then echo \"::error::WIN_CSC_LINK missing - release blocked\"; exit 1; fi` 的显式失败步骤，且 build job 与 publish job 分离、publish job 先上传 artifact 再在最后一步发布 latest*.yml（步骤顺序在 workflow 中可读且 job 名为 `upload-artifacts` 与 `publish-manifest`）",
+          "`rg -n \"uses: (?!actions/checkout@[0-9a-f]{40})\" .github/workflows/release.yml` 校验所有第三方 action 均以 40 位 commit SHA 固定（把该校验写成 scripts/check-workflow-pins.mjs 并在 CI 中运行）",
+          "packages/app/src/main/logging/redact.ts 单测 redact.test.ts：输入含 `sk-ant-abcdefghijklmnop1234`、`Authorization: Bearer eyJhbGciOi...`、`\"key\": \"secret-value\"`、`C:\\\\Users\\\\yehh\\\\Documents\\\\a.txt` 四种样本，断言输出中四者均不可见且 home 路径被替换为 `~`",
+          "日志轮转：logger.test.ts 断言 `log.transports.file.maxSize === 5242880` 且总量上限逻辑（超过 7 个归档文件时删除最旧）有单测覆盖",
+          "support bundle 可预览：packages/app/src/main/diagnostics/support-bundle.ts 导出 `previewBundle(): { path: string; sizeBytes: number; redacted: boolean }[]` 与 `exportBundle(targetPath: string)`，且 exportBundle 内每个文本文件写入前都经过 redactSecrets（单测断言写出的 zip 内容中不含预置的假 key）",
+          "health check 与 marker：packages/app/src/main/health/health-check.ts 导出 `runStartupHealthCheck(): Promise<{ ok: boolean; failed: ('db-migration'|'renderer-ready'|'pi-handshake')[] }>`；update-service 在 installAndRestart 前写 `<userData>/update-state/pending-update.json`，健康启动后写 `last-known-good.json` 并删除 pending marker；单测覆盖「连续两次 health check 失败 → safeMode=true」",
+          "[UI-observable] 用户在设置→「关于与更新」→「诊断」点击「生成诊断包」，先看到将导出文件的清单预览（路径、大小、是否已脱敏），确认后导出并可「在文件夹中显示」；健康检查失败后重启，界面顶部显示 safe mode 横幅（说明已禁用第三方扩展与自动任务）并提供「查看诊断」与「下载上一稳定版本」入口",
+          "docs/product/RELEASE_SETUP.md 存在，含 secret 名称清单（如 WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD / APPLE_TEAM_ID / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / PIBUDDY_UPDATE_FEED_URL）、申请步骤、轮换周期、过期演练、发布暂停与 hotfix 流程；`rg -n \"sk-|BEGIN (RSA|PRIVATE)|-----BEGIN\" docs/product/RELEASE_SETUP.md` 无输出（文档不含任何 secret 本身）",
+          "docs/product/ADR-0001-update-feed.md 记录更新源选型（GitHub Releases vs 自建 generic feed）、asar:false 对差分更新的限制、以及 v1 不做真实二进制自动回滚的决定与替代方案（health marker + safe mode + 分阶段放量 + 快速撤回 feed）"
+        ],
+        "verification": "pnpm --filter @pibuddy/app dist -- --win nsis --publish never && node packages/app/scripts/verify-release-artifacts.mjs win && pnpm --filter @pibuddy/app test -- src/main/logging src/main/diagnostics src/main/health && node scripts/check-workflow-pins.mjs",
+        "definition_of_done": "三个平台的安装包和更新清单能在 CI 里可复现地产出，没有签名凭据时发布会明确失败而不是偷偷发未签名包；出问题时用户能一键导出一份不含隐私的诊断包，更新后启动失败会进入安全模式并给出退路。"
+      },
+      "files": [
+        { "path": "packages/app/electron-builder.yml", "action": "modify", "target": "mac/win/linux/publish/electronDownload", "change": "mac 增加 zip + hardenedRuntime + entitlements + notarize + 麦克风用途说明；linux 增加 deb；新增 publish generic；移除硬编码 npmmirror" },
+        { "path": "packages/app/build/entitlements.mac.plist", "action": "create", "target": "macOS entitlements", "change": "com.apple.security.cs.allow-jit、allow-unsigned-executable-memory、device.audio-input（麦克风）" },
+        { "path": "packages/app/scripts/build-config.mjs", "action": "create", "target": "构建期配置注入", "change": "按 PIBUDDY_USE_CN_MIRROR / PIBUDDY_UPDATE_FEED_URL 组装 electron-builder 覆盖项，CI 默认不启用镜像" },
+        { "path": "packages/app/scripts/verify-release-artifacts.mjs", "action": "create", "target": "产物校验", "change": "按平台断言 latest*.yml / 安装包 / blockmap 齐全，版本与 package.json 一致，stable 渠道禁止 prerelease 标记" },
+        { "path": ".github/workflows/release.yml", "action": "create", "target": "release workflow", "change": "win/mac/linux 原生 runner 矩阵 --publish never 构建 → 校验 → 缺凭据显式失败 → upload-artifacts job → publish-manifest job（最后发布 latest*.yml）；第三方 action 全部 SHA 固定" },
+        { "path": ".github/workflows/ci.yml", "action": "create", "target": "PR CI", "change": "typecheck + 单测 + verify-release-artifacts 的 dry-run + check-workflow-pins" },
+        { "path": "scripts/check-workflow-pins.mjs", "action": "create", "target": "action 固定校验", "change": "扫描 workflow 中所有 uses:，非 40 位 SHA 即失败" },
+        { "path": "packages/app/src/main/logging/logger.ts", "action": "create", "target": "createLogger()", "change": "electron-log 封装，scope 化、correlation/runtime/session ID、5MB 轮转与 7 文件上限" },
+        { "path": "packages/app/src/main/logging/redact.ts", "action": "create", "target": "redactSecrets()", "change": "key/Bearer/JSON key 字段/home 绝对路径/环境变量值 五类脱敏" },
+        { "path": "packages/app/src/main/diagnostics/support-bundle.ts", "action": "create", "target": "previewBundle/exportBundle", "change": "先出清单供用户预览再导出 zip，全部文本经 redactSecrets；crash dump 收集前需显式隐私同意标记" },
+        { "path": "packages/app/src/main/health/health-check.ts", "action": "create", "target": "runStartupHealthCheck()", "change": "DB migration / renderer ready / bundled Pi handshake 三项检查，失败次数累计写入 marker" },
+        { "path": "packages/app/src/main/health/safe-mode.ts", "action": "create", "target": "safe mode", "change": "连续失败进入 safe mode：禁用第三方 extension 与自动任务、暴露诊断入口与上一稳定版本下载入口" },
+        { "path": "packages/app/src/main/update/update-service.ts", "action": "modify", "target": "installAndRestart / 启动流程", "change": "安装前写 pending-update marker；启动时读 marker 触发 health check，成功写 last-known-good 并清 marker" },
+        { "path": "packages/app/src/main/ipc/registry.ts", "action": "modify", "target": "registerAllIpc()", "change": "追加 registerDiagnosticsIpc()" },
+        { "path": "packages/app/src/preload/api/diagnostics.ts", "action": "create", "target": "diagnostics 命名空间", "change": "previewBundle / exportBundle / getSafeModeState / getHealthReport" },
+        { "path": "packages/app/src/preload/api/index.ts", "action": "modify", "target": "api 聚合", "change": "加入 diagnostics 命名空间" },
+        { "path": "packages/app/src/renderer/src/components/DiagnosticsPanel.vue", "action": "create", "target": "诊断面板", "change": "文件清单预览 + 脱敏说明 + 导出 + 在文件夹中显示 + crash dump 隐私选择开关" },
+        { "path": "packages/app/src/renderer/src/components/SafeModeBanner.vue", "action": "create", "target": "safe mode 横幅", "change": "说明已禁用内容、查看诊断、下载上一稳定版本入口" },
+        { "path": "packages/app/src/renderer/src/components/SettingsModal.vue", "action": "modify", "target": "设置弹窗", "change": "挂载 DiagnosticsPanel 到「关于与更新」下的诊断区块" },
+        { "path": "docs/product/RELEASE_SETUP.md", "action": "create", "target": "发布配置文档", "change": "secret 名称、申请、轮换、过期演练、发布暂停、hotfix 流程；不含任何 secret 值" },
+        { "path": "docs/product/ADR-0001-update-feed.md", "action": "create", "target": "更新源 ADR", "change": "feed 选型、asar:false 对差分更新的限制、v1 不做真实二进制回滚的决定与替代方案" }
+      ],
+      "implementation": [
+        "先改 electron-builder.yml 的 mac zip 与 entitlements，本地跑 `--win nsis --publish never` 确认 latest.yml + blockmap 产出，再写 verify-release-artifacts.mjs 把断言固化",
+        "把 npmmirror 从 yml 里挪到 build-config.mjs，按 PIBUDDY_USE_CN_MIRROR 注入；CI 不设该变量",
+        "写 release.yml：三个原生 runner 各自 build + 签名（凭据来自 release environment secret）+ verify；缺任一必需 secret 的显式 exit 1 步骤放在 build 之前",
+        "publish 拆两个 job：upload-artifacts 先传不可变产物，publish-manifest 最后传 latest*.yml / latest-mac.yml / latest-linux.yml，保证客户端不会看到指向不存在文件的清单",
+        "所有第三方 action 换成 40 位 commit SHA，并写 check-workflow-pins.mjs 在 CI 中强制",
+        "logging：基于 electron-log 建 scope logger，所有日志出口统一过 redactSecrets；先写 redact.test.ts 再写实现",
+        "diagnostics：previewBundle 返回清单（日志、settings 脱敏副本、update-state marker、health 报告、系统信息），exportBundle 打包 zip；crash dump 只在用户显式同意后才纳入",
+        "health：runStartupHealthCheck 三项检查各自超时 5s；结果写 <userData>/update-state/health.json；连续两次失败置 safeMode",
+        "UPD-007 分层：bundled Pi 版本跟随应用发布，禁止运行期 npm update——在 pi-launcher 旁加 `assertNoRuntimeNpmUpdate()` 说明与单测断言代码库中不存在对 `npm update` / `npm i -g` 的调用（`rg -n \"npm (update|i -g|install -g)\" packages/app/src` 无输出）；external Pi 只做版本兼容范围检测与提示",
+        "写 RELEASE_SETUP.md 与 ADR-0001，明确把「无真实凭据 / 无 clean VM」两项写进文档的验收状态章节",
+        "在任务验收说明中把 M4 出口门禁标注为 blocked-by-credential + not-tested (no clean VM)"
+      ],
+      "test": {
+        "commands": [
+          "pnpm --filter @pibuddy/app test -- src/main/logging src/main/diagnostics src/main/health",
+          "node packages/app/scripts/verify-release-artifacts.mjs win",
+          "node scripts/check-workflow-pins.mjs",
+          "rg -n \"npm (update|i -g|install -g)\" packages/app/src"
+        ],
+        "unit": [
+          "packages/app/src/main/logging/redact.test.ts",
+          "packages/app/src/main/logging/logger.test.ts",
+          "packages/app/src/main/diagnostics/support-bundle.test.ts",
+          "packages/app/src/main/health/health-check.test.ts"
+        ],
+        "integration": [
+          "本地 --win nsis --publish never 构建后跑 verify-release-artifacts.mjs"
+        ],
+        "success_metrics": [
+          "win 产物三件套齐全",
+          "四类敏感样本全部脱敏",
+          "缺凭据时 release job 失败"
+        ]
+      },
+      "reference": {
+        "pattern": "electron-builder 官方多平台配置 + GitHub Actions 原生 runner 矩阵",
+        "files": ["packages/app/electron-builder.yml"],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "把打包/签名/CI/诊断放在同一个任务，是因为它们共享同一个「缺凭据即失败关闭」的约束边界，且都不触碰运行时状态机（B05 的领地），从而可以与 B03 并行。",
+        "decision_factors": [
+          "mac 只有 dmg 是自动更新的硬缺口，必须补 zip",
+          "OBS-101 的 health marker 与 safe mode 是更新回滚的替代方案，属于同一决策链"
+        ],
+        "tradeoffs": "本任务不产出任何已签名的正式包，也不做真实 N→N+1 验证"
+      },
+      "risks": [
+        "结构性不可达：GitHub owner/repo、Windows signing identity/Publisher、Apple Team/Developer ID/notarization、Linux manifest 签名私钥、正式下载域名必须由产品所有者提供，Coding Agent 不得编造；本任务只交付 adapter + fake feed + unsigned CI artifact，release job 保持失败关闭，验收状态写 blocked-by-credential",
+        "无 clean VM，Windows signed NSIS 真实 N→N+1 闭环无法执行，验收记 not-tested (no clean VM)；M4 出口门禁在本环境不可达，任何声称完成的表述都是错误的",
+        "asar: false 使差分更新收益有限且包体较大，需在 ADR 中如实记录，不得为了差分更新擅自打开 asar（会破坏 pi 按路径执行 cli.js 与动态加载扩展）",
+        "DEB/RPM 无可靠自更新路径，UI 必须显式降级提示，不得伪装自动安装"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": ["三平台打包与签名", "发布流水线", "日志与诊断", "更新后健康检查与安全模式"],
+        "affected_components": ["electron-builder", "ci", "main/logging", "main/diagnostics", "main/health"],
+        "affected_requirements": ["UPD-005", "UPD-006", "UPD-007", "OBS-101", "QA-401"],
+        "adr_ids": ["ADR-0001-update-feed"]
+      },
+      "meta": {
+        "estimated_time": "14h",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": true
+      }
+    },
+    {
+      "id": "TASK-B07",
+      "title": "FS-101 + FS-102 Workspace 文件服务、结构化附件、编辑器冲突检测与 Agent changeset diff",
+      "description": "把「把绝对路径拼进 prompt」换成真正的 workspace 服务：workspace record、lazy 文件树 + watch + ignore + 超大目录与符号链接保护、可取消分页的文件名与内容搜索（重活放 utility process）、CodeMirror 文本编辑（encoding/newline 检测、dirty、显式保存、mtime + content hash 冲突与 compare/reload/overwrite）、所有写操作经 PermissionEngine 与 root containment。附件从「绝对路径字符串」升级为结构化引用（attachment ID / capability / relative-source name / MIME / size / hash / expiry）——当前 stores/app.ts 的 send() 直接把 `- ${f.path}` 拼进消息，这是本任务要删掉的行为。同时建 Agent changeset：把 Agent 的写/edit/delete 归档为可审阅的变更集，支持 file/hunk diff、接受拒绝、批量、在编辑器定位，接受前必须用 before hash 检测外部修改。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "feature",
+      "priority": "high",
+      "effort": "large",
+      "action": "新建 packages/app/src/main/workspace/workspace-store.ts，workspace record 字段固定为 `{ id: string; canonicalRoot: string; displayName: string; trust: 'trusted'|'untrusted'|'unknown'; createdAt: number; lastOpenedAt: number; ignorePolicy: string[]; defaultModel: string | null; permissionRules: PermissionRule[] }`，canonicalRoot 用 `fs.realpathSync.native(root)` 求出；新建 workspace/path-guard.ts 导出 `assertInsideRoot(root: string, target: string): string`，实现为 `const real = fs.realpathSync.native(target); const rel = path.relative(root, real); if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) throw new PathEscapeError(...); return rel;`，所有返回 renderer 的路径一律是 `rel`，禁止返回绝对路径；新建 workspace/attachment-store.ts，`createAttachment(absPath): { id: string; capability: 'read'|'read-write'; relativePath: string; sourceName: string; mimeType: string; sizeBytes: number; sha256: string; expiresAt: number }`，并把 stores/app.ts 中 `message += \"\\n\\n[用户提供的文件]\\n\" + refs.map((f) => \\`- ${f.path}\\`).join(\"\\n\")` 替换为按 relativePath 呈现的结构化附件清单；新建 workspace/file-editor.ts，`saveFile({ relativePath, content, baseMtimeMs, baseSha256 })` 在写入前重新 stat + hash，任一不匹配即返回 `{ conflict: true, current: { mtimeMs, sha256, preview } }` 而不是覆盖。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/workspace, packages/app/src/main/changeset, packages/app/src/renderer/src/components/workspace",
+      "focus_paths": [
+        "packages/app/src/main/workspace/",
+        "packages/app/src/main/changeset/",
+        "packages/app/src/renderer/src/components/"
+      ],
+      "read_first": [
+        "packages/app/src/renderer/src/stores/app.ts 第 388-422 行（send 里把绝对路径拼进 prompt 的现状）",
+        "packages/app/src/main/ipc.ts 第 136-170 行（dialog:choose-files / file:read-image / shell:open-path 现状）与第 215-234 行（describeFile 返回绝对路径）",
+        "packages/app/src/preload/index.ts 第 34-38 行（file.pathFor 直接把拖拽文件转绝对路径）",
+        "packages/app/src/renderer/src/components/InputBar.vue 第 46-80 行（拖拽与选择文件）",
+        "packages/app/src/main/sessions/session-index.ts（B01 的 SQLite 连接与迁移模式，changeset 表复用同一 DB）",
+        "PARTA:M2 产出的 PermissionEngine 实现文件（以其实际导出为准）",
+        "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 FS-101 / FS-102 两节与 M5 出口门禁",
+        "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 971-1015 行（tool_execution_start/update/end，changeset 的事件来源）"
+      ],
+      "depends_on": ["TASK-B02", "TASK-B04", "PARTA:M2"],
+      "wave": 5,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/src/main/workspace/path-guard.ts 含 `realpathSync.native` 与 `rel.startsWith('..')`；单测 path-guard.test.ts 覆盖并全部拒绝：`../outside.txt`、指向工作区外的 symlink、Windows junction、`C:/Windows/system32/drivers/etc/hosts` 绝对路径、以及路径中含中文与空格的合法用例必须通过",
+          "`rg -n \"absolutePath|\\.path\\b\" packages/app/src/preload/api/workspace.ts` 的返回类型中不含绝对路径字段；workspace IPC 返回结构统一为 `{ relativePath: string }`，单测 workspace-ipc.test.ts 断言任一返回值 JSON 序列化后不包含 workspace root 字符串",
+          "附件结构化：packages/app/src/main/workspace/attachment-store.ts 导出的 createAttachment 返回对象包含 id / capability / relativePath / sourceName / mimeType / sizeBytes / sha256 / expiresAt 八个字段；`rg -n \"用户提供的文件\" packages/app/src/renderer/src/stores/app.ts` 无输出（旧的绝对路径拼接已删除）",
+          "编辑冲突：file-editor.test.ts 断言 (a) baseMtimeMs 与 baseSha256 均匹配时写入成功；(b) 仅 mtime 变化但内容 hash 相同时允许写入（避免误报）；(c) 内容 hash 变化时返回 `{ conflict: true }` 且目标文件字节未被修改；(d) 只读目录写入返回 errorCode='permission' 而非抛未捕获异常；(e) 磁盘满（用 fs 写入错误注入 ENOSPC）返回 errorCode='disk'",
+          "encoding/newline：单测断言 UTF-8 BOM、UTF-8 无 BOM、GBK 三种样本被正确识别，且保存时保留原有换行风格（CRLF 文件保存后仍为 CRLF）",
+          "搜索可取消分页有上限：packages/app/src/main/workspace/search-worker.ts 运行在 utility process（`utilityProcess.fork` 调用点可 grep 到），`search({ query, limit, cursor, signal })` 返回 `{ items: { relativePath, line, preview }[], nextCursor, truncated }`，单测断言 limit 生效、AbortSignal 取消后 worker 在 200ms 内停止发送结果、单文件 preview 长度 <= 200",
+          "changeset 表与冲突检测：packages/app/src/main/changeset/changeset-store.ts 建表含 `session_id, turn_id, tool_call_id, relative_path, before_sha256, after_sha256, status, created_at`；`acceptChange(id)` 在应用前重算目标文件 sha256，与 before_sha256 不符时返回 `{ conflict: true }` 并要求三方比较；同一 changeset 重复 accept 第二次返回 `{ alreadyApplied: true }`（单测覆盖三条）",
+          "[UI-observable] 用户在左侧文件树展开工作区（超过 5000 项的目录显示「目录过大，已折叠，点击加载」而不是卡死），双击文本文件在 CodeMirror 中打开、编辑后标题显示未保存圆点、Ctrl+S 保存；此时用外部编辑器改同一文件再保存，PiBuddy 弹出冲突对话框提供「查看差异 / 重新载入 / 覆盖」三个动作，选择任一动作后结果与预期一致",
+          "[UI-observable] 用户把一个文件拖进输入框，附件条显示的是相对路径与文件名而不是完整绝对路径；发给 Agent 后 Agent 修改该文件，用户在「变更」面板看到该文件的 diff，可逐 hunk 或整文件接受/拒绝、可批量接受、点击可跳到编辑器对应行；若该文件在审阅期间被外部修改，接受时被拦下并提示冲突",
+          "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/workspace src/main/changeset` 退出码 0"
+        ],
+        "verification": "pnpm --filter @pibuddy/app test -- src/main/workspace src/main/changeset && rg -n \"用户提供的文件\" packages/app/src && pnpm --filter @pibuddy/app dev 手工验证：中文空格路径、symlink 越界、5000+ 文件目录、外部修改冲突、只读目录、changeset 接受拒绝",
+        "definition_of_done": "用户能在 PiBuddy 里浏览、搜索和编辑工作文件夹里的文件，两个编辑器同时改同一个文件时不会被悄悄覆盖；把文件交给 Agent 后能看到它改了什么、逐条接受或拒绝，并且 Agent 拿到的是受控的结构化附件而不是任意绝对路径。"
+      },
+      "files": [
+        { "path": "packages/app/src/main/workspace/workspace-store.ts", "action": "create", "target": "WorkspaceStore", "change": "workspace record CRUD（复用 B01 的 SQLite），canonicalRoot 用 realpath，记录 trust / ignorePolicy / defaultModel / permissionRules" },
+        { "path": "packages/app/src/main/workspace/path-guard.ts", "action": "create", "target": "assertInsideRoot()", "change": "realpath + relative 双重校验，越界抛 PathEscapeError；所有对外返回相对路径" },
+        { "path": "packages/app/src/main/workspace/file-tree.ts", "action": "create", "target": "listDir()/watch()", "change": "lazy 列目录 + fs.watch 增量刷新 + ignore 规则 + 单目录 5000 项折叠 + symlink/junction 不跟随" },
+        { "path": "packages/app/src/main/workspace/search-worker.ts", "action": "create", "target": "utilityProcess 搜索", "change": "文件名与内容搜索，可取消、分页、结果上限、preview 截断 200 字符" },
+        { "path": "packages/app/src/main/workspace/file-editor.ts", "action": "create", "target": "readFile/saveFile", "change": "encoding 与 newline 检测、dirty 判定、mtime + sha256 冲突检测、错误分类 permission/disk/encoding" },
+        { "path": "packages/app/src/main/workspace/attachment-store.ts", "action": "create", "target": "createAttachment/resolveAttachment", "change": "结构化附件引用，含 capability 与 expiresAt；Agent 只拿 attachment ID 与相对路径" },
+        { "path": "packages/app/src/main/workspace/workspace-ipc.ts", "action": "create", "target": "registerWorkspaceIpc()", "change": "workspace:open / tree:list / tree:watch / search / file:read / file:save / file:mutate（新建重命名移动复制回收站恢复）/ attachment:create" },
+        { "path": "packages/app/src/main/changeset/changeset-store.ts", "action": "create", "target": "ChangesetStore", "change": "从 tool_execution_end 事件抽取写/edit/delete，记录 session/turn/tool、before/after hash、状态与时间" },
+        { "path": "packages/app/src/main/changeset/apply.ts", "action": "create", "target": "acceptChange/rejectChange", "change": "接受前重算 hash 检测外部修改；备份原文件到 <userData>/changeset-backup/；重复应用短路" },
+        { "path": "packages/app/src/main/ipc/registry.ts", "action": "modify", "target": "registerAllIpc()", "change": "追加 registerWorkspaceIpc() 与 registerChangesetIpc()" },
+        { "path": "packages/app/src/preload/api/workspace.ts", "action": "create", "target": "workspace 命名空间", "change": "文件树、搜索、读写、变更集；返回值一律相对路径" },
+        { "path": "packages/app/src/preload/api/index.ts", "action": "modify", "target": "api 聚合", "change": "加入 workspace 命名空间" },
+        { "path": "packages/app/src/preload/index.ts", "action": "modify", "target": "file.pathFor", "change": "移除直接返回绝对路径的 pathFor，改为 `file.createAttachment(file)` 经 main 生成结构化引用" },
+        { "path": "packages/app/src/renderer/src/stores/workspace.ts", "action": "create", "target": "useWorkspaceStore", "change": "文件树状态、搜索状态、打开的编辑器 tab、dirty 与冲突状态、changeset 列表" },
+        { "path": "packages/app/src/renderer/src/components/FileTreePanel.vue", "action": "create", "target": "文件树", "change": "lazy 展开、刷新、ignore 切换、超大目录折叠提示、右键新建/重命名/移动/复制/删除（经 PermissionEngine）" },
+        { "path": "packages/app/src/renderer/src/components/FileEditorPane.vue", "action": "create", "target": "CodeMirror 编辑器", "change": "encoding/newline 显示、dirty 圆点、Ctrl+S 保存、冲突对话框（查看差异/重新载入/覆盖）" },
+        { "path": "packages/app/src/renderer/src/components/ChangesetPanel.vue", "action": "create", "target": "变更审阅面板", "change": "file/hunk diff、接受拒绝、批量、跳到编辑器、大文件与二进制降级提示、冲突拦截提示" },
+        { "path": "packages/app/src/renderer/src/components/InputBar.vue", "action": "modify", "target": "附件区", "change": "附件条改显示相对路径与文件名，底层持有 attachment ID" },
+        { "path": "packages/app/src/renderer/src/stores/app.ts", "action": "modify", "target": "send()", "change": "删除绝对路径拼接，改为按结构化附件生成相对路径清单" },
+        { "path": "packages/app/src/renderer/src/components/AppShell.vue", "action": "modify", "target": "布局", "change": "新增文件树 / 编辑器 / 变更三栏可折叠布局" }
+      ],
+      "implementation": [
+        "先写 path-guard 与其单测（中文空格、symlink、junction、深目录、绝对路径越界），这是 M5 出口门禁最直接的一条",
+        "workspace-store 复用 B01 的 SQLite 连接新增 workspaces 表并做 user_version 迁移",
+        "file-tree：单次只列一层；目录项超过 5000 返回 `{ truncated: true, total }` 由 UI 折叠；`fs.lstatSync` 判定 symlink 后不递归",
+        "search-worker：用 `utilityProcess.fork` 起独立进程，接受 AbortSignal 后向子进程发 'cancel' 并在 200ms 内 kill；结果分页游标为 `${fileIndex}:${lineIndex}`",
+        "file-editor：读时检测 BOM 与 GBK（用 TextDecoder 尝试 + 失败回退），记录 newline 风格；保存时先 stat + hash 再写，不匹配即返回 conflict 结构",
+        "attachment-store：id 用 randomUUID，sha256 取全文件，expiresAt 默认 24h；resolveAttachment 过期即拒绝",
+        "所有 mutate 操作（新建/重命名/移动/复制/删除/恢复）先过 assertInsideRoot 再过 PermissionEngine；删除走 shell.trashItem 而非 unlink",
+        "changeset：订阅 tool_execution_end，对文件类工具（write/edit/delete）抽取路径与内容，before hash 取工具执行前的快照（在 tool_execution_start 时抓取），写入 changeset 表",
+        "apply：accept 前重算 hash；不匹配返回 conflict 并提供 current 内容供三方比较；应用前把原文件复制到 changeset-backup/<changeset_id>；状态置 applied 后再次 accept 直接短路",
+        "renderer 三栏布局与 CodeMirror 接入（新增依赖 codemirror 6 系列，版本写精确值并同步 lockfile）",
+        "跑 M5 出口门禁场景清单：中文空格路径、symlink/junction、深目录、超多文件、外部修改、磁盘满、只读目录、两个编辑器并发修改"
+      ],
+      "test": {
+        "commands": [
+          "pnpm --filter @pibuddy/app test -- src/main/workspace src/main/changeset",
+          "pnpm --filter @pibuddy/app typecheck",
+          "rg -n \"用户提供的文件\" packages/app/src"
+        ],
+        "unit": [
+          "packages/app/src/main/workspace/path-guard.test.ts",
+          "packages/app/src/main/workspace/file-editor.test.ts",
+          "packages/app/src/main/workspace/search-worker.test.ts",
+          "packages/app/src/main/workspace/attachment-store.test.ts",
+          "packages/app/src/main/changeset/apply.test.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "越界路径 5/5 被拒且合法中文空格路径通过",
+          "外部修改后接受变更被拦下且原文件未被覆盖",
+          "5000+ 文件目录不冻结主线程"
+        ]
+      },
+      "reference": {
+        "pattern": "main 侧守卫 + 相对路径对外，参考现有 ipc.ts 的 describeFile 但反转其绝对路径外泄行为",
+        "files": ["packages/app/src/main/ipc.ts"],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "FS-101 与 FS-102 共享同一套 root containment、hash 与冲突语义，拆开会导致两边各写一份哈希与冲突判定；合成一个垂直切片才能验收「交给 Agent → 审阅 changeset → 接受拒绝」这条门禁链路。",
+        "decision_factors": [
+          "当前 send() 直接拼绝对路径，是 M5 要消灭的核心行为",
+          "冲突检测必须与保存路径同一实现，否则编辑器与 changeset 会出现两套判据"
+        ],
+        "tradeoffs": "文件树与编辑器是新增 UI 面积最大的部分，本轮不做多标签会话级布局记忆"
+      },
+      "risks": [
+        "Windows junction 与 symlink 的 realpath 行为差异较大，必须用真实 fixture（mklink /J 与 /D）测试，不能只靠 POSIX 假设",
+        "changeset 的 before hash 依赖在 tool_execution_start 时抓快照；若工具在一次调用中修改多个文件，需按工具参数逐文件抓取，抓取失败时该条变更标记为 unverified 并禁止一键接受",
+        "CodeMirror 6 是新增依赖，需按 UPD-001 的同一纪律写精确版本并进 lockfile；引入前确认与 Vite 7 / Vue 3.5 兼容"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": ["Workspace 文件服务", "文件编辑与冲突", "结构化附件", "Agent 变更审阅"],
+        "affected_components": ["main/workspace", "main/changeset", "renderer/workspace"],
+        "affected_requirements": ["FS-101", "FS-102"],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "16h",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": true
+      }
+    },
+    {
+      "id": "TASK-B08",
+      "title": "ART-101 + ART-102 受限沙箱预览、Office/PDF 转换与 Artifact 仓库",
+      "description": "在受限 utility process/sidecar 中做 Office/PDF 转换，转换产物在独立 sandbox origin 的 BrowserView 中预览（无 Node、无主 preload、无主 session、CSP 阻断脚本与任意网络），保证恶意文档既不能执行宏脚本也碰不到主 renderer。第一版覆盖 Markdown / 纯文本代码 / JSON / CSV / 图片 / 音视频 metadata / PDF / Word / Excel / PPT。同时建 Artifact 仓库：稳定 ID、类型、来源 session-turn-tool、workspace、版本、hash、created/updated、preview、原始导出路径与删除状态；支持搜索筛选、版本比较、rename、duplicate、export、show in folder、回收站恢复；聊天消息链接到 artifact 的确定版本而不是易失路径；Agent 生成产物有 generating/ready/failed/conflicted 状态，转换失败不丢原文件。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "feature",
+      "priority": "medium",
+      "effort": "large",
+      "action": "新建 packages/app/src/main/preview/convert-host.ts，用 `utilityProcess.fork(convertWorkerPath, [], { env: { NODE_OPTIONS: '' }, stdio: 'pipe' })` 起转换进程，并对每次转换施加硬上限常量 `const CONVERT_LIMITS = { maxInputBytes: 50 * 1024 * 1024, maxOutputBytes: 100 * 1024 * 1024, timeoutMs: 30_000, maxRssBytes: 512 * 1024 * 1024 } as const`，超时或超限一律 kill 并返回 `{ ok: false, code: 'timeout'|'too-large'|'oom' }`；转换进程只被授予单一输入文件路径与一个专属输出临时目录（`path.join(app.getPath('temp'), 'pibuddy-convert', randomUUID())`），禁止访问其它路径。新建 preview/preview-window.ts，用 `new BrowserWindow({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: undefined, partition: 'sandbox:preview', webSecurity: true, javascript: false } })` 承载 HTML 预览，并对该 partition 注册 `session.fromPartition('sandbox:preview').webRequest.onBeforeRequest` 拦截一切非 `file://` 且非本地转换输出目录的请求，同时注入 CSP 响应头 `default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'none'; connect-src 'none'; frame-src 'none'`。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/preview, packages/app/src/main/artifacts, packages/app/src/renderer/src/components",
+      "focus_paths": [
+        "packages/app/src/main/preview/",
+        "packages/app/src/main/artifacts/",
+        "packages/app/src/renderer/src/components/"
+      ],
+      "read_first": [
+        "packages/app/src/main/index.ts 第 5-30 行（现有 BrowserWindow webPreferences，注意 sandbox: false 是主窗口现状，预览窗口不得沿用）",
+        "packages/app/src/main/workspace/path-guard.ts（TASK-B07 产出，预览输入必须先过 root containment）",
+        "packages/app/src/main/workspace/attachment-store.ts（TASK-B07 产出的 hash 与 capability 语义）",
+        "packages/app/src/main/changeset/changeset-store.ts（TASK-B07 产出，artifact 来源 session/turn/tool 的取数口径与之一致）",
+        "packages/app/src/main/sessions/session-index.ts（B01 的 SQLite 连接与迁移模式）",
+        "packages/app/src/renderer/src/components/MessageItem.vue（消息中链接 artifact 的挂载点）",
+        "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 ART-101 / ART-102 两节与 M5 出口门禁"
+      ],
+      "depends_on": ["TASK-B07"],
+      "wave": 6,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/src/main/preview/preview-window.ts 同时含 `sandbox: true`、`nodeIntegration: false`、`contextIsolation: true`、`partition: 'sandbox:preview'` 与 `script-src 'none'`；`rg -n \"preload\" packages/app/src/main/preview/preview-window.ts` 无输出或仅出现 `preload: undefined`（预览窗口不得加载主 preload）",
+          "网络阻断单测/集成断言：向预览窗口注入一个引用 `https://example.com/x.png` 与 `<script src>` 的 HTML，断言 webRequest 拦截计数 >= 1 且该请求被 cancel；断言页面中脚本未执行（用转换输出中的可观察副作用检查，如 DOM 未被修改）",
+          "packages/app/src/main/preview/convert-host.ts 含 `CONVERT_LIMITS` 且四个上限值与 action 中一致；convert-host.test.ts 断言 (a) 超过 timeoutMs 的转换被 kill 并返回 code='timeout'；(b) 输入超过 maxInputBytes 直接拒绝且未 fork 子进程；(c) 子进程 env 中不含任何以 `PIBUDDY_` 或 `*_API_KEY` 结尾的变量",
+          "宏与外部内容默认禁用：转换 worker 对 Office 文档的解析选项显式关闭宏、远程模板、外部链接与自动数据连接，且 office-safety.test.ts 用一个含 VBA 宏与远程模板引用的 fixture 断言转换输出中不含宏内容、不含 `http://` / `https://` 外链目标",
+          "错误可行动：损坏文件、密码保护文件、超大文件、不支持类型四类 fixture 各自返回明确 code（'corrupt' | 'password-protected' | 'too-large' | 'unsupported'）与用户可读建议，且原文件在转换失败后仍存在且字节未变（单测断言 sha256 不变）",
+          "artifact 表字段完整：packages/app/src/main/artifacts/artifact-store.ts 建表含 `id, kind, source_session_id, source_turn_id, source_tool_call_id, workspace_id, version, sha256, created_at, updated_at, preview_path, export_path, status, deleted_at`，status 取值受 `'generating'|'ready'|'failed'|'conflicted'` 约束；单测断言同一逻辑产物二次生成会 version+1 而不是覆盖前一版本",
+          "消息链接确定版本：MessageItem 渲染的 artifact 链接携带 `artifactId + version` 而非文件路径；单测断言把 artifact 的文件移动到别处后，历史消息中的链接仍能解析到该版本（通过 artifact 表而非路径）",
+          "[UI-observable] 用户点击一个 Word / Excel / PPT / PDF / CSV / 图片文件，能在应用内看到内容预览；打开一个带宏的恶意 Office 样本时，预览正常显示文本内容但宏不执行、无任何外部网络请求（在开发者工具 Network 面板与 webRequest 计数中均可验证）；打开损坏或有密码的文件时显示明确原因与下一步建议，而不是空白或崩溃",
+          "[UI-observable] 用户在「产物」库看到 Agent 生成的文件，可搜索筛选、对比两个版本、重命名、复制一份、导出、在文件夹中显示、移入回收站并恢复；Agent 正在生成时该条目显示 generating 状态，生成失败显示 failed 且原始文件仍可下载",
+          "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/preview src/main/artifacts` 退出码 0"
+        ],
+        "verification": "pnpm --filter @pibuddy/app test -- src/main/preview src/main/artifacts && pnpm --filter @pibuddy/app dev 用 fixtures/office 下的正常与恶意样本各跑一遍预览，并在 packaged 构建里复测 Word/Excel/PPT/PDF/CSV/图片六类",
+        "definition_of_done": "用户可以在 PiBuddy 里安全地看 Word、Excel、PPT、PDF、CSV 和图片，带宏的恶意文档打不开宏也连不上外网；Agent 做出来的文件进入「产物」库，能找到、能比版本、能导出、误删能恢复，聊天记录里的链接永远指向当时那一版。"
+      },
+      "files": [
+        { "path": "packages/app/src/main/preview/convert-host.ts", "action": "create", "target": "ConvertHost", "change": "utilityProcess 转换宿主，四项硬上限、专属临时输出目录、env 净化、超时 kill" },
+        { "path": "packages/app/src/main/preview/convert-worker.ts", "action": "create", "target": "转换 worker 入口", "change": "按 MIME 分派 Office/PDF/CSV 解析，显式关闭宏、远程模板、外部链接与自动数据连接" },
+        { "path": "packages/app/src/main/preview/preview-window.ts", "action": "create", "target": "沙箱预览窗口", "change": "独立 partition、sandbox:true、无 preload、javascript:false、CSP 头注入、webRequest 全量拦截非本地请求" },
+        { "path": "packages/app/src/main/preview/preview-types.ts", "action": "create", "target": "PreviewKind / PreviewError", "change": "markdown/text/json/csv/image/media-metadata/pdf/word/excel/ppt 十类与 corrupt/password-protected/too-large/unsupported/timeout/oom 六类错误码" },
+        { "path": "packages/app/src/main/preview/preview-ipc.ts", "action": "create", "target": "registerPreviewIpc()", "change": "preview:open / preview:convert / preview:close，输入必须先过 assertInsideRoot" },
+        { "path": "packages/app/src/main/artifacts/artifact-store.ts", "action": "create", "target": "ArtifactStore", "change": "artifact 表与版本链（同一逻辑产物 version 递增）、状态机、回收站、搜索筛选" },
+        { "path": "packages/app/src/main/artifacts/artifact-ipc.ts", "action": "create", "target": "registerArtifactIpc()", "change": "artifacts:query / rename / duplicate / export / show-in-folder / trash / restore / compare-versions" },
+        { "path": "packages/app/src/main/ipc/registry.ts", "action": "modify", "target": "registerAllIpc()", "change": "追加 registerPreviewIpc() 与 registerArtifactIpc()" },
+        { "path": "packages/app/src/preload/api/preview.ts", "action": "create", "target": "preview 命名空间", "change": "open/convert/close，只传 attachmentId 或 relativePath，不传绝对路径" },
+        { "path": "packages/app/src/preload/api/artifacts.ts", "action": "create", "target": "artifacts 命名空间", "change": "查询、重命名、复制、导出、回收站、版本比较" },
+        { "path": "packages/app/src/preload/api/index.ts", "action": "modify", "target": "api 聚合", "change": "加入 preview 与 artifacts 命名空间" },
+        { "path": "packages/app/src/renderer/src/stores/artifacts.ts", "action": "create", "target": "useArtifactsStore", "change": "产物列表、筛选、版本比较、状态（generating/ready/failed/conflicted）" },
+        { "path": "packages/app/src/renderer/src/components/PreviewPane.vue", "action": "create", "target": "预览面板", "change": "按 PreviewKind 分派渲染；HTML/文档类嵌入沙箱窗口；错误态显示原因与建议动作" },
+        { "path": "packages/app/src/renderer/src/components/ArtifactLibrary.vue", "action": "create", "target": "产物库", "change": "搜索筛选、版本比较、rename/duplicate/export/show in folder、回收站与恢复" },
+        { "path": "packages/app/src/renderer/src/components/ArtifactLink.vue", "action": "create", "target": "消息内产物链接", "change": "按 artifactId + version 解析，点击打开预览；产物被删除时显示可恢复提示" },
+        { "path": "packages/app/src/renderer/src/components/MessageItem.vue", "action": "modify", "target": "工具产物渲染", "change": "工具生成文件时渲染 ArtifactLink 而非路径文本" },
+        { "path": "packages/app/src/renderer/src/components/AppShell.vue", "action": "modify", "target": "布局", "change": "新增「产物」侧栏入口与 PreviewPane 容器" }
+      ],
+      "implementation": [
+        "先搭 preview-window 与 webRequest 拦截，并用一个含外链与 script 的 HTML fixture 写拦截断言——这是 M5 出口门禁「恶意文档不能执行宏脚本或访问主 renderer」的直接证据",
+        "convert-host：fork 前校验输入大小与 MIME；env 只透传最小集合（PATH、TEMP），显式删除所有 *_API_KEY 与 PIBUDDY_* 变量；超时用 `AbortController` + `child.kill('SIGKILL')`",
+        "convert-worker：Office 解析库选型时优先选择纯 JS 且默认不执行宏的库，解析选项显式关闭远程模板与外部链接；PDF 走渲染为图片或结构化文本，不在预览窗口内启用 JS",
+        "十类 PreviewKind 各写一个最小 fixture 与断言；音视频只读 metadata 不解码",
+        "错误四类（corrupt / password-protected / too-large / unsupported）各配一个 fixture，断言原文件 sha256 转换前后不变",
+        "artifact-store：复用 B01 的 SQLite 连接新增 artifacts 表与 user_version 迁移；同一 (workspace_id, logical_key) 二次生成 version+1，preview_path 指向转换缓存",
+        "状态机：tool_execution_start 时插入 generating，tool_execution_end 成功置 ready、失败置 failed；外部文件被改动且 hash 与记录不符时置 conflicted",
+        "ArtifactLink：解析 artifactId+version → artifact 表 → 实际路径；产物被移入回收站时链接显示「已移入回收站，点击恢复」",
+        "打包验证：在 packaged 构建（asar:false）里复测六类文件预览，确认转换 worker 路径在打包后仍可解析",
+        "把 M5 出口门禁场景逐条过一遍并记录结果：中文空格路径、symlink、深目录、超多文件、外部修改、磁盘满、只读目录、并发编辑、恶意文档"
+      ],
+      "test": {
+        "commands": [
+          "pnpm --filter @pibuddy/app test -- src/main/preview src/main/artifacts",
+          "pnpm --filter @pibuddy/app typecheck"
+        ],
+        "unit": [
+          "packages/app/src/main/preview/convert-host.test.ts",
+          "packages/app/src/main/preview/office-safety.test.ts",
+          "packages/app/src/main/preview/preview-window.test.ts",
+          "packages/app/src/main/artifacts/artifact-store.test.ts"
+        ],
+        "integration": [
+          "packaged 构建下的六类文件预览人工验收"
+        ],
+        "success_metrics": [
+          "恶意样本零外部请求、零脚本执行",
+          "转换失败原文件 sha256 不变",
+          "同一产物二次生成 version 递增而非覆盖"
+        ]
+      },
+      "reference": {
+        "pattern": "Electron 独立 partition + sandbox BrowserWindow + webRequest 拦截；转换重活走 utilityProcess，与 B07 的 search-worker 同构",
+        "files": ["packages/app/src/main/index.ts", "packages/app/src/main/workspace/search-worker.ts"],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "预览与 artifact 是同一条链路（转换产物即 artifact 的 preview 版本），拆开会导致转换缓存与产物版本各存一份；沙箱窗口与转换进程双层隔离，是让「恶意文档不能执行宏脚本或访问主 renderer」这条门禁可被证据化验证的最小结构。",
+        "decision_factors": [
+          "主窗口当前 sandbox: false，预览绝不能复用主 session 与主 preload",
+          "asar: false 会影响 worker 路径解析，必须在 packaged 构建里复测"
+        ],
+        "tradeoffs": "PDF 采用渲染为图片/结构化文本而非富交互阅读器，牺牲部分体验换取零 JS 执行"
+      },
+      "risks": [
+        "Office 解析库若引入原生依赖会与 npmRebuild: false 冲突，选型必须优先纯 JS；若不得不用原生依赖需同步改打包配置并在 ADR 中记录",
+        "asar: false 下 utilityProcess.fork 的 worker 路径在 packaged 与 dev 下不同，必须两种模式都测，只跑 dev 会漏",
+        "音视频 metadata、PPT 等格式覆盖度取决于所选库；未覆盖的子格式必须返回 'unsupported' 并给出可行动提示，不得渲染成空白冒充成功"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": ["安全预览", "Office/PDF 转换", "Artifact 仓库"],
+        "affected_components": ["main/preview", "main/artifacts", "renderer/preview", "renderer/artifacts"],
+        "affected_requirements": ["ART-101", "ART-102"],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "16h",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": true
+      }
+    }
+  ]
+}

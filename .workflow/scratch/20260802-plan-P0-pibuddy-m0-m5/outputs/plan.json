@@ -1,0 +1,1134 @@
+{
+  "summary": "PiBuddy 桌面版 M0-M5 的合并执行计划：把分片 A（M0-M2 基础层，8 个 task）与分片 B（M3-M5 产品层，8 个 task）合并为 16 个统一编号任务、13 个波次。A 分片先补齐工程基线（git/vitest/fake Pi fixture/CI）与共享契约（@pibuddy/contract + PiEnvelope 七字段 + 脱敏日志），再依次修复 pi runtime 定位、runtime 代际状态机、会话解析一致性、Electron 安全窗口、窄 IPC 与 workspace capability、凭据金库与出网管控；B 分片在此地基上交付会话中心（SQLite 增量索引）、delta 流式与输入队列、Extension UI 全方法与 Pi 资源中心、Provider 与模型中心、main-only UpdateService 与签名发布 CI、Workspace 文件服务与 Agent changeset、受限沙箱预览与 Artifact 仓库。合并时把 B 分片对分片 A 三组里程碑产出的占位依赖全部解析为具体 task ID（M0 → TASK-001/TASK-002；M1 → TASK-003/TASK-004/TASK-005；M2 → TASK-006/TASK-007/TASK-008），并逐波次做了环检测、同波次文件写冲突求交、依赖波次序、收敛条件主观语言扫描、read_first 完整性、UI-observable 覆盖与术语一致性校验。",
+  "approach": "分层纵向切片 + 写冲突驱动的波次划分。三条原则：(1) 地基先行——无 git、无测试、无契约时任何改动都不可回滚且不可自动验证（exploration-risk cross_cutting_risks[3] 定级 critical），因此 TASK-001/TASK-002 为全部后续任务的硬前置；(2) 波次边界由「同波次不得写同一文件」决定而非由里程碑决定——因此波次 3 让 M1 的 TASK-003 与 M2 的 TASK-004 并行，波次 9/10 让 M3 与 M4 并行；(3) 每个波次闭合一个用户可观测能力而非一层——16 个 task 全部含至少 1 条 [UI-observable] 收敛条件，13 个波次全部有 UI-observable 覆盖。跨分片依赖按「B 实际需要 A 的哪个具体产出」解析：TASK-009 依赖 TASK-001/002/006/007（语义）与 TASK-008（写冲突排序）；TASK-010 依赖 TASK-005 的代际状态机；TASK-012 依赖 TASK-003 的 buildPiSpawn 与 TASK-005 的代际状态机；TASK-014 硬依赖 TASK-008 的 secret-store（同一套 safeStorage 密钥库）；TASK-015 依赖 TASK-007 的 workspaceId/attachment token。",
+  "task_ids": [
+    "TASK-001",
+    "TASK-002",
+    "TASK-003",
+    "TASK-004",
+    "TASK-005",
+    "TASK-006",
+    "TASK-007",
+    "TASK-008",
+    "TASK-009",
+    "TASK-010",
+    "TASK-011",
+    "TASK-012",
+    "TASK-013",
+    "TASK-014",
+    "TASK-015",
+    "TASK-016"
+  ],
+  "task_count": 16,
+  "complexity": "high",
+  "estimated_time": "约 121 小时（7255 分钟）纯执行工时，不含 clean VM / 三平台 runner / 签名凭据到位后的验收时间",
+  "recommended_execution": "Agent",
+  "waves": [
+    {
+      "wave": 1,
+      "tasks": [
+        "TASK-001"
+      ]
+    },
+    {
+      "wave": 2,
+      "tasks": [
+        "TASK-002"
+      ]
+    },
+    {
+      "wave": 3,
+      "tasks": [
+        "TASK-003",
+        "TASK-004"
+      ]
+    },
+    {
+      "wave": 4,
+      "tasks": [
+        "TASK-005"
+      ]
+    },
+    {
+      "wave": 5,
+      "tasks": [
+        "TASK-006"
+      ]
+    },
+    {
+      "wave": 6,
+      "tasks": [
+        "TASK-007"
+      ]
+    },
+    {
+      "wave": 7,
+      "tasks": [
+        "TASK-008"
+      ]
+    },
+    {
+      "wave": 8,
+      "tasks": [
+        "TASK-009"
+      ]
+    },
+    {
+      "wave": 9,
+      "tasks": [
+        "TASK-010",
+        "TASK-011"
+      ]
+    },
+    {
+      "wave": 10,
+      "tasks": [
+        "TASK-012",
+        "TASK-013"
+      ]
+    },
+    {
+      "wave": 11,
+      "tasks": [
+        "TASK-014"
+      ]
+    },
+    {
+      "wave": 12,
+      "tasks": [
+        "TASK-015"
+      ]
+    },
+    {
+      "wave": 13,
+      "tasks": [
+        "TASK-016"
+      ]
+    }
+  ],
+  "data_flow": {
+    "diagram": null,
+    "stages": [
+      "pi 子进程 stdout (JSONL, 仅 LF 分帧) → packages/pi-sdk/src/jsonl.ts attachJsonlReader（加缓冲上限）",
+      "PiRpcClient.handleLine → emit(event) / resolve(pending)（加 timeout + AbortSignal + stdin error 处理）",
+      "PiRuntimeSupervisor 注入 runtimeId + generation + sequence + occurredAt，按 @pibuddy/contract 的 PiEnvelope 封装",
+      "packages/app/src/main/pi/event-forwarder.ts 33ms 批处理（折叠规则改为按 assistantMessageEvent.type + contentIndex 拼接 delta）",
+      "ipc-guard（PermissionEngine: checkFrame / checkPayload / checkRate）→ 窄 channel allowlist → wc.send",
+      "preload/api/<namespace>.ts 分层 → contextBridge（index.d.ts 由 api 聚合对象推导，不手写）",
+      "renderer store 按 sessionId + runtimeScope 归一化，丢弃 generation 落后与 stateSequence 落后的事件",
+      "命令方向反向：renderer 窄方法 → preload api → ipc-guard schema.parse → supervisor → pi stdin（workspaceId / attachment token，不传绝对路径）",
+      "旁路持久化：SQLite session-index（JSONL 只读不改写）+ secret-store（safeStorage）+ artifact-store + changeset-store"
+    ]
+  },
+  "design_decisions": [
+    "契约唯一真相源为 packages/contract（包名 @pibuddy/contract），main / preload / renderer / pi-sdk 四方共用；B 分片原本零处引用该包，合并时已为 8 个 B 任务补 read_first 并追加「唯一契约包」收敛条件。",
+    "事件信封字段名以分片 A 的 PiEnvelope 为准（protocolVersion / workspaceId / sessionId / runtimeId / generation / sequence / occurredAt），未知 protocolVersion 一律 fail closed。",
+    "B05（TASK-011）的 UpdateState.sequence 与信封字段 sequence 同名异义，按 A 优先重命名为 stateSequence，避免两套单调序号在同一事件链上混淆。",
+    "B04（TASK-014）原文的 \"vault\" 统一为 A08（TASK-008）的 packages/app/src/main/secret-store.ts；全项目只允许一套 safeStorage 密钥库。",
+    "B07（TASK-015）read_first 中的「分片 A M2（TASK-007）产出的 PermissionEngine 实现文件」解析为具体的 packages/app/src/main/ipc-guard.ts（接口声明见 packages/contract/src/ports.ts）。",
+    "B01（TASK-009）的 SQLite sessions 表原本以 workspace_root 绝对路径为键，与 A07 的不透明 workspaceId 冲突；合并时追加 workspace_id 列与「renderer 侧 grep workspace_root 输出 0」的收敛条件。",
+    "toolRuns 刻意不在 M0 迁移（TASK-002 收敛条件锁定 \"toolRuns = reactive\" 出现 1 次），避免 ToolActivity.vue:39 的「run 为 undefined 即 running」在分区后让所有工具卡片永久转圈；该改造推迟到 TASK-010 并配显式三态。",
+    "波次划分以「同波次 files[].path 交集为空」为硬约束：TASK-008 与 TASK-009 无语义依赖，但同改 ipc.ts / preload/index.ts / preload/index.d.ts，故加一条写冲突排序边；TASK-010 与 TASK-012 同建 ipc/pi-ipc.ts，同样加排序边。",
+    "结构性不可达门禁（M4 签名凭据、clean VM、三平台 runner）不标为可达成，按 doc:455 记为 blocked-by-credential / not-tested，并在 plan.unreachable_exit_gates 中逐条列出。",
+    "【本轮修订】会话历史取数模型定案（CRITICAL-1）：pi 0.83.0 的 get_entries 只有 since 游标，rpc.md:696 原文为 \"get only entries strictly after it\"，且全协议无 before / limit / 反向分页参数。因此 TASK-010 的历史加载拆成两条路径 —— 向后（新消息）由主进程用 get_entries + since 增量拉取；向前（更早历史）由 TASK-009 新增的 packages/app/src/main/sessions/session-history.ts 的 readEntriesBefore() 按 JSONL 字节 offset 本地反向分页，不经 pi RPC。JSONL 为唯一真相源，SQLite 仅为索引，一致性判据固定为 mtime_ms + size_bytes 短路加 content_hash 检测外部截断/重写；失配时返回 stale 并先 syncWorkspace 再重试一次。",
+    "【本轮修订】TASK-010 对 TASK-009 的依赖由「口径一致」升级为实现硬依赖：反向分页的实现、sessions:read-history IPC 通道与 preload 的 readHistoryBefore 方法均由 TASK-009 产出，TASK-010 只做消费。依赖边未变（TASK-010.depends_on 原本即含 TASK-009），故依赖图与波次划分不受影响。",
+    "【本轮修订】Office/PDF 解析库选型定案（W-1）：mammoth 1.12.0（DOCX）、exceljs 4.4.0（XLSX）、unpdf 1.8.0（PDF 文本抽取）、papaparse 5.5.4（CSV）、jszip 3.10.1 + fast-xml-parser 4.5.3（PPTX 最小实现）。六者均为纯 JS、依赖闭包内无 node-gyp 构建与 .node 文件，与 electron-builder.yml 的 npmRebuild: false 相容。显式排除 xlsx@0.18.5（停更 + 未修复的 CVE-2023-30533）与 pdfjs-dist / pdf-parse（均把 @napi-rs/canvas 列为 dependencies）。TASK-016 的 implementation[0] 是机械化验证闸门。",
+    "【本轮修订】asar 取值全计划统一为 true（W-2）：以 TASK-003（RUN-001）为准。pi-runtime 经 extraResources 外置，TASK-016 的 convert-worker.js 经 asarUnpack 外置并在运行期把路径中的 app.asar 重写为 app.asar.unpacked。TASK-011 / TASK-013 / TASK-016 中原先按 asar: false 撰写的风险项、ADR 记录项与打包验证步骤已同步改写。",
+    "轮次二裁定：插话传输方式全计划统一为 prompt + streamingBehavior，不使用原生 steer / follow_up 命令（以 TASK-007 c[4] 为准，TASK-010 c[5] 已同向改写）。SES-102 要求的「立即插话」/「下一轮处理」是产品语义区分，仍必须实现，只是传输层统一走 prompt 的两个 streamingBehavior 取值（\"steer\" / \"followUp\"）。裁定依据（已核 pi-coding-agent 0.83.0 原文）：(1) 投递语义逐字相同——rpc.md:62 与 rpc.md:82 对 steer 的描述同为 \"delivered after the current assistant turn finishes executing its tool calls, before the next LLM call\"，rpc.md:63 与 rpc.md:104 对 followUp 同理；(2) 原生命令有净损失——rpc.md:82 / rpc.md:104 明文 \"Extension commands are not allowed (use `prompt` instead)\"，而 rpc.md:67 规定 prompt 路径下扩展命令 \"executes immediately even during streaming\"，改原生命令会让用户在助手流式运行期间无法调用斜杠扩展命令，且无任何补偿收益；(3) 二者进入同一队列——dist/core/agent-session.js:832-838 显示 prompt 的 streamingBehavior 分支即内部调用 _queueSteer / _queueFollowUp，故 rpc.md:347 set_steering_mode 与 rpc.md:1018 queue_update 对二者一致适用。附带事实：app.ts:406 现状已是 prompt + streamingBehavior:\"steer\"，改原生命令属主动回退。follow_up 路径按同一口径统一，不单独裁定。",
+    "【轮次三裁定 1 · IPC 守卫落点】守卫必须是结构性的，不得钉死在任何单一文件。全部 IPC handler 只能经 packages/app/src/main/ipc-guard.ts 的 registerHandler 包装器注册，包装器内做 senderFrame 校验 + zod schema 校验 + CHANNEL_MAX_BYTES 尺寸校验 + rate limit 四步；ipcMain.handle / ipcMain.on 只允许出现在 ipc-guard.ts 内。收敛条件为结构断言：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测 13，全部在 ipc.ts:89-173）。理由：原设计把 assertMainFrame 钉在 ipc.ts，TASK-009 在 wave 8 把 handler 迁到 ipc/sessions-ipc.ts 后，其后约 50 个新 channel 全部无守卫，SEC-002 静默失效且 CI 仍退出 0（CT-05）。该断言不随 handler 迁移失效。落地位置：TASK-007 建立守卫；TASK-008/009/011/012/013/014/015/016 各带一条同形结构断言 + 本任务新增 channel 的 registerHandler 计数。",
+    "【轮次三裁定 2 · 附件注册表】全计划只允许一套，归 TASK-007 所有：packages/app/src/main/attachment-registry.ts。TTL 取 ATTACHMENT_TTL_MS = 1800000（30 分钟滑动过期，resolve 命中即续期），并导出 revokeAllForSession / revokeAll 在会话切换与应用退出时显式撤销全部未消费 token。理由：5 分钟对「用户添加附件后再打一段长文字」过短；24 小时对一次性 capability 过长，违背 SEC-003 的短期 capability 语义。TASK-015 / TASK-016 只消费不新建 —— TASK-015 原 files 中的 workspace/attachment-store.ts 已改为 modify attachment-registry.ts，标识字段名全计划统一为 `token`（撤销 id / attachmentId 两种称谓，CT-16/CT-17）。落地位置：TASK-007 c[10]/c[13]、TASK-015 c[2]/c[11]/c[22]、TASK-016 c[24]。",
+    "【轮次三裁定 3 · workspace 身份】workspaceId 必须持久化，禁止进程级 UUID。registerWorkspace 用 fs.realpathSync.native 求 canonical root，以其 sha256 派生稳定值并经 writeJsonAtomic 一次性持久化到 <userData>/workspaces.json，注册后不再变化；renderer 只见该不透明 ID 与 displayPath。理由：原设计用 randomUUID 每进程重新生成，而 TASK-009 的 sessions.workspace_id 声明 NOT NULL 且 query 依其过滤，重启后旧行外键悬空、历史会话表现为「全部消失」且不报任何错（CT-19）。收敛条件断言跨重启相等（两次 registerWorkspace 同一 realpath 返回同值，且与落盘记录相等）。落地位置：TASK-007 c[9] 与其 action / files[1] / implementation[2]、TASK-009 c[10]。",
+    "【轮次三裁定 4 · 日志器】全计划只允许一个，归 TASK-002 所有：packages/app/src/main/logger.ts（结构化 JSONL + 轮转），脱敏抽到 packages/app/src/main/logger-redact.ts 由其 import。其后所有任务一律消费，不得新建第二个实现 —— TASK-013 原本要新建 main/logging/logger.ts（electron-log）与 logging/redact.ts，已改为 modify 前两个文件。electron-log 的锁版仅供 electron-updater 内部使用，autoUpdater.logger 以适配器接到 createLogger('updater')。收敛条件为结构断言：`rg --no-filename -c 'export function createLogger' packages/app/src/main | awk sum` === 1、`rg --no-filename -c 'export (function|const) redactSecrets' packages/app/src/main | awk sum` === 1（后者同时修掉 SYS-2：原 `grep -rc 'function redactSecrets'` 对箭头函数导出会得 0 而误杀正确实现）。落地位置：TASK-002 c[10]、TASK-011 c[24]、TASK-013 c[4]/c[5]/c[12] 与其 action/read_first/files、TASK-014 c[21]。",
+    "【轮次三裁定 5 · 会话枚举】单一路径。TASK-006 只拥有 resolver 纯函数（packages/app/src/main/sessions/session-dir.ts 的 encodeSessionDirSegment 与四级 sessionDir 优先链，该文件不碰文件系统故能原样存活）；枚举实现在任何时刻只有一个 —— TASK-006 在 wave 5 交付过渡版 sessions/session-repository.ts（异步、取代 sessions-store.ts 的同步全量枚举），TASK-009 在 wave 8 用 SQLite 索引版 sessions/session-index.ts 原地替换并删除前者。收敛条件：`rg --no-filename -c 'export async function listSessionsForWorkspace' packages/app/src/main | awk sum` 恒为 1；`test ! -e packages/app/src/main/sessions-store.ts`（旧的 fs.readFileSync 整文件 split('\\n') 全量解析路径整体消失，实测位于 sessions-store.ts:49）；TASK-009 另断言 `test ! -e .../sessions/session-repository.ts` 且 MAX_SESSIONS_SCANNED 命中为 0（同时消解 200 vs 500 上限的 near-miss）。落地位置：TASK-006 c[0]/c[1]/c[2]/c[3]、TASK-009 c[1]/c[4]。",
+    "【轮次三裁定 6 · 契约类型边界】跨进程类型唯一定义在 @pibuddy/contract。探查实证 7 处重复：具名 4 个（AppSettings 在 main/settings.ts:5 与 preload/index.d.ts:28；SessionMeta 在 main/sessions-store.ts:5 与 preload/index.d.ts:19；PickedFile 在 preload/index.d.ts:38；StartResult 在 preload/index.d.ts:13）+ 内联匿名 3 处（preload/index.ts:15 的 pi:start 参数、:35 的图片返回、:50 的 STT 请求）。收敛条件：具名 4 个逐一 `rg --no-filename -c 'export (interface|type) <NAME>\\b' packages/app/src packages/pi-sdk/src | awk sum` === 0 且在 packages/contract/src 中 === 1；内联 3 处收敛为具名的 SttTranscribeRequest / ReadImageResult / PiStartParams 并由 preload 引用。另由 TASK-002 建 scripts/check-contract-uniqueness.mjs 作为机器闸门，替代 TASK-009..016 中 8 条逐字重复、后半句无机器判据的「契约唯一性」文字条。",
+    "【轮次三 · CT-21 测试发现范围】vitest 配置唯一且在仓库根，由 TASK-001 建立，include 覆盖 packages/*/src/**/*.{test,spec}.ts 与 packages/*/test/**/*.{test,spec}.ts 两种放置约定；禁止任何任务新建第二个配置（TASK-009 原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除 —— 一旦触发，packages/app/test/ 下 11 个 A 分片 spec 全部脱离发现范围而 pnpm -w test 仍退出 0）。闸门为 scripts/check-test-discovery.mjs：磁盘 spec 集合 D ⊄ vitest 实际发现集合 F 即退出码 1 并列出遗漏文件，接入 CI。注：断言的文件计数排除 ./source（codex 与 hermes-studio 为只读参考树，不在 pnpm-workspace.yaml 的 packages/* 内，其自带的 vitest.config.ts 与本工作区无关）。所有下游任务的测试命令统一为 `pnpm -w test -- <路径>`，消解「packages/app 的 test 脚本仅条件式添加」的 near-miss。",
+    "【轮次三 · CT-04 信封与折叠的顺序】折叠在信封之后执行，判据读信封的 typed payload。PiEnvelope 显式声明第 8 个字段 payload（TASK-002 c[2]）；pi-supervisor.ts 负责 generation/sequence/wrapEnvelope，33ms 批处理与折叠一律在 packages/app/src/main/pi/event-forwarder.ts（TASK-005 建立、TASK-010 升级，同时消解 CT-03 的转发器归属分歧）。折叠入口签名逐字锁定为 `export function collapseEnvelopes(input: PiEnvelope<AgentEvent>[]): PiEnvelope<AgentEvent>[]` —— 类型层面使裸 AgentEvent fixture 无法通过 typecheck；判据字段路径为 payload.assistantMessageEvent，并断言 `e.assistantMessageEvent` / `env.assistantMessageEvent` 命中为 0。理由：信封先于折叠时原判据恒为 undefined，折叠退化为透传，而 200-delta 单测因直接投喂裸事件仍然通过。落地位置：TASK-002 c[2]、TASK-005 c[6]/c[7]、TASK-010 c[0]/c[1]/c[2]。",
+    "【轮次三 · CT-12 存储选型定稿（实测）】本轮在真实环境实测：packages/app 锁定的 electron 43.2.0 内 `process.versions.node` = 24.18.0，`require('node:sqlite')` 成功。故 TASK-009 采用 node:sqlite，electron-builder.yml 的 npmRebuild 保持 false，与 TASK-016 c[14] 及其 check-pure-js-deps 闸门一致，CT-12 的「node:sqlite 不可用时需改 npmRebuild=true」分支被事实消除。TASK-001 新增 scripts/probe-node-sqlite.mjs 把该探测固化为 wave 1 的可复验闸门（必须在 ELECTRON_RUN_AS_NODE 下探测，不得用宿主 node 代替）。若未来 electron 升级使探针转 FAIL，回退方案是纯 JS/WASM 的 sql.js，仍不得改 npmRebuild、不得引入 better-sqlite3 等原生依赖。",
+    "【轮次三 · 单点实现原则的两处推论】(a) 原子写唯一实现 packages/app/src/main/fs-atomic.ts 的 writeJsonAtomic（TASK-002 建），settings.json / auth.json / workspaces.json / health marker 四处一律复用，`rg --no-filename -c 'fsyncSync|renameSync' packages/app/src/main -g '!fs-atomic.ts' | awk sum` === 0 —— 同时修掉 near-miss「auth.json 裸 writeFileSync 非原子而 settings.json 要求 tmp+fsync+rename」。(b) 收容原语唯一实现 workspace-registry.ts 的 resolveInWorkspace（TASK-007 建），rel 为空串（root 自身）视为放行；TASK-015 原设计的 workspace/path-guard.ts + assertInsideRoot（以 rel === '' 拒绝 root 自身，判定方向相反）已整体撤销，TASK-016 c[19] 同步改为 resolveInWorkspace（CT-18）。",
+    "【轮次三 · CT-24 凭据落盘口径收窄】TASK-008 的 definition_of_done 由「API key 永不明文落盘」收窄为「PiBuddy 自有密钥（STT 等由 PiBuddy 直接使用的凭据）永不明文落盘，safeStorage 不可用时 fail-closed」；provider 凭据是显式例外 —— pi 运行时自身要读 ~/.pi/agent/auth.json，该文件由 TASK-014 以 0o600 + writeJsonAtomic + 写前备份的文件权限模型保护，不纳入该约束。理由：不作此收窄时，Linux 上 safeStorage 缺失会让实现者拒写 auth.json，PROV-101 的目标直接失败。",
+    "【轮次三 · CT-25/CT-26/CT-22 三处状态与签名口径】(a) 会话级状态清空改为注册表机制：TASK-006 在 stores/app.ts 导出 registerSessionScopedReset，resetSessionScopedState 遍历回调执行；TASK-012 把 uiRequests / statusTexts 迁到 stores/extensionUi.ts 时由该 store 自行注册，TASK-006 c[10] 的六项行为断言逐字不变仍须通过 —— 断言的是行为不是字段位置。(b) send() 签名全计划锁定为 `export async function send(opts: SendOptions = {}): Promise<boolean>`，TASK-006/007/010/014/015 五个任务各带一条逐字断言；TASK-014 的图片能力守卫改为 `return false` 而非裸 return。(c) 传输层丢弃规则唯一实现 contract 的 shouldAcceptEnvelope，全部渲染侧 store 调用它；stateSequence 降级为 update 域内「快照 vs 事件」对账用的计数器，不承担传输层去重。",
+    "【轮次三 · 断言写法统一（SYS-1 / look-around）】全计划三条硬性写法约定，由 TASK-001 落入 doc/baseline-2026-08-02.md 并逐条自证：(1) 否定型断言一律 `test -e <PATH> && [ \"$(rg -c '<PAT>' <PATH> | wc -l)\" -eq 0 ]`，路径不存在时 test 失败即判 FAIL —— 禁用 `grep -rc`（对目录输出多行 file:count、对缺失路径退出码 2，会让大量否定断言被「任务没做」蒙混过关）；(2) 计数型断言一律 `[ \"$(rg -c --no-filename '<PAT>' <PATH> | awk '{s+=$1} END{print s+0}')\" -ge N ]`；(3) 禁止正则 look-around —— 本轮实测 ripgrep 的 Rust regex 报 `error: look-around ... is not supported` 并以退出码 2 终止（TASK-013 c[3] 原文即为此形，既不能通过也不能失败），需要「匹配 A 但不匹配 B」时用 `rg A PATH | rg -vc B` 管道（已实测可用）。TASK-015 c[4] 的 JS 侧 look-behind 亦改为不依赖 look-around 的等价写法以统一口径。",
+    "[裁定 · IPC handler 目录归属 —— errata-2 终裁] 规则三条：(1) 有明确功能域的 handler 放入该域目录 —— packages/app/src/main/sessions/sessions-ipc.ts、main/pi/pi-ipc.ts、main/update/update-ipc.ts、main/providers/providers-ipc.ts、main/workspace/workspace-ipc.ts、main/preview/preview-ipc.ts、main/artifacts/artifact-ipc.ts；(2) 无单一功能域的杂项 handler（dialog / shell / settings / file / stt）平铺为 packages/app/src/main/misc-ipc.ts，不新建 main/misc/ 目录；(3) 横切设施平铺在 main/ 下 —— 守卫 packages/app/src/main/ipc-guard.ts 与聚合器 packages/app/src/main/ipc-registry.ts。依据 doc/PiBuddy-product-grade-coding-agent-prompt.md 第 344 行推荐目录 `src/main/update/{update-types,update-service,update-ipc,update-errors,release-integrity}.ts`（update 域的 IPC 文件位于 update 目录内）。不存在、也不创建以 main/ 加 ipc 子目录形式的集中 handler 目录；全计划任何字段都不得再出现该目录前缀，errata-2 已实测该前缀在 plan.json 与 16 个 task 文件中的命中数为 0。配套：裁定1 的 IPC 守卫只保留结构性断言（全仓 ipcMain 直接注册数为 0，改前实跑 13），不再把 registerHandler 计数钉死到具体 handler 文件路径。errata-1 disputes 的 D-1 至此结清。"
+  ],
+  "shared_context": {
+    "patterns": [
+      "Ports & Adapters：packages/contract/src/ports.ts 声明 PiRuntimeSupervisor / SessionRepository / SettingsStore / PermissionEngine / UpdateService 五个接口，实现分散在 main 侧同名模块",
+      "Capability token：workspace-registry.registerWorkspace 以 canonical realpath 的 sha256 派生并持久化不透明 workspaceId（裁定3，禁止 randomUUID）；attachment-registry.issue 返回 ATTACHMENT_TTL_MS = 1800000 的 30 分钟滑动过期 token（裁定2，全计划唯一注册表，标识字段名统一为 token）；渲染进程不持有绝对路径",
+      "Envelope + fail closed：所有跨进程事件经 parseEnvelope 校验，protocolVersion !== PROTOCOL_VERSION 即拒绝",
+      "单调序号去重：传输层丢弃规则唯一实现为 contract 的 shouldAcceptEnvelope（按 generation + envelope.sequence），全部渲染侧 store 一律调用它；UpdateState.stateSequence 只用于 update 域内「快照 vs 事件」对账，不承担传输层去重（CT-22：否则同一规则被实现两遍）",
+      "收容判定统一口径：const rel = path.relative(root, realpath(target)); 拒绝 rel === \"\" / rel.startsWith(\"..\") / path.isAbsolute(rel)，严禁 real.startsWith(root) 前缀判定",
+      "增量索引旁路：SQLite 只做索引，JSONL 会话文件保持唯一真相源且只读不改写（有前 N 字节 byte-equal 断言）",
+      "main-only 敏感面：feed URL / token / API key / 绝对路径一律不出 main；renderer 只拿快照 + 脱敏错误 + 布尔态（如 sttApiKeyConfigured / sttApiKeyLast4）",
+      "IPC 注册单一入口：ipcMain.handle / ipcMain.on 只允许出现在 packages/app/src/main/ipc-guard.ts；所有 handler 经 registerHandler(channel, schema, handler) 注册，四重校验（frame / zod / CHANNEL_MAX_BYTES / rate limit）集中在包装器内（裁定1）",
+      "单点实现清单（全仓各恰 1 份，均有结构断言）：createLogger、redactSecrets、writeJsonAtomic、resolveInWorkspace、listSessionsForWorkspace、shouldAcceptEnvelope、ATTACHMENT_TTL_MS、vitest.config.ts"
+    ],
+    "conventions": [
+      "ESM + strict TypeScript；vue-tsc --noEmit 与 tsc --noEmit 为基础闸门，pnpm -w test 为回归闸门",
+      "pnpm workspace 单仓；新增包必须同时登记到 packages/app/tsconfig.node.json 与 tsconfig.web.json 的 include",
+      "TS 标识符 camelCase（workspaceId / runtimeId / stateSequence），SQLite 列名 snake_case（workspace_id / source_path / created_at）——两套命名域不混用",
+      "中文用户可见文案；日志与错误码保持英文；日志默认不记录 prompt 正文、API key、Authorization 与完整环境变量",
+      "JSONL 分帧仅以 LF 为记录分隔符、容忍尾部 \\r，禁止使用 Node readline（会按 U+2028/U+2029 分行）",
+      "收敛条件必须可执行且可证伪。三条硬性写法：(1) 否定型 `test -e <PATH> && [ \"$(rg -c '<PAT>' <PATH> | wc -l)\" -eq 0 ]`，路径不存在即 FAIL，禁用 grep -rc；(2) 计数型 `[ \"$(rg -c --no-filename '<PAT>' <PATH> | awk '{s+=$1} END{print s+0}')\" -ge N ]`；(3) 禁止正则 look-around（ripgrep 实测退出码 2），用 `rg A PATH | rg -vc B` 表达「匹配 A 但不匹配 B」。禁止「正确 / 合理 / 一致 / 正常 / 可读 / 明确 / 之类的 / 附近」等不可测措辞；禁止含人工判断分支的「X 或 Y」（两个分支都必须机器可判）；纯否定断言必须与一条正向断言配对，避免被「任务没做」满足",
+      "每个交付波次至少 1 条 [UI-observable] 收敛条件，且以 doc/baseline-2026-08-02.md 的 15 项闭环功能清单为回归对照"
+    ],
+    "dependencies": [
+      "@earendil-works/pi-coding-agent@0.83.0（真相源：dist/*.js 与 docs/*.md；exports 仅声明 types + import 条件，createRequire().resolve 必然抛 ERR_PACKAGE_PATH_NOT_EXPORTED）",
+      "Electron（BrowserWindow / safeStorage / utilityProcess / shell / webUtils）",
+      "zod ^4.4.3（当前仅作为 pi 的传递依赖存在于 lockfile，需由 TASK-002 提为直接依赖）",
+      "vitest（TASK-001 引入，vitest.workspace.ts 统一入口）",
+      "node:sqlite DatabaseSync（TASK-009 引入，session-index.db 与后续 changeset / artifacts 表共用同一连接）",
+      "electron-updater 6.8.9 / electron-log 5.4.4 / electron-builder 26.15.3（TASK-011 精确版本锁定，无 ^）",
+      "CodeMirror（TASK-015 文件编辑器）、MarkdownIt + highlight.js/lib/common（现有，html:false 为唯一 XSS 防线）"
+    ]
+  },
+  "requirement_traceability": [
+    {
+      "requirement_id": "QA-001",
+      "milestone": "M0",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-risk.json D_high_risk_refactor_hotspots.context.no_git_repository：在 D:/selftool/pi-ui 执行 git status 返回 \"fatal: not a git repository\"，.git 目录不存在",
+      "task_ids": [
+        "TASK-001"
+      ],
+      "verification_status": "implemented"
+    },
+    {
+      "requirement_id": "QA-002",
+      "milestone": "M0",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-risk.json context.no_tests：packages 下无 *.test.ts / *.spec.ts / vitest.config.*；packages/app/package.json:10-16 与 packages/pi-sdk/package.json:8-10 的 scripts 中无 test",
+      "task_ids": [
+        "TASK-001"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "QA-003",
+      "milestone": "M0",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-risk.json context.no_tests（同上，无任何 fixture）+ exploration-implementation.json RUN-002 evidence packages/app/src/main/ipc.ts:14-28（无代际标识，旧 generation 延迟事件无法构造回归用例）",
+      "task_ids": [
+        "TASK-001"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "QA-004",
+      "milestone": "M0",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-architecture.json absent_summary.shared_contract_package：\"absent — pi-sdk holds protocol types only; app-layer contract types (AppSettings, SessionMeta, PickedFile, StartResult) are duplicated between main and preload\"",
+      "task_ids": [
+        "TASK-002"
+      ],
+      "verification_status": "implemented"
+    },
+    {
+      "requirement_id": "OBS-001",
+      "milestone": "M0",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-architecture.json section_2.identifier_presence：protocolVersion / workspaceId / sessionId(on event wire) / runtimeId / generation / sequence / occurredAt 七项全部 absent；runtimeId 仅以 webContents id 存在于 ipc.ts:14,24,93,104；generation 缺失见 ipc.ts:93；sequence 仅为 client.ts:62,155 的 RPC 请求号",
+      "task_ids": [
+        "TASK-002",
+        "TASK-005"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "OBS-002",
+      "milestone": "M0",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-implementation.json SEC-004 evidence：packages/app/src/main/settings.ts:5-13（sttApiKey 与普通配置同级明文存放）与 packages/app/src/main/ipc.ts:131-134（settings:get 把含明文 sttApiKey 的完整对象回传渲染进程）",
+      "task_ids": [
+        "TASK-002",
+        "TASK-008"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "RUN-001",
+      "milestone": "M1",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-implementation.json RUN-001：packages/app/src/main/pi-launcher.ts:12-29 用 createRequire().resolve 解析入口；@earendil-works/pi-coding-agent@0.83.0 package.json:13-22 的 exports 只声明 types+import 条件；runtime-experiment 实测抛 ERR_PACKAGE_PATH_NOT_EXPORTED",
+      "task_ids": [
+        "TASK-003"
+      ],
+      "verification_status": "packaged-smoke"
+    },
+    {
+      "requirement_id": "SES-001",
+      "milestone": "M1",
+      "current_status": "partial",
+      "evidence_file_line": "exploration-implementation.json SES-001：packages/app/src/main/sessions-store.ts:19-22 的 sessionDirFor 与 pi dist/core/session-manager.js:241-247 的 getDefaultSessionDirPath 对拍，Windows 三例 MATCH、POSIX \"/home/u\" MISMATCH（多出前导 \"-\"）；且未感知 dist/config.js:396-419 的 PI_CODING_AGENT_SESSION_DIR 与 settings.md:204-210 的 sessionDir",
+      "task_ids": [
+        "TASK-006"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "RUN-002",
+      "milestone": "M1",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-implementation.json RUN-002：packages/app/src/main/ipc.ts:14-28（clients Map 只以 webContentsId 为键，无代际标识）、ipc.ts:89-104（pi:start 直接替换 client）、packages/pi-sdk/src/client.ts:104-112（stop 后进程真正退出仍 emit exit）、packages/app/src/renderer/src/stores/app.ts:287-293（onExit 无 runtimeId，误报「智能体进程意外退出」）",
+      "task_ids": [
+        "TASK-005"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "RUN-003",
+      "milestone": "M1",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-implementation.json RUN-003：packages/pi-sdk/src/client.ts:153-165（send 无 timeout）、client.ts:30-40（PiClientOptions 无 timeout/signal，全文件 AbortSignal 零命中）、client.ts:146-151（write 未注册 stdin error，丢弃返回值无背压）、packages/pi-sdk/src/jsonl.ts:13-28（buffer 无上限）",
+      "task_ids": [
+        "TASK-005"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "SES-002",
+      "milestone": "M1",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-implementation.json SES-002：packages/app/src/renderer/src/stores/app.ts:428-440（newTask 只判 resp.success，不读 data.cancelled）、app.ts:442-461（openSession 同）、app.ts:402-421（发送失败路径丢用户输入）、app.ts:331-347（start 后用全局 settings 无条件覆盖会话记录的 model/thinkingLevel）；本轮已并入原先被误升格为独立需求 ID 的 doc:207 子条目（runtime/session 更换时清理或按 scope 恢复 queue、Extension UI request、status、live assistant、tool run），其证据为：exploration-risk.json C_extension_ui_uncovered_methods.covered_but_incomplete[1]：packages/app/src/renderer/src/stores/app.ts:75（uiRequests 为全局 ref，不按 sessionId 分区）、app.ts:287-293（onExit 不清）、app.ts:317-321（start 不清）",
+      "task_ids": [
+        "TASK-006",
+        "TASK-007"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "SEC-001",
+      "milestone": "M2",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-implementation.json SEC-001：packages/app/src/main/index.ts:14-20（sandbox: false 显式关闭）、main/index.ts:5-30（无 will-navigate / setWindowOpenHandler / 权限请求拦截）、packages/app/src/renderer/index.html:1-12（无 CSP meta）、main/index.ts:25-27（ELECTRON_RENDERER_URL 无白名单）",
+      "task_ids": [
+        "TASK-004",
+        "TASK-003"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "SEC-002",
+      "milestone": "M2",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-implementation.json SEC-002：packages/app/src/preload/index.ts:14-22（暴露通用 command(Record<string,unknown>)）、packages/app/src/main/ipc.ts:115-117（原样透传到 pi stdin）、ipc.ts:88-213（senderFrame/validateSender 全文件命中 0）、ipc.ts:156-162（file:read-image 接受任意绝对路径）、ipc.ts:164-170（shell.openPath 接受任意字符串）；pi docs/rpc.md:454-460 原生提供 bash 直执行",
+      "task_ids": [
+        "TASK-007"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "SEC-003",
+      "milestone": "M2",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-architecture.json section_2.identifier_presence.workspaceId：\"absent — workspace is only a raw filesystem path string, passed per-call (ipc.ts:91, ipc.ts:127) and stored as AppSettings.workspace (settings.ts:6)\"；配合 exploration-implementation.json SEC-002 的 ipc.ts:156-162 任意路径读取",
+      "task_ids": [
+        "TASK-007"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "SEC-004",
+      "milestone": "M2",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-implementation.json SEC-004：packages/app/src/main/settings.ts:5-13（sttApiKey 明文）、settings.ts:27-32（非原子写）、packages/app/src/main/ipc.ts:131-134（明文回传 renderer）、ipc.ts:173-212（baseUrl 完全来自 renderer，SSRF）、ipc.ts:200-204（fetch 无 signal/超时）、ipc.ts:185-197（audio 无大小上限、mimeType 无白名单）",
+      "task_ids": [
+        "TASK-008"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "SEC-005",
+      "milestone": "M2",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-risk.json A_existing_closed_loop_features[13] (A14 markdown 缓存)：packages/app/src/renderer/src/markdown.ts:22-29 只设置 target/rel，未做 scheme 白名单；MessageItem.vue:78-82 用 v-html 渲染，html:false 是当前唯一 XSS 防线。附件侧见 exploration-implementation.json SEC-002 evidence ipc.ts:79-86（IMAGE_MIME 仅按扩展名查表，无 magic bytes）",
+      "task_ids": [
+        "TASK-004",
+        "TASK-007"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "SES-101",
+      "milestone": "M3",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-risk.json A_existing_closed_loop_features[11] (A12 会话列表与切换)：packages/app/src/main/sessions-store.ts:24-47（listSessions 在 Electron main 线程同步 readdirSync + statSync + 全量读文件）、sessions-store.ts:49-82（parseSessionFile 整文件读入内存逐行 JSON.parse）",
+      "task_ids": [
+        "TASK-009"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "SES-102",
+      "milestone": "M3",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-risk.json A_existing_closed_loop_features[0] (A01 流式文本增量)：stores/app.ts:146-155 每次 message_update 做整对象浅拷贝，消费全量快照而非 delta；A15 (33ms 事件合并)：packages/app/src/main/ipc.ts:48-68 折叠只保留最后一条 message_update，delta 化后即静默丢字符；A13：ChatView.vue:14-15 为尾部切片而非虚拟滚动",
+      "task_ids": [
+        "TASK-010"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "PROV-101",
+      "milestone": "M3",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-implementation.json SEC-004 evidence packages/app/src/main/ipc.ts:173-212（唯一的 provider 侧配置是 renderer 直传的 stt baseUrl/apiKey）；exploration-risk.json A07 模型切换 implementation_fact：stores/app.ts:333-341 启动时用全局 settings 无条件覆盖会话记录的模型；SettingsModal.vue:79-82 仍引导用户去终端 /login",
+      "task_ids": [
+        "TASK-014"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "EXT-101",
+      "milestone": "M3",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-risk.json C_extension_ui_uncovered_methods：setWidget（types.ts:242,255-256 有类型无 handler）与 setTitle（types.ts:243,245）命中 stores/app.ts:262-263 的 default 分支静默丢弃；dialog timeout（types.ts:250 仅类型声明，全库无运行时使用，ExtensionUiHost.vue 73 行不含定时器）；孤儿响应经 pi-sdk/src/client.ts:177 直写 stdin 被静默吞掉；unhandled_agent_events 5 类",
+      "task_ids": [
+        "TASK-012"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "EXT-102",
+      "milestone": "M3",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-risk.json B_unused_rpc_commands.summary_counts（docs 中大量 RPC 命令从未被 wrap 或调用，含资源枚举类）+ exploration-architecture.json absent_summary.PermissionEngine: \"absent\"（无 trust 决策落点）",
+      "task_ids": [
+        "TASK-012"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "UX-101",
+      "milestone": "M3",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-architecture.json section_4_pinia_store_state_inventory：单一扁平 store，无 onboarding / 状态中心概念；exploration-implementation.json SES-002 evidence stores/app.ts:402-421（失败仅 notify，无分级错误与状态中心）",
+      "task_ids": [
+        "TASK-014"
+      ],
+      "verification_status": "implemented"
+    },
+    {
+      "requirement_id": "UPD-001",
+      "milestone": "M4",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-architecture.json absent_summary.UpdateService: \"absent\"；仓库无 publish 块、无 electron-updater 依赖、无任何更新代码（tasks-partB TASK-B05 read_first 已核对 packages/app/electron-builder.yml 与 packages/app/package.json）",
+      "task_ids": [
+        "TASK-011"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "UPD-002",
+      "milestone": "M4",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-architecture.json absent_summary.UpdateService: \"absent\"",
+      "task_ids": [
+        "TASK-011"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "UPD-003",
+      "milestone": "M4",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-architecture.json absent_summary.UpdateService: \"absent\"",
+      "task_ids": [
+        "TASK-011"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "UPD-004",
+      "milestone": "M4",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-architecture.json absent_summary.UpdateService: \"absent\"",
+      "task_ids": [
+        "TASK-011"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "UPD-005",
+      "milestone": "M4",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-implementation.json RUN-001 evidence packages/app/electron-builder.yml:6-13（files 白名单只有 out/** 与 package.json，asar:false，无 publish 块）；mac.target 仅 dmg，缺 updater 必需的 zip 与 latest-mac.yml",
+      "task_ids": [
+        "TASK-013"
+      ],
+      "verification_status": "packaged-smoke"
+    },
+    {
+      "requirement_id": "UPD-006",
+      "milestone": "M4",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-implementation.json RUN-001 evidence packages/app/electron-builder.yml:6-13（无 publish、无签名配置）；doc/PiBuddy-product-grade-coding-agent-prompt.md:455 规定签名凭据必须由产品所有者配置，Coding Agent 不得编造",
+      "task_ids": [
+        "TASK-013"
+      ],
+      "verification_status": "blocked-by-credential"
+    },
+    {
+      "requirement_id": "UPD-007",
+      "milestone": "M4",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-implementation.json RUN-001 evidence（pi runtime 与 app 的版本关系仅存在于 pi-launcher.ts:12-29 的解析逻辑，无分层更新概念）+ exploration-architecture.json absent_summary.UpdateService: \"absent\"",
+      "task_ids": [
+        "TASK-013"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "OBS-101",
+      "milestone": "M4",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-implementation.json SEC-004 evidence packages/app/src/main/settings.ts:5-13 与 ipc.ts:131-134（敏感值无脱敏路径）；exploration-architecture.json absent_summary.runtime_schema_validation_on_ipc: \"absent\"（无结构化日志与诊断落点）",
+      "task_ids": [
+        "TASK-013"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "QA-401",
+      "milestone": "M4",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-risk.json context.no_tests：唯一自动化闸门是 tsc --noEmit 与 vue-tsc --noEmit，无更新专项测试载体；doc:440-441 要求 clean VM 与两个签名测试版本",
+      "task_ids": [
+        "TASK-013"
+      ],
+      "verification_status": "not-tested"
+    },
+    {
+      "requirement_id": "FS-101",
+      "milestone": "M5",
+      "current_status": "confirmed_defect",
+      "evidence_file_line": "exploration-risk.json A_existing_closed_loop_features[3] (A04 图片多模态) implementation_fact：「非图片文件只把绝对路径字符串拼进 prompt 文本（app.ts:394-398），不是结构化附件」；配合 packages/app/src/preload/index.ts:34-38（file.pathFor 直接把拖拽文件转绝对路径）",
+      "task_ids": [
+        "TASK-015"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "FS-102",
+      "milestone": "M5",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-architecture.json absent_summary.PermissionEngine: \"absent\" 与 SessionRepository_write_path: \"absent\"（无写路径抽象即无 changeset 归档点）；tool_execution_* 事件源见 exploration-risk.json A03 entry_points stores/app.ts:182-211",
+      "task_ids": [
+        "TASK-015"
+      ],
+      "verification_status": "tested"
+    },
+    {
+      "requirement_id": "ART-101",
+      "milestone": "M5",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-implementation.json SEC-001 evidence packages/app/src/main/index.ts:14-20（主窗口 sandbox:false，不存在任何独立 sandbox origin 预览窗口）；无 utility process 转换宿主",
+      "task_ids": [
+        "TASK-016"
+      ],
+      "verification_status": "packaged-smoke"
+    },
+    {
+      "requirement_id": "ART-102",
+      "milestone": "M5",
+      "current_status": "missing",
+      "evidence_file_line": "exploration-architecture.json section_5_target_module_mapping SessionRepository：\"a read-only filesystem lister exists; there is no repository abstraction and no write path\"（无 artifact 持久化载体）",
+      "task_ids": [
+        "TASK-016"
+      ],
+      "verification_status": "tested"
+    }
+  ],
+  "unreachable_exit_gates": [
+    {
+      "milestone": "M4",
+      "gate_text": "doc:451「至少 Windows signed NSIS 在干净 VM 完成真实 N → N+1 更新闭环」中的 signed 部分，以及 doc:453「release checklist、签名证据、artifact inventory 和更新 E2E 报告齐全」的签名证据部分",
+      "reason": "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md:455 明确规定「以下真实值必须由产品所有者配置，Coding Agent 不得编造：正式 GitHub owner/repo 或 CDN/bucket/public URL、Windows signing identity/Publisher、Apple Team/Developer ID/notarization credential、Linux 独立 manifest 签名私钥、正式下载与反馈域名。缺失时可以完成 adapter、fake feed 和 unsigned CI artifact，但 release job 必须失败关闭，验收状态写 not-tested/blocked-by-credential，不能用自签名包冒充正式完成」。本次规划范围内不存在任何签名凭据，TASK-013 只能交付 adapter、fake feed、unsigned artifact 与「缺凭据即 release job 失败关闭」的 CI 行为。",
+      "status": "blocked-by-credential",
+      "acceptance_status": "用户已确认接受",
+      "user_confirmed": true,
+      "user_confirmed_date": "2026-08-02"
+    },
+    {
+      "milestone": "M4",
+      "gate_text": "doc:441「Windows clean VM：安装旧版、创建会话/设置/草稿、检测、下载、重启安装、验证版本与数据、卸载保留/删除数据选择」与 doc:451 的「干净 VM」限定",
+      "reason": "规划与执行环境为开发者本机（win32，D:/selftool/pi-ui），无 clean VM 与无三平台原生 runner。exploration-risk.json D_high_risk_refactor_hotspots.context.no_tests 亦确认当前唯一自动化闸门是 tsc --noEmit。按 D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md:455 的规定，此类未验证项必须显式标注而不得宣称完成。",
+      "status": "not-tested",
+      "acceptance_status": "用户已确认接受",
+      "user_confirmed": true,
+      "user_confirmed_date": "2026-08-02"
+    },
+    {
+      "milestone": "M4",
+      "gate_text": "doc:442「macOS：签名、公证、staple 验证，DMG 首装，ZIP 更新到新版本，麦克风权限仍正常」",
+      "reason": "需 Apple Team ID / Developer ID / notarization credential，属 D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md:455 列举的产品所有者配置项；同时需 macOS 原生 runner。TASK-013 只交付 electron-builder 配置（zip target、hardenedRuntime、entitlements、notarize 开关）与 CI 骨架。",
+      "status": "blocked-by-credential",
+      "acceptance_status": "用户已确认接受",
+      "user_confirmed": true,
+      "user_confirmed_date": "2026-08-02"
+    },
+    {
+      "milestone": "M4",
+      "gate_text": "doc:443「Linux：AppImage 检测/下载/替换；不可写目录、非 AppImage 安装和 DEB 场景显示正确降级」中的独立 manifest 签名部分",
+      "reason": "需 Linux 独立 manifest 签名私钥，属 D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md:455 列举项；且需 Linux 原生 runner 才能验证 AppImage 就地替换。",
+      "status": "blocked-by-credential",
+      "acceptance_status": "用户已确认接受",
+      "user_confirmed": true,
+      "user_confirmed_date": "2026-08-02"
+    },
+    {
+      "milestone": "M1",
+      "gate_text": "doc:221「在 clean VM/runner 上用 packaged app 完成 bundled Pi 启动 smoke」与 doc:222「至少 Windows packaged E2E 通过」",
+      "reason": "同样受限于无 clean VM 与无 CI runner 矩阵。TASK-003 的 packaged-smoke 收敛条件只能在开发机上以 pnpm --filter @pibuddy/app dist 产出的未签名包执行，这不满足「clean VM」限定——开发机上全局 pi 与 node_modules 均存在，无法证伪回退到全局 pi 的路径。缓解手段：TASK-003 已包含「临时重命名全局 pi 命令」的手工验证，但该手段不等价于 clean VM。",
+      "status": "not-tested"
+    },
+    {
+      "milestone": "M5",
+      "gate_text": "doc:494「典型 Word/Excel/PPT/PDF/CSV/图片能在 packaged app 安全预览；恶意文档不能执行宏/脚本、访问主 renderer 或任意网络」",
+      "reason": "可用本地未签名打包在 Windows x64 上验证一个平台，但 doc:646 的最低平台矩阵要求 Windows 11 x64 + macOS arm64 + Ubuntu LTS x64 三平台，缺 macOS/Linux runner 时无法完成矩阵覆盖。",
+      "status": "not-tested"
+    }
+  ],
+  "protected_features": [
+    {
+      "id": "A01",
+      "feature": "流式文本增量",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/stores/app.ts:146-155 (message_start / message_update -> liveAssistant)",
+        "packages/app/src/renderer/src/stores/app.ts:156-181 (message_end -> pushMessage)",
+        "packages/app/src/renderer/src/components/ChatView.vue:73-77 (liveAssistant 渲染)"
+      ],
+      "depends_on_ipc_events": [
+        "pi:event (preload/index.ts:19 subscribe -> main/ipc.ts:70 wc.send)",
+        "pi RPC events: message_start / message_update / message_end (docs/rpc.md L906-L955)"
+      ],
+      "implementation_fact": "liveAssistant 每次 message_update 做整对象浅拷贝 { ...msg }（app.ts:153），消费的是全量 message 快照而非 assistantMessageEvent.delta。",
+      "regression_risk": "M0 事件 envelope 改造、M1 generation 过滤、M3 SES-102 改成 delta 拼帧，任一步骤都直接改写这三处；delta 化后如果不同时改 message_end 的 pushMessage 去重逻辑，会出现整条助手消息丢失或重复。"
+    },
+    {
+      "id": "A02",
+      "feature": "thinking 折叠",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/components/MessageItem.vue:48 (openThinking 状态)",
+        "packages/app/src/renderer/src/components/MessageItem.vue:71-76 (thinking block 折叠渲染)"
+      ],
+      "depends_on_ipc_events": [
+        "AssistantMessage.content 中 type='thinking' 块（pi-sdk/src/types.ts:17-20, docs/rpc.md L1402-L1424）"
+      ],
+      "implementation_fact": "折叠状态用 content 数组下标 i 作为 key（MessageItem.vue:48,72-75），流式期间下标随内容块增长而漂移。",
+      "regression_risk": "M3 虚拟滚动会让 MessageItem 组件被回收重建，openThinking 是组件内 ref，滚动后展开状态丢失；下标 key 在 delta 拼帧下不稳定。"
+    },
+    {
+      "id": "A03",
+      "feature": "tool call 卡片与展开",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/components/ToolActivity.vue:35-42 (tool-chip 与状态)",
+        "packages/app/src/renderer/src/components/ToolActivity.vue:43-56 (expanded 展开区，含 args / output / 输出图片)",
+        "packages/app/src/renderer/src/components/ToolActivity.vue:26-30 (输出超 4000 字符只保留尾部)",
+        "packages/app/src/renderer/src/friendly.ts:13-36 (describeTool 中文文案映射)",
+        "packages/app/src/renderer/src/stores/app.ts:24-31 (ToolRun 结构)",
+        "packages/app/src/renderer/src/stores/app.ts:182-211 (tool_execution_start/update/end)",
+        "packages/app/src/renderer/src/stores/app.ts:112-122 (recordToolResult，历史消息回放路径)"
+      ],
+      "depends_on_ipc_events": [
+        "pi:event -> tool_execution_start / tool_execution_update / tool_execution_end (docs/rpc.md L971-L1014)",
+        "toolRuns 以 toolCallId 为键跨消息关联（app.ts:70 reactive Record）"
+      ],
+      "implementation_fact": "toolRuns 是全局单一 reactive Record，不按 sessionId 分区；仅在 loadMessages(app.ts:307) 与 newTask(app.ts:435) 时整体清空。",
+      "regression_risk": "M0 要求按 sessionId 归一化 store，M1 要求 runtime 更换时清理 tool run。若 toolRuns 分区后 ToolActivity.vue:12 的 store.toolRuns[props.call.id] 查找未同步改造，所有工具卡片会永久停在 running 转圈状态（run 为 undefined 即视为 running，ToolActivity.vue:39）。"
+    },
+    {
+      "id": "A04",
+      "feature": "图片多模态（粘贴/拖拽/选择 -> base64 -> pi images）",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/components/InputBar.vue:22-31 (addImageFromFile: FileReader -> base64)",
+        "packages/app/src/renderer/src/components/InputBar.vue:33-44 (onPaste 剪贴板图片)",
+        "packages/app/src/renderer/src/components/InputBar.vue:46-68 (onWindowDrop 拖拽，图片走 base64、其它走 webUtils 绝对路径)",
+        "packages/app/src/renderer/src/components/InputBar.vue:70-80 (pickFiles -> dialog + file.readImage)",
+        "packages/app/src/main/ipc.ts:157-162 (file:read-image，按扩展名映射 MIME 后 readFileSync -> base64)",
+        "packages/app/src/main/ipc.ts:79-86 (IMAGE_MIME 白名单)",
+        "packages/app/src/renderer/src/stores/app.ts:402-407 (images 随 prompt 一并发送)",
+        "packages/app/src/renderer/src/components/MessageItem.vue:56-61 (用户消息内联图片回显)"
+      ],
+      "depends_on_ipc_events": [
+        "dialog:choose-files (ipc.ts:146)",
+        "file:read-image (ipc.ts:157)",
+        "file.pathFor -> webUtils.getPathForFile (preload/index.ts:37)",
+        "pi RPC prompt.images / ImageContent (docs/rpc.md L51-L54, L78)"
+      ],
+      "implementation_fact": "非图片文件只把绝对路径字符串拼进 prompt 文本（app.ts:394-398），不是结构化附件。",
+      "regression_risk": "审计文档第 49 行明确称图片多模态为『当前实现的强项』。M2 SEC-003 要求 renderer 不再持有绝对路径、改为 capability token；M2 SEC-005 要求 magic bytes 嗅探替代扩展名白名单；M5 FS-101 要求附件改为 attachment ID。三个里程碑都要改 InputBar.vue + ipc.ts 的同一条链路，任一环节改错即丢失粘贴/拖拽入口。"
+    },
+    {
+      "id": "A05",
+      "feature": "steer 插话",
+      "status": "closed_loop_but_indirect",
+      "entry_points": [
+        "packages/app/src/renderer/src/stores/app.ts:401 (wasStreaming 判定)",
+        "packages/app/src/renderer/src/stores/app.ts:406 (streamingBehavior: 'steer')",
+        "packages/app/src/renderer/src/stores/app.ts:412 (插话提示文案)",
+        "packages/app/src/renderer/src/stores/app.ts:212-216 (queue_update -> queue.steering)",
+        "packages/app/src/renderer/src/components/InputBar.vue:167-168 (排队条数提示)"
+      ],
+      "depends_on_ipc_events": [
+        "pi RPC prompt + streamingBehavior='steer' (docs/rpc.md L56-L65)",
+        "pi RPC event queue_update (docs/rpc.md L1016-L1026)"
+      ],
+      "implementation_fact": "PiBuddy 并未调用 pi 的 steer 命令，而是复用 prompt + streamingBehavior。pi-sdk/src/client.ts:194 的 steer() 与 :198 的 followUp() 从未被调用。用户无法选择 followUp。",
+      "regression_risk": "M2 SEC-002 要求删除 renderer 通用 pi.command 改为窄方法。若窄方法拆成 prompt() / steer() 两个，必须保留 streamingBehavior 语义分支——docs/rpc.md L65 明确：streaming 中不带 streamingBehavior 的 prompt 直接返回 error，用户输入会静默失败。"
+    },
+    {
+      "id": "A06",
+      "feature": "abort 停止",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/stores/app.ts:424-426 (abortRun)",
+        "packages/app/src/renderer/src/components/InputBar.vue:213-221 (仅 streaming 时显示停止按钮)",
+        "packages/app/src/renderer/src/components/MessageItem.vue:96-101 (stopReason==='aborted' 的『已按你的要求停止』提示)"
+      ],
+      "depends_on_ipc_events": [
+        "pi RPC abort (docs/rpc.md L124-L135)",
+        "streaming 由 agent_start/agent_settled 驱动（app.ts:136-145）"
+      ],
+      "implementation_fact": "abortRun 不检查 resp.success，也不处理失败反馈（app.ts:425 单行 await 无返回值检查）。",
+      "regression_risk": "M1 RUN-003 要求 stop 顺序 graceful abort -> terminate -> kill process tree。若 abort 语义被 runtime supervisor 接管，此处必须区分『中止当前 turn』与『终止进程』，否则停止按钮会杀掉整个会话。"
+    },
+    {
+      "id": "A07",
+      "feature": "模型切换",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/components/TopBar.vue:19-37 (按 provider 分组的 NSelect 与 onModelChange)",
+        "packages/app/src/renderer/src/stores/app.ts:463-478 (setModel + 持久化 + refreshState + refreshThinkingLevels)",
+        "packages/app/src/renderer/src/stores/app.ts:333-341 (启动时用 settings 恢复上次模型)",
+        "packages/app/src/main/ipc.ts:108 (启动时 getAvailableModels)"
+      ],
+      "depends_on_ipc_events": [
+        "pi RPC set_model (docs/rpc.md L217-L233)",
+        "pi RPC get_available_models (docs/rpc.md L259-L277)",
+        "settings:get / settings:set (ipc.ts:131-134)"
+      ],
+      "implementation_fact": "model value 用 `${provider}::${id}` 拼接（TopBar.vue:16,23）再 split('::') 还原，rest.join('::') 兼容 id 内含 '::' 的情况（TopBar.vue:35-36）。启动时用全局 settings 无条件覆盖会话记录的模型（app.ts:335-341）。",
+      "regression_risk": "M1 SES-002 明确要求『不用全局 settings 无条件覆盖历史会话记录的 model/thinking』，M3 PROV-101 要求区分全局/workspace/session 默认。改动 app.ts:333-341 时若判断条件写反，会导致打开历史会话即被切成默认模型（静默数据语义变更，无报错）。"
+    },
+    {
+      "id": "A08",
+      "feature": "thinking level 切换",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/components/TopBar.vue:39-51 (THINKING_LABELS 中文映射 + 选项)",
+        "packages/app/src/renderer/src/components/TopBar.vue:75-83 (仅 levels>1 时显示)",
+        "packages/app/src/renderer/src/stores/app.ts:480-486 (setThinkingLevel)",
+        "packages/app/src/renderer/src/stores/app.ts:372-377 (refreshThinkingLevels)",
+        "packages/app/src/renderer/src/stores/app.ts:342-347 (启动恢复)"
+      ],
+      "depends_on_ipc_events": [
+        "pi RPC set_thinking_level (docs/rpc.md L281-L296)",
+        "pi RPC get_available_thinking_levels (docs/rpc.md L316-L334)"
+      ],
+      "implementation_fact": "THINKING_LABELS 覆盖 off/minimal/low/medium/high/xhigh/max 全 7 档（TopBar.vue:39-47），与 docs/rpc.md L289 完全一致；未知档位回退显示原始值（TopBar.vue:50）。",
+      "regression_risk": "与 A07 同一条 settings 覆盖链（app.ts:342-347），M1 SES-002 改造时同步受影响。"
+    },
+    {
+      "id": "A09",
+      "feature": "费用与 context 显示",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/components/TopBar.vue:53 (contextPercent)",
+        "packages/app/src/renderer/src/components/TopBar.vue:71-73 (『记忆已用 N%』)",
+        "packages/app/src/renderer/src/components/Sidebar.vue:45 (『本次花费』)",
+        "packages/app/src/renderer/src/friendly.ts:47-50 (formatCost: <$0.01 特例)",
+        "packages/app/src/renderer/src/stores/app.ts:362-365 (refreshStats)",
+        "packages/app/src/renderer/src/stores/app.ts:142 (agent_settled 触发刷新)"
+      ],
+      "depends_on_ipc_events": [
+        "pi RPC get_session_stats (docs/rpc.md L531-L568)"
+      ],
+      "implementation_fact": "contextUsage.percent 可能为 null（docs/rpc.md L572 说明压缩后为 null），TopBar.vue:53 用 ?? null 正确处理；stats 仅在 agent_settled、start、openSession 时刷新，长时间单轮流式期间不更新。",
+      "regression_risk": "M3 若接入 compact 手动压缩，压缩后 percent 为 null 的窗口期必须保留 TopBar.vue:71 的 v-if 判空，否则显示 NaN%。"
+    },
+    {
+      "id": "A10",
+      "feature": "语音输入（MediaRecorder -> STT）",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/stt.ts:3-51 (VoiceRecorder: getUserMedia + MediaRecorder + track 清理)",
+        "packages/app/src/renderer/src/components/InputBar.vue:88-129 (toggleVoice 三态：未配置提示 / 录音 / 转写)",
+        "packages/app/src/renderer/src/components/InputBar.vue:117-120 (转写结果追加到 store.editorText)",
+        "packages/app/src/main/ipc.ts:173-212 (stt:transcribe -> FormData -> OpenAI 兼容 /audio/transcriptions)",
+        "packages/app/src/main/ipc.ts:186-192 (按 mimeType 推断文件扩展名)",
+        "packages/app/src/renderer/src/components/SettingsModal.vue:63-76 (baseUrl / apiKey / model 三项配置)"
+      ],
+      "depends_on_ipc_events": [
+        "stt:transcribe (preload/index.ts:43-51 -> ipc.ts:173)",
+        "settings:get / settings:set 存储 sttBaseUrl/sttApiKey/sttModel (main/settings.ts:5-13)"
+      ],
+      "implementation_fact": "renderer 每次调用都把明文 apiKey 与任意 baseUrl 一起提交给主进程（InputBar.vue:110-116），主进程直接 fetch 该 URL（ipc.ts:200）。无 timeout、无 size limit、无 URL allowlist。",
+      "regression_risk": "M2 SEC-004 要求 key 只留主进程、renderer 按 endpoint ID 调用、加 SSRF 阻断。改造后 InputBar.vue:110-116 的调用签名必然变化；若 SettingsModal.vue:25-27 回显逻辑（读取明文 sttApiKey）未同步改成『已配置/尾四位』，设置页会显示空值让用户误以为配置丢失。"
+    },
+    {
+      "id": "A11",
+      "feature": "Extension UI 的 select/confirm/input/editor/notify/setStatus/set_editor_text",
+      "status": "closed_loop_partial",
+      "entry_points": [
+        "packages/app/src/renderer/src/stores/app.ts:242-265 (handleUiRequest 分发)",
+        "packages/app/src/renderer/src/stores/app.ts:244-249 (select/confirm/input/editor -> uiRequests 队列)",
+        "packages/app/src/renderer/src/stores/app.ts:250-255 (notify -> notifier)",
+        "packages/app/src/renderer/src/stores/app.ts:256-258 (setStatus -> statusTexts['ext:'+key])",
+        "packages/app/src/renderer/src/stores/app.ts:259-261 (set_editor_text -> editorText)",
+        "packages/app/src/renderer/src/stores/app.ts:267-277 (respondUi: 先出队再回包)",
+        "packages/app/src/renderer/src/components/ExtensionUiHost.vue:7 (只渲染队首 uiRequests[0])",
+        "packages/app/src/renderer/src/components/ExtensionUiHost.vue:31-70 (四种 dialog 的具体 UI)",
+        "packages/app/src/renderer/src/stores/app.ts:99-104 (extStatus 顶栏弱化显示)",
+        "packages/app/src/main/ipc.ts:119-121 (pi:ui-respond -> client.respondUi)",
+        "packages/pi-sdk/src/client.ts:134-137 (extension_ui_request 事件分流)",
+        "packages/pi-sdk/src/client.ts:176-178 (respondUi 直写 stdin)"
+      ],
+      "depends_on_ipc_events": [
+        "pi:ui-request (ipc.ts:101 -> preload/index.ts:20)",
+        "pi:ui-respond (preload/index.ts:17 -> ipc.ts:119)",
+        "docs/rpc.md L1143-L1333 Extension UI Protocol"
+      ],
+      "implementation_fact": "统一处理为串行队列（只显示 uiRequests[0]），statusTexts 用 'ext:' 前缀与内部状态共存（app.ts:92-104 通过前缀区分 busyStatus 与 extStatus）。",
+      "regression_risk": "M3 EXT-101 要求补齐 setWidget/setTitle/timeout。uiRequests 是全局 ref、不按 sessionId 分区、runtime exit 时不清空（app.ts:287-293 的 onExit 只改 started/streaming），M1 generation 改造若不清理它，会遗留跨会话的僵尸弹窗。"
+    },
+    {
+      "id": "A12",
+      "feature": "会话列表与切换",
+      "status": "closed_loop_with_platform_defect",
+      "entry_points": [
+        "packages/app/src/main/sessions-store.ts:19-22 (sessionDirFor: 自写 cwd 编码)",
+        "packages/app/src/main/sessions-store.ts:24-47 (listSessions: 同步 readdir + statSync + 全量读文件)",
+        "packages/app/src/main/sessions-store.ts:49-82 (parseSessionFile: 逐行 JSON.parse 取 id/name/firstMessage/messageCount)",
+        "packages/app/src/main/ipc.ts:127-129 (sessions:list)",
+        "packages/app/src/renderer/src/stores/app.ts:367-370 (refreshSessions)",
+        "packages/app/src/renderer/src/stores/app.ts:442-461 (openSession: switch_session -> get_messages -> loadMessages)",
+        "packages/app/src/renderer/src/stores/app.ts:428-440 (newTask: new_session)",
+        "packages/app/src/renderer/src/components/Sidebar.vue:25-42 (会话列表渲染与 active 判定)",
+        "packages/app/src/renderer/src/components/Sidebar.vue:19-23 (开始新任务按钮)"
+      ],
+      "depends_on_ipc_events": [
+        "sessions:list (ipc.ts:127)",
+        "pi RPC switch_session (docs/rpc.md L597-L613)",
+        "pi RPC new_session (docs/rpc.md L137-L158)",
+        "pi RPC get_messages (docs/rpc.md L195-L213)"
+      ],
+      "implementation_fact": "openSession(app.ts:447-454) 与 newTask(app.ts:429-433) 都只检查 resp.success，未检查 docs/rpc.md L607/L612 与 L152/L157 定义的 data.cancelled。sessions-store.ts:20 的 workspace.replace(/[\\\\/:]/g,'-') 在 POSIX 绝对路径（以 / 开头）下会多产出一个前导 '-'，与 pi 实际目录名不符（审计文档 doc/PiBuddy-desktop-agent-source-audit-2026-08-02.md:13 已确认）。listSessions 在 Electron main 线程同步全量读取全部 JSONL。",
+      "regression_risk": "M1 SES-001 要求整体替换为 pi 公开 resolver，M3 SES-101 要求换成 SQLite 增量索引。sessions-store.ts 全文件（94 行）将被两次重写，而 Sidebar.vue:33 依赖的 SessionMeta 四个字段（name/firstMessage/messageCount/modified）与 Sidebar.vue:30 依赖的 path === agentState.sessionFile 相等判定是唯一的 UI 契约，字段改名即导致列表全空白且无报错。"
+    },
+    {
+      "id": "A13",
+      "feature": "消息窗口化渲染",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/components/ChatView.vue:14-15 (INITIAL_WINDOW = 60)",
+        "packages/app/src/renderer/src/components/ChatView.vue:25-30 (hiddenCount / visibleItems 切片)",
+        "packages/app/src/renderer/src/components/ChatView.vue:32-40 (showEarlier +100 并补偿 scrollTop)",
+        "packages/app/src/renderer/src/components/ChatView.vue:17-23 (sessionFile 变化时重置窗口)",
+        "packages/app/src/renderer/src/components/ChatView.vue:42-56 (stickToBottom 阈值 80px + activityTick 驱动的自动滚底)",
+        "packages/app/src/renderer/src/stores/app.ts:79 (activityTick 定义)",
+        "packages/app/src/renderer/src/stores/app.ts:125-134 (6 类事件递增 activityTick，规避 deep watch)"
+      ],
+      "depends_on_ipc_events": [
+        "store.activityTick（由 message_start/update/end 与 tool_execution_start/update/end 驱动）",
+        "store.agentState?.sessionFile（窗口重置的触发键）"
+      ],
+      "implementation_fact": "非虚拟滚动，是尾部切片 + 手动扩窗；showEarlier 通过 scrollHeight 差值补偿视口位置（ChatView.vue:39）。activityTick 是刻意设计的轻量替代方案，注释见 app.ts:78。",
+      "regression_risk": "M3 SES-102 要求替换为真正虚拟滚动。activityTick 机制、stickToBottom 阈值、sessionFile 重置键三者是耦合的滚动语义；换成虚拟列表后若丢失 activityTick 订阅，流式期间不再自动滚底（表现为『助手在说话但看不见』），且该失效不会抛错。"
+    },
+    {
+      "id": "A14",
+      "feature": "markdown 缓存",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/renderer/src/markdown.ts:33-34 (Map 缓存 + MAX_CACHE=300)",
+        "packages/app/src/renderer/src/markdown.ts:36-46 (renderMarkdown 命中/淘汰逻辑)",
+        "packages/app/src/renderer/src/markdown.ts:5-19 (MarkdownIt html:false + linkify + highlight)",
+        "packages/app/src/renderer/src/markdown.ts:22-29 (link_open 规则强制 target=_blank + rel=noopener noreferrer)",
+        "packages/app/src/renderer/src/markdown.ts:3 (highlight.js/lib/common 子集，注释说明省 ~1MB)",
+        "packages/app/src/renderer/src/components/MessageItem.vue:78-82 (v-html 渲染)"
+      ],
+      "depends_on_ipc_events": [
+        "无 IPC 依赖，纯 renderer 内计算"
+      ],
+      "implementation_fact": "缓存键是文本全文（markdown.ts:37），流式期间每个中间前缀都会写入一条缓存，300 条上限用 FIFO 淘汰（markdown.ts:42-44）。html:false 是当前唯一的 XSS 防线。",
+      "regression_risk": "M2 SEC-005 明确要求『Markdown 保持 html:false，链接与图片 scheme 白名单』。markdown.ts:26-27 只设置了 target/rel，未做 scheme 白名单。改造时若误开 html:true 或替换渲染器，MessageItem.vue:81 的 v-html 立刻成为 XSS 入口。M3 SES-102 要求『完成消息才进入 Markdown cache』，即需改 markdown.ts:36 的无条件写入。"
+    },
+    {
+      "id": "A15",
+      "feature": "33ms 事件合并",
+      "status": "closed_loop",
+      "entry_points": [
+        "packages/app/src/main/ipc.ts:36-77 (makeEventForwarder 全函数)",
+        "packages/app/src/main/ipc.ts:75 (setTimeout(flush, 33))",
+        "packages/app/src/main/ipc.ts:48-68 (折叠：连续 message_update 保留最后一条；同 toolCallId 的连续 tool_execution_update 保留最后一条)",
+        "packages/app/src/main/ipc.ts:42-45 (wc.isDestroyed() 时丢弃队列)",
+        "packages/app/src/main/ipc.ts:100 (client.on('event', makeEventForwarder(wc)) 绑定点)"
+      ],
+      "depends_on_ipc_events": [
+        "PiRpcClient 'event' 事件（pi-sdk/src/client.ts:131,138 emit）",
+        "wc.send('pi:event') -> preload/index.ts:19"
+      ],
+      "implementation_fact": "折叠正确性建立在『累积型事件携带到目前为止的完整内容』这一前提上（ipc.ts:30-34 注释，与 docs/rpc.md L1014 一致）。timer 只在 flush 内置 null（ipc.ts:41），dispose 路径（ipc.ts:16-22 disposeClientFor）不取消未决 timer。",
+      "regression_risk": "M1 RUN-002 明确要求『dispose 必须取消 batch timer』——当前 disposeClientFor 只调 client.stop()，遗留的 33ms timer 仍会 flush 旧 generation 事件到新会话（审计文档已列为三个确定性阻断之一）。M3 SES-102 要求改成 assistantMessageEvent.delta 拼帧，一旦事件从『全量快照』变为『增量 delta』，ipc.ts:48-56 的折叠逻辑就从无损优化变成静默丢字符——这是本项改造中最隐蔽的回归。"
+    }
+  ],
+  "residual_risks": [
+    {
+      "id": "RR-01",
+      "severity": "high",
+      "risk": "activityTick 滚动驱动与虚拟化改造的隐式耦合",
+      "evidence": "exploration-risk.json A13：packages/app/src/renderer/src/stores/app.ts:79（activityTick 定义）、app.ts:125-134（6 类事件递增 activityTick 以规避 deep watch）、ChatView.vue:42-56（stickToBottom 阈值 80px 由 activityTick 驱动）、ChatView.vue:17-23（sessionFile 变化重置窗口）",
+      "affected_tasks": [
+        "TASK-010",
+        "TASK-009"
+      ],
+      "why_residual": "TASK-010 用 animation frame 合并 delta 并引入分段数据源，会重写这三处；activityTick 订阅一旦丢失，流式期间不再自动滚底，表现为「助手在说话但看不见」，不抛错、不失败类型检查。",
+      "mitigation": "TASK-010 的 [UI-observable] 条件必须包含「长回复流式期间聊天区持续跟随滚动到底部」；TASK-001 的 doc/baseline-2026-08-02.md 已把 A13 列入 15 项手工 smoke 基线，每个交付波次逐项复核。"
+    },
+    {
+      "id": "RR-02",
+      "severity": "high",
+      "risk": "组件内 ref 承载的展开状态在组件回收后丢失",
+      "evidence": "exploration-risk.json A02：packages/app/src/renderer/src/components/MessageItem.vue:48（openThinking 为组件内 ref，且以 content 数组下标 i 为 key，流式期间下标漂移）；A03：ToolActivity.vue:10-12、:39（expanded ref，且 !run 等同 running）",
+      "affected_tasks": [
+        "TASK-010"
+      ],
+      "why_residual": "TASK-010 明确要把 thinking/tool 展开状态提到 store，但下标 key 在 delta 拼帧下不稳定；若提 store 时仍沿用数组下标而非稳定 id，展开状态会在流式期间跳到错误的块上。",
+      "mitigation": "TASK-010 收敛条件要求展开状态以稳定 key（toolCallId / contentIndex + messageId 复合键）存储，并有「回收组件后重新挂载展开状态不变」的单测。"
+    },
+    {
+      "id": "RR-03",
+      "severity": "high",
+      "risk": "toolRuns 分区后工具卡片永久停在 running 转圈",
+      "evidence": "exploration-risk.json A03 regression_risk：「toolRuns 是全局单一 reactive Record，不按 sessionId 分区；若 toolRuns 分区后 ToolActivity.vue:12 的 store.toolRuns[props.call.id] 查找未同步改造，所有工具卡片会永久停在 running 转圈状态（run 为 undefined 即视为 running，ToolActivity.vue:39）」",
+      "affected_tasks": [
+        "TASK-002",
+        "TASK-010"
+      ],
+      "why_residual": "TASK-002 已按此风险刻意不迁移 toolRuns（其收敛条件含 \"grep -c 'toolRuns = reactive' … 输出 1\"），把风险推迟到 TASK-010；TASK-010 引入分段数据源时仍需处理同一查找口径。",
+      "mitigation": "TASK-010 必须把 ToolActivity.vue:39 的「run 为 undefined 即 running」改为显式三态（unknown / running / settled），并在收敛条件中断言 undefined 渲染为 unknown 而非 running。"
+    },
+    {
+      "id": "RR-04",
+      "severity": "critical",
+      "risk": "33ms 折叠在事件 delta 化后从无损优化变为静默丢字符",
+      "evidence": "exploration-risk.json A15 regression_risk 与 D_high_risk_refactor_hotspots.cross_cutting_risks[0]：「main/ipc.ts:36-77 的 makeEventForwarder：M0 要加 envelope 与 schema 校验、M1 要加 generation 过滤与 dispose 时取消 timer、M3 要把事件从累积快照改为 delta。折叠逻辑(ipc.ts:48-68)在累积语义下无损，在 delta 语义下有损……不会报错、不会失败类型检查，只会在长回复时静默丢字符」",
+      "affected_tasks": [
+        "TASK-002",
+        "TASK-005",
+        "TASK-010"
+      ],
+      "why_residual": "同一段代码被三个波次（2 / 4 / 9）依次改写，而语义反转发生在最后一次。TASK-010 已把折叠规则改为「仅同类型同 contentIndex 的 text_delta/thinking_delta 才合并且拼接 delta 字符串」，但正确性依赖执行者不回退到旧折叠写法。",
+      "mitigation": "TASK-010 的 packages/app/src/main/pi/event-forwarder.test.ts 必须包含「投喂 N 条 delta，flush 后拼接结果字节等于原始拼接」的断言；TASK-005 在改 dispose 取消 timer 时不得同时改折叠语义。"
+    },
+    {
+      "id": "RR-05",
+      "severity": "critical",
+      "risk": "15 项闭环功能的回归全部是运行时静默行为变化，类型检查与构建均无法捕获",
+      "evidence": "exploration-risk.json cross_cutting_risks[3]：「无 git（无法 diff/revert）、无测试（typecheck 是唯一闸门）。本报告 A 节 15 项已闭环功能中，没有任何一项的回归会导致类型错误或构建失败」",
+      "affected_tasks": [
+        "TASK-001",
+        "TASK-002",
+        "TASK-003",
+        "TASK-004",
+        "TASK-005",
+        "TASK-006",
+        "TASK-007",
+        "TASK-008",
+        "TASK-009",
+        "TASK-010",
+        "TASK-011",
+        "TASK-012",
+        "TASK-013",
+        "TASK-014",
+        "TASK-015",
+        "TASK-016"
+      ],
+      "why_residual": "TASK-001 建立 git 与 vitest 后风险大幅下降，但 15 项中多数（滚动跟随、折叠展开、卡片状态、粘贴拖拽入口）仍只能靠手工 smoke 判定，自动化覆盖不到。",
+      "mitigation": "doc/baseline-2026-08-02.md 的 15 项手工 smoke 清单作为每个波次的强制回归对照基线（见 plan.protected_features）；每个波次至少 1 条 [UI-observable] 收敛条件。"
+    },
+    {
+      "id": "RR-06",
+      "severity": "medium",
+      "risk": "契约在消除重复之前仍被 M1/M2 持续改动，放大不一致",
+      "evidence": "exploration-risk.json cross_cutting_risks[2]：AppSettings 同时定义于 main/settings.ts:5-13 与 preload/index.d.ts:28-36；SessionMeta 同时定义于 main/sessions-store.ts:5-12 与 preload/index.d.ts:19-26；PiBuddyApi 类型 index.d.ts:45-83 与实现 preload/index.ts:13-52 手工同步",
+      "affected_tasks": [
+        "TASK-002",
+        "TASK-007",
+        "TASK-008",
+        "TASK-009"
+      ],
+      "why_residual": "TASK-002 在波次 2 消除重复，但 preload/index.d.ts 仍被波次 6/7/8 连续三次重写（TASK-007 / TASK-008 / TASK-009），每次都可能重新引入手工同步的类型。",
+      "mitigation": "本次合并已为 8 个 B 任务追加「唯一契约包」收敛条件（所有跨进程载荷类型必须 from '@pibuddy/contract'），并把 TASK-009 的 index.d.ts 改为由 api 聚合对象推导而非手写。"
+    },
+    {
+      "id": "RR-07",
+      "severity": "medium",
+      "risk": "TASK-009（原 B01）对 A 分片 ipc.ts / preload 的写冲突耦合把关键路径拉到 13 个波次",
+      "evidence": "TASK-008 与 TASK-009 的 files 交集为 packages/app/src/main/ipc.ts、packages/app/src/preload/index.ts、packages/app/src/preload/index.d.ts；且 B 分片全部 8 个任务经 depends_on 传递地依赖 TASK-009",
+      "affected_tasks": [
+        "TASK-008",
+        "TASK-009"
+      ],
+      "why_residual": "硬约束要求保留 16 个 task 不得拆分合并，因此无法把 TASK-009 的 preload 分层部分前移到与 TASK-008 并行。",
+      "mitigation": "若后续允许拆分，可把 TASK-009 中「preload 拆 api/<namespace>.ts + ipc/registry.ts」的纯结构部分提前并入 TASK-007，使 SQLite 索引部分可与 TASK-008 并行，关键路径可缩短 1 个波次。"
+    },
+    {
+      "id": "RR-08",
+      "severity": "medium",
+      "risk": "本轮把 IPC 守卫、附件注册表、日志器、原子写、收容原语、会话枚举六项收敛为「全仓唯一实现」的结构断言，这些断言的执行成本落在每个下游任务上",
+      "why_not_fully_resolved": "结构断言本身是可执行的，但「唯一性」在多人并行时只有在跑断言时才暴露；本轮已把全部六项接入 CI（check-contract-uniqueness.mjs / check-test-discovery.mjs / check-workflow-pins.mjs 三个脚本 + 各任务内的 rg 结构断言），无法进一步在编辑期阻止。",
+      "mitigation_in_execution": "执行阶段每个任务收敛前先跑本任务的结构断言块；若某条唯一性断言 > 1，先删除重复实现再继续，禁止用「暂时并存、后续合并」绕过。"
+    },
+    {
+      "id": "RR-09",
+      "severity": "medium",
+      "risk": "safeFetch 默认拒绝 loopback，自托管在 localhost 的 STT / OpenAI 兼容端点在 v1 不可用",
+      "why_not_fully_resolved": "CT-08 的两套 URL 判定必须收敛为一套，而 SSRF 防护的核心价值恰在于拒绝 loopback 与内网。为 localhost 开口子需要一条独立的「用户显式声明的本地端点」白名单路径（含 UI 确认与持久化），属新增需求而非本轮的矛盾消解范围。",
+      "mitigation_in_execution": "在 TASK-008 的 outbound-guard.ts 中预留 `allowLoopback` 参数但默认关闭且无调用方；产品文档明确 v1 不支持 loopback 端点。若执行期确认该场景为必需，走需求变更而非放宽 safeFetch 默认值。"
+    },
+    {
+      "id": "RR-10",
+      "severity": "medium",
+      "risk": "人工回归的记录载体（doc/regression/TASK-0NN-*.md）本身可被伪造",
+      "why_not_fully_resolved": "本轮把 6 条「人工回归通过」类的恒真条件改为「文件存在 + 恰 N 行 `- [x]` + ISO 时间戳 + 逐项判定值」，使「没做」会失败；但「做了但记假数据」在无录屏/无 e2e 的前提下无法机械识别。全面 e2e 化超出本计划范围（Electron e2e 基建本身是一个独立任务）。",
+      "mitigation_in_execution": "每条人工项都已改为「以属性取值 / 计数 / 字段相等」判定而非观感，记录中必须写下实测值而非仅打勾；checkpoint 任务（TASK-007/009/013）的回归记录由执行者之外的人复核一次。"
+    },
+    {
+      "id": "RR-11",
+      "severity": "low",
+      "risk": "TASK-006 在 wave 5 交付的过渡枚举器（sessions/session-repository.ts）在 wave 8 被整体删除，属计划内的一次性返工",
+      "why_not_fully_resolved": "裁定 5 的字面要求是「TASK-006 只提供 resolver，TASK-009 拥有唯一枚举实现」。若严格照字面执行，wave 5 删除 sessions-store.ts 后到 wave 8 SQLite 索引就绪之间的三个波次里，侧栏历史会话列表将完全不可用 —— 这与「不得削减需求覆盖 / 不破坏既有闭环功能」直接冲突。本轮按裁定的实质意图（任何时刻不存在两套枚举器）落地：枚举实现始终恰为 1 个，只是从过渡版原地换成索引版。此项已在 revision-round-3.json 的 disputes 中作为「裁定澄清」显式登记。",
+      "mitigation_in_execution": "TASK-009 的 files 中把 sessions/session-repository.ts 标为 delete，并以 `rg --no-filename -c 'export async function listSessionsForWorkspace' ... == 1` 与 `test ! -e .../session-repository.ts` 双条件确保替换而非并存。"
+    }
+  ],
+  "deferred_requirements": [
+    {
+      "requirement_id": "PTY-101",
+      "milestone": "M6",
+      "reason": "本计划范围限定为 M0-M5（doc:141-497）；PTY-101 位于 doc:502，属 M6 章节，未纳入本次 16 个 task。"
+    },
+    {
+      "requirement_id": "GIT-101",
+      "milestone": "M6",
+      "reason": "同上，doc:510，M6 范围外。"
+    },
+    {
+      "requirement_id": "GIT-102",
+      "milestone": "M6",
+      "reason": "同上，doc:517，M6 范围外。"
+    },
+    {
+      "requirement_id": "AGT-101",
+      "milestone": "M7",
+      "reason": "同上，doc:534，M7 范围外。"
+    },
+    {
+      "requirement_id": "AGT-102",
+      "milestone": "M7",
+      "reason": "同上，doc:541，M7 范围外。"
+    },
+    {
+      "requirement_id": "AUT-101",
+      "milestone": "M8",
+      "reason": "同上，doc:559，M8 范围外。"
+    },
+    {
+      "requirement_id": "MEM-101",
+      "milestone": "M8",
+      "reason": "同上，doc:567，M8 范围外。"
+    },
+    {
+      "requirement_id": "REM-101",
+      "milestone": "M9",
+      "reason": "同上，doc:584，M9 范围外。"
+    },
+    {
+      "requirement_id": "BROWSER-101",
+      "milestone": "M9",
+      "reason": "同上，doc:593，M9 范围外。"
+    },
+    {
+      "requirement_id": "PLG-101",
+      "milestone": "M9",
+      "reason": "同上，doc:599，M9 范围外。"
+    },
+    {
+      "requirement_id": "SES-101（会话树 / 分叉可视化子项）",
+      "milestone": "M3",
+      "reason": "doc/PiBuddy-product-grade-coding-agent-prompt.md 第 329 行的 M3 出口门禁列举「恢复/搜索/重命名/分叉/导出会话」，其中「分叉」能力本轮不完整达成：fork/clone/rewind 与 get_session_tree / get_fork_messages 的 RPC 与 IPC 通道、类型、以及 TASK-010 的「从此消息分叉」入口仍全部接入（数据面完整），仅缺可视化分支树 UI（分支点 / compaction / 模型变化定位）。因此 M3 出口门禁本轮记为部分达成，验收说明必须标注「分叉可视化未完成」，不得声称 M3 出口门禁完整达成。",
+      "scope_retained": "fork / clone / rewind RPC 能力、get_session_tree 与 get_fork_messages 的 IPC 通道与契约类型、MessageItem 的「从此消息分叉」入口",
+      "scope_cut": "可视化会话分支树 UI（树视图、分支点标注、compaction 与模型变化定位）",
+      "user_confirmed": true,
+      "user_confirmed_date": "2026-08-02"
+    },
+    {
+      "requirement_id": "M4 三平台 clean VM 更新 E2E（QA-401 的验证面）",
+      "milestone": "M4",
+      "reason": "需 clean VM 与三平台原生 runner，见 plan.unreachable_exit_gates；本计划只交付 fake feed 下的状态机单测与 CI 骨架，验收状态记为 not-tested。",
+      "user_confirmed": true,
+      "user_confirmed_date": "2026-08-02"
+    },
+    {
+      "requirement_id": "M4 签名与公证（UPD-006 的验证面）",
+      "milestone": "M4",
+      "reason": "doc:455 规定签名凭据必须由产品所有者配置且 Coding Agent 不得编造；缺失时 release job 必须失败关闭，验收状态记为 blocked-by-credential。",
+      "user_confirmed": true,
+      "user_confirmed_date": "2026-08-02"
+    }
+  ],
+  "_metadata": {
+    "timestamp": "2026-08-02T08:19:41Z",
+    "source": "workflow-planner (2+1 synthesis)",
+    "planning_mode": "full",
+    "plan_type": "feature",
+    "schema_version": "2.0",
+    "git_commit": null,
+    "shards_merged": [
+      "tasks-partA.json (TASK-A01..A08)",
+      "tasks-partB.json (TASK-B01..B08)"
+    ],
+    "evidence_sources": [
+      "exploration-architecture.json",
+      "exploration-implementation.json",
+      "exploration-risk.json"
+    ],
+    "spec_source": "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md",
+    "revision_round": 3,
+    "revision_log": [
+      "revision-round-1.json",
+      "revision-round-2.json",
+      "revision-round-3.json"
+    ]
+  },
+  "path_conventions": {
+    "note": "errata-2 增补。用于判定计划内路径引用的解析归属，供路径闭合自检使用；不改变任何任务分解、依赖、wave 或需求覆盖。",
+    "entries": [
+      {
+        "pattern": "docs/product/**",
+        "resolves_to": "仓库内路径（packages 同级的 docs/product/）",
+        "owner": "TASK-013 files[] create（RELEASE_SETUP.md / ADR-0001-update-feed.md）"
+      },
+      {
+        "pattern": "docs/<name>.md（除 docs/product/ 外）",
+        "resolves_to": "pi 依赖包自带文档，绝对路径基址 D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/",
+        "owner": "外部依赖（只读证据引用，非交付物）",
+        "verified": "errata-2 已对 rpc.md / session-format.md / settings.md / providers.md / models.md / security.md / packages.md / environment-variables.md 逐个 test -e 实测"
+      },
+      {
+        "pattern": "doc/**",
+        "resolves_to": "仓库内路径（需求原文 doc/PiBuddy-*.md 与 doc/regression/ 回归记录）",
+        "owner": "需求文档为既有文件；doc/regression/* 由 errata-2 补录为各 task 的 files[] create 条目"
+      },
+      {
+        "pattern": "packages/app/resources/pi-runtime/**",
+        "resolves_to": "构建产物目录，由 packages/app/scripts/prepare-pi-runtime.mjs 生成",
+        "owner": "TASK-003（wave 3），errata-2 已补录为 files[] create 条目"
+      }
+    ]
+  }
+}

@@ -1,0 +1,257 @@
+{
+  "id": "TASK-010",
+  "title": "SES-102 长对话与输入队列：delta 流式、分段消息源、立即插话/下一轮处理分流与草稿恢复",
+  "description": "把流式从「每帧携带全量累积消息」改成按 assistantMessageEvent.delta 拼接，并同步修正主进程 33ms 折叠逻辑——现有折叠只保留最后一条 message_update，一旦改成 delta 就会静默丢字符。渲染侧用 animation frame 合并 delta，只有完成的消息才进 Markdown 缓存。消息列表改成分段数据源（锚点、跳到底部、未读分界、历史加载失败重试），并把 thinking/tool 展开状态从组件内 ref 提到 store，避免回收组件丢状态。输入侧明确区分「直接发送」/「立即插话」/「下一轮处理」三种产品语义（传输层统一走 prompt 命令，靠 streamingBehavior 取值区分，不引入原生 steer / follow_up 命令），未发送队列项可编辑删除，草稿与队列按 session 持久化。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "feature",
+  "priority": "high",
+  "effort": "large",
+  "action": "把 packages/app/src/main/ipc.ts 的 makeEventForwarder 抽到 packages/app/src/main/pi/event-forwarder.ts，折叠规则改为：仅当 `prev.type === 'message_update' && e.type === 'message_update' && prev.assistantMessageEvent?.type === e.assistantMessageEvent?.type && ['text_delta','thinking_delta'].includes(e.assistantMessageEvent.type) && prev.assistantMessageEvent.contentIndex === e.assistantMessageEvent.contentIndex` 时才合并，合并结果为 `{ ...e, assistantMessageEvent: { ...e.assistantMessageEvent, delta: (prev.assistantMessageEvent.delta ?? '') + (e.assistantMessageEvent.delta ?? '') } }`；text_start / text_end / thinking_start / thinking_end / toolcall_start / toolcall_delta / toolcall_end / done / error 一律不合并。渲染层 stores/app.ts 的 case 'message_update' 改为把 delta 追加到 `streamBuffer` 并用 `requestAnimationFrame` 调度一次 flush，`message_end` 时才调用 renderMarkdown 写入缓存。发送路径按产品语义三分，但传输层统一走 prompt 命令：未 streaming → `{ type: \"prompt\", message }`（不带 streamingBehavior）；streaming 且用户选「立即插话」→ `{ type: \"prompt\", message, streamingBehavior: \"steer\" }`；streaming 且用户选「下一轮处理」→ `{ type: \"prompt\", message, streamingBehavior: \"followUp\" }`。改动落点是把 app.ts:406 现有的硬编码 `...(wasStreaming ? { streamingBehavior: \"steer\" } : {})` 换成由 mode 驱动的 `...(wasStreaming ? { streamingBehavior: mode } : {})`，即保留既有 steer 分支、新增 followUp 分支。禁止改发原生 `{type:\"steer\"}` / `{type:\"follow_up\"}` 命令，也不得发出 streaming 中不带 streamingBehavior 的裸 prompt（rpc.md:65 规定该情形命令直接返回 error）。历史（向前、更早）加载不走 pi RPC：`stores/chat-window.ts` 向上翻页一律调用 `window.piBuddy.sessions.readHistoryBefore({ sourcePath, beforeOffset, limit: 60 })`（实现见 TASK-009 的 packages/app/src/main/sessions/session-history.ts，由主进程按 JSONL 字节 offset 反向读取并解析）；向后（新消息）增量仍用 `{ type: 'get_entries', since: lastEntryId }`，且该 RPC 调用只允许出现在主进程侧。依据：rpc.md:696 规定 since 是 \"get only entries strictly after it\"，全协议无 before / limit / 反向分页参数。数据模型口径固定为：JSONL 是唯一真相源，SQLite 是索引；readHistoryBefore 返回 `stale: true` 时先 syncWorkspace 再重试一次。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/pi, packages/app/src/renderer/src/stores/app.ts, packages/app/src/renderer/src/components",
+  "focus_paths": [
+    "packages/app/src/main/pi/",
+    "packages/app/src/renderer/src/stores/app.ts",
+    "packages/app/src/renderer/src/components/ChatView.vue",
+    "packages/app/src/renderer/src/components/InputBar.vue"
+  ],
+  "read_first": [
+    "packages/app/src/main/ipc.ts 第 30-77 行（makeEventForwarder 与 33ms 折叠注释）",
+    "packages/app/src/renderer/src/stores/app.ts 第 79 行、第 124-240 行（activityTick 与 handleEvent），以及第 406 行 `...(wasStreaming ? { streamingBehavior: \"steer\" } : {})`——这是「立即插话」的现状实现，本任务只把硬编码的 \"steer\" 换成 mode 驱动，不改传输命令",
+    "【插话传输方式裁定证据 1/3】node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 62-63 行（prompt 的 streamingBehavior:\"steer\"/\"followUp\" 投递语义）对照第 82 行（原生 steer）与第 104 行（原生 follow_up）：steer 侧两句话逐字相同，证明改原生命令毫无投递语义收益",
+    "【插话传输方式裁定证据 2/3】同一 rpc.md 第 67 行（prompt：扩展命令 \"executes immediately even during streaming\"）对照第 82 行与第 104 行（原生 steer / follow_up：\"Extension commands are not allowed (use `prompt` instead)\"）：改原生命令会让用户在助手流式期间无法调用斜杠扩展命令，是功能净损失。另见第 65 行：streaming 中不带 streamingBehavior 的裸 prompt 直接报错",
+    "【插话传输方式裁定证据 3/3】node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session.js 第 832-838 行（`if (options.streamingBehavior === \"followUp\") await this._queueFollowUp(...) else await this._queueSteer(...)`）与 dist/core/agent-session.d.ts 第 359 行注释：prompt 的两个取值就是内部走同一对队列，故 rpc.md:347 set_steering_mode 与 rpc.md:1018 queue_update 对二者一致适用",
+    "packages/app/src/renderer/src/components/ChatView.vue",
+    "packages/app/src/renderer/src/components/InputBar.vue",
+    "packages/app/src/renderer/src/components/MessageItem.vue 第 48 行（openThinking 组件内 ref）",
+    "packages/app/src/renderer/src/components/ToolActivity.vue 第 10-12 行、第 39 行（expanded ref 与 !run 等同 running）",
+    "packages/app/src/renderer/src/markdown.ts",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 43-136 行（prompt/steer/follow_up/abort）、第 915-956 行（message_update 携带 message 全量快照与 assistantMessageEvent.partial 全量快照，delta 为增量）、第 1016-1027 行（queue_update）、第 694-723 行（get_entries 与 since 游标）——特别是第 696 行：since 是 \"get only entries strictly after it\"，无 before / limit 参数，因此反向分页必须走本地 JSONL offset 而非本 RPC",
+    "packages/app/src/main/sessions/session-index.ts（TASK-009 产出：getDraft/saveDraft，以及 scan_offset / mtime_ms / size_bytes / content_hash 四列）",
+    "packages/app/src/main/sessions/session-history.ts（TASK-009 产出的 readEntriesBefore：本任务向上翻页的唯一数据源）",
+    "packages/app/src/preload/api/sessions.ts（TASK-009 产出的 readHistoryBefore 方法签名）",
+    "packages/contract/src/index.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/contract/src/envelope.ts",
+    "packages/app/src/main/pi/event-forwarder.ts",
+    "packages/app/src/main/pi/event-forwarder.test.ts",
+    "packages/app/src/main/pi/pi-ipc.ts",
+    "packages/app/src/renderer/src/stores/chat-window.ts",
+    "packages/app/src/renderer/src/components/QueuePanel.vue"
+  ],
+  "depends_on": [
+    "TASK-005",
+    "TASK-009"
+  ],
+  "wave": 9,
+  "parallel_group": "wave2",
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "[CT-04 · 折叠在信封之后，判据读信封 payload] packages/app/src/main/pi/event-forwarder.ts（TASK-005 已建的唯一转发器位置）的 collapseEnvelopes 签名逐字为 `export function collapseEnvelopes(input: PiEnvelope<AgentEvent>[]): PiEnvelope<AgentEvent>[]`（`rg -c 'export function collapseEnvelopes\\(input: PiEnvelope<AgentEvent>\\[\\]\\): PiEnvelope<AgentEvent>\\[\\]' packages/app/src/main/pi/event-forwarder.ts` 输出 1）—— 类型层面锁死「折叠只吃信封」，投喂裸 AgentEvent 无法通过 typecheck；文件含字符串 `'text_delta'`、`'thinking_delta'`、`contentIndex` 与 `payload.assistantMessageEvent`；且判据不得读裸事件字段：`test -e packages/app/src/main/pi/event-forwarder.ts && [ \"$(rg -c 'e\\.assistantMessageEvent|env\\.assistantMessageEvent' packages/app/src/main/pi/event-forwarder.ts | wc -l)\" -eq 0 ]`（原设计直接读 e.assistantMessageEvent，在信封先于折叠时恒为 undefined，折叠退化为透传且 200-delta 单测因投喂裸事件仍然通过）；`test -e packages/app/src/main/pi/event-forwarder.ts && [ \"$(rg -c 'collapsed\\[collapsed.length - 1\\] = e;' packages/app/src/main/pi/event-forwarder.ts | wc -l)\" -eq 0 ]`",
+      "[CT-04 · fixture 必须经信封包装] 单测 packages/app/src/main/pi/event-forwarder.test.ts 的每个 fixture 都由 contract 的 `wrapEnvelope(...)` 构造（`rg -c 'wrapEnvelope\\(' packages/app/src/main/pi/event-forwarder.test.ts` 输出 >= 1，且该文件不得直接构造裸事件传入 collapseEnvelopes —— 由 c[0] 的泛型签名 + `pnpm typecheck` 退出码 0 共同保证，裸事件对象缺 protocolVersion/sequence 等必填字段，编译期即失败）。断言：投入 200 条 text_delta 信封（每条 payload.delta 为一个字符，contentIndex 相同，sequence 递增）后 flush，输出信封数 === 1，其 `payload.assistantMessageEvent.delta` 与 200 个字符按序拼接完全相等，且输出信封的 `sequence` === 第 200 条的 sequence；再投入 text_delta(idx=0) → text_end → text_delta(idx=1) 三条信封，断言输出为 3 条且 sequence 顺序不变",
+      "[W-4 快照取帧 · 基于信封] event-forwarder.test.ts 投入 3 条同 contentIndex 的 text_delta 信封（均由 wrapEnvelope 构造，sequence 依次为 1/2/3），fixture 字段取值明定为：第 1 帧 payload.delta='a'、第 2 帧 payload.delta='b'、第 3 帧 payload.delta='c'（delta 是增量），而同帧的 `payload.message.content[0].text` 与 `payload.assistantMessageEvent.partial.content[0].text` 依次为 'a'/'ab'/'abc'（全量累积快照）。flush 后断言输出信封同时满足三件事：(a) 增量拼接 —— `payload.assistantMessageEvent.delta === 'abc'`；(b) 快照取末帧 —— `payload.message.content[0].text === 'abc'` 且 `payload.assistantMessageEvent.partial.content[0].text === 'abc'`；(c) 信封元数据取末帧 —— 输出的 `sequence === 3`。三件事锁死「delta 累加、全量快照与信封元数据取末帧」：误以第 1 帧为基底则 (b)(c) 失败，漏拼 delta 直接取末帧则 (a) 得 'c' 失败。（原文另断言源码中 `{ ...e,` 的 Prettier 空格风格，属 SYS-2 过度指定，已删除——行为断言已完全覆盖该意图）",
+      "`rg -n \"activityTick\" packages/app/src/renderer/src/stores/app.ts packages/app/src/renderer/src/components/ChatView.vue` 仍有命中，证明流式滚动驱动没有在重构中被丢掉；并新增 ChatView 单测断言 activityTick 递增时 stickToBottom 为真则 scrollTop 被设为 scrollHeight",
+      "packages/app/src/renderer/src/stores/app.ts 含 `requestAnimationFrame` 与 `streamBuffer`（`[ \"$(rg -c --no-filename 'requestAnimationFrame|streamBuffer' packages/app/src/renderer/src/stores/app.ts | awk '{s+=$1} END{print s+0}')\" -ge 2 ]`）；流式期间不走 Markdown 渲染 —— 用 node 脚本判定：在 MessageItem.vue 中定位每个 `renderMarkdown(` 调用所在行 L，断言其上溯最近的 `v-if` / `v-else-if` / `if (` 条件表达式中出现 `props.streaming` 或 `!props.streaming`（命中数为 0 即 FAIL）；并补组件单测：以 `streaming: true` 挂载时 renderMarkdown 的 spy 调用次数为 0，以 `streaming: false` 挂载时恰被调用 1 次（双向断言，缺任一方向即 FAIL）",
+      "[steer 传输方式锁定 · 与 TASK-007 c[4] 同向] 「立即插话」与「下一轮处理」两种产品语义都经 prompt 命令传输、靠 streamingBehavior 取值区分，不得改用原生 steer / follow_up 命令。静态断言四条：(1) `[ \"$(rg -c --no-filename 'streamingBehavior: \"steer\"' packages/app/src/renderer/src/stores/app.ts | awk '{s+=$1} END{print s+0}')\" -ge 1 ]`（app.ts:406 既有分支必须保留）；(2) `[ \"$(rg -c --no-filename 'streamingBehavior: \"followUp\"' packages/app/src/renderer/src/stores/app.ts | awk '{s+=$1} END{print s+0}')\" -ge 1 ]`（本任务新增，改前该字符串在全仓命中数为 0，故此条当前为假、只有真正实现「下一轮处理」才转真）；(3) `test -e packages/app/src/renderer/src/stores/app.ts && [ \"$(rg -c 'type: \"steer\"' packages/app/src/renderer/src/stores/app.ts | wc -l)\" -eq 0 ]`；(4) `test -e packages/app/src/renderer/src/stores/app.ts && [ \"$(rg -c 'type: \"follow_up\"' packages/app/src/renderer/src/stores/app.ts | wc -l)\" -eq 0 ]`（第 3、4 条为回归守卫：一旦有人把传输改成原生命令即失败）。另加 [send() 签名锁定 · 由 TASK-006 定义] `rg -c 'export async function send\\(opts: SendOptions = \\{\\}\\): Promise<boolean>' packages/app/src/renderer/src/stores/app.ts` 输出 1（该签名被 TASK-006/007/010/014/015 五个任务共同依赖，任一任务改写签名即在此断言上失败）。行为断言 packages/app/src/renderer/src/stores/send-routing.test.ts 捕获 send() 实际出参对象 sent：(a) 非 streaming → `sent.type === \"prompt\"` 且 `!(\"streamingBehavior\" in sent)`；(b) streaming + mode=\"steer\" → `sent.type === \"prompt\" && sent.streamingBehavior === \"steer\"`；(c) streaming + mode=\"followUp\" → `sent.type === \"prompt\" && sent.streamingBehavior === \"followUp\"`；(d) streaming 且 mode 缺失 → send() 抛错且底层 RPC 发出次数为 0",
+      "thinking 展开状态与 tool 展开状态存放在 store（导出名逐字为 `openThinking` 与 `expandedTools` 的两个 reactive 容器（`rg -c 'export const openThinking = reactive|export const expandedTools = reactive' packages/app/src/renderer/src/stores/chat-ui.ts` 输出 2），key 分别为 messageKey 与 toolCallId），且 `test -e packages/app/src/renderer/src/components && [ \"$(rg -c 'const expanded = ref\\(|const openThinking = ref\\(' packages/app/src/renderer/src/components/MessageItem.vue packages/app/src/renderer/src/components/ToolActivity.vue | wc -l)\" -eq 0 ]`",
+      "ToolActivity.vue 对 `!run` 与 `run.status === 'running'` 分开处理：未找到 run 时显示「工具记录已不可用」而非无限转圈；`test -e packages/app/src/renderer/src/components/ToolActivity.vue && [ \"$(rg -c \"!run \\|\\| run.status === 'running'\" packages/app/src/renderer/src/components/ToolActivity.vue | wc -l)\" -eq 0 ]`，且该组件单测断言：toolRuns 中查不到对应 run 时渲染出文本「工具记录已不可用」（正向断言，缺失即 FAIL）",
+      "[UI-observable] 用户在助手输出中途输入新指令，可以在发送按钮旁选择「立即插话」或「下一轮处理」（单测断言两个按钮的 aria-label 存在），队列区显示未发送项且每项同时存在「编辑」与「删除」按钮；关闭并重开应用后同一会话的草稿文本、附件条目数与未发送队列长度三者与关闭前逐项相等（e2e 断言，不以观感判定）；性能门禁改为可执行断言：packages/app/src/renderer/src/components/chat-window.perf.test.ts 用 PerformanceObserver 观测 longtask，对 800 条消息会话执行「加载 + 滚动到顶 + 一次 200 帧流式」脚本，断言 `entries.filter(e => e.duration > 200).length === 0`，并把 observer 的原始 entries 写入 `doc/regression/TASK-010-perf.json`（原文的「Performance 面板截图 或 PerformanceObserver 断言」含一个永可满足的截图分支，且验收说明无记录路径）",
+      "`pnpm --filter @pibuddy/app typecheck` 与 `pnpm --filter @pibuddy/app test -- src/main/pi src/renderer` 均退出码 0",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1",
+      "[CRITICAL-1 反向分页 · 正向断言在先] packages/app/src/renderer/src/stores/chat-window.ts 含字符串 `readHistoryBefore` 与 `beforeOffset`（`rg -c 'readHistoryBefore' packages/app/src/renderer/src/stores/chat-window.ts` 输出 >= 1，正向断言，空实现无法满足）；且 `test -e packages/app/src/renderer && [ \"$(rg -c 'get_entries' packages/app/src/renderer | wc -l)\" -eq 0 ]`。注：get_entries 在改前全仓命中数实测为 0，故任何单纯的否定断言都是恒真的；原文「主进程中的 get_entries 命中全部位于向后增量路径（带 since: 同行或相邻行）」对空集恒真且「相邻行」无行距定义，已删除 —— 主进程侧由 TASK-009 c[11] 的正向断言覆盖",
+      "chat-window.test.ts：mock readHistoryBefore 返回三页（nextBeforeOffset 依次为 A、B、null），断言 (a) 滚动到顶部触发下一页且总请求次数恰为 3；(b) nextBeforeOffset===null 后再次滚到顶不再发请求（请求次数仍为 3，防止到顶后无限请求）；(c) 返回 stale===true 时先调用一次 sessions 同步再重试且只重试一次；(d) 请求抛错时 loadError 为真且 retry() 只重发一次",
+      "[rAF 与缓冲跨会话泄漏] 切换 session 与组件卸载时都执行 `cancelAnimationFrame(rafId)` 并把 streamBuffer 置空：单测在流式进行中切会话，断言切换后 rafId===null、streamBuffer===''、且新会话的首条消息内容不含上一会话的任何字符（残留缓冲会把上一会话的尾字符渗进新会话，typecheck 与构建都不会报错）",
+      "[折叠节拍与窗口销毁] event-forwarder.test.ts 断言 (a) 33ms 窗口内到达的 20 条事件只触发 1 次 `wc.send`；(b) `wc.isDestroyed()` 返回 true 时 `wc.send` 调用次数为 0 且不抛异常（窗口关闭后仍投递会产生静默的未捕获异常）",
+      "[队列只读语义落到 DOM] QueuePanel.vue 中已提交给 pi 的队列项（来源 queue_update）不渲染删除按钮：组件单测断言 committed 分区内 `queryAll('button')` 的 aria-label 集合不含「删除」且含「不可撤回」提示文案；本地未提交项则同时存在「编辑」与「删除」两个按钮",
+      "[草稿 debounce 生效] InputBar 草稿保存为 debounce 500ms：单测用 fake timers 断言 10 次连续 keystroke 后推进 500ms，`sessions.saveDraft` 恰被调用 1 次（未 debounce 会在长输入时每键一次 IPC + 一次 SQLite 写，UI 上无任何征兆）",
+      "[未读分界线不误判 · 双向断言] 单测三个场景：(a) 窗口不在底部时到达一条新消息 → 断言 `[data-unread-divider]` 数量 === 1（正向，缺失即 FAIL）；(b) 滚回底部并推进 1100ms → 断言数量 === 0；(c) 同一会话在 (a) 状态下再到达 3 条新消息 → 断言数量仍 === 1（不重复插入）。原文只断言「数量 <= 1」，被「永远不插入」的空实现满足",
+      "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+      "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4（本任务只向既有插槽注入内容，不改插槽名集合）"
+    ],
+    "verification": "pnpm --filter @pibuddy/app test -- src/main/pi/event-forwarder.test.ts src/renderer/src/stores/send-routing.test.ts && pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app dev 手工验证长回复无丢字、插话两种模式、草稿恢复",
+    "definition_of_done": "长对话中助手回复逐字出现且一个字符都不丢，用户可以选择立刻插话还是等下一轮，未发送的话可以改可以删，关掉应用再打开草稿还在。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/pi/event-forwarder.ts",
+      "action": "modify",
+      "target": "makeEventForwarder",
+      "change": "从 ipc.ts 迁入并改成 delta 拼接式折叠，保留 33ms 节拍与 tool_execution_update 同 toolCallId 覆盖式折叠（后者仍是累积语义，可安全覆盖）"
+    },
+    {
+      "path": "packages/app/src/main/pi/event-forwarder.test.ts",
+      "action": "create",
+      "target": "折叠正确性单测",
+      "change": "200 条 delta 拼接无损、跨 contentIndex 不合并、非 delta 事件不合并"
+    },
+    {
+      "path": "packages/app/src/main/pi/pi-ipc.ts",
+      "action": "modify",
+      "target": "pi:start handler",
+      "change": "改为 import { makeEventForwarder } from '../pi/event-forwarder.js'，删除本地实现"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/app.ts",
+      "action": "modify",
+      "target": "handleEvent / send / liveAssistant",
+      "change": "delta 缓冲 + rAF flush；send 三路分流（三者均发 prompt 命令，靠 streamingBehavior 区分：不带 / \"steer\" / \"followUp\"，第 406 行硬编码的 steer 改为 mode 驱动）；展开状态容器；未读分界与后台运行标识；草稿与队列经 sessions.saveDraft 持久化"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/chat-window.ts",
+      "action": "create",
+      "target": "useChatWindow",
+      "change": "分段数据源：向前（更早历史）调用 window.piBuddy.sessions.readHistoryBefore 按 JSONL 字节 offset 反向分页，游标为 beforeOffset（非 entryId）；向后增量沿用主进程的 get_entries + since；维护锚点、跳到底部、未读分界线与加载失败重试状态"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ChatView.vue",
+      "action": "modify",
+      "target": "窗口渲染与滚动",
+      "change": "接入 useChatWindow，保留 activityTick 订阅与 stickToBottom 逻辑，新增「跳到底部」按钮、未读分界线、历史加载失败重试按钮"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/MessageItem.vue",
+      "action": "modify",
+      "target": "openThinking / 渲染分支",
+      "change": "展开状态改读 store；streaming 时走纯文本渲染，非 streaming 才 renderMarkdown；补复制、重新发送、从此消息分叉、错误详情按钮与 aria 标签"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ToolActivity.vue",
+      "action": "modify",
+      "target": "expanded / run 状态",
+      "change": "展开状态改读 store；run 缺失与 running 分开渲染；展开区加 role/aria-expanded"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/InputBar.vue",
+      "action": "modify",
+      "target": "submit / 队列区",
+      "change": "发送模式选择（立即插话 → streamingBehavior:\"steer\"；下一轮处理 → streamingBehavior:\"followUp\"）、未发送队列列表与编辑删除、草稿自动保存（debounce 500ms 调 sessions.saveDraft）"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/QueuePanel.vue",
+      "action": "create",
+      "target": "队列面板",
+      "change": "展示本地未发送队列（可编辑删除）与已提交给 pi 的队列（queue_update 只读展示，标注不可撤回）"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/chat-ui.ts",
+      "action": "create",
+      "target": "openThinking / expandedTools 容器",
+      "change": "[errata-2 补录] c[6] 断言该文件导出两个 reactive 容器，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/send-routing.test.ts",
+      "action": "create",
+      "target": "send() 出参路由单测",
+      "change": "[errata-2 补录] c[5] 与 test.unit[1] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/chat-window.test.ts",
+      "action": "create",
+      "target": "虚拟窗口单测",
+      "change": "[errata-2 补录] test.unit[2] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/chat-window.perf.test.ts",
+      "action": "create",
+      "target": "longtask 性能门禁",
+      "change": "[errata-2 补录] c[8] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "doc/regression/TASK-010-perf.json",
+      "action": "create",
+      "target": "PerformanceObserver 原始 entries",
+      "change": "[errata-2 补录] c[8] 要求把 observer entries 写入该路径，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "先写 event-forwarder.test.ts 再改实现：用 200 条单字符 text_delta 断言拼接无损，这是本任务最容易静默回归的点",
+    "迁移 makeEventForwarder 到 src/main/pi/event-forwarder.ts，保留 33ms setTimeout 节拍与 wc.isDestroyed() 保护",
+    "renderer 侧新增 `let streamBuffer = ''` 与 `let rafId: number | null = null`，message_update 只做 `streamBuffer += delta`，rAF 回调里一次性写入 liveAssistant 的目标 content block 并 `activityTick.value++`",
+    "message_start 建立 live 消息骨架；toolcall_start/toolcall_end 直接落 block，不进 delta 缓冲",
+    "message_end 清空 streamBuffer、pushMessage、并触发 renderMarkdown 缓存写入",
+    "新建 stores/chat-window.ts：初始窗口 60 条；向上（更早）加载调用 `window.piBuddy.sessions.readHistoryBefore({ sourcePath, beforeOffset, limit: 60 })`（TASK-009 的本地 JSONL 反向分页），游标是字节 beforeOffset，nextBeforeOffset===null 即到顶不再请求；返回 stale===true 时先触发一次 syncWorkspace 再重试一次；失败时置 loadError 并暴露 retry()。禁止在渲染层或本模块出现 get_entries——rpc.md:696 的 since 只能向新方向增量",
+    "向后（新消息）增量：主进程用 `{ type: 'get_entries', since: lastEntryId }` 拉取并经 event-forwarder 下发；渲染层不直接发 RPC，从而保证「反向走本地、正向走 RPC」两条路径在代码上可 grep 区分",
+    "展开状态上提：store 新增 `const expandedThinking = reactive<Record<string, boolean>>({})` 与 `const expandedTools = reactive<Record<string, boolean>>({})`，key 用 `${messageKey}:${blockIndex}` 与 toolCallId",
+    "InputBar 增加发送模式分段控件（默认「立即插话」），streaming 时才显示；submit 按模式调用 store.send(text, images, files, mode)；store.send 把 mode 直接映射为 streamingBehavior 取值（「立即插话」→ \"steer\"，「下一轮处理」→ \"followUp\"）并挂到 prompt 载荷上——具体是把 app.ts:406 现有的 `...(wasStreaming ? { streamingBehavior: \"steer\" } : {})` 硬编码换成 `...(wasStreaming ? { streamingBehavior: mode } : {})`。传输命令恒为 prompt，不新增原生 steer / follow_up 调用路径，也不保留任何「原生命令 vs streamingBehavior」的双写兼容分支",
+    "草稿持久化：editorText / images / files / 本地队列变更后 debounce 500ms 调 window.piBuddy.sessions.saveDraft(sessionPath, draft)；start/openSession 后调 getDraft 恢复",
+    "队列语义澄清并落到 UI 文案：pi 的 queue_update 只给字符串数组、无稳定 id，已提交给 pi 的队列项无法删除，因此本地队列（未提交）可编辑删除，已提交队列只读并标注",
+    "回归验证：流式文本增量、thinking 折叠、tool 卡片与展开、图片多模态、立即插话（prompt + streamingBehavior:\"steer\"）、下一轮处理（prompt + streamingBehavior:\"followUp\"）、abort 停止、markdown 缓存、33ms 事件合并全部人工过一遍；并额外确认助手流式运行期间输入斜杠扩展命令仍能立即执行（这正是保留 prompt 传输而不改原生 steer 的收益，见 rpc.md:67 与 rpc.md:82）"
+  ],
+  "test": {
+    "commands": [
+      "pnpm --filter @pibuddy/app test -- src/main/pi/event-forwarder.test.ts",
+      "pnpm --filter @pibuddy/app test -- src/renderer",
+      "pnpm --filter @pibuddy/app typecheck"
+    ],
+    "unit": [
+      "packages/app/src/main/pi/event-forwarder.test.ts",
+      "packages/app/src/renderer/src/stores/send-routing.test.ts",
+      "packages/app/src/renderer/src/stores/chat-window.test.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "200 条 delta 拼接零丢失",
+      "800 条消息滚动无 >200ms 长任务",
+      "重启后草稿与未发送队列 100% 恢复"
+    ]
+  },
+  "reference": {
+    "pattern": "沿用现有 33ms 批量转发思路，只替换折叠判据",
+    "files": [
+      "packages/app/src/main/ipc.ts",
+      "packages/app/src/renderer/src/stores/app.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "【插话传输方式裁定 · 与 TASK-007 c[4] 同向，已核 rpc.md 原文】SES-102 要求的「立即插话 / 下一轮处理」是产品语义区分，必须实现；但传输层统一走 prompt 命令的两个 streamingBehavior 取值（\"steer\" / \"followUp\"），不改用原生 steer / follow_up 命令。三条依据：(1) 投递语义逐字相同——rpc.md:62 描述 prompt 的 streamingBehavior:\"steer\" 为 \"delivered after the current assistant turn finishes executing its tool calls, before the next LLM call\"，rpc.md:82 描述原生 steer 用的是同一句话，一字不差；rpc.md:63 的 \"followUp\" 与 rpc.md:104 的原生 follow_up 同理。(2) 原生命令有净损失——rpc.md:82 与 rpc.md:104 均明文规定 \"Extension commands are not allowed (use `prompt` instead)\"，而 rpc.md:67 规定 prompt 路径下扩展命令 \"executes immediately even during streaming\"；改用原生命令会使用户在助手流式运行期间无法调用扩展命令（斜杠命令），且无任何补偿收益。(3) 两者进入同一队列、set_steering_mode 对二者一致适用——dist/core/agent-session.js:832-838 显示 prompt 的 streamingBehavior 分支就是内部调用 `this._queueFollowUp(...)` / `this._queueSteer(...)`，与 agent-session.d.ts:359 注释 \"During streaming, queues via steer() or followUp() based on streamingBehavior option\" 一致，故 rpc.md:347 的 set_steering_mode 与 rpc.md:1018 的 queue_update 语义完全通用。附带事实：app.ts:406 现状已是 prompt + streamingBehavior:\"steer\"，改原生命令属主动回退。follow_up 路径按同一口径统一，不单独裁定。delta 化是 SES-102 的性能核心（避免 O(n²) 前缀传输解析），但它与主进程折叠逻辑强耦合，必须同一任务同时改；分段数据源而非全量虚拟滚动，是为了不破坏现有 activityTick 滚动闭环与变高消息的稳定性。历史加载改为「向后走 pi RPC 游标、向前走本地 JSONL 字节 offset」的双路径取数模型：反向分页在 pi RPC 层不存在，只能由主进程基于 TASK-009 的索引 offset 本地实现，因此本任务对 TASK-009 是实现硬依赖而非口径依赖。",
+    "decision_factors": [
+      "prompt 的 streamingBehavior 与原生 steer / follow_up 投递语义逐字相同（rpc.md:62 vs :82，rpc.md:63 vs :104），但原生命令禁用扩展命令（rpc.md:82/:104）而 prompt 允许其流式期间立即执行（rpc.md:67），故传输层锁定 prompt",
+      "prompt 的 streamingBehavior 分支在实现上直接调用内部 _queueSteer / _queueFollowUp（agent-session.js:832-838），与原生命令共用同一队列，set_steering_mode / queue_update 一致适用，改原生命令无任何机制收益",
+      "message_update 当前携带全量累积消息，是现有折叠正确性的隐含前提",
+      "activityTick 是流式滚动唯一驱动，丢了不报错",
+      "pi 0.83.0 的 get_entries 只有 since（strictly after）游标，无 before/limit，反向分页在 RPC 层不存在（rpc.md:696）",
+      "TASK-009 的 SQLite 索引已持有 scan_offset / mtime_ms / size_bytes / content_hash，主进程具备按字节 offset 反向读 JSONL 的全部条件"
+    ],
+    "tradeoffs": "分段数据源在极端长会话（数万条）下仍不如真正虚拟滚动，但可控且不破坏现有交互；若后续实测不达标再单开任务上虚拟滚动"
+  },
+  "risks": [
+    "pi 0.83.0 无任何反向分页 RPC（rpc.md:696：since 只返回 strictly after 的条目，无 before/limit）；向上加载更早历史必须走 TASK-009 的 session-history.readEntriesBefore，任何回退到 get_entries 的实现都会表现为「向上翻页拿不到更早消息」而不是报错",
+    "JSONL 是真相源、SQLite 只是索引：readHistoryBefore 返回 stale 时必须先 syncWorkspace 再重试，否则用户在外部工具续写会话后向上翻页会读到错位的字节 offset 并静默丢行",
+    "delta 折叠若判据写错会静默丢字符——只在长回复偶发、typecheck 与 UI 都不会报错，必须以单测为准而不是肉眼验证",
+    "已提交给 pi 的队列项无法删除（RPC 无对应命令），不得用假的删除按钮冒充；UI 必须明确区分「未发送」与「已提交」",
+    "会话树可视化（分支点 / compaction / 模型变化定位）与 fork/rewind 不静默删分支属于 SES-101/SES-102 交集，本任务只做「从消息分叉」入口，树视图延期，需在验收说明中标注"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "长对话渲染",
+      "输入队列",
+      "草稿恢复"
+    ],
+    "affected_components": [
+      "main/pi",
+      "renderer/stores/app",
+      "renderer/ChatView",
+      "renderer/InputBar"
+    ],
+    "affected_requirements": [
+      "SES-102"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "12h",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": false,
+    "wave": 9
+  },
+  "origin_shard": "B",
+  "origin_id": "TASK-B02"
+}

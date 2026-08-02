@@ -1,0 +1,434 @@
+{
+  "revision_round": 2,
+  "max_rounds": 3,
+  "scope_statement": "本轮受指令限定为「只修一处矛盾（TASK-007 / TASK-010 的 steer 锚点方向相反）+ 一次全局一致性收尾自检」。除该矛盾外，仅额外落地 3 处由自检直接命中、且已用源码或 rpc.md 原文证实的最小修正。未修改任何源码；所有写操作落在 outputs/。自检 2 / 3 / 8 结果为 FAIL，其修复超出本轮授权范围，已完整登记待轮次 3 处理。",
+  "dispute": null,
+  "primary_fix": {
+    "id": "R2-C1",
+    "title": "TASK-007 c[4] 与 TASK-010 c[5] 对「立即插话」传输方式的断言方向相反",
+    "ruling_received": "以 TASK-007 为准：保留 prompt + streamingBehavior:steer；TASK-010 不得改发原生 steer 命令。",
+    "independent_verification": {
+      "verdict": "CONFIRMED — 裁定与 rpc.md 原文及 SDK 实现完全一致，无 dispute",
+      "evidence_1_delivery_semantics_identical": "rpc.md:62（prompt 的 streamingBehavior=steer）与 rpc.md:82（原生 steer）均为 'delivered after the current assistant turn finishes executing its tool calls, before the next LLM call'，逐字相同；rpc.md:63 与 rpc.md:104 对 followUp / follow_up 同理。",
+      "evidence_2_extension_command_net_loss": "rpc.md:82 与 rpc.md:104 均明文 'Extension commands are not allowed (use prompt instead)'；rpc.md:67 规定 prompt 路径下扩展命令 'executes immediately even during streaming'。改原生命令 = 用户在助手流式期间丧失斜杠扩展命令能力，无补偿收益。",
+      "evidence_3_same_queue": "强于文档的源码证据：dist/core/agent-session.js:832-838 中 prompt 的实现为 if (options.streamingBehavior === 'followUp') await this._queueFollowUp(...) else await this._queueSteer(...)，与 dist/core/agent-session.d.ts:359 注释一致。二者进入同一对队列，故 rpc.md:347 set_steering_mode 与 rpc.md:1018 queue_update 对二者一致适用。",
+      "evidence_4_status_quo": "额外发现：packages/app/src/renderer/src/stores/app.ts:406 现状已是 ...(wasStreaming ? { streamingBehavior: \"steer\" } : {})。TASK-010 原文的改法属主动回退，而非新增。"
+    },
+    "landing": {
+      "1_criteria_rewritten": "TASK-010 c[5] 全文改写为与 TASK-007 c[4] 同向，并给出确切字符串与 grep 条件（详见 falsifiability_proof）。",
+      "2_product_semantics_preserved": "SES-102 要求的「立即插话」/「下一轮处理」产品语义区分未被削减：title / description / action / implementation[8] / files[stores-app.ts, InputBar.vue] 均改为「传输层统一走 prompt，靠 streamingBehavior 的两个取值区分」，功能面不变，仅传输方式统一。",
+      "3_dead_compat_branch_removed": "原 c[5] 的「若仍保留兼容分支，必须同时存在 if (!streamingBehavior) throw 之类的守卫」条件从句已删除——该守卫在裁定后不再是兼容分支，而是主路径，且原措辞含恒真分支（不保留兼容分支时整句空洞为真）。新 c[5] 的 (d) 子句以无条件形式保留了「禁止裸 prompt」这一实质约束（rpc.md:65）。implementation[] 中新增明确否定：不保留任何「原生命令 vs streamingBehavior」的双写兼容分支。",
+      "4_follow_up_unified": "follow_up 路径按同一口径统一：原 action 中的 { type: 'follow_up', message } 改为 { type: 'prompt', message, streamingBehavior: 'followUp' }。理由同 steer——rpc.md:104 与 rpc.md:63 构成同构证据链。"
+    },
+    "falsifiability_proof": {
+      "method": "对新 c[5] 的四条静态断言逐条在当前真实代码库上实测",
+      "results": [
+        "(1) grep -c 'streamingBehavior: \"steer\"' → 实测 1（当前为真，构成回归保护）",
+        "(2) grep -c 'streamingBehavior: \"followUp\"' → 实测 0（当前为假，只有真正实现「下一轮处理」才转真——该条是本 criterion 的进度驱动项，证明其非恒真）",
+        "(3) grep -c 'type: \"steer\"' app.ts → 实测 0（回归守卫）",
+        "(4) grep -c 'type: \"follow_up\"' app.ts → 实测 0（回归守卫）"
+      ],
+      "conclusion": "至少存在一条当前为假、需实现才转真的断言，故 c[5] 非恒真；同时存在双向守卫，故改用原生命令必然失败。与 TASK-007 c[4] 引用同一字符串形式（双引号），与源码 app.ts:406 实际风格一致，不会产生新的引号口径分歧。"
+    },
+    "quote_style_note": "TASK-007 c[4] 断言的是双引号形式的 streamingBehavior: \"steer\"。已核实 app.ts:406 真实写法为双引号，故 TASK-010 新断言统一采用双引号，避免制造「单引号 vs 双引号 grep 互斥」的新矛盾。",
+    "fields_updated": {
+      "TASK-010.json": [
+        "title",
+        "description",
+        "action",
+        "read_first（+3 条证据项，含 rpc.md 与 agent-session.js 行号）",
+        "convergence.criteria[5] 重写",
+        "convergence.criteria[2] 修正（见 R2-A3）",
+        "implementation[8]",
+        "implementation[11]",
+        "files[stores/app.ts].change",
+        "files[InputBar.vue].change",
+        "rationale.chosen_approach（裁定全文）",
+        "rationale.decision_factors（+2）"
+      ],
+      "plan.json": [
+        "design_decisions[13] 新增「轮次二裁定：插话传输方式全计划统一为 prompt + streamingBehavior」"
+      ]
+    }
+  },
+  "additional_fixes": [
+    {
+      "id": "R2-A1",
+      "target": "TASK-007 convergence.criteria[18]",
+      "trigger": "自检 4（主观语言 = 0）",
+      "issue": "含「执行 window.piBuddy.pi.prompt({text:'x'}) 正常工作」（主观），且后半句「不存在任何可传入任意 channel 名/绝对路径/URL 的入口」是对无界空间的全称断言，不可机械判定。轮次 1 自检已识别该条为唯一命中并列入 out_of_scope，本轮闭环。",
+      "fix": "改为可测：Promise resolve 不抛错 + 3 秒内 ChatView 新增 user 消息并出现 assistant 流式回复；Object.keys(window.piBuddy.pi).sort() 长度 === 15 且等于 c[3] 枚举；对这 15 个方法在 preload/index.d.ts 中的形参类型逐一核对（把无界全称断言收敛为对 15 项有限集合的枚举检查）。",
+      "anchor_safety": "已断言 TASK-007 c[4]（本轮裁定锚点）逐字未变。"
+    },
+    {
+      "id": "R2-A2",
+      "target": "TASK-012 convergence.criteria[9]",
+      "trigger": "自检 8（跨 task 互斥断言）",
+      "issue": "c[9] 称「Extension UI 五方法既有闭环」，而同任务 c[1] 要求覆盖「全部 9 个 method」，TASK-007 c[17] 又称「七种交互」——同一对象三个数字。",
+      "ground_truth_verified": "packages/pi-sdk/src/types.ts:235-244 声明 9 个 method；packages/app/src/renderer/src/stores/app.ts:243-263 handleUiRequest 当前显式处理 7 个 case（select/confirm/input/editor/notify/setStatus/set_editor_text），setWidget 与 setTitle 落入 default 被静默丢弃。",
+      "fix": "c[9] 的「五方法」改为「七个 method」并逐一枚举，显式说明 SDK 共 9 个、setWidget/setTitle 属 c[1] 新补的两个、不计入「既有闭环」。c[1] 的 9 个 method 断言保持不变。TASK-007 c[17] 的「七种」经查为正确，未改动。"
+    },
+    {
+      "id": "R2-A3",
+      "target": "TASK-010 convergence.criteria[2]",
+      "trigger": "自检 8（互斥断言：正确实现反而失败）",
+      "issue": "该条（轮次 1 新增）fixture 规定三帧累积快照为 a/ab/abc（即各帧 delta 应为 a/b/c），却断言 delta === 'a'+'ab'+'abc'（= aababc）。二者不可同真。同时它与同任务 c[1]（每条 delta 为一个字符，200 条拼接 === 200 字符）口径相反。正确实现会挂在这一条上。",
+      "fix": "fixture 各帧 delta 明定为 a/b/c，累积快照仍为 a/ab/abc；断言拆为 (a) delta === 'abc'（增量拼接）与 (b) message/partial 快照 === 'abc'（取末帧）。并补充两条失败路径说明：误用 { ...prev, 则 (b) 得 'a' 失败；漏拼 delta 直接取末帧则 (a) 得 'c' 失败。现与 c[1] 同向。"
+    }
+  ],
+  "self_check": {
+    "1_placeholder_literals": {
+      "result": "PASS",
+      "detail": "交付物（plan.json + tasks/TASK-001..016.json + waves.json + dependency-graph.json）中 PARTA: / PARTB: 命中 0。历史留痕文件仍含命中（plan-check.json 12、revision-round-1.json 13、synthesis-report.json 21、tasks-partB.json 15），按轮次 1 的 artifacts_intentionally_untouched 判定属如实记载的过程记录，不改写。"
+    },
+    "2_no_tautological_criteria": {
+      "result": "FAIL",
+      "detail": "对全部 293 条 criteria（含轮次 1 为 B 分片新增的 65 条）逐条施加「何种代码状态会使其失败」的判据，命中 25 条恒真/不可证伪。轮次 1 self_check.2 记为 PASS 与本轮结论不符。修复超出本轮授权，完整清单见 deferred_to_round_3.tautologies。",
+      "dominant_patterns": [
+        "对空集的全称断言（get_entries / PIBUDDY_USE_CN_MIRROR / 目标目录尚不存在时，否定型 grep 被「任务没做」满足）",
+        "含「或」「若…则」「之类的」「附近」等逃逸分支，一支恒真",
+        "只有否定断言、无正向断言，空实现即通过",
+        "断言内容未定义（「各有一个 fixture 与断言」「人工回归通过」但无记录载体路径）"
+      ],
+      "verified_samples": [
+        "TASK-013 c[3] 的 rg 负向先行断言已实测：ripgrep 报 regex parse error 并以退出码 2 终止（Rust regex 不支持 look-around），该条既不能通过也不能失败",
+        "8 个 B 分片 task（TASK-009..016）的「契约唯一性」条为逐字重复的同一段文本，其后半句「不得出现同名 interface 重复声明 / 禁止新建第二套契约包」无机器判据"
+      ],
+      "count_reported_by_scan": 25,
+      "count_remaining_after_this_round": 24,
+      "count_note": "扫描命中 25 条（清单 17 项，其中最后一项「契约唯一性」覆盖 TASK-009..016 共 8 个 task）。本轮修复其中 1 条（TASK-010 c[5]，随主裁定一并重写），故剩余 24 条。TASK-012 c[9] 的数字矛盾已修（R2-A2），但其「人工回归通过」无记录载体的问题仍在，故仍计入。"
+    },
+    "3_cross_task_contradictions": {
+      "result": "FAIL",
+      "detail": "点名核查的口径项全部一致，但全量两两扫描另发现 26 项跨 task 矛盾（见自检 8）。",
+      "named_items_checked": {
+        "asar": "PASS — 全计划取值统一为 true；出现的 asar: false 全部位于「由 false 改为 true」的历史表述或「grep 应为 0」的断言中",
+        "contract_package": "PASS — 51 处命中全部为 @pibuddy/contract，无第二种包名",
+        "steer_transport": "PASS（本轮修复后）— 全计划同向为 prompt + streamingBehavior",
+        "stateSequence": "PASS — TASK-011 中 stateSequence 10 处、裸 sequence 0 处，轮次 1 的重命名已彻底落地",
+        "secret_store": "PASS — secret-store 22 处 / safeStorage 11 处，vault 在 tasks/ 中 0 处（仅存于 plan.json 的裁定说明文本内）",
+        "ipc_guard": "PASS — ipc-guard.ts 为实现文件、PermissionEngine 为 ports.ts 中的接口名，接口/实现分工一致（但 TASK-007 未声明 implements，见自检 8 第 20 项）",
+        "runtimeId_generation": "PASS — 命名一致，无竞争同义词",
+        "workspaceId": "CONDITIONAL — workspaceId 18 处一致；workspace_root / workspaceRoot 的 7 处命中经查全部位于主进程 SQLite / settings 键，符合轮次 1 design_decisions[5]，但与 TASK-015 的持久化 workspace 记录构成同一性风险（见自检 8 第 19 项）",
+        "attachment_token": "FAIL — 存在 attachment token（TASK-007/016）、attachment ID（TASK-015）、attachmentId（TASK-016）三种称谓，且对应两套注册表与两个 TTL（见自检 8 第 16/17 项）"
+      }
+    },
+    "4_subjective_language": {
+      "result": "FAIL",
+      "count_before": 13,
+      "count_after": 12,
+      "detail": "机械正则（固定词表）扫描仅命中 1 条并已修复（R2-A1）；但语义复核另发现 12 条含「正常」「可读」「明确」等不可测措辞，机械扫描因词表不含裸「正常」/「可读」而漏检。故本项判定为 FAIL 而非 PASS。清单见 deferred_to_round_3.subjective_language。",
+      "cross_method_note": "两种方法（正则 vs 逐条语义复核）结果不一致，以语义复核为准；这也说明轮次 1 self_check.4 的 PASS 结论建立在同类机械扫描之上，不可靠。"
+    },
+    "5_dependency_graph": {
+      "result": "PASS",
+      "detail": "16 个 task 全部解析：depends_on 无悬空引用；DFS 三色标记无环；无任何 task 的 wave 早于或等于其依赖的 wave（0 处违规）；plan.json.waves 与各 task 的 wave 字段逐项一致；plan.task_ids 与磁盘 task 集合相等。同 wave 内 files[] 的 create/modify/delete 路径写交集为 0（wave 3 = TASK-003+004、wave 9 = TASK-010+011、wave 10 = TASK-012+013 三个并行波次均无冲突）。"
+    },
+    "6_ui_observable_per_wave": {
+      "result": "PASS",
+      "detail": "13 个交付波次全部至少含 1 条 [UI-observable]：w1=1 w2=1 w3=4 w4=2 w5=2 w6=3 w7=2 w8=1 w9=3 w10=2 w11=3 w12=2 w13=2。"
+    },
+    "7_requirement_coverage": {
+      "result": "PASS",
+      "detail": "requirement_traceability 35 条，requirement_id 唯一且全部带非空 task_ids；tasks/ 中出现的 doc ID 恰为 35 个，与 traceability 集合完全相等（双向差集为空）；traceability 未指向任何不存在的 task；16 个 task 全部被至少一条需求覆盖。覆盖率未下降。注：交付物实测为 35 个 doc ID，而非指令中提及的 29 个。"
+    },
+    "8_pairwise_criteria_contradiction_scan": {
+      "result": "FAIL",
+      "count": 26,
+      "near_miss_count": 17,
+      "method": "以「每条 criterion 约束的具体产物」（文件路径、导出符号、配置键、字符串字面量、grep 期望值 0/>=1）建索引，对 16 个 task 两两求碰撞，再逐项人工判读。",
+      "fixed_this_round": [
+        "R2-C1（steer 传输方式，指令指定）",
+        "R2-A2（Extension UI 方法数 5 vs 7 vs 9）",
+        "R2-A3（TASK-010 c[2] 与 c[1] 的 delta 口径相反）"
+      ],
+      "independently_verified_highest_impact": [
+        {
+          "id": "CT-05",
+          "severity": "critical",
+          "claim": "SEC-002 的 IPC 守卫在 wave 8 后静默失效",
+          "verification": "实测：全 16 个 task 中仅 TASK-007 c[5] 与 c[7] 断言 assertMainFrame，且两条都把路径钉在 packages/app/src/main/ipc.ts（wave 6）。TASK-009（wave 8）的 files[] 将 handler 迁至 src/main/ipc/sessions-ipc.ts 与 registry.ts 并削减 ipc.ts。此后无任何 criterion 对新 handler 文件重新断言 frame / schema / size / rate 守卫，而 TASK-009..016 合计新增约 50 个 channel。",
+          "status": "CONFIRMED"
+        },
+        {
+          "id": "CT-21",
+          "severity": "critical",
+          "claim": "packages/app/vitest.config.ts 的 include 会静默注销 11 个 A 分片 spec",
+          "verification": "实测 TASK-009 implementation 原文为条件式（仅当 packages/app 需要独立 test environment 时新建，include=['src/**/*.test.ts']）。故非无条件发生，但一旦发生，packages/app/test/*.spec.ts 全部脱离发现范围而 pnpm -w test 仍退出 0。",
+          "status": "CONFIRMED（条件触发）"
+        },
+        {
+          "id": "CT-15",
+          "severity": "high",
+          "claim": "渲染进程持有 sourcePath 绝对路径与 TASK-007 的不透明句柄模型冲突",
+          "verification": "实测 sourcePath 仅出现于 TASK-009（10 处）与 TASK-010（2 处）；TASK-009 c[10] 同时断言「渲染进程只见 workspaceId 与 displayPath，不见绝对路径」。同一 task 内自相矛盾成立。可利用性未验证（取决于未规定的校验），但设计口径冲突确凿。",
+          "status": "CONFIRMED（口径冲突）；exploitability NOT VERIFIED"
+        }
+      ],
+      "not_confirmed": [
+        {
+          "id": "CT-13-npmmirror",
+          "reported": "TASK-013 c[18] 与 c[0] 就 npmmirror 相冲突",
+          "verdict": "REJECTED — c[0] 断言 electron-builder.yml 中 npmmirror 命中为 0，c[18] 断言 electron-builder.yml 与 build-config.mjs 的命中全部位于条件分支内。前者使后者在该文件上空洞为真，但二者不互斥。属自检 2 的恒真问题，不属自检 8 的矛盾。"
+        }
+      ],
+      "full_inventory": "26 项矛盾 + 17 项 near-miss 的完整清单见 deferred_to_round_3.contradictions 与 near_misses"
+    }
+  },
+  "deferred_to_round_3": {
+    "why_deferred": "本轮指令明确限定为「只修一处矛盾 + 一次全局一致性收尾，不得改动其它任何内容」。自检 2 / 3 / 8 命中的 25 条恒真、12 条主观措辞、23 项未修矛盾中，绝大多数不是措辞问题而是架构归属决策（哪个模块拥有 IPC 守卫 / 附件注册表 / 日志器 / 会话枚举 / workspace 身份 / 契约类型边界），需要 checker 或 planner 层裁定并可能改动 depends_on 与 wave 划分。在本轮授权内强行改写将产生大量未经复核的新断言，风险高于收益。",
+    "contradictions": [
+      {
+        "id": "CT-01",
+        "pair": "TASK-006 files[1] <-> TASK-009 c[1]",
+        "artifact": "main/sessions-store.ts",
+        "conflict": "TASK-006 action=delete VS TASK-009 要求该文件存活并仅保留 sessionDirFor 导出",
+        "note": "TASK-009 依赖 TASK-006，故其 grep 在文件缺失时空洞通过"
+      },
+      {
+        "id": "CT-02",
+        "pair": "TASK-006 整体 <-> TASK-009 c[0]/c[4]",
+        "artifact": "会话枚举真相源",
+        "conflict": "session-repository.ts 与 SessionIndex 两套枚举器并存，两套目录解析算法、两个上限（200 vs 500）；TASK-009 未在 files[] 中删除前者"
+      },
+      {
+        "id": "CT-03",
+        "pair": "TASK-005 c[7] <-> TASK-010 c[0]",
+        "artifact": "33ms 事件转发器所在模块",
+        "conflict": "pi-supervisor.ts VS pi/event-forwarder.ts"
+      },
+      {
+        "id": "CT-04",
+        "pair": "TASK-005 c[6]/files[3] <-> TASK-010 c[0]/c[2]",
+        "artifact": "流经转发器的对象形状",
+        "conflict": "PiEnvelope 包装 VS 裸 AgentEvent（TASK-010 折叠判据直接读 e.assistantMessageEvent）",
+        "severity": "critical — 若信封先于折叠，判据恒 undefined，折叠退化为透传，而 c[1] 的 200-delta 单测因直接投喂裸事件仍然通过"
+      },
+      {
+        "id": "CT-05",
+        "pair": "TASK-007 c[5]/c[7] <-> TASK-009 files[7]",
+        "artifact": "IPC handler 所在文件与守卫断言",
+        "conflict": "见 self_check.8 已验证项",
+        "severity": "critical"
+      },
+      {
+        "id": "CT-06",
+        "pair": "TASK-005 c[8] <-> TASK-009/010 files",
+        "artifact": "clients.set 顺序校验脚本的目标路径",
+        "conflict": "verification 字段硬编码 readFileSync 指向 main/ipc.ts，pi:start 迁走后必然失效"
+      },
+      {
+        "id": "CT-07",
+        "pair": "TASK-008 c[3] <-> TASK-014 c[2]",
+        "artifact": "stt:transcribe 请求 schema",
+        "conflict": "{endpointId, audio, mimeType} VS 入参只剩 {audio, mimeType}"
+      },
+      {
+        "id": "CT-08",
+        "pair": "TASK-008 c[7] <-> TASK-014 c[2]",
+        "artifact": "同一 STT 通道的出站 URL 策略",
+        "conflict": "safeFetch 拒绝 localhost/127.0.0.1 VS assertHttpsOrLocalhost 放行 localhost；另 testProvider / discoverModels 两条新出站路径绕过 safeFetch"
+      },
+      {
+        "id": "CT-09",
+        "pair": "TASK-008 c[1] <-> TASK-014 c[1]",
+        "artifact": "STT key 配置态字段名",
+        "conflict": "sttApiKeyConfigured + sttApiKeyLast4 VS sttApiKeySet"
+      },
+      {
+        "id": "CT-10",
+        "pair": "TASK-007 c[6] <-> TASK-008 c[3]",
+        "artifact": "stt:transcribe 载荷上限",
+        "conflict": "MAX_IPC_PAYLOAD_BYTES 8MB 通用守卫先于 MAX_AUDIO_BYTES 25MB 生效，后者成死代码；需按 channel 覆盖"
+      },
+      {
+        "id": "CT-11",
+        "pair": "TASK-003 c[7]+action <-> TASK-012 files[7]",
+        "artifact": "buildPiSpawn 找不到内置运行时时的行为",
+        "conflict": "必须抛错且信息含 runtime-manifest.json VS 保持全局 pi 回退不变"
+      },
+      {
+        "id": "CT-12",
+        "pair": "TASK-009 implementation[0]/risks[0] <-> TASK-016 c[14]",
+        "artifact": "electron-builder.yml 的 npmRebuild",
+        "conflict": "node:sqlite 不可用时需改 true VS 要求恒为 false 且禁止改动",
+        "action_required": "在 TASK-009 启动前先跑 node:sqlite 探针并据此定稿"
+      },
+      {
+        "id": "CT-13",
+        "pair": "TASK-002 c[10] <-> TASK-013 c[5]/c[12]",
+        "artifact": "主进程日志器",
+        "conflict": "main/logger.ts（自研 JSONL，5 文件，键名正则 redact）VS main/logging/logger.ts（electron-log，7 文件，redactSecrets 装在 transport hook）；无任务删除前者，且 TASK-008 reference.pattern 明确指向旧的 logger.redact"
+      },
+      {
+        "id": "CT-14",
+        "pair": "TASK-001 files[5]/c[9] <-> TASK-013 c[3]/files[6]",
+        "artifact": ".github/workflows/ci.yml",
+        "conflict": "两个 task 都声明 action=create；TASK-013 的 SHA-pin 检查器会在 TASK-001 交付的 ci.yml 上失败，且第二次 create 会丢掉 TASK-001 的 pnpm build 闸门"
+      },
+      {
+        "id": "CT-15",
+        "pair": "TASK-007 c[9] <-> TASK-009 c[11] / TASK-010 c[11]",
+        "artifact": "渲染进程可持有的路径类值",
+        "conflict": "见 self_check.8 已验证项",
+        "severity": "high"
+      },
+      {
+        "id": "CT-16",
+        "pair": "TASK-007 c[10] <-> TASK-015 c[2]/c[11]",
+        "artifact": "附件引用与注册表",
+        "conflict": "attachment-registry.ts 一次性 token / TTL 300000（5 分钟）VS workspace/attachment-store.ts 结构化可复用记录 / expiresAt 默认 24h；两套字段词汇（token VS id+capability），TASK-015 不删除前者"
+      },
+      {
+        "id": "CT-17",
+        "pair": "TASK-015 files[16]/c[2] <-> TASK-016 files[9]",
+        "artifact": "preview / 附件 API 接受的标识",
+        "conflict": "TASK-016 明确「不传裸 attachmentId」，而 TASK-015 使 attachmentId 成为渲染层唯一句柄——PreviewPane 无合法途径打开刚拖入的附件"
+      },
+      {
+        "id": "CT-18",
+        "pair": "TASK-007 c[8] <-> TASK-015 c[0]",
+        "artifact": "workspace root 包含性原语",
+        "conflict": "resolveInWorkspace（接受 root 自身）VS assertInsideRoot（额外拒绝 rel 为空串，即拒绝 root 自身）；两套安全原语对同一输入判定相反，各自带独立测试套件"
+      },
+      {
+        "id": "CT-19",
+        "pair": "TASK-007 c[8]/c[9] <-> TASK-015 action <-> TASK-016 artifacts 表",
+        "artifact": "workspace 身份",
+        "conflict": "A07 每进程 randomUUID VS B07 持久化 workspace 记录；sessions.workspace_id 声明 NOT NULL 且 query 依其过滤，但进程级 UUID 重启即变，索引列跨重启失效",
+        "severity": "high"
+      },
+      {
+        "id": "CT-20",
+        "pair": "TASK-015 read_first[5] <-> TASK-007 c[6]",
+        "artifact": "PermissionEngine 实现",
+        "conflict": "TASK-015 称 ipc-guard.ts 实现 checkFrame/checkPayload/checkRate，TASK-007 的收敛条件中无 implements 亦无这三个方法名；另 TASK-015 的 PermissionRule 类型无任务在 @pibuddy/contract 中定义，使其 c[10] 不可满足"
+      },
+      {
+        "id": "CT-21",
+        "pair": "A 分片 11 个 spec <-> TASK-009 implementation[1]",
+        "artifact": "测试发现范围",
+        "conflict": "见 self_check.8 已验证项",
+        "severity": "critical"
+      },
+      {
+        "id": "CT-22",
+        "pair": "TASK-002 c[2]/c[4] <-> TASK-011 c[1]/c[12]",
+        "artifact": "UpdateState 类型归属与单调序号",
+        "conflict": "update-types.ts 本地声明 VS 跨进程类型一律从 @pibuddy/contract 导入，c[1] 与 c[12] 不可同真；另 stateSequence 与信封 sequence 是两条推送通道的两套排序机制，渲染侧丢弃规则实现两遍"
+      },
+      {
+        "id": "CT-23",
+        "pair": "TASK-002 files[7] <-> TASK-009 files[10]/files[13]",
+        "artifact": "会话列表行类型",
+        "conflict": "contract 的 SessionSummary VS preload 的 SessionRow/DraftRecord；TASK-009 c[9] 自身禁止在 preload/renderer 重声明第二套形状，与其 files[] 互斥"
+      },
+      {
+        "id": "CT-24",
+        "pair": "TASK-008 DoD/c[12] <-> TASK-014 c[0]/c[15]",
+        "artifact": "API key 是否允许明文落盘",
+        "conflict": "「永不明文落盘」+ safeStorage fail-closed VS 必须把 provider key 明文写入 ~/.pi/agent/auth.json（pi 运行时自身要读）",
+        "resolution_hint": "TASK-008 的 DoD 需收窄为「PiBuddy 自有密钥（STT）不明文落盘；provider 凭证委托给 pi 的 auth.json 文件权限模型」，否则 Linux 上 safeStorage 缺失时实现者会拒写 auth.json，PROV-101 目标失败"
+      },
+      {
+        "id": "CT-25",
+        "pair": "TASK-006 c[10] <-> TASK-012 files[9]",
+        "artifact": "uiRequests / statusTexts 归属",
+        "conflict": "resetSessionScopedState 须在 stores/app.ts 内含这两个标识 VS TASK-012 将其迁出到 stores/extensionUi.ts；迁出后无人保证切会话时清空，正是 TASK-006 c[20] 的验收点；TASK-012 c[4] 又要求 app.ts 写 statusTexts.summarization"
+      },
+      {
+        "id": "CT-26",
+        "pair": "TASK-006 c[11] <-> TASK-014 action",
+        "artifact": "stores/app.ts send() 返回契约",
+        "conflict": "Promise<boolean> VS 图片能力守卫内裸 return——裸 return 在 Promise<boolean> 函数中过不了 typecheck，而两任务都要求 typecheck 退出码 0"
+      }
+    ],
+    "near_misses": [
+      "start() 模型恢复分支（TASK-006 c[13] 的 sessionPath undefined 分支与 TASK-014 c[4] 需要的比较点互斥，需显式 else 分支）",
+      "send() 签名被 5 个 task 重塑（006/007/010/014/015），仅 TASK-006 钉了签名",
+      "shell.openExternal 全树恰 1 处（TASK-004 c[6]）与 TASK-011/TASK-013 新增的外链入口",
+      "packages/app/package.json 的 test 脚本仅条件式添加，但 8 个下游 task 都调用 pnpm --filter @pibuddy/app test",
+      "MAX_SESSIONS_SCANNED=200（TASK-006）与 500 会话基准（TASK-009）",
+      "REFRESH_SESSIONS_DEBOUNCE_MS 归属（app.ts VS sessions store）",
+      "ToolActivity.vue：TASK-004 files[5] 要求不改 expanded 与 !run 判定，TASK-010 c[6]/c[7] 要求删除",
+      "TASK-014 c[21] 依赖 TASK-013 的 redactSecrets 但 depends_on 未含 TASK-013（仅靠 wave 序侥幸成立）",
+      "SETTINGS_SCHEMA_VERSION 恒为 1 而 003/008/014 三个 task 各自扩字段",
+      "auth.json 写入非原子（TASK-014 裸 writeFileSync，而 TASK-008 对 settings.json 要求 tmp+fsync+rename）",
+      "sandbox:preview 分区无 permission handler（TASK-004 c[10] 只覆盖 defaultSession）",
+      "TASK-016 read_first[0] 与 decision_factors[0] 仍称主窗口 sandbox: false，该前提已被 TASK-004 c[0] 在 wave 3 修正",
+      "TASK-013 c[10] 要求 ADR-0001 全文不含 asar: false，但该 ADR 的职责恰是记录为何弃用它",
+      "AppShell.vue 被 011/012/014/015/016 五个 task 修改而无任务拥有其布局契约",
+      "TASK-007 内部：MAX_IMAGE_BYTES 10MB > MAX_IPC_PAYLOAD_BYTES 8MB（与 CT-10 同构）",
+      "pi:ui-expire / pi:ui-expire-all 为 TASK-005 之后新增的推送通道，TASK-012 未提及 PiEnvelope 包装",
+      "TASK-009 c[16] 与 c[4] 对 sessions:list 的否定断言重复（非恒真，仅冗余）"
+    ],
+    "tautologies": [
+      "TASK-010 c[11]（get_entries 全仓 0 命中，「命中全部位于向后增量路径」对空集恒真）",
+      "TASK-010 c[17]（unread-divider 数量 <= 1 被 0 满足）",
+      "TASK-010 c[8]（「Performance 面板截图 或 PerformanceObserver 断言」的截图分支使其永可满足，且验收说明无路径）",
+      "TASK-012 c[17]（否定 grep 指向尚不存在的目录）",
+      "TASK-012 c[12]（「命中行附近存在判断」——附近无行距定义）",
+      "TASK-012 c[9]（已由 R2-A2 修复其数字矛盾，但「人工回归通过」仍无记录载体）",
+      "TASK-013 c[18]（grep PIBUDDY_USE_CN_MIRROR release.yml == 0：该变量全仓不存在且 release.yml 由本任务新建）",
+      "TASK-013 c[3]（rg 负向先行断言，已实测报错退出码 2，不可执行）",
+      "TASK-007 c[12]（「grep shell.openPath 输出 0 或 该调用仅接受 attachment token 解析出的路径」——「或」分支为人工判断，实现者可原样保留 ipc.ts:165 并主张第二分支成立）",
+      "TASK-014 c[7]（否定断言由祖先 TASK-007 保证，本任务做与不做不改变其真值）",
+      "TASK-014 c[17]（否定 grep 指向尚不存在的路径）",
+      "TASK-014 c[1]（对 grep 输出做人工语义判断，无机械判据）",
+      "TASK-016 c[17]（「各有一个 fixture 与断言」未定义断言内容；grep unsupported >= 1 被「对所有输入都返回 unsupported」的桩满足——恰是该条声称要防的空白冒充）",
+      "TASK-016 c[1]（「用可观察副作用检查，如 DOM 未被修改」只给举例未给断言）",
+      "TASK-011 c[8]（唯一机器判据是「缺席」，不实现取消按钮即通过；true 分支无断言）",
+      "TASK-009 c[8]（「人工回归通过并记录在任务说明里」——载体未定路径）",
+      "TASK-009/010/011/012/013/014/015/016 各一条「契约唯一性」（共 8 条逐字重复，后半句无机器判据）"
+    ],
+    "subjective_language": [
+      "TASK-003 c[5]（可读原因）",
+      "TASK-003 c[16]（正常启动 / 明确错误）",
+      "TASK-004 c[13]（五项全部正常）",
+      "TASK-007 c[17]（七种交互正常响应）",
+      "TASK-008 c[11]（正常加载）",
+      "TASK-008 c[15]（可读错误提示）",
+      "TASK-013 c[2]（可读）",
+      "TASK-014 c[6]（正常放行）",
+      "TASK-014 c[8]（附件条恢复正常）",
+      "TASK-014 c[10]（可读原因）",
+      "TASK-016 c[4]（可读建议）",
+      "TASK-016 c[7]（正常显示 / 明确原因）"
+    ],
+    "systemic_issues": [
+      {
+        "id": "SYS-1",
+        "title": "grep -c / grep -rc 的语义与「路径不存在」的判定",
+        "detail": "约 20 条条件写作「grep -rc … 输出 0」。grep -rc 对目录输出的是多行 file:count 而非单个 0；对不存在的路径退出码 2 且无输出。这直接决定了大量否定型断言会否被「任务没做」蒙混过关。建议全库统一为 rg -c … | wc -l 或 rg --count-matches，并显式规定「路径不存在」视为失败。"
+      },
+      {
+        "id": "SYS-2",
+        "title": "过度指定导致正确实现失败（与恒真相反的方向）",
+        "detail": "TASK-009 c[15] 要求 session-index.ts 含字面量 BEGIN/COMMIT（better-sqlite3 的 db.transaction() 写法不含这两个词）；TASK-014 c[21] 要求 grep -rc 'function redactSecrets' == 1（箭头函数导出得 0）；TASK-010 c[2] 依赖 Prettier 空格风格的 { ...e,。"
+      },
+      {
+        "id": "SYS-3",
+        "title": "轮次 1 自身的记账不一致",
+        "detail": "revision-round-1.json 的 changes[11] 记 TASK-014 criteria「after: 18 条」，而 density_remediation.per_task.TASK-014.criteria 记 22（磁盘实际为 22）；其 self_check.2 与 self_check.4 均记 PASS，与本轮结论不符。"
+      }
+    ]
+  },
+  "artifacts_updated": [
+    "tasks/TASK-010.json",
+    "tasks/TASK-007.json",
+    "tasks/TASK-012.json",
+    "plan.json"
+  ],
+  "artifacts_intentionally_untouched": {
+    "synthesis-report.json / plan-check.json / tasks-partA.json / tasks-partB.json": "沿用轮次 1 判定：历史过程记录与合并前快照，改写会伪造过程。",
+    "dependency-graph.json / waves.json": "本轮依赖边与波次零变更（见 self_check.5），无需重算写回。",
+    "revision-round-1.json": "上一轮的判定记录；其记账不一致已在 deferred_to_round_3.systemic_issues.SYS-3 中登记，但不回改历史文件。",
+    "所有源码": "本轮未修改任何源码；对 packages/ 与 node_modules/ 的访问全部为只读取证。"
+  },
+  "verification_run": {
+    "json_validity": "tasks/TASK-001..016.json 与 plan.json 全部 json.load 通过",
+    "anchor_integrity": "TASK-007 c[4]（裁定锚点）逐字未变，已断言校验",
+    "regression": "依赖图 / 波次 / 写交集 / UI-observable / 需求覆盖 五项在改动后重跑，结论与改动前一致"
+  },
+  "conclusion": "指令指定的唯一必修项已完成并经原文与源码双重取证：裁定成立，无 dispute；TASK-010 c[5] 已改写为与 TASK-007 c[4] 同向，且实测含一条当前为假的断言，非恒真；SES-102 的「立即插话 / 下一轮处理」产品语义完整保留，仅传输层统一；follow_up 按同一口径统一；死的兼容分支措辞已移除。另完成 3 处源码取证的最小修正。但全局收尾自检 8 项中 3 项 FAIL：25 条恒真条件、12 条主观措辞、26 项跨 task 矛盾（其中 CT-04 / CT-05 / CT-21 为会静默摧毁流式正确性、IPC 安全守卫与全部 M0-M2 回归测试的严重项，且三者的共同特征是「失败时不报错、CI 仍退出 0」）。这些问题的性质是架构归属未裁定，而非措辞疏漏，超出本轮授权。建议轮次 3 不作为润色轮，而作为一次实质性重规划：先裁定 6 组归属（IPC 守卫落点、附件注册表、workspace 身份、日志器、会话枚举、契约类型边界），再据此重写受影响 task 的 criteria 与 depends_on。不建议在轮次 3 之前进入执行。"
+}

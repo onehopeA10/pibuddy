@@ -1,0 +1,534 @@
+{
+  "errata_id": "errata-1",
+  "scope": "定向勘误（非完整修订轮）：只修 plan-check-final.json 判定的 7 项；未改动任务分解、依赖图、wave 划分、需求覆盖或任何未点名内容",
+  "source_verdict": "plan-check-final.json = CRITICAL",
+  "timestamp": "2026-08-02",
+  "artifacts_modified": [
+    "outputs/plan.json (仅 design_decisions 追加 1 条)",
+    "outputs/tasks/TASK-001.json",
+    "outputs/tasks/TASK-002.json",
+    "outputs/tasks/TASK-003.json",
+    "outputs/tasks/TASK-009.json",
+    "outputs/tasks/TASK-010.json",
+    "outputs/tasks/TASK-011.json",
+    "outputs/tasks/TASK-012.json",
+    "outputs/tasks/TASK-013.json",
+    "outputs/tasks/TASK-014.json",
+    "outputs/tasks/TASK-015.json",
+    "outputs/tasks/TASK-016.json"
+  ],
+  "source_code_modified": "无（本轮未修改任何源码，只写 outputs/）",
+  "ruling_verification": {
+    "item": "阻塞项1 裁定复核",
+    "instruction": "采用「域内 *-ipc.ts」，IPC 文件与其功能域代码同目录，不集中到 main/ipc/",
+    "cited_evidence": "doc/PiBuddy-product-grade-coding-agent-prompt.md:344",
+    "line_344_verbatim": "- 推荐目录：`src/main/update/{update-types,update-service,update-ipc,update-errors,release-integrity}.ts`、`src/main/lifecycle/graceful-shutdown.ts`、`src/renderer/src/stores/update.ts` 和独立 update components；不要继续堆进现有 `ipc.ts/index.ts`。",
+    "verification_command": "grep -n \"update-service,update-ipc\" doc/PiBuddy-product-grade-coding-agent-prompt.md",
+    "verification_output": "344:- 推荐目录：`src/main/update/{update-types,update-service,update-ipc,update-errors,release-integrity}.ts`…",
+    "conclusion": "裁定与第 344 行一致：update 域的 IPC 文件位于 update 目录内。已按裁定落地，未改判。",
+    "corroboration": "TASK-011/014/015/016 的 files[] 现状已是域内路径：main/update/update-ipc.ts、main/providers/providers-ipc.ts、main/workspace/workspace-ipc.ts、main/preview/preview-ipc.ts、main/artifacts/artifact-ipc.ts"
+  },
+  "root_cause_analysis": {
+    "item1": {
+      "hard_evidence_reproduced": "TASK-014 files[] create 的是 packages/app/src/main/providers/providers-ipc.ts，而 c[22] 断言 packages/app/src/main/ipc/providers-ipc.ts",
+      "invalid_ref_count": 12,
+      "invalid_ref_breakdown": "8 个从未被任何 task create 的路径各 1 次（main/ipc/ 下的 artifacts-ipc / changeset-ipc / diagnostics-ipc / preview-ipc / providers-ipc / resources-ipc / update-ipc / workspace-ipc）+ pi-ipc.ts 2 次 + misc-ipc.ts 2 次 = 12；main/ipc/sessions-ipc.ts 的 2 次引用有效（TASK-009 create），故 14 处引用中 12 处无效，与复检计数一致",
+      "why_always_false": "rg 对不存在文件退出 2 且无 stdout，awk '{s+=$1} END{print s+0}' 得 0，`0 >= N` 恒假",
+      "repo_ground_truth": "packages/app/src/main/ 实际只含 index.ts / ipc.ts / pi-launcher.ts / sessions-store.ts / settings.ts —— main/ipc/ 目录当前不存在"
+    },
+    "item2": {
+      "defect_1": "正则 `^\\s*uses:` 不匹配最常见的紧凑写法 `- uses:`",
+      "defect_2": "`rg -vc` 在计数为 0 时不打印 \"0\" 而是空输出 + exit 1，故「输出 0」的通过态无法产生",
+      "defect_3_new_found": "TASK-001 c[9](b) 的同一闸门副本另有转义错误（两个字面反斜杠），在单引号 shell 串中等价于「一个字面反斜杠后跟若干 s」，永不匹配空白"
+    },
+    "item3": {
+      "named_inversion": "check-pure-js-deps.mjs：TASK-013(w10) 的 ci.yml modify 写入调用，脚本原由 TASK-016(w13) create → wave 10-12 期间 CI 恒红，污染 TASK-014(w11)、TASK-015(w12) 两个交付 wave",
+      "additional_inversion_found_by_sweep": "check-contract-uniqueness.mjs：TASK-001(w1) create 的 ci.yml 断言含该调用，脚本由 TASK-002(w2) create → wave 1 期间 CI 恒红",
+      "sweep_covered": [
+        "check-pure-js-deps",
+        "check-contract-uniqueness",
+        "check-test-discovery",
+        "check-workflow-pins",
+        "probe-node-sqlite",
+        "check-update-deps",
+        "verify-release-artifacts",
+        "build-config"
+      ]
+    }
+  },
+  "changes": [
+    {
+      "item": "item1",
+      "title": "阻塞项1 · IPC handler 目录归属自相矛盾",
+      "count": 9,
+      "entries": [
+        {
+          "target": "TASK-009 convergence.criteria[19]",
+          "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 9 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main/ipc/sessions-ipc.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 9；且这些 channel 各自在 packages/contract/src/ipc-contract.ts 中有对应 zod schema（单测遍历 registerHandler 的 channel 常量表，断言每个 channel 在 schema 表中有条目）",
+          "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 9 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 9 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 9。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 9` 恒假）",
+          "reason": "裁定1 第二分句把断言钉死到 8 个无人 create 的 main/ipc/*-ipc.ts（artifacts/changeset/diagnostics/preview/providers/resources/update/workspace），与第一分句「不钉死任何 handler 文件」直接矛盾且恒假；改写为不引用任何 handler 路径的单测判据。第一分句（ipcMain 直接注册数为 0，实跑 13）保持不变"
+        },
+        {
+          "target": "TASK-011 convergence.criteria[20]",
+          "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 4 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main/ipc/update-ipc.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 4；且这些 channel 各自在 packages/contract/src/ipc-contract.ts 中有对应 zod schema（单测遍历 registerHandler 的 channel 常量表，断言每个 channel 在 schema 表中有条目）",
+          "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 4 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 4 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 4。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 4` 恒假）",
+          "reason": "裁定1 第二分句把断言钉死到 8 个无人 create 的 main/ipc/*-ipc.ts（artifacts/changeset/diagnostics/preview/providers/resources/update/workspace），与第一分句「不钉死任何 handler 文件」直接矛盾且恒假；改写为不引用任何 handler 路径的单测判据。第一分句（ipcMain 直接注册数为 0，实跑 13）保持不变"
+        },
+        {
+          "target": "TASK-012 convergence.criteria[18]",
+          "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main/ipc/pi-ipc.ts packages/app/src/main/ipc/resources-ipc.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 6；且这些 channel 各自在 packages/contract/src/ipc-contract.ts 中有对应 zod schema（单测遍历 registerHandler 的 channel 常量表，断言每个 channel 在 schema 表中有条目）",
+          "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 6 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 6。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 6` 恒假）",
+          "reason": "裁定1 第二分句把断言钉死到 8 个无人 create 的 main/ipc/*-ipc.ts（artifacts/changeset/diagnostics/preview/providers/resources/update/workspace），与第一分句「不钉死任何 handler 文件」直接矛盾且恒假；改写为不引用任何 handler 路径的单测判据。第一分句（ipcMain 直接注册数为 0，实跑 13）保持不变"
+        },
+        {
+          "target": "TASK-013 convergence.criteria[19]",
+          "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 3 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main/ipc/diagnostics-ipc.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 3；且这些 channel 各自在 packages/contract/src/ipc-contract.ts 中有对应 zod schema（单测遍历 registerHandler 的 channel 常量表，断言每个 channel 在 schema 表中有条目）",
+          "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 3 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 3 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 3。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 3` 恒假）",
+          "reason": "裁定1 第二分句把断言钉死到 8 个无人 create 的 main/ipc/*-ipc.ts（artifacts/changeset/diagnostics/preview/providers/resources/update/workspace），与第一分句「不钉死任何 handler 文件」直接矛盾且恒假；改写为不引用任何 handler 路径的单测判据。第一分句（ipcMain 直接注册数为 0，实跑 13）保持不变"
+        },
+        {
+          "target": "TASK-014 convergence.criteria[22]",
+          "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 5 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main/ipc/misc-ipc.ts packages/app/src/main/ipc/providers-ipc.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 5；且这些 channel 各自在 packages/contract/src/ipc-contract.ts 中有对应 zod schema（单测遍历 registerHandler 的 channel 常量表，断言每个 channel 在 schema 表中有条目）",
+          "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 5 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 5 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 5。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 5` 恒假）",
+          "reason": "裁定1 第二分句把断言钉死到 8 个无人 create 的 main/ipc/*-ipc.ts（artifacts/changeset/diagnostics/preview/providers/resources/update/workspace），与第一分句「不钉死任何 handler 文件」直接矛盾且恒假；改写为不引用任何 handler 路径的单测判据。第一分句（ipcMain 直接注册数为 0，实跑 13）保持不变"
+        },
+        {
+          "target": "TASK-015 convergence.criteria[19]",
+          "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 8 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main/ipc/workspace-ipc.ts packages/app/src/main/ipc/changeset-ipc.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 8；且这些 channel 各自在 packages/contract/src/ipc-contract.ts 中有对应 zod schema（单测遍历 registerHandler 的 channel 常量表，断言每个 channel 在 schema 表中有条目）",
+          "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 8 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 8 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 8。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 8` 恒假）",
+          "reason": "裁定1 第二分句把断言钉死到 8 个无人 create 的 main/ipc/*-ipc.ts（artifacts/changeset/diagnostics/preview/providers/resources/update/workspace），与第一分句「不钉死任何 handler 文件」直接矛盾且恒假；改写为不引用任何 handler 路径的单测判据。第一分句（ipcMain 直接注册数为 0，实跑 13）保持不变"
+        },
+        {
+          "target": "TASK-016 convergence.criteria[20]",
+          "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main/ipc/preview-ipc.ts packages/app/src/main/ipc/artifacts-ipc.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 6；且这些 channel 各自在 packages/contract/src/ipc-contract.ts 中有对应 zod schema（单测遍历 registerHandler 的 channel 常量表，断言每个 channel 在 schema 表中有条目）",
+          "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 6 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 6。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 6` 恒假）",
+          "reason": "裁定1 第二分句把断言钉死到 8 个无人 create 的 main/ipc/*-ipc.ts（artifacts/changeset/diagnostics/preview/providers/resources/update/workspace），与第一分句「不钉死任何 handler 文件」直接矛盾且恒假；改写为不引用任何 handler 路径的单测判据。第一分句（ipcMain 直接注册数为 0，实跑 13）保持不变"
+        },
+        {
+          "target": "TASK-009 files[]",
+          "before": "(缺失：无 pi-ipc.ts / misc-ipc.ts 条目)",
+          "after": "[{\"path\": \"packages/app/src/main/ipc/pi-ipc.ts\", \"action\": \"create\", \"target\": \"registerPiIpc()\", \"change\": \"承接从 ipc.ts 迁出的 pi:* handler（pi:start / pi:command / pi:ui-respond / pi:stop），全部经 ipc-guard.ts 的 registerHandler 注册\"}, {\"path\": \"packages/app/src/main/ipc/misc-ipc.ts\", \"action\": \"create\", \"target\": \"registerMiscIpc()\", \"change\": \"承接从 ipc.ts 迁出的 settings / dialog / shell / file / stt handler，全部经 ipc-guard.ts 的 registerHandler 注册\"}]",
+          "reason": "TASK-009 自身 files[] 中 ipc.ts 的 change 已逐字声明「其余 pi/settings/dialog handler 迁到 src/main/ipc/pi-ipc.ts 与 misc-ipc.ts」，但两个文件从未出现 create 条目；TASK-010(w9)/TASK-012(w10)/TASK-014(w11) 却对它们标 modify，形成 modify-before-create 断链。本次仅把该 task 已声明的变更补录为 files[] 条目，未新增任务、依赖或 wave"
+        },
+        {
+          "target": "plan.json design_decisions[]",
+          "before": "(无 IPC 目录归属裁定)",
+          "after": "[裁定 · IPC handler 目录归属] 采用「域内 *-ipc.ts」：IPC 文件与其功能域代码同目录，不集中到 main/ipc/。依据 doc/PiBuddy-product-grade-coding-agent-prompt.md 第 344 行推荐目录 `src/main/update/{update-types,update-service,update-ipc,update-errors,release-integrity}.ts`（update 域的 IPC 文件位于 update 目录内），且 TASK-011/014/015/016 的 files[] 现状已是 main/update/update-ipc.ts、main/providers/providers-ipc.ts、main/workspace/workspace-ipc.ts、main/preview/preview-ipc.ts、main/artifacts/artifact-ipc.ts。main/ipc/ 只保留聚合器 registry.ts 与无独立功能域的 misc-ipc.ts。配套：裁定1 的 IPC 守卫只保留结构性断言（全仓 ipcMain 直接注册数为 0，改前实跑 13），不再把 registerHandler 计数钉死到具体 handler 文件路径。残留分歧见 errata-1.json 的 disputes：TASK-009 files[] 现状把 sessions-ipc.ts / pi-ipc.ts / misc-ipc.ts 放在 main/ipc/ 下，与本裁定的「域内」口径不一致，本轮未擅自改判 files[] 的 create 路径。",
+          "reason": "按要求记录裁定与依据行号（doc/PiBuddy-product-grade-coding-agent-prompt.md:344）"
+        }
+      ]
+    },
+    {
+      "item": "item2",
+      "title": "阻塞项2 · 供应链 pin 闸门实测失明",
+      "count": 4,
+      "entries": [
+        {
+          "target": "TASK-013 convergence.criteria[3]",
+          "before": "[look-around 不可执行 · 改写为 ripgrep 可执行的等价条件] 所有第三方 action 均以 40 位 commit SHA 固定：`rg -n '^\\s*uses:' .github/workflows/release.yml | rg -vc '@[0-9a-f]{40}\\s*$'` 输出 0；同一条件对 .github/workflows/ci.yml 亦成立。该校验写成 scripts/check-workflow-pins.mjs（遍历 .github/workflows/*.yml，对每行匹配 `^\\s*uses:` 且不以 `@<40 位 hex>` 结尾的行以退出码 1 报出 file:line）并在 CI 中运行。原文 `rg -n \"uses: (?!actions/checkout@[0-9a-f]{40})\"` 已实测无法执行：ripgrep 的 Rust regex 不支持 look-around，报 `error: look-around ... is not supported` 并以退出码 2 终止，该条既不能通过也不能失败",
+          "after": "[look-around 不可执行 · 改写为 ripgrep 可执行的等价条件] 所有第三方 action 均以 40 位 commit SHA 固定：`rg -n '^\\s*-?\\s*uses:' .github/workflows/release.yml | rg -vc '@[0-9a-f]{40}\\s*$'` 输出 0；同一条件对 .github/workflows/ci.yml 亦成立。该校验写成 scripts/check-workflow-pins.mjs（遍历 .github/workflows/*.yml，对每行匹配 `^\\s*-?\\s*uses:` 且不以 `@<40 位 hex>` 结尾的行以退出码 1 报出 file:line）并在 CI 中运行。原文 `rg -n \"uses: (?!actions/checkout@[0-9a-f]{40})\"` 已实测无法执行：ripgrep 的 Rust regex 不支持 look-around，报 `error: look-around ... is not supported` 并以退出码 2 终止，该条既不能通过也不能失败",
+          "reason": "rg 正则 `^\\s*uses:` 不匹配最常见的紧凑写法 `- uses:`；实跑样本含 3 个 action（2 固定 1 未固定），旧正则只命中 1 行且漏掉未固定的 `- uses: pnpm/action-setup@v4`，新正则命中全部 3 行"
+        },
+        {
+          "target": "TASK-013 convergence.criteria[3]",
+          "before": "[look-around 不可执行 · 改写为 ripgrep 可执行的等价条件] 所有第三方 action 均以 40 位 commit SHA 固定：`rg -n '^\\s*-?\\s*uses:' .github/workflows/release.yml | rg -vc '@[0-9a-f]{40}\\s*$'` 输出 0；同一条件对 .github/workflows/ci.yml 亦成立。该校验写成 scripts/check-workflow-pins.mjs（遍历 .github/workflows/*.yml，对每行匹配 `^\\s*-?\\s*uses:` 且不以 `@<40 位 hex>` 结尾的行以退出码 1 报出 file:line）并在 CI 中运行。原文 `rg -n \"uses: (?!actions/checkout@[0-9a-f]{40})\"` 已实测无法执行：ripgrep 的 Rust regex 不支持 look-around，报 `error: look-around ... is not supported` 并以退出码 2 终止，该条既不能通过也不能失败",
+          "after": "[look-around 不可执行 · 改写为 ripgrep 可执行的等价条件] 所有第三方 action 均以 40 位 commit SHA 固定：`rg -n '^\\s*-?\\s*uses:' .github/workflows/release.yml | rg -v '@[0-9a-f]{40}\\s*$' | wc -l` 输出 0；同一条件对 .github/workflows/ci.yml 亦成立。该校验写成 scripts/check-workflow-pins.mjs（遍历 .github/workflows/*.yml，对每行匹配 `^\\s*-?\\s*uses:` 且不以 `@<40 位 hex>` 结尾的行以退出码 1 报出 file:line）并在 CI 中运行。原文 `rg -n \"uses: (?!actions/checkout@[0-9a-f]{40})\"` 已实测无法执行：ripgrep 的 Rust regex 不支持 look-around，报 `error: look-around ... is not supported` 并以退出码 2 终止，该条既不能通过也不能失败",
+          "reason": "rg -vc 在计数为 0 时不输出 \"0\" 而是空输出 + exit 1，故「输出 0」的通过态无法产生；改用 `| wc -l` 稳定产出数字，「输出 0」措辞得以成立"
+        },
+        {
+          "target": "TASK-013 files[] scripts/check-workflow-pins.mjs .change",
+          "before": "扫描 workflow 中所有 uses:，非 40 位 SHA 即失败",
+          "after": "扫描 .github/workflows/*.yml 中所有 action 引用，正则为 `^\\s*-?\\s*uses:`（必须同时匹配 `uses:` 与最常见的紧凑写法 `- uses:`），凡不以 `@<40 位 hex>` 结尾者以退出码 1 逐条报出 file:line；全部固定时退出码 0。不得使用 `rg -vc` 作为通过态判据（计数为 0 时无输出且 exit 1）",
+          "reason": "规格描述逐字复用了坏正则 `^\\s*uses:`，同步修正为 `^\\s*-?\\s*uses:` 并写明不得用 rg -vc 判通过态"
+        },
+        {
+          "target": "TASK-001 convergence.criteria[9] (ci.yml pin assertion)",
+          "before": "(a) .github/workflows/ci.yml contains 'pnpm typecheck' 且 contains 'pnpm test' 且 contains 'pnpm build' 且 contains 'node scripts/check-test-discovery.mjs'；(b) 该文件中所有第三方 action 均以 40 位 commit SHA 固定 —— \\`rg -n '^\\\\s*uses:' .github/workflows/ci.yml | rg -vc '@[0-9a-f]{40}\\\\s*$'\\` 输出 0（不得使用 look-around，ripgrep 的 Rust regex 不支持，实测退出码 2）；(c) 本文件由本任务一次性 create，TASK-002 与 TASK-013 只允许 modify（CT-14：两个任务同时 create 会丢掉本任务的 build 闸门）。另：`node scripts/check-contract-uniqueness.mjs` 一步不在本任务写入 —— 该脚本由 TASK-002（wave 2）创建，且其判据 (b) 要求 packages/* 中恰有 1 个 contract 包，wave 1 时为 0 个必然退出码 1；改由 TASK-002 在创建脚本的同一 wave 追加该 CI 步骤（闸门脚本创建 wave <= 引用 wave）",
+          "after": "(a) .github/workflows/ci.yml contains 'pnpm typecheck' 且 contains 'pnpm test' 且 contains 'pnpm build' 且 contains 'node scripts/check-test-discovery.mjs'；(b) 该文件中所有第三方 action 均以 40 位 commit SHA 固定 —— `rg -n '^\\s*-?\\s*uses:' .github/workflows/ci.yml | rg -v '@[0-9a-f]{40}\\s*$' | wc -l` 输出 0（正则须同时匹配 `uses:` 与紧凑写法 `- uses:`，否则漏掉最常见写法；不得用 `rg -vc`，计数为 0 时它无输出且 exit 1，通过态无法产生；不得使用 look-around，ripgrep 的 Rust regex 不支持，实测退出码 2；原文另有转义错误，在单引号 shell 串中等价于「一个字面反斜杠后跟若干 s」，永不匹配空白）；(c) 本文件由本任务一次性 create，TASK-002 与 TASK-013 只允许 modify（CT-14：两个任务同时 create 会丢掉本任务的 build 闸门）。另：`node scripts/check-contract-uniqueness.mjs` 一步不在本任务写入 —— 该脚本由 TASK-002（wave 2）创建，且其判据 (b) 要求 packages/* 中恰有 1 个 contract 包，wave 1 时为 0 个必然退出码 1；改由 TASK-002 在创建脚本的同一 wave 追加该 CI 步骤（闸门脚本创建 wave <= 引用 wave）",
+          "reason": "同一供应链 pin 闸门在 TASK-001 c[9](b) 上的副本，三重失明：(1) 转义错误（原文两个字面反斜杠）在单引号 shell 串中永不匹配空白；(2) 正则缺紧凑写法 `- uses:`；(3) `rg -vc` 在计数 0 时无输出且 exit 1，「输出 0」的通过态无法产生。已统一为与 TASK-013 c[3] 一致的 `^\\s*-?\\s*uses:` + `| wc -l` 形式"
+        }
+      ]
+    },
+    {
+      "item": "item3",
+      "title": "阻塞项3 · CI 闸门倒挂",
+      "count": 4,
+      "entries": [
+        {
+          "target": "TASK-016 files[] -> TASK-013 files[]",
+          "before": "TASK-016 (wave 13) create packages/app/scripts/check-pure-js-deps.mjs",
+          "after": "TASK-013 (wave 10) create packages/app/scripts/check-pure-js-deps.mjs",
+          "reason": "TASK-013(w10) 的 ci.yml modify 已把 `node packages/app/scripts/check-pure-js-deps.mjs` 写进 CI，而脚本原由 TASK-016(w13) 创建 → wave 10-12 期间 CI 恒红，污染 TASK-014(w11)、TASK-015(w12) 两个交付 wave 的验收信号。创建前移到引用它的同一个 task"
+        },
+        {
+          "target": "TASK-016 convergence.criteria[12]",
+          "before": "[无原生依赖闸门] `node packages/app/scripts/check-pure-js-deps.mjs` 退出码 0：遍历上述六个包的安装闭包，命中 binding.gyp / `gypfile: true` / install 类脚本含 node-gyp|prebuild-install|node-pre-gyp|cmake-js / 任何 .node 文件即退出码 1；该脚本接入 CI（.github/workflows/ci.yml 中可 grep 到调用）。这条是 electron-builder.yml 保持 `npmRebuild: false` 的前提，缺了它选型漂移不会有任何构建报错",
+          "after": "[无原生依赖闸门] `node packages/app/scripts/check-pure-js-deps.mjs` 退出码 0。该脚本由 TASK-013（wave 10）创建并已接入 .github/workflows/ci.yml，本任务不再创建它，只需在引入 mammoth / exceljs / unpdf / papaparse / jszip / fast-xml-parser 六个解析库后仍使该闸门退出码为 0：闸门遍历 packages/app 已安装依赖闭包，命中 binding.gyp / `gypfile: true` / install 类脚本含 node-gyp|prebuild-install|node-pre-gyp|cmake-js / 任何 .node 文件即退出码 1。这条是 electron-builder.yml 保持 `npmRebuild: false` 的前提，缺了它选型漂移不会有任何构建报错",
+          "reason": "随 check-pure-js-deps.mjs 创建前移到 TASK-013，TASK-016 改为仅需通过该闸门（不再声明创建与接入 CI）"
+        },
+        {
+          "target": "TASK-001 convergence.criteria[9]",
+          "before": "(a) .github/workflows/ci.yml contains 'pnpm typecheck' 且 contains 'pnpm test' 且 contains 'pnpm build' 且 contains 'node scripts/check-test-discovery.mjs' 且 contains 'node scripts/check-contract-uniqueness.mjs'；(b) 该文件中所有第三方 action 均以 40 位 commit SHA 固定 —— \\`rg -n '^\\\\s*uses:' .github/workflows/ci.yml | rg -vc '@[0-9a-f]{40}\\\\s*$'\\` 输出 0（不得使用 look-around，ripgrep 的 Rust regex 不支持，实测退出码 2）；(c) 本文件由本任务一次性 create，TASK-013 只允许 modify（CT-14：两个任务同时 create 会丢掉本任务的 build 闸门）",
+          "after": "(a) .github/workflows/ci.yml contains 'pnpm typecheck' 且 contains 'pnpm test' 且 contains 'pnpm build' 且 contains 'node scripts/check-test-discovery.mjs'；(b) 该文件中所有第三方 action 均以 40 位 commit SHA 固定 —— \\`rg -n '^\\\\s*uses:' .github/workflows/ci.yml | rg -vc '@[0-9a-f]{40}\\\\s*$'\\` 输出 0（不得使用 look-around，ripgrep 的 Rust regex 不支持，实测退出码 2）；(c) 本文件由本任务一次性 create，TASK-002 与 TASK-013 只允许 modify（CT-14：两个任务同时 create 会丢掉本任务的 build 闸门）。另：`node scripts/check-contract-uniqueness.mjs` 一步不在本任务写入 —— 该脚本由 TASK-002（wave 2）创建，且其判据 (b) 要求 packages/* 中恰有 1 个 contract 包，wave 1 时为 0 个必然退出码 1；改由 TASK-002 在创建脚本的同一 wave 追加该 CI 步骤（闸门脚本创建 wave <= 引用 wave）",
+          "reason": "全计划扫描发现的同类倒挂：TASK-001(w1) 创建的 ci.yml 断言含 `node scripts/check-contract-uniqueness.mjs`，而该脚本由 TASK-002(w2) 创建 → wave 1 期间 CI 恒红。因该脚本判据要求恰有 1 个 contract 包（w1 时为 0），不能把创建前移到 w1，故改为把 CI 引用后移到创建它的 TASK-002"
+        },
+        {
+          "target": "TASK-002 files[] + convergence.criteria[17]",
+          "before": "(无 ci.yml 条目；c[17] 未断言 CI 接入)",
+          "after": "files[] 新增 .github/workflows/ci.yml modify；c[17] 追加 CI 接入断言",
+          "reason": "TASK-002 自身 files[] 中 check-contract-uniqueness.mjs 的 change 已逐字声明「接入 ci.yml」，但缺 ci.yml 条目。补录后该闸门的创建与 CI 引用同在 wave 2，倒挂消除"
+        }
+      ]
+    },
+    {
+      "item": "item4",
+      "title": "另修4 · TASK-003 c[5] 恒真",
+      "count": 2,
+      "entries": [
+        {
+          "target": "TASK-003 convergence.criteria[5]",
+          "before": "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'catch \\{\\}' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（原第 24-26 行的空 catch 已消除）；且解析失败路径可验证：pi-launcher.ts 抛出的 Error.message 同时 contains 原始 err.message 的子串与固定错误码字面量 'PI_RUNTIME_RESOLVE_FAILED'，logger 收到一条 level==='error' 且 code==='PI_RUNTIME_RESOLVE_FAILED' 的记录 —— packages/app/test/pi-launcher.spec.ts 用注入的解析失败断言这三件事",
+          "after": "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -U -c 'catch \\{\\s*(//[^\\n]*\\s*)*\\}' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（原第 24-26 行的空 catch 已消除）；且解析失败路径可验证：pi-launcher.ts 抛出的 Error.message 同时 contains 原始 err.message 的子串与固定错误码字面量 'PI_RUNTIME_RESOLVE_FAILED'，logger 收到一条 level==='error' 且 code==='PI_RUNTIME_RESOLVE_FAILED' 的记录 —— packages/app/test/pi-launcher.spec.ts 用注入的解析失败断言这三件事",
+          "reason": "真实代码 packages/app/src/main/pi-launcher.ts:24-26 为 `} catch {` 换行接注释再 `}`，单行模式 `catch \\{\\}` 实跑 0 命中（exit 1）恒真；改为 -U 多行模式匹配「空或仅含注释的 catch 体」，实跑命中 1 处（24-26 行）"
+        },
+        {
+          "target": "TASK-003 convergence.criteria[5]",
+          "before": "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -U -c 'catch \\{\\s*(//[^\\n]*\\s*)*\\}' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（原第 24-26 行的空 catch 已消除）；且解析失败路径可验证：pi-launcher.ts 抛出的 Error.message 同时 contains 原始 err.message 的子串与固定错误码字面量 'PI_RUNTIME_RESOLVE_FAILED'，logger 收到一条 level==='error' 且 code==='PI_RUNTIME_RESOLVE_FAILED' 的记录 —— packages/app/test/pi-launcher.spec.ts 用注入的解析失败断言这三件事",
+          "after": "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -U -c 'catch \\{\\s*(//[^\\n]*\\s*)*\\}' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（语义为「修复后应为假」的否定型断言：当前第 24-26 行 `} catch {` + 注释 + `}` 的空 catch 仍在，该断言现在实跑判 FAIL，修复移除空 catch 后转 PASS。旧模式 `catch \\{\\}` 要求单行，对真实代码实跑 0 命中、exit 1，`wc -l` 得 0 使断言恒真）；且解析失败路径可验证：pi-launcher.ts 抛出的 Error.message 同时 contains 原始 err.message 的子串与固定错误码字面量 'PI_RUNTIME_RESOLVE_FAILED'，logger 收到一条 level==='error' 且 code==='PI_RUNTIME_RESOLVE_FAILED' 的记录 —— packages/app/test/pi-launcher.spec.ts 用注入的解析失败断言这三件事",
+          "reason": "明确选定「否定型：修复后应为假」语义，并记录当前实跑为 FAIL（缺陷仍在），证明非恒真"
+        }
+      ]
+    },
+    {
+      "item": "item5",
+      "title": "另修5 · CT-11 守卫失明（TASK-003 c[18] / TASK-012 c[21]）",
+      "count": 2,
+      "entries": [
+        {
+          "target": "TASK-003 convergence.criteria[18]",
+          "before": "[CT-11 · 内置运行时缺失必须抛错，禁止回退全局 pi] `rg --no-filename -c 'runtime-manifest.json' packages/app/src/main/pi-launcher.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 1，且 `test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'which pi|command -v pi|fallbackToGlobalPi' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`。此条为全计划口径：TASK-012 修改 buildPiSpawn 追加 trust 参数时不得重新引入全局 pi 回退（TASK-012 带同一断言复验）",
+          "after": "[CT-11 · 内置运行时缺失必须抛错，禁止回退全局 pi] `rg --no-filename -c 'runtime-manifest.json' packages/app/src/main/pi-launcher.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 1，且 `test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'pi\\.cmd|which pi|command -v pi|fallbackToGlobalPi' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`。此条为全计划口径：TASK-012 修改 buildPiSpawn 追加 trust 参数时不得重新引入全局 pi 回退（TASK-012 带同一断言复验）",
+          "reason": "真实全局 pi 回退写在 packages/app/src/main/pi-launcher.ts:28 `return { command: isWin ? \"pi.cmd\" : \"pi\", shell: isWin };`，旧三模式实跑 0 命中（exit 1）恒真；加入 `pi\\.cmd` 后实跑命中第 28 行"
+        },
+        {
+          "target": "TASK-012 convergence.criteria[21]",
+          "before": "[CT-11 · 不得重新引入全局 pi 回退] 本任务对 buildPiSpawn 的修改仅限追加 `-a` / `-na` trust 参数：`rg --no-filename -c 'runtime-manifest.json' packages/app/src/main/pi-launcher.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 1，且 `test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'which pi|command -v pi|fallbackToGlobalPi' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`；TASK-003 的 packages/app/test/pi-launcher.spec.ts 在本任务改动后仍全部通过（`pnpm -w test -- pi-launcher` 退出码 0）",
+          "after": "[CT-11 · 不得重新引入全局 pi 回退] 本任务对 buildPiSpawn 的修改仅限追加 `-a` / `-na` trust 参数：`rg --no-filename -c 'runtime-manifest.json' packages/app/src/main/pi-launcher.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 1，且 `test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'pi\\.cmd|which pi|command -v pi|fallbackToGlobalPi' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`；TASK-003 的 packages/app/test/pi-launcher.spec.ts 在本任务改动后仍全部通过（`pnpm -w test -- pi-launcher` 退出码 0）",
+          "reason": "真实全局 pi 回退写在 packages/app/src/main/pi-launcher.ts:28 `return { command: isWin ? \"pi.cmd\" : \"pi\", shell: isWin };`，旧三模式实跑 0 命中（exit 1）恒真；加入 `pi\\.cmd` 后实跑命中第 28 行"
+        }
+      ]
+    },
+    {
+      "item": "item6",
+      "title": "另修6 · TASK-001 vitest 守卫失明",
+      "count": 18,
+      "entries": [
+        {
+          "target": "TASK-001 convergence.criteria[13]",
+          "before": "[CT-21 · 测试发现范围不得被注销] (a) 工作区内 vitest 配置唯一：`find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1，且该文件为仓库根的 vitest.config.ts（./source 下的 codex / hermes-studio 为只读参考树，不在 pnpm-workspace.yaml 的 packages/* 内，故排除）；(b) `node scripts/check-test-discovery.mjs` 退出码 0，其输出的 discovered 与 onDisk 两个数字相等 —— 该脚本枚举磁盘上 packages/**/*.{spec,test}.ts（排除 node_modules）得集合 D，再从 vitest 的实际发现结果得集合 F，D ⊄ F 即退出码 1 并列出遗漏文件",
+          "after": "[CT-21 · 测试发现范围不得被注销] (a) 工作区内 vitest 配置唯一：`find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL），且该文件为仓库根的 vitest.config.ts（./source 下的 codex / hermes-studio 为只读参考树，不在 pnpm-workspace.yaml 的 packages/* 内，故排除）；(b) `node scripts/check-test-discovery.mjs` 退出码 0，其输出的 discovered 与 onDisk 两个数字相等 —— 该脚本枚举磁盘上 packages/**/*.{spec,test}.ts（排除 node_modules）得集合 D，再从 vitest 的实际发现结果得集合 F，D ⊄ F 即退出码 1 并列出遗漏文件",
+          "reason": "TASK-001 同时 create 了 vitest.config.ts 与 vitest.workspace.ts，旧 glob 只看 vitest.config.*，对 workspace 文件完全失明：实跑构造树中新增 packages/app/vitest.workspace.ts 后旧判据仍输出 1，新判据由 2 行变 3 行判 FAIL"
+        },
+        {
+          "target": "TASK-001 convergence.criteria[13]",
+          "before": "[CT-21 · 测试发现范围不得被注销] (a) 工作区内 vitest 配置唯一：`find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL），且该文件为仓库根的 vitest.config.ts（./source 下的 codex / hermes-studio 为只读参考树，不在 pnpm-workspace.yaml 的 packages/* 内，故排除）；(b) `node scripts/check-test-discovery.mjs` 退出码 0，其输出的 discovered 与 onDisk 两个数字相等 —— 该脚本枚举磁盘上 packages/**/*.{spec,test}.ts（排除 node_modules）得集合 D，再从 vitest 的实际发现结果得集合 F，D ⊄ F 即退出码 1 并列出遗漏文件",
+          "after": "[CT-21 · 测试发现范围不得被注销] (a) 工作区内 vitest 配置唯一：`find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL），且两者均位于仓库根（./source 下的 codex / hermes-studio 为只读参考树，不在 pnpm-workspace.yaml 的 packages/* 内，故排除）；(b) `node scripts/check-test-discovery.mjs` 退出码 0，其输出的 discovered 与 onDisk 两个数字相等 —— 该脚本枚举磁盘上 packages/**/*.{spec,test}.ts（排除 node_modules）得集合 D，再从 vitest 的实际发现结果得集合 F，D ⊄ F 即退出码 1 并列出遗漏文件",
+          "reason": "随 glob 扩展同步措辞：被断言的配置文件由 1 个变为 2 个"
+        },
+        {
+          "target": "TASK-009 convergence.criteria[20]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "TASK-001 同时 create 了 vitest.config.ts 与 vitest.workspace.ts，旧 glob 只看 vitest.config.*，对 workspace 文件完全失明：实跑构造树中新增 packages/app/vitest.workspace.ts 后旧判据仍输出 1，新判据由 2 行变 3 行判 FAIL"
+        },
+        {
+          "target": "TASK-009 convergence.criteria[20]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "随 glob 扩展同步措辞：被断言的配置文件由 1 个变为 2 个"
+        },
+        {
+          "target": "TASK-010 convergence.criteria[18]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "TASK-001 同时 create 了 vitest.config.ts 与 vitest.workspace.ts，旧 glob 只看 vitest.config.*，对 workspace 文件完全失明：实跑构造树中新增 packages/app/vitest.workspace.ts 后旧判据仍输出 1，新判据由 2 行变 3 行判 FAIL"
+        },
+        {
+          "target": "TASK-010 convergence.criteria[18]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "随 glob 扩展同步措辞：被断言的配置文件由 1 个变为 2 个"
+        },
+        {
+          "target": "TASK-011 convergence.criteria[22]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "TASK-001 同时 create 了 vitest.config.ts 与 vitest.workspace.ts，旧 glob 只看 vitest.config.*，对 workspace 文件完全失明：实跑构造树中新增 packages/app/vitest.workspace.ts 后旧判据仍输出 1，新判据由 2 行变 3 行判 FAIL"
+        },
+        {
+          "target": "TASK-011 convergence.criteria[22]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "随 glob 扩展同步措辞：被断言的配置文件由 1 个变为 2 个"
+        },
+        {
+          "target": "TASK-012 convergence.criteria[20]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "TASK-001 同时 create 了 vitest.config.ts 与 vitest.workspace.ts，旧 glob 只看 vitest.config.*，对 workspace 文件完全失明：实跑构造树中新增 packages/app/vitest.workspace.ts 后旧判据仍输出 1，新判据由 2 行变 3 行判 FAIL"
+        },
+        {
+          "target": "TASK-012 convergence.criteria[20]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "随 glob 扩展同步措辞：被断言的配置文件由 1 个变为 2 个"
+        },
+        {
+          "target": "TASK-013 convergence.criteria[21]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "TASK-001 同时 create 了 vitest.config.ts 与 vitest.workspace.ts，旧 glob 只看 vitest.config.*，对 workspace 文件完全失明：实跑构造树中新增 packages/app/vitest.workspace.ts 后旧判据仍输出 1，新判据由 2 行变 3 行判 FAIL"
+        },
+        {
+          "target": "TASK-013 convergence.criteria[21]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "随 glob 扩展同步措辞：被断言的配置文件由 1 个变为 2 个"
+        },
+        {
+          "target": "TASK-014 convergence.criteria[24]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "TASK-001 同时 create 了 vitest.config.ts 与 vitest.workspace.ts，旧 glob 只看 vitest.config.*，对 workspace 文件完全失明：实跑构造树中新增 packages/app/vitest.workspace.ts 后旧判据仍输出 1，新判据由 2 行变 3 行判 FAIL"
+        },
+        {
+          "target": "TASK-014 convergence.criteria[24]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "随 glob 扩展同步措辞：被断言的配置文件由 1 个变为 2 个"
+        },
+        {
+          "target": "TASK-015 convergence.criteria[21]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "TASK-001 同时 create 了 vitest.config.ts 与 vitest.workspace.ts，旧 glob 只看 vitest.config.*，对 workspace 文件完全失明：实跑构造树中新增 packages/app/vitest.workspace.ts 后旧判据仍输出 1，新判据由 2 行变 3 行判 FAIL"
+        },
+        {
+          "target": "TASK-015 convergence.criteria[21]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "随 glob 扩展同步措辞：被断言的配置文件由 1 个变为 2 个"
+        },
+        {
+          "target": "TASK-016 convergence.criteria[22]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "TASK-001 同时 create 了 vitest.config.ts 与 vitest.workspace.ts，旧 glob 只看 vitest.config.*，对 workspace 文件完全失明：实跑构造树中新增 packages/app/vitest.workspace.ts 后旧判据仍输出 1，新判据由 2 行变 3 行判 FAIL"
+        },
+        {
+          "target": "TASK-016 convergence.criteria[22]",
+          "before": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且该文件为仓库根的 vitest.config.ts；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "after": "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+          "reason": "随 glob 扩展同步措辞：被断言的配置文件由 1 个变为 2 个"
+        }
+      ]
+    },
+    {
+      "item": "item7",
+      "title": "另修7 · TASK-013 c[3] 复验",
+      "count": 1,
+      "entries": [
+        {
+          "target": "TASK-013 convergence.criteria[3]",
+          "before": "[look-around 不可执行 · 改写为 ripgrep 可执行的等价条件] 所有第三方 action 均以 40 位 commit SHA 固定：`rg -n '^\\s*-?\\s*uses:' .github/workflows/release.yml | rg -v '@[0-9a-f]{40}\\s*$' | wc -l` 输出 0；同一条件对 .github/workflows/ci.yml 亦成立。该校验写成 scripts/check-workflow-pins.mjs（遍历 .github/workflows/*.yml，对每行匹配 `^\\s*-?\\s*uses:` 且不以 `@<40 位 hex>` 结尾的行以退出码 1 报出 file:line）并在 CI 中运行。原文 `rg -n \"uses: (?!actions/checkout@[0-9a-f]{40})\"` 已实测无法执行：ripgrep 的 Rust regex 不支持 look-around，报 `error: look-around ... is not supported` 并以退出码 2 终止，该条既不能通过也不能失败",
+          "after": "[look-around 不可执行 · 改写为 ripgrep 可执行的等价条件] 所有第三方 action 均以 40 位 commit SHA 固定：`rg -n '^\\s*-?\\s*uses:' .github/workflows/release.yml | rg -v '@[0-9a-f]{40}\\s*$' | wc -l` 输出 0；同一条件对 .github/workflows/ci.yml 亦成立。该校验写成 scripts/check-workflow-pins.mjs（遍历 .github/workflows/*.yml，对每行匹配 `^\\s*-?\\s*uses:` 且不以 `@<40 位 hex>` 结尾的行以退出码 1 报出 file:line）并在 CI 中运行。原文 `rg -n \"uses: (?!actions/checkout@[0-9a-f]{40})\"` 已实测无法执行：ripgrep 的 Rust regex 不支持 look-around，报 `error: look-around ... is not supported` 并以退出码 2 终止，该条既不能通过也不能失败。本轮已实跑复验：构造含 `- uses: actions/checkout@<40hex>`、`uses: actions/setup-node@<40hex>`、`- uses: pnpm/action-setup@v4` 三行的样本，旧正则 `^\\s*uses:` 只命中 1 行（漏掉两处紧凑写法，含唯一未固定项），新正则 `^\\s*-?\\s*uses:` 命中 3 行；全固定样本上 `| wc -l` 输出 0 判 PASS，含 1 处未固定的样本输出 1 判 FAIL，非恒真亦非恒假。check-workflow-pins.mjs 的退出码为主判据，rg 形式为等价旁证",
+          "reason": "复检称改写后仍失败：根因是 `^\\s*uses:` 漏紧凑写法 + `rg -vc` 在 0 时无输出且 exit 1。两处已由 item2 全局替换修好，此处补记实跑命令与输出"
+        }
+      ]
+    }
+  ],
+  "empirical_runs": [
+    {
+      "item": "item2 / item7",
+      "purpose": "证明修好后的 pin 正则同时匹配两种写法，且通过态可产出数字",
+      "fixture": "sample.yml = 3 个 action（`- uses: actions/checkout@<40hex>`、`uses: actions/setup-node@<40hex>`、`- uses: pnpm/action-setup@v4` 未固定）；allpinned.yml = 2 个 action 全固定（含 `- uses:` 与 `uses:` 两种写法）",
+      "runs": [
+        {
+          "cmd": "rg -c '^\\s*uses:' sample.yml",
+          "output": "1",
+          "verdict": "旧正则只命中 1 行，漏掉两处紧凑写法（含唯一未固定项）→ 闸门对真实违规失明"
+        },
+        {
+          "cmd": "rg -c '^\\s*-?\\s*uses:' sample.yml",
+          "output": "3",
+          "verdict": "新正则命中全部 3 行"
+        },
+        {
+          "cmd": "rg -c '^\\s*-?\\s*uses:' allpinned.yml",
+          "output": "2",
+          "verdict": "两种写法均命中"
+        },
+        {
+          "cmd": "rg -n '^\\s*-?\\s*uses:' allpinned.yml | rg -vc '@[0-9a-f]{40}\\s*$'",
+          "output": "stdout=[] exit=1",
+          "verdict": "旧通过态判据无法产出「输出 0」—— 复检所述失明确认"
+        },
+        {
+          "cmd": "rg -n '^\\s*-?\\s*uses:' allpinned.yml | rg -v '@[0-9a-f]{40}\\s*$' | wc -l",
+          "output": "0",
+          "verdict": "PASS（全固定）"
+        },
+        {
+          "cmd": "rg -n '^\\s*-?\\s*uses:' sample.yml | rg -v '@[0-9a-f]{40}\\s*$' | wc -l",
+          "output": "1",
+          "verdict": "FAIL（1 处未固定）→ 断言可区分，非恒真非恒假"
+        }
+      ]
+    },
+    {
+      "item": "item4",
+      "purpose": "TASK-003 c[5] 语义选择与实跑",
+      "semantics_chosen": "否定型断言，语义为「修复后应为假」：当前缺陷仍在，断言现在实跑判 FAIL；TASK-003 移除空 catch 后转 PASS",
+      "runs": [
+        {
+          "cmd": "rg -c 'catch \\{\\}' packages/app/src/main/pi-launcher.ts",
+          "output": "(无输出) exit=1",
+          "verdict": "旧单行模式 0 命中 → `wc -l` 得 0 → 断言恒真（从未匹配也永不匹配）"
+        },
+        {
+          "cmd": "rg -U -n 'catch \\{\\s*(//[^\\n]*\\s*)*\\}' packages/app/src/main/pi-launcher.ts",
+          "output": "24:  } catch {\\n25:    // 落到全局 pi\\n26:  }",
+          "verdict": "新多行模式实跑命中 1 处，行号与复检所述 24-26 一致"
+        },
+        {
+          "cmd": "test -e <file> && [ \"$(rg -U -c 'catch \\{\\s*(//[^\\n]*\\s*)*\\}' <file> | wc -l)\" -eq 0 ]",
+          "output": "FAIL",
+          "verdict": "缺陷仍在 → 正确判 FAIL，证明非恒真"
+        }
+      ]
+    },
+    {
+      "item": "item5",
+      "purpose": "CT-11 守卫必须命中真实的全局 pi 回退",
+      "real_code": "packages/app/src/main/pi-launcher.ts:27-28 —— `const isWin = process.platform === \"win32\";` / `return { command: isWin ? \"pi.cmd\" : \"pi\", shell: isWin };`",
+      "runs": [
+        {
+          "cmd": "rg -c 'which pi|command -v pi|fallbackToGlobalPi' packages/app/src/main/pi-launcher.ts",
+          "output": "(无输出) exit=1",
+          "verdict": "旧三模式对真实回退 0 命中 → 断言恒真（失明）"
+        },
+        {
+          "cmd": "rg -n 'pi\\.cmd|which pi|command -v pi|fallbackToGlobalPi' packages/app/src/main/pi-launcher.ts",
+          "output": "28:  return { command: isWin ? \"pi.cmd\" : \"pi\", shell: isWin };",
+          "verdict": "新模式实跑命中第 28 行"
+        },
+        {
+          "cmd": "test -e <file> && [ \"$(rg -c 'pi\\.cmd|…' <file> | wc -l)\" -eq 0 ]",
+          "output": "FAIL",
+          "verdict": "回退仍在 → 正确判 FAIL，证明非恒真"
+        },
+        {
+          "cmd": "rg --no-filename -c 'runtime-manifest.json' packages/app/src/main/pi-launcher.ts | awk '{s+=$1} END{print s+0}'",
+          "output": "0",
+          "verdict": "同条的正向分句当前为 0（< 1）→ 亦正确判 FAIL，非恒真"
+        }
+      ]
+    },
+    {
+      "item": "item6",
+      "purpose": "证明旧 glob 对 vitest.workspace.ts 失明、新判据可区分",
+      "fixture": "构造树含 ./vitest.config.ts、./vitest.workspace.ts、node_modules/vitest.config.ts、source/vitest.config.ts",
+      "runs": [
+        {
+          "cmd": "find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort",
+          "output": "./vitest.config.ts\\n./vitest.workspace.ts (lines=2)",
+          "verdict": "PASS（TASK-001 交付态）"
+        },
+        {
+          "cmd": "同上，且新增 packages/app/vitest.workspace.ts",
+          "output": "lines=3",
+          "verdict": "FAIL → 新判据捕获违规"
+        },
+        {
+          "cmd": "find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l（旧判据，同一违规态）",
+          "output": "1",
+          "verdict": "旧判据「输出 1」仍 PASS → 对第二个 workspace 配置完全失明，确认失明"
+        },
+        {
+          "cmd": "旧判据在新增 packages/app/vitest.config.ts 时",
+          "output": "2",
+          "verdict": "旧判据只对 vitest.config.* 类违规有效"
+        }
+      ]
+    },
+    {
+      "item": "item1",
+      "purpose": "确认裁定1 第一分句（保留不变）非恒真",
+      "runs": [
+        {
+          "cmd": "rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'",
+          "output": "13",
+          "verdict": "实跑 13 ≠ 0 → 第一分句当前判 FAIL，非恒真，按要求原样保留"
+        }
+      ]
+    }
+  ],
+  "final_self_check": [
+    {
+      "check": "1 · 全部 criteria 引用的文件路径都能在某个 task 的 files[] 找到对应条目",
+      "method": "遍历 16 个 task 的全部 criteria，正则抽取 packages|scripts|tools|doc|docs|.github 前缀的文件路径，与全部 files[] 路径集合比对",
+      "result": "PASS（针对本次范围）",
+      "detail": "修改前 main/ipc/*-ipc.ts 有 12 处无效引用；修改后残留 3 处 main/ipc/ 引用，全部可解析：TASK-009 c[4] -> sessions-ipc.ts (TASK-009 create w8)、TASK-012 c[12] -> pi-ipc.ts (TASK-009 create w8)、TASK-014 c[2] -> misc-ipc.ts (TASK-009 create w8)。无效引用 12 -> 0",
+      "out_of_scope_residue": "全量扫描另发现若干与本次 7 项无关的路径不一致（见 findings_not_fixed），按「只修点名项」未改动"
+    },
+    {
+      "check": "2 · 本次修改的每条 criteria 都实跑一遍，确认非恒真也非恒假",
+      "result": "PASS",
+      "detail": "见 empirical_runs。可执行的 shell 断言全部实跑：item2/7 在全固定样本 PASS、含未固定样本 FAIL；item4 当前 FAIL（缺陷在）、修复后 PASS；item5 当前 FAIL（回退在）；item6 交付态 2 行 PASS、违规态 3 行 FAIL；裁定1 第一分句实跑 13 判 FAIL。item1 新第二分句改为单测判据（registerAllIpc 后遍历 ipc-guard 已注册 channel 表），属交付期可执行，当前无源码故不可跑，已在条目中写明为单测断言而非 shell 断言"
+    },
+    {
+      "check": "3 · 闸门脚本创建 wave <= 引用 wave，无倒挂",
+      "result": "PASS",
+      "detail": "8 个闸门脚本全量扫描。修复前 2 处倒挂：check-pure-js-deps（create w13 / ref w10）、check-contract-uniqueness（create w2 / ref w1）。修复后：check-pure-js-deps create TASK-013 w10 = ref w10；check-contract-uniqueness create TASK-002 w2 = ref w2（CI 引用后移至 TASK-002）。其余 6 个脚本本就无倒挂。可执行/contains 型引用的倒挂数 = 0（TASK-001 c[9] 中残留的 check-contract-uniqueness 字样仅为说明「该步不在本任务写入」的解释性文字，非断言）"
+    },
+    {
+      "check": "4 · 依赖图、wave 划分、需求覆盖与修改前完全一致",
+      "result": "PASS",
+      "detail": "与备份逐字段比对：task 集合一致（16）；wave changed = NONE；depends_on changed = NONE；每个 task 的 criteria 条数 changed = NONE；plan.waves 一致；plan.task_ids 一致；requirement_traceability 完全一致且仍为 35 条（35↔35 未变）；plan.json 除 design_decisions（27 -> 28，按要求追加裁定记录）外其余键全部未变"
+    },
+    {
+      "check": "5 · 每个交付 wave 仍 >=1 条 [UI-observable]",
+      "result": "PASS",
+      "detail": "wave1=1, wave2=1, wave3=4, wave4=2, wave5=2, wave6=3, wave7=2, wave8=1, wave9=3, wave10=2, wave11=3, wave12=2, wave13=2 —— 13 个 wave 全部 >=1，且与修改前一致（未触碰任何 [UI-observable] 条目）"
+    }
+  ],
+  "disputes": [
+    {
+      "id": "D-1",
+      "topic": "TASK-009 files[] 把 sessions-ipc.ts / pi-ipc.ts / misc-ipc.ts 放在 main/ipc/ 下，与「域内 *-ipc.ts」裁定不一致",
+      "detail": "裁定要求 IPC 文件与功能域同目录，但 TASK-009 的 files[] create 路径为 packages/app/src/main/ipc/sessions-ipc.ts（域内口径应为 main/sessions/sessions-ipc.ts）。复检把该路径排除在 12 处无效引用之外（14 处引用 - 2 处 sessions-ipc = 12），即认可其现状。",
+      "action_taken": "未擅自改判 files[] 的 create 路径。按指令「以各 task files[] 中 create 的真实路径为准」保留 main/ipc/ 现状，并在 plan.json design_decisions 中写明 main/ipc/ 只保留聚合器 registry.ts 与无独立功能域的 misc-ipc.ts，残留分歧指向本条。",
+      "needs_adjudication": "下一轮需决定：是否把 sessions-ipc.ts 与 pi-ipc.ts 移到 main/sessions/ 与 main/pi/ 以彻底统一口径（misc-ipc.ts 无对应功能域，留在 main/ipc/ 合理）"
+    },
+    {
+      "id": "D-2",
+      "topic": "pi-ipc.ts / misc-ipc.ts 原本 modify-before-create 断链",
+      "detail": "TASK-010(w9)、TASK-012(w10)、TASK-014(w11) 对这两个文件标 modify，但全计划无 create 条目，且仓库中 main/ipc/ 目录不存在。",
+      "action_taken": "已在 TASK-009(w8) 补录 create 条目——依据是 TASK-009 自身 files[] 中 ipc.ts 的 change 已逐字声明「其余 pi/settings/dialog handler 迁到 src/main/ipc/pi-ipc.ts 与 misc-ipc.ts」，属把该 task 已声明的变更补录为条目，未新增任务、依赖或 wave。",
+      "note": "若认为补录 files[] 条目超出勘误范围，可回退该项；但回退后 TASK-010/012/014 的 modify 将重新指向无人创建的文件"
+    }
+  ],
+  "findings_not_fixed": {
+    "note": "以下为全量扫描发现、但不在本次 7 项点名范围内的问题，按「不得改动任何未点名的内容」未修改，供下一轮处理",
+    "items": [
+      "TASK-013 c[0] 写 `scripts/build-config.mjs`、c[1] 写 `scripts/verify-release-artifacts.mjs`，而 files[] create 路径为 packages/app/scripts/ 下（均为解释性文字，非可执行断言，verification 行用的是全路径）",
+      "TASK-011 c[0] 写 `scripts/check-update-deps.mjs`，files[] create 于 packages/app/scripts/（TASK-015 c[18] 用的是正确全路径）",
+      "TASK-011 c[8] 引用 scripts/check-updater-capability.mjs —— 全计划无任何 create/modify 条目",
+      "TASK-006 c[4]/c[5] 引用 packages/app/src/main/session-repository.ts，实际 create 路径为 packages/app/src/main/sessions/session-repository.ts",
+      "TASK-011 c[24]/TASK-013 c[5] 引用 packages/app/src/main/logging/logger.ts，实际 create 路径为 packages/app/src/main/logger.ts",
+      "TASK-015 c[2] 引用 main/workspace/attachment-store.ts、c[4] 引用 main/workspace/file-editor.test.ts；TASK-010 c[6] 引用 stores/chat-ui.ts、c[5] 引用 stores/send-routing.test.ts、c[8] 引用 chat-window.perf.test.ts；TASK-014 c[7] 引用 stores/send-image-capability.test.ts；TASK-002 c[18] 引用 test/fs-atomic.spec.ts；TASK-013 c[4] 引用 test/logger-redact.spec.ts；TASK-011 c[1] 引用 packages/contract/src/update.ts —— 均无 files[] 条目（部分可能是有意的新测试文件，需逐条确认）",
+      "TASK-001 c[4] 断言仓库根 vitest.config.ts 的 test.include 覆盖两种放置约定，但 TASK-001 同时 create 了 vitest.workspace.ts；vitest 存在 workspace 文件时项目发现以 workspace 为准，c[4] 所断言的 test.include 可能被架空（本次仅按点名修了守卫 glob，未改 c[4] 语义）",
+      "多个 criteria 存在转义不一致（字面双反斜杠与转义反引号），本次仅修正了 TASK-001 c[9] 这一处点名闸门"
+    ]
+  }
+}

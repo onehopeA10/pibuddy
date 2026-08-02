@@ -1,0 +1,16 @@
+{
+  "name": "@pibuddy/pi-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript client for the pi coding agent RPC mode (JSONL over stdio)",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  }
+}

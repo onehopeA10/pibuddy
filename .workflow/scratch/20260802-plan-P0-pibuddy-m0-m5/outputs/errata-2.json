@@ -1,0 +1,5757 @@
+{
+ "errata_id": "errata-2",
+ "title": "定向清理轮 · 路径归一 + 全量路径闭合 + 落地用户已确认的两项裁决",
+ "scope": "仅修改 .workflow/scratch/20260802-plan-P0-pibuddy-m0-m5/outputs/ 下的 plan.json 与 tasks/TASK-001..016.json；未修改任何源码；未改动任务分解、依赖图、wave 划分、需求覆盖、各 task criteria 条数，以及与路径无关的 criteria 语义。",
+ "timestamp": "2026-08-02T10:07:40.264Z",
+ "artifacts_modified": [
+  "plan.json",
+  "tasks/TASK-002.json",
+  "tasks/TASK-003.json",
+  "tasks/TASK-004.json",
+  "tasks/TASK-005.json",
+  "tasks/TASK-006.json",
+  "tasks/TASK-007.json",
+  "tasks/TASK-008.json",
+  "tasks/TASK-009.json",
+  "tasks/TASK-010.json",
+  "tasks/TASK-011.json",
+  "tasks/TASK-012.json",
+  "tasks/TASK-013.json",
+  "tasks/TASK-014.json",
+  "tasks/TASK-015.json",
+  "tasks/TASK-016.json"
+ ],
+ "artifacts_unmodified": [
+  "tasks/TASK-001.json（本轮无任何字段变更）"
+ ],
+ "source_code_modified": "无。本轮所有 rg / test / node 调用均为只读校验。",
+ "path_normalization_ruling": {
+  "rules": [
+   "R1 有明确功能域的 handler 放入该域目录：main/sessions/sessions-ipc.ts、main/pi/pi-ipc.ts、main/update/update-ipc.ts、main/providers/providers-ipc.ts、main/workspace/workspace-ipc.ts、main/preview/preview-ipc.ts、main/artifacts/artifact-ipc.ts",
+   "R2 无单一功能域的杂项 handler（dialog / shell / settings / file / stt）平铺为 main/misc-ipc.ts，不新建 main/misc/ 目录",
+   "R3 集中 IPC 目录不存在也不创建；全计划任何字段不得再出现该目录前缀",
+   "R4 横切设施平铺在 main/ 下：守卫 main/ipc-guard.ts（原状保留）、聚合器 main/ipc-registry.ts（由原集中目录下的 registry.ts 迁出）",
+   "R5 日志器归属以拥有者 TASK-002 的 files[] create 条目为准 —— 其 create 路径为 main/logger.ts 与 main/logger-redact.ts 且二者一致，故全计划归一到平铺路径；main/logging/logger.ts 的两处引用经复核均为 `test ! -e` 反向守卫，属刻意设计，原样保留"
+  ],
+  "relocations": [
+   {
+    "from": "packages/app/src/main/ipc/sessions-ipc.ts",
+    "to": "packages/app/src/main/sessions/sessions-ipc.ts",
+    "rule": "R1",
+    "resolves": "errata-1 disputes D-1"
+   },
+   {
+    "from": "packages/app/src/main/ipc/pi-ipc.ts",
+    "to": "packages/app/src/main/pi/pi-ipc.ts",
+    "rule": "R1",
+    "note": "main/pi/ 域已由 TASK-005 files[10] 的 event-forwarder.ts 建立"
+   },
+   {
+    "from": "packages/app/src/main/ipc/misc-ipc.ts",
+    "to": "packages/app/src/main/misc-ipc.ts",
+    "rule": "R2"
+   },
+   {
+    "from": "packages/app/src/main/ipc/registry.ts",
+    "to": "packages/app/src/main/ipc-registry.ts",
+    "rule": "R4"
+   },
+   {
+    "from": "packages/app/src/main/ipc/（目录，出现在 focus_paths 与散文中）",
+    "to": "packages/app/src/main/",
+    "rule": "R3"
+   }
+  ],
+  "logging_negative_guards": [
+   {
+    "task": "TASK-011",
+    "field": "convergence.criteria[24]",
+    "kept_verbatim": "`test ! -e packages/app/src/main/logging/logger.ts`",
+    "reason": "该引用是「不得新建第二个日志器」的反向守卫，终裁选平铺 main/logger.ts 后该守卫仍然正确且必要，改写会把守卫删空"
+   },
+   {
+    "task": "TASK-013",
+    "field": "convergence.criteria[5]",
+    "kept_verbatim": "不得新建 packages/app/src/main/logging/logger.ts（`test ! -e packages/app/src/main/logging/logger.ts`）",
+    "reason": "同上"
+   }
+  ],
+  "errata1_findings_disposition": [
+   {
+    "item": "#1 main/logging/logger.ts 与实际 main/logger.ts 不一致",
+    "verdict": "FALSE POSITIVE + 部分成立",
+    "detail": "TASK-011 c[24] 与 TASK-013 c[5] 对 logging/logger.ts 的引用经逐字复核均为 `test ! -e` 反向守卫，非路径笔误，保留原样；实际成立的部分是 TASK-013 focus_paths[2] = packages/app/src/main/logging/（一个永不存在的目录），已归一为 packages/app/src/main/；另 TASK-013 test.unit[0]/[1] 指向 main/logging/redact.test.ts 与 main/logging/logger.test.ts，已分别归一为 packages/app/test/logger-redact.spec.ts 与 packages/app/test/logger.spec.ts"
+   },
+   {
+    "item": "#2 check-updater-capability.mjs 无任何创建条目",
+    "verdict": "FIXED",
+    "detail": "唯一引用者为 TASK-011 c[8]（wave 9）。已在 TASK-011 files[] 补录 create 条目，路径归一为 packages/app/scripts/check-updater-capability.mjs（与同 task 的 check-update-deps.mjs 同目录）。创建 wave 9 <= 唯一引用 wave 9，无倒挂"
+   },
+   {
+    "item": "#3 TASK-013 c[0]/c[1] 与 TASK-011 c[0] 的脚本前缀写成 scripts/ 而 create 在 packages/app/scripts/",
+    "verdict": "FIXED",
+    "detail": "6 个 app 级脚本（prepare-pi-runtime / build-config / verify-release-artifacts / check-update-deps / check-pure-js-deps / check-updater-capability）的全部引用统一为 packages/app/scripts/ 前缀；仓库根 scripts/ 保留给 check-test-discovery / probe-node-sqlite / check-contract-uniqueness / check-workflow-pins 四个工作区级脚本，二者不再混用"
+   },
+   {
+    "item": "#4 TASK-006 c[4]/c[5] 引用 main/session-repository.ts 而 create 在 main/sessions/ 下",
+    "verdict": "FIXED",
+    "detail": "TASK-006 内 6 处引用（action / scope / read_first[12] / c[4] / c[5] / doc_context.affected_components[0]）与 convergence.verification 全部归一为 packages/app/src/main/sessions/session-repository.ts"
+   },
+   {
+    "item": "#5 一批 criteria 引用的文件无 files[] 条目",
+    "verdict": "FIXED（并扩大到全量扫描）",
+    "detail": "原清单 8 个之外，全量扫描另发现 44 个同类悬空引用（主要是各 task test.unit[] 中的 *.test.ts 与 doc/regression/* 回归记录）。合计 52 个已在其所属 task 补录 files[] 条目；其中 TASK-015 的两条经复核属「指向本任务自己禁止存在的模块」的错配，已改指到 TASK-007 已有的 spec 并补 modify 条目"
+   },
+   {
+    "item": "#6 TASK-001 c[4] 的 vitest.config.ts test.include 可能被 vitest.workspace.ts 架空",
+    "verdict": "NOT FIXED（越权）",
+    "detail": "该问题与路径无关，属 criteria 语义。本轮受「严禁改动与路径无关的 criteria 语义」约束，未修改。见 findings_not_fixed"
+   },
+   {
+    "item": "#7 多个 criteria 转义不一致",
+    "verdict": "NOT FIXED（越权）+ 大幅收窄",
+    "detail": "对全部 16 个 task 的 373 条 criteria 在「解码后字符串」层面扫描连续双反斜杠，仅 4 条命中；逐条复核后 3 条（TASK-006 c[7]、TASK-009 c[14]、TASK-013 c[4]）写法正确，只有 TASK-006 c[1] 一条可疑。属 criteria 语义，未修改。见 findings_not_fixed"
+   },
+   {
+    "item": "#8 disputes D-1 / D-2",
+    "verdict": "RESOLVED",
+    "detail": "D-1 已按终裁把三个 handler 移入各自归属；D-2 的 pi-ipc / misc-ipc 补录条目保留并随之迁移"
+   }
+  ]
+ },
+ "ruling_A_M4_blocked_by_credential": {
+  "user_confirmed": true,
+  "confirmed_date": "2026-08-02",
+  "landed_in": [
+   "plan.unreachable_exit_gates 中 4 条 milestone===\"M4\" 的条目各追加 acceptance_status=\"用户已确认接受\"、user_confirmed=true、user_confirmed_date=\"2026-08-02\"；机器状态值 status（blocked-by-credential / not-tested）原样保留，不被覆盖",
+   "plan.deferred_requirements 中 2 条 M4 条目追加 user_confirmed=true、user_confirmed_date=\"2026-08-02\"",
+   "TASK-011.convergence.definition_of_done 与 TASK-013.convergence.definition_of_done 各追加同一段明文"
+  ],
+  "delivery_not_reduced": {
+   "statement": "本裁决不削减任何交付要求，逐项复核如下",
+   "evidence": [
+    "UpdateService 状态机：TASK-011 files[3] create packages/app/src/main/update/update-service.ts 仍在；c[1] 仍要求十个状态字面量与 UpdateStatus / UpdateErrorCode 定义在 packages/contract/src/update.ts（本轮已为该文件补录 create 条目）",
+    "fake feed：TASK-011 / TASK-013 的 risks 与 criteria 中的 fake feed 要求逐字未动",
+    "docs/product/RELEASE_SETUP.md：TASK-013 files[20] create 条目仍在，未被降级或删除",
+    "TASK-011 与 TASK-013 的 convergence.criteria 条数分别为 26 与 24，与本轮修改前完全一致（见 final_self_check.invariance）"
+   ]
+  }
+ },
+ "ruling_B_SES101_fork_visualization": {
+  "user_confirmed": true,
+  "confirmed_date": "2026-08-02",
+  "doc_reference": "doc/PiBuddy-product-grade-coding-agent-prompt.md 第 329 行（M3 出口门禁：普通用户无需终端即可完成首次启动、Provider 登录/配置、新建任务、恢复/搜索/重命名/分叉/导出会话和安装一个受信 Pi skill）",
+  "doc_line_correction": "plan.deferred_requirements 原文写 doc:330，实测该门禁句位于第 329 行，本轮更正",
+  "scope_retained": "fork / clone / rewind RPC 能力、get_session_tree 与 get_fork_messages 的 IPC 通道与契约类型、TASK-010 MessageItem 的「从此消息分叉」入口",
+  "scope_cut": "可视化会话分支树 UI（树视图、分支点标注、compaction 与模型变化定位）",
+  "landed_in": [
+   "plan.deferred_requirements 中 SES-101 条目改写：明写 doc:329、明写「M3 出口门禁本轮记为部分达成，不得声称完整达成」、新增 scope_retained / scope_cut / user_confirmed / user_confirmed_date",
+   "TASK-009.risks[1] 追加【裁决B · 用户已于 2026-08-02 确认批准该裁剪】段落"
+  ],
+  "no_criteria_claims_full_m3_gate": {
+   "method": "对 plan.json 与 16 个 task 文件全文 grep \"M3 出口门禁\" 与 \"分叉\"",
+   "hits": [
+    "plan.deferred_requirements[10]：本轮改写后明写「本轮记为部分达成 …… 不得声称 M3 出口门禁完整达成」",
+    "TASK-009.description：把会话中心称为 M3 出口门禁「恢复/搜索/重命名会话」的载体 —— 陈述归属，非完成声明",
+    "TASK-012.description / rationale：称承载 M3 出口门禁要求的「安装一个受信 skill」，并声明「M3 出口门禁不含 MCP」—— 陈述归属与范围，非完成声明",
+    "TASK-010.risks[4]：明写「本任务只做「从消息分叉」入口，树视图延期，需在验收说明中标注」"
+   ],
+   "verdict": "无任何 convergence.criteria 声称 M3 出口门禁完整达成"
+  }
+ },
+ "changes": [
+  {
+   "file": "tasks/TASK-003.json",
+   "field": "convergence.criteria[8]",
+   "before": "pnpm --filter @pibuddy/app exec node scripts/prepare-pi-runtime.mjs 退出码为 0",
+   "after": "pnpm --filter @pibuddy/app exec node packages/app/scripts/prepare-pi-runtime.mjs 退出码为 0",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-003.json",
+   "field": "convergence.verification",
+   "before": "cd D:/selftool/pi-ui && pnpm -w test && pnpm --filter @pibuddy/app exec node scripts/prepare-pi-runtime.mjs && node -e \"const m=require('./packages/app/resources/pi-runtime/runtime-manifest.json');console.log(m.version,m.entry,m.protocolVersion)\" && pnpm --filter @pibuddy/app dist",
+   "after": "cd D:/selftool/pi-ui && pnpm -w test && pnpm --filter @pibuddy/app exec node packages/app/scripts/prepare-pi-runtime.mjs && node -e \"const m=require('./packages/app/resources/pi-runtime/runtime-manifest.json');console.log(m.version,m.entry,m.protocolVersion)\" && pnpm --filter @pibuddy/app dist",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-003.json",
+   "field": "files[4].change",
+   "before": "新增 \"prepare:runtime\": \"node scripts/prepare-pi-runtime.mjs\"；dist 改为 \"pnpm prepare:runtime && electron-vite build && electron-builder\"",
+   "after": "新增 \"prepare:runtime\": \"node packages/app/scripts/prepare-pi-runtime.mjs\"；dist 改为 \"pnpm prepare:runtime && electron-vite build && electron-builder\"",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-003.json",
+   "field": "implementation[5]",
+   "before": "写 scripts/prepare-pi-runtime.mjs：realpathSync 解开 packages/app/node_modules/@earendil-works/pi-coding-agent 的 pnpm symlink，dereference 复制，计算 dist/cli.js 的 sha256 写入 manifest",
+   "after": "写 packages/app/scripts/prepare-pi-runtime.mjs：realpathSync 解开 packages/app/node_modules/@earendil-works/pi-coding-agent 的 pnpm symlink，dereference 复制，计算 dist/cli.js 的 sha256 写入 manifest",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-003.json",
+   "field": "test.commands[2]",
+   "before": "pnpm --filter @pibuddy/app exec node scripts/prepare-pi-runtime.mjs",
+   "after": "pnpm --filter @pibuddy/app exec node packages/app/scripts/prepare-pi-runtime.mjs",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-006.json",
+   "field": "action",
+   "before": "新建 packages/app/src/main/session-repository.ts 实现 @pibuddy/contract 的 SessionRepository：优先调用 pi 公开导出的 SessionManager.list(cwd, sessionDir)（已确认为 dist/index.js 第 23 行导出的静态方法，签名 static list(cwd: string, sessionDir?: string, onProgress?): Promise<SessionInfo[]>，返回含 path/id/cwd/name/created/modified/messageCount/firstMessage）；导出纯函数 encodeSessionDirSegment(resolvedPath: string): string 严格复刻 `--${resolvedPath.replace(/^[/\\\\]/,\"\").replace(/[/\\\\:]/g,\"-\")}--` 作为回退；sessionDir 解析优先级实现为 settings.sessionDir → process.env.PI_CODING_AGENT_SESSION_DIR → path.join(process.env.PI_CODING_AGENT_DIR, \"sessions\", encodeSessionDirSegment(...)) → path.join(os.homedir(), \".pi\", \"agent\", \"sessions\", encodeSessionDirSegment(path.resolve(cwd)))；全部 I/O 改用 node:fs/promises 并设 MAX_SESSIONS_SCANNED = 200、MAX_SESSION_HEAD_BYTES = 1_048_576；在 packages/pi-sdk/src/client.ts 的 args 组装处补 args.push(\"--session-dir\", o.sessionDir)；渲染进程 store 的 newTask/openSession 增加 resp.data.cancelled === true 分支，send() 返回 Promise<boolean> 且 InputBar.submit 改为 if (await store.send(...)) 才清空并补 catch；新增 resetSessionScopedState() 统一清 items/toolRuns/queue/statusTexts/uiRequests/liveAssistant/streaming/stats 并在 start 与 newTask 中调用；start(sessionPath) 仅在 sessionPath === undefined 时应用 settings 的 provider/modelId/thinkingLevel。",
+   "after": "新建 packages/app/src/main/sessions/session-repository.ts 实现 @pibuddy/contract 的 SessionRepository：优先调用 pi 公开导出的 SessionManager.list(cwd, sessionDir)（已确认为 dist/index.js 第 23 行导出的静态方法，签名 static list(cwd: string, sessionDir?: string, onProgress?): Promise<SessionInfo[]>，返回含 path/id/cwd/name/created/modified/messageCount/firstMessage）；导出纯函数 encodeSessionDirSegment(resolvedPath: string): string 严格复刻 `--${resolvedPath.replace(/^[/\\\\]/,\"\").replace(/[/\\\\:]/g,\"-\")}--` 作为回退；sessionDir 解析优先级实现为 settings.sessionDir → process.env.PI_CODING_AGENT_SESSION_DIR → path.join(process.env.PI_CODING_AGENT_DIR, \"sessions\", encodeSessionDirSegment(...)) → path.join(os.homedir(), \".pi\", \"agent\", \"sessions\", encodeSessionDirSegment(path.resolve(cwd)))；全部 I/O 改用 node:fs/promises 并设 MAX_SESSIONS_SCANNED = 200、MAX_SESSION_HEAD_BYTES = 1_048_576；在 packages/pi-sdk/src/client.ts 的 args 组装处补 args.push(\"--session-dir\", o.sessionDir)；渲染进程 store 的 newTask/openSession 增加 resp.data.cancelled === true 分支，send() 返回 Promise<boolean> 且 InputBar.submit 改为 if (await store.send(...)) 才清空并补 catch；新增 resetSessionScopedState() 统一清 items/toolRuns/queue/statusTexts/uiRequests/liveAssistant/streaming/stats 并在 start 与 newTask 中调用；start(sessionPath) 仅在 sessionPath === undefined 时应用 settings 的 provider/modelId/thinkingLevel。",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-006.json",
+   "field": "scope",
+   "before": "packages/app/src/main/session-repository.ts + renderer 会话交互链路",
+   "after": "packages/app/src/main/sessions/session-repository.ts + renderer 会话交互链路",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-006.json",
+   "field": "read_first[12]",
+   "before": "packages/app/src/main/session-repository.ts",
+   "after": "packages/app/src/main/sessions/session-repository.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-006.json",
+   "field": "convergence.criteria[4]",
+   "before": "packages/app/src/main/session-repository.ts contains 'MAX_SESSIONS_SCANNED = 200' 且 contains 'MAX_SESSION_HEAD_BYTES'",
+   "after": "packages/app/src/main/sessions/session-repository.ts contains 'MAX_SESSIONS_SCANNED = 200' 且 contains 'MAX_SESSION_HEAD_BYTES'",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-006.json",
+   "field": "convergence.criteria[5]",
+   "before": "packages/app/src/main/session-repository.ts contains 'parseError'，单个损坏 JSONL 只在该条目上标记 parseError 而不影响其它条目",
+   "after": "packages/app/src/main/sessions/session-repository.ts contains 'parseError'，单个损坏 JSONL 只在该条目上标记 parseError 而不影响其它条目",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-006.json",
+   "field": "convergence.verification",
+   "before": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && node -e \"const{encodeSessionDirSegment}=require('./packages/app/src/main/session-repository.ts');\" || true",
+   "after": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && node -e \"const{encodeSessionDirSegment}=require('./packages/app/src/main/sessions/session-repository.ts');\" || true",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-006.json",
+   "field": "doc_context.affected_components[0]",
+   "before": "packages/app/src/main/session-repository.ts",
+   "after": "packages/app/src/main/sessions/session-repository.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "focus_paths[1]",
+   "before": "packages/app/src/main/ipc/",
+   "after": "packages/app/src/main/",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "read_first[18]",
+   "before": "packages/app/src/main/ipc/sessions-ipc.ts",
+   "after": "packages/app/src/main/sessions/sessions-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "read_first[19]",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "convergence.criteria[4]",
+   "before": "[裁定5 · 唯一枚举实现与唯一 channel 集合] packages/app/src/main/ipc/sessions-ipc.ts 经 registerHandler 注册且仅注册以下 9 个 channel 常量：'sessions:query'、'sessions:rename'、'sessions:set-pinned'、'sessions:set-status'、'sessions:purge'、'sessions:get-draft'、'sessions:save-draft'、'sessions:export-html'、'sessions:read-history'（单测断言 channel 常量数组长度 === 9 且排序后逐项相等）；`rg --no-filename -c 'sessions:list' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0；枚举实现唯一：`rg --no-filename -c 'export async function listSessionsForWorkspace' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1 且该实现位于 packages/app/src/main/sessions/session-index.ts，同时 `test ! -e packages/app/src/main/sessions/session-repository.ts` 且 `rg --no-filename -c 'MAX_SESSIONS_SCANNED' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 0（TASK-006 的 wave 5 过渡实现与其 200 条上限在本任务被原地替换，不与 500 会话基准并存 —— 见 near-miss「MAX_SESSIONS_SCANNED=200 与 500 会话基准」与 CT-02「两套枚举器并存」）",
+   "after": "[裁定5 · 唯一枚举实现与唯一 channel 集合] packages/app/src/main/sessions/sessions-ipc.ts 经 registerHandler 注册且仅注册以下 9 个 channel 常量：'sessions:query'、'sessions:rename'、'sessions:set-pinned'、'sessions:set-status'、'sessions:purge'、'sessions:get-draft'、'sessions:save-draft'、'sessions:export-html'、'sessions:read-history'（单测断言 channel 常量数组长度 === 9 且排序后逐项相等）；`rg --no-filename -c 'sessions:list' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0；枚举实现唯一：`rg --no-filename -c 'export async function listSessionsForWorkspace' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1 且该实现位于 packages/app/src/main/sessions/session-index.ts，同时 `test ! -e packages/app/src/main/sessions/session-repository.ts` 且 `rg --no-filename -c 'MAX_SESSIONS_SCANNED' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 0（TASK-006 的 wave 5 过渡实现与其 200 条上限在本任务被原地替换，不与 500 会话基准并存 —— 见 near-miss「MAX_SESSIONS_SCANNED=200 与 500 会话基准」与 CT-02「两套枚举器并存」）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "convergence.criteria[19]",
+   "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 9 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 9 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 9。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 9` 恒假）",
+   "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 9 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 9 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 9。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 9` 恒假）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "files[5].path",
+   "before": "packages/app/src/main/ipc/sessions-ipc.ts",
+   "after": "packages/app/src/main/sessions/sessions-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "files[6].path",
+   "before": "packages/app/src/main/ipc/pi-ipc.ts",
+   "after": "packages/app/src/main/pi/pi-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "files[7].path",
+   "before": "packages/app/src/main/ipc/misc-ipc.ts",
+   "after": "packages/app/src/main/misc-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "files[8].path",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "files[10].change",
+   "before": "移除 sessions:list handler，改为调用 registerAllIpc()；其余 pi/settings/dialog handler 迁到 src/main/ipc/pi-ipc.ts 与 misc-ipc.ts",
+   "after": "移除 sessions:list handler，改为调用 registerAllIpc()；其余 pi/settings/dialog handler 迁到 src/main/pi/pi-ipc.ts 与 misc-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-010.json",
+   "field": "read_first[19]",
+   "before": "packages/app/src/main/ipc/pi-ipc.ts",
+   "after": "packages/app/src/main/pi/pi-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-010.json",
+   "field": "files[2].path",
+   "before": "packages/app/src/main/ipc/pi-ipc.ts",
+   "after": "packages/app/src/main/pi/pi-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "read_first[1]",
+   "before": "packages/app/pnpm-lock.yaml 或 D:/selftool/pi-ui/pnpm-lock.yaml（确认 electron-updater / electron-log / electron-builder 的唯一版本）",
+   "after": "pnpm-lock.yaml（仓库根，绝对路径 D:/selftool/pi-ui/pnpm-lock.yaml）（确认 electron-updater / electron-log / electron-builder 的唯一版本）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "read_first[4]",
+   "before": "packages/app/src/main/ipc/registry.ts（B01 产出）",
+   "after": "packages/app/src/main/ipc-registry.ts（B01 产出）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "convergence.criteria[0]",
+   "before": "packages/app/package.json 中 electron-updater / electron-log / electron-builder 三个版本号均为精确值且不含 `^` 或 `~`；`rg -n \"electron-updater|electron-log|electron-builder\" packages/app/package.json` 输出的三行与 pnpm-lock.yaml 中解析到的版本一一相等（把比对写成 scripts/check-update-deps.mjs 并在 test 中调用）",
+   "after": "packages/app/package.json 中 electron-updater / electron-log / electron-builder 三个版本号均为精确值且不含 `^` 或 `~`；`rg -n \"electron-updater|electron-log|electron-builder\" packages/app/package.json` 输出的三行与 pnpm-lock.yaml 中解析到的版本一一相等（把比对写成 packages/app/scripts/check-update-deps.mjs 并在 test 中调用）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "convergence.criteria[8]",
+   "before": "[取消能力双向断言] scripts/check-updater-capability.mjs 检测 electron-updater 是否导出 CancellationToken 并输出 `{ cancelSupported: true|false }`；UpdateBanner.vue 中取消按钮包裹在 `v-if=\"store.cancelSupported\"` 内。组件单测两个方向都断言：(a) cancelSupported=false 时 DOM 中「取消下载」文本节点数 === 0；(b) cancelSupported=true 时该文本节点数 === 1，且点击后 `CancellationToken.prototype.cancel` 的 spy 恰被调用 1 次、随后状态转为 'idle'。原文只有 (a)，唯一机器判据是「缺席」，不实现取消按钮即通过",
+   "after": "[取消能力双向断言] packages/app/scripts/check-updater-capability.mjs 检测 electron-updater 是否导出 CancellationToken 并输出 `{ cancelSupported: true|false }`；UpdateBanner.vue 中取消按钮包裹在 `v-if=\"store.cancelSupported\"` 内。组件单测两个方向都断言：(a) cancelSupported=false 时 DOM 中「取消下载」文本节点数 === 0；(b) cancelSupported=true 时该文本节点数 === 1，且点击后 `CancellationToken.prototype.cancel` 的 spy 恰被调用 1 次、随后状态转为 'idle'。原文只有 (a)，唯一机器判据是「缺席」，不实现取消按钮即通过",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "convergence.criteria[20]",
+   "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 4 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 4 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 4。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 4` 恒假）",
+   "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 4 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 4 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 4。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 4` 恒假）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "convergence.verification",
+   "before": "node scripts/check-update-deps.mjs && pnpm --filter @pibuddy/app test -- src/main/update && pnpm --filter @pibuddy/app typecheck && PIBUDDY_FAKE_UPDATE_FEED=https://127.0.0.1:8443/ pnpm --filter @pibuddy/app dev 走一遍 idle→downloaded→安装前检查",
+   "after": "node packages/app/scripts/check-update-deps.mjs && pnpm --filter @pibuddy/app test -- src/main/update && pnpm --filter @pibuddy/app typecheck && PIBUDDY_FAKE_UPDATE_FEED=https://127.0.0.1:8443/ pnpm --filter @pibuddy/app dev 走一遍 idle→downloaded→安装前检查",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[8].path",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-012.json",
+   "field": "read_first[14]",
+   "before": "packages/app/src/main/ipc/pi-ipc.ts",
+   "after": "packages/app/src/main/pi/pi-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-012.json",
+   "field": "convergence.criteria[12]",
+   "before": "[respondUi 返回值被真正使用 · 定义「附近」] 用 node 脚本判定：在 packages/app/src/main/ipc/pi-ipc.ts 中定位每个 `respondUi(` 调用所在行 L，断言 (L, L+5] 行区间内存在 `if (!` 或 `=== false` 或 `.ok` 之一（区间宽度明定为 5 行，原文「命中行附近」无行距定义）；单测断言进程未运行时 respond 返回 `{ ok:false, reason:'no-runtime' }` 且 pi-sdk 的 stdin write spy 调用次数为 0（当前实现直写 stdin 并把失败静默吞掉）",
+   "after": "[respondUi 返回值被真正使用 · 定义「附近」] 用 node 脚本判定：在 packages/app/src/main/pi/pi-ipc.ts 中定位每个 `respondUi(` 调用所在行 L，断言 (L, L+5] 行区间内存在 `if (!` 或 `=== false` 或 `.ok` 之一（区间宽度明定为 5 行，原文「命中行附近」无行距定义）；单测断言进程未运行时 respond 返回 `{ ok:false, reason:'no-runtime' }` 且 pi-sdk 的 stdin write spy 调用次数为 0（当前实现直写 stdin 并把失败静默吞掉）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-012.json",
+   "field": "convergence.criteria[18]",
+   "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 6 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 6。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 6` 恒假）",
+   "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 6 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 6。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 6` 恒假）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-012.json",
+   "field": "files[4].path",
+   "before": "packages/app/src/main/ipc/pi-ipc.ts",
+   "after": "packages/app/src/main/pi/pi-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "action",
+   "before": "修改 packages/app/electron-builder.yml：mac.target 由 `[dmg]` 改为 `[dmg, zip]` 并加 `hardenedRuntime: true`、`gatekeeperAssess: false`、`entitlements: build/entitlements.mac.plist`、`entitlementsInherit: build/entitlements.mac.plist`、`notarize: true`，`extendInfo.NSMicrophoneUsageDescription: \"PiBuddy 需要使用麦克风来把你说的话转成文字\"`；win.target 保持 nsis 且 nsis.perMachine 保持 false（per-user）；linux.target 改为 `[AppImage, deb]`；新增 `publish` 块使用 `provider: generic` + `url: ${env.PIBUDDY_UPDATE_FEED_URL}` 并把 `electronDownload.mirror` 改为仅当 `${env.PIBUDDY_USE_CN_MIRROR}` 为 true 时生效（在 scripts/build-config.mjs 中拼装，CI 不设该变量）。在 TASK-002 建立的唯一日志器 packages/app/src/main/logger.ts 上扩展（裁定4：全计划只允许一个日志器实现，不得新建 main/logging/logger.ts）：MAX_LOG_BYTES = 5 * 1024 * 1024、MAX_LOG_FILES = 7，导出 `createLogger(scope: 'main'|'pi-runtime'|'updater'|'session-index'|'permission')`，每条日志强制带 `correlationId / runtimeId / sessionId`，并把 redactSecrets 挂到真正写盘的函数内。electron-log 的锁版仅供 electron-updater 内部使用，autoUpdater.logger 以适配器接到 createLogger('updater')。在 TASK-002 建立的唯一脱敏实现 packages/app/src/main/logger-redact.ts 上扩规则，其 `redactSecrets(input: string): string`，至少覆盖 `sk-[A-Za-z0-9_-]{16,}`、`Bearer\\s+\\S+`、`\"key\"\\s*:\\s*\"[^\"]+\"`、`os.homedir()` 绝对路径（替换为 `~`）与 `process.env` 值。",
+   "after": "修改 packages/app/electron-builder.yml：mac.target 由 `[dmg]` 改为 `[dmg, zip]` 并加 `hardenedRuntime: true`、`gatekeeperAssess: false`、`entitlements: build/entitlements.mac.plist`、`entitlementsInherit: build/entitlements.mac.plist`、`notarize: true`，`extendInfo.NSMicrophoneUsageDescription: \"PiBuddy 需要使用麦克风来把你说的话转成文字\"`；win.target 保持 nsis 且 nsis.perMachine 保持 false（per-user）；linux.target 改为 `[AppImage, deb]`；新增 `publish` 块使用 `provider: generic` + `url: ${env.PIBUDDY_UPDATE_FEED_URL}` 并把 `electronDownload.mirror` 改为仅当 `${env.PIBUDDY_USE_CN_MIRROR}` 为 true 时生效（在 packages/app/scripts/build-config.mjs 中拼装，CI 不设该变量）。在 TASK-002 建立的唯一日志器 packages/app/src/main/logger.ts 上扩展（裁定4：全计划只允许一个日志器实现，不得新建 main/logging/logger.ts）：MAX_LOG_BYTES = 5 * 1024 * 1024、MAX_LOG_FILES = 7，导出 `createLogger(scope: 'main'|'pi-runtime'|'updater'|'session-index'|'permission')`，每条日志强制带 `correlationId / runtimeId / sessionId`，并把 redactSecrets 挂到真正写盘的函数内。electron-log 的锁版仅供 electron-updater 内部使用，autoUpdater.logger 以适配器接到 createLogger('updater')。在 TASK-002 建立的唯一脱敏实现 packages/app/src/main/logger-redact.ts 上扩规则，其 `redactSecrets(input: string): string`，至少覆盖 `sk-[A-Za-z0-9_-]{16,}`、`Bearer\\s+\\S+`、`\"key\"\\s*:\\s*\"[^\"]+\"`、`os.homedir()` 绝对路径（替换为 `~`）与 `process.env` 值。",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "focus_paths[2]",
+   "before": "packages/app/src/main/logging/",
+   "after": "packages/app/src/main/",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "read_first[21]",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "convergence.criteria[0]",
+   "before": "packages/app/electron-builder.yml 中 mac.target 同时包含 `dmg` 与 `zip`；含 `hardenedRuntime: true`、`entitlements: build/entitlements.mac.plist`、`NSMicrophoneUsageDescription`；`test -e packages/app/electron-builder.yml && [ \"$(rg -c 'npmmirror' packages/app/electron-builder.yml | wc -l)\" -eq 0 ]`（镜像改由 scripts/build-config.mjs 按 PIBUDDY_USE_CN_MIRROR 注入）",
+   "after": "packages/app/electron-builder.yml 中 mac.target 同时包含 `dmg` 与 `zip`；含 `hardenedRuntime: true`、`entitlements: build/entitlements.mac.plist`、`NSMicrophoneUsageDescription`；`test -e packages/app/electron-builder.yml && [ \"$(rg -c 'npmmirror' packages/app/electron-builder.yml | wc -l)\" -eq 0 ]`（镜像改由 packages/app/scripts/build-config.mjs 按 PIBUDDY_USE_CN_MIRROR 注入）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "convergence.criteria[1]",
+   "before": "`pnpm --filter @pibuddy/app dist -- --win nsis --publish never` 后 packages/app/release/ 同时存在 `latest.yml`、`PiBuddy-Setup-*.exe`、`PiBuddy-Setup-*.exe.blockmap` 三个文件；scripts/verify-release-artifacts.mjs 对 win/mac/linux 三个平台各自断言必需文件集合（win: latest.yml + exe + blockmap；mac: latest-mac.yml + *.dmg + *.zip；linux: latest-linux.yml + *.AppImage），缺任一即退出码 1",
+   "after": "`pnpm --filter @pibuddy/app dist -- --win nsis --publish never` 后 packages/app/release/ 同时存在 `latest.yml`、`PiBuddy-Setup-*.exe`、`PiBuddy-Setup-*.exe.blockmap` 三个文件；packages/app/scripts/verify-release-artifacts.mjs 对 win/mac/linux 三个平台各自断言必需文件集合（win: latest.yml + exe + blockmap；mac: latest-mac.yml + *.dmg + *.zip；linux: latest-linux.yml + *.AppImage），缺任一即退出码 1",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "convergence.criteria[19]",
+   "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 3 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 3 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 3。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 3` 恒假）",
+   "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 3 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 3 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 3。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 3` 恒假）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "files[14].path",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "test.unit[0]",
+   "before": "packages/app/src/main/logging/redact.test.ts",
+   "after": "packages/app/test/logger-redact.spec.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "test.unit[1]",
+   "before": "packages/app/src/main/logging/logger.test.ts",
+   "after": "packages/app/test/logger.spec.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "read_first[18]",
+   "before": "packages/app/src/main/ipc/misc-ipc.ts",
+   "after": "packages/app/src/main/misc-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "read_first[19]",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "convergence.criteria[2]",
+   "before": "[CT-07/CT-08 · 请求形状与出站原语都不另立一套] stt:transcribe 的 baseUrl/apiKey/model 不再来自 renderer，但请求形状保持 TASK-008 c[3] 定义的 `SttTranscribeRequest`（endpointId / audio / mimeType 三个字段，不得收窄为 {audio, mimeType}）：packages/app/src/main/ipc/misc-ipc.ts 中该 handler 经 registerHandler 以 contract 的 SttTranscribeRequest schema 注册，main 侧按 endpointId 查配置得到 baseUrl/apiKey/model；出站一律经 TASK-008 的 safeFetch，`rg --no-filename -c 'assertHttpsOrLocalhost' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0 且 `rg --no-filename -c '\\bfetch\\(' packages/app/src/main -g '*.ts' -g '!net/outbound-guard.ts' -g '!*.test.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（testProvider 与 discoverModels 两条新出站路径同样必须走 safeFetch）；单测覆盖 http://169.254.169.254、file://、内网 10.x 三个拒绝用例，断言抛出的错误码为 OUTBOUND_BLOCKED",
+   "after": "[CT-07/CT-08 · 请求形状与出站原语都不另立一套] stt:transcribe 的 baseUrl/apiKey/model 不再来自 renderer，但请求形状保持 TASK-008 c[3] 定义的 `SttTranscribeRequest`（endpointId / audio / mimeType 三个字段，不得收窄为 {audio, mimeType}）：packages/app/src/main/misc-ipc.ts 中该 handler 经 registerHandler 以 contract 的 SttTranscribeRequest schema 注册，main 侧按 endpointId 查配置得到 baseUrl/apiKey/model；出站一律经 TASK-008 的 safeFetch，`rg --no-filename -c 'assertHttpsOrLocalhost' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0 且 `rg --no-filename -c '\\bfetch\\(' packages/app/src/main -g '*.ts' -g '!net/outbound-guard.ts' -g '!*.test.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（testProvider 与 discoverModels 两条新出站路径同样必须走 safeFetch）；单测覆盖 http://169.254.169.254、file://、内网 10.x 三个拒绝用例，断言抛出的错误码为 OUTBOUND_BLOCKED",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "convergence.criteria[22]",
+   "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 5 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 5 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 5。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 5` 恒假）",
+   "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 5 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 5 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 5。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 5` 恒假）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "files[7].path",
+   "before": "packages/app/src/main/ipc/misc-ipc.ts",
+   "after": "packages/app/src/main/misc-ipc.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "files[8].path",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "read_first[20]",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "convergence.criteria[18]",
+   "before": "[新增依赖精确版本] package.json 中 codemirror 相关依赖全部为精确版本（无 `^` / `~`），并纳入 TASK-011 产出的 scripts/check-update-deps.mjs 的比对范围，`node packages/app/scripts/check-update-deps.mjs` 退出码 0",
+   "after": "[新增依赖精确版本] package.json 中 codemirror 相关依赖全部为精确版本（无 `^` / `~`），并纳入 TASK-011 产出的 packages/app/scripts/check-update-deps.mjs 的比对范围，`node packages/app/scripts/check-update-deps.mjs` 退出码 0",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "convergence.criteria[19]",
+   "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 8 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 8 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 8。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 8` 恒假）",
+   "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 8 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 8 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 8。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 8` 恒假）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "files[9].path",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-016.json",
+   "field": "read_first[17]",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-016.json",
+   "field": "convergence.criteria[20]",
+   "before": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 6 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 6。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 main/ipc/*-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 6` 恒假）",
+   "after": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 6 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 6。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 6` 恒假）",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-016.json",
+   "field": "files[7].path",
+   "before": "packages/app/src/main/ipc/registry.ts",
+   "after": "packages/app/src/main/ipc-registry.ts",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-016.json",
+   "field": "risks[0]",
+   "before": "解析库已定死为 mammoth 1.12.0 / exceljs 4.4.0 / unpdf 1.8.0 / papaparse 5.5.4 / jszip 3.10.1 / fast-xml-parser 4.5.3（均为纯 JS、依赖闭包内无 node-gyp 构建与 .node 文件），与 `npmRebuild: false` 相容；执行前必须先跑 scripts/check-pure-js-deps.mjs 复核 —— 若闸门失败，按 implementation[0] 的备选清单降级，不得引入原生依赖，也不得改动 npmRebuild 或 asar 设置",
+   "after": "解析库已定死为 mammoth 1.12.0 / exceljs 4.4.0 / unpdf 1.8.0 / papaparse 5.5.4 / jszip 3.10.1 / fast-xml-parser 4.5.3（均为纯 JS、依赖闭包内无 node-gyp 构建与 .node 文件），与 `npmRebuild: false` 相容；执行前必须先跑 packages/app/scripts/check-pure-js-deps.mjs 复核 —— 若闸门失败，按 implementation[0] 的备选清单降级，不得引入原生依赖，也不得改动 npmRebuild 或 asar 设置",
+   "reason": "path-normalization"
+  },
+  {
+   "file": "tasks/TASK-002.json",
+   "field": "files[+] packages/app/test/fs-atomic.spec.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/test/fs-atomic.spec.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— rename 前注入异常时原文件字节未变且 .tmp 被清理（c[18] 要求该文件存在，原无 files[] 条目）"
+  },
+  {
+   "file": "tasks/TASK-003.json",
+   "field": "files[+] doc/regression/TASK-003-runtime.md",
+   "before": "(缺失)",
+   "after": "create doc/regression/TASK-003-runtime.md",
+   "reason": "路径闭合：补录 files[] 条目 —— c[16] 要求该文件存在并含勾选行，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-004.json",
+   "field": "files[+] doc/regression/TASK-004-security.md",
+   "before": "(缺失)",
+   "after": "create doc/regression/TASK-004-security.md",
+   "reason": "路径闭合：补录 files[] 条目 —— c[13] 要求该文件存在并含勾选行，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-005.json",
+   "field": "files[+] doc/regression/TASK-005-runtime.md",
+   "before": "(缺失)",
+   "after": "create doc/regression/TASK-005-runtime.md",
+   "reason": "路径闭合：补录 files[] 条目 —— c[19] 要求该文件存在并含勾选行，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-006.json",
+   "field": "files[+] doc/regression/TASK-006-session.md",
+   "before": "(缺失)",
+   "after": "create doc/regression/TASK-006-session.md",
+   "reason": "路径闭合：补录 files[] 条目 —— c[20] 要求该文件存在并含勾选行，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-007.json",
+   "field": "files[+] doc/regression/TASK-007-extension-ui.md",
+   "before": "(缺失)",
+   "after": "create doc/regression/TASK-007-extension-ui.md",
+   "reason": "路径闭合：补录 files[] 条目 —— c[17] 要求该文件存在并含勾选行，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-008.json",
+   "field": "files[+] doc/regression/TASK-008-secrets.md",
+   "before": "(缺失)",
+   "after": "create doc/regression/TASK-008-secrets.md",
+   "reason": "路径闭合：补录 files[] 条目 —— c[15] 要求该文件存在并含勾选行，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "files[+] packages/app/src/main/sessions/session-rename.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/sessions/session-rename.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[5] 与 test.unit[2] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "files[+] packages/app/src/main/sessions/session-index.bench.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/sessions/session-index.bench.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[7] 与 test.unit[3] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "files[+] doc/regression/TASK-009-session-center.md",
+   "before": "(缺失)",
+   "after": "create doc/regression/TASK-009-session-center.md",
+   "reason": "路径闭合：补录 files[] 条目 —— c[8] 要求该文件存在并含恰 4 行 `- [x]`，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-010.json",
+   "field": "files[+] packages/app/src/renderer/src/stores/chat-ui.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/renderer/src/stores/chat-ui.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[6] 断言该文件导出两个 reactive 容器，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-010.json",
+   "field": "files[+] packages/app/src/renderer/src/stores/send-routing.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/renderer/src/stores/send-routing.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[5] 与 test.unit[1] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-010.json",
+   "field": "files[+] packages/app/src/renderer/src/stores/chat-window.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/renderer/src/stores/chat-window.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[2] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-010.json",
+   "field": "files[+] packages/app/src/renderer/src/components/chat-window.perf.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/renderer/src/components/chat-window.perf.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[8] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-010.json",
+   "field": "files[+] doc/regression/TASK-010-perf.json",
+   "before": "(缺失)",
+   "after": "create doc/regression/TASK-010-perf.json",
+   "reason": "路径闭合：补录 files[] 条目 —— c[8] 要求把 observer entries 写入该路径，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[+] packages/contract/src/update.ts",
+   "before": "(缺失)",
+   "after": "create packages/contract/src/update.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[1] 断言十个状态字面量与类型定义在该文件，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[+] packages/app/scripts/check-updater-capability.mjs",
+   "before": "(缺失)",
+   "after": "create packages/app/scripts/check-updater-capability.mjs",
+   "reason": "路径闭合：补录 files[] 条目 —— c[8] 引用该脚本，全计划原无任何 create/modify 条目"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[+] packages/app/src/main/update/update-init.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/update/update-init.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[0] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[+] packages/app/src/main/update/update-schedule.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/update/update-schedule.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[1] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[+] packages/app/src/main/update/update-singleflight.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/update/update-singleflight.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[2] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[+] packages/app/src/main/update/release-integrity.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/update/release-integrity.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[3] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[+] packages/app/src/main/update/update-errors.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/update/update-errors.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[5] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[+] packages/app/src/renderer/src/stores/update.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/renderer/src/stores/update.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[4] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "files[+] packages/app/src/renderer/src/components/update-banner.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/renderer/src/components/update-banner.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[8] 的两方向断言载体与 test.unit[6] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-012.json",
+   "field": "files[+] packages/app/src/main/extension-ui/ext-ui-timeout.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/extension-ui/ext-ui-timeout.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[1] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-012.json",
+   "field": "files[+] packages/app/src/main/extension-ui/ext-ui-lifecycle.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/extension-ui/ext-ui-lifecycle.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[4] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-012.json",
+   "field": "files[+] packages/app/src/main/pi-resources/package-install.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/pi-resources/package-install.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[2] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-012.json",
+   "field": "files[+] packages/app/src/main/pi-resources/trust-store.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/pi-resources/trust-store.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[3] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-012.json",
+   "field": "files[+] doc/regression/TASK-012-extension-ui.md",
+   "before": "(缺失)",
+   "after": "create doc/regression/TASK-012-extension-ui.md",
+   "reason": "路径闭合：补录 files[] 条目 —— c[9] 要求该文件存在并含勾选行，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "files[+] packages/app/test/logger-redact.spec.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/test/logger-redact.spec.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[4] 引用（原 test.unit[0] 误写为 src/main/logging/redact.test.ts），原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "files[+] packages/app/test/logger.spec.ts",
+   "before": "(缺失)",
+   "after": "modify packages/app/test/logger.spec.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[5] 要求在 TASK-002(w2) 建立的该 spec 上追加轮转断言（原 test.unit[1] 误写为 src/main/logging/logger.test.ts）"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "files[+] packages/app/src/main/diagnostics/support-bundle.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/diagnostics/support-bundle.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[2] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "files[+] packages/app/src/main/health/health-check.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/health/health-check.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[3] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "files[+] packages/app/src/main/providers/auth-store.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/providers/auth-store.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[0] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "files[+] packages/app/src/main/providers/connectivity.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/providers/connectivity.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[1] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "files[+] packages/app/src/main/providers/model-scope.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/providers/model-scope.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[2] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "files[+] packages/app/src/main/usage/usage-store.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/usage/usage-store.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[3] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "files[+] packages/app/src/renderer/src/stores/send-image-capability.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/renderer/src/stores/send-image-capability.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[7] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-014.json",
+   "field": "files[+] packages/app/src/renderer/src/stores/model-capability.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/renderer/src/stores/model-capability.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[5] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "files[+] packages/app/src/main/workspace/file-editor.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/workspace/file-editor.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[4] 与 test.unit[1] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "files[+] packages/app/src/main/workspace/search-worker.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/workspace/search-worker.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[2] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "files[+] packages/app/src/main/workspace/file-tree.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/workspace/file-tree.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[5] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "files[+] packages/app/src/main/changeset/apply.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/changeset/apply.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[4] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "files[+] packages/app/test/workspace-capability.spec.ts",
+   "before": "(缺失)",
+   "after": "modify packages/app/test/workspace-capability.spec.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[0] 逐字要求「在 TASK-007 的 packages/app/test/workspace-capability.spec.ts 上追加用例」（原 test.unit[0] 误指向 c[0] 自身禁止存在的 workspace/path-guard.ts 的同名测试）"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "files[+] packages/app/test/attachment-registry.spec.ts",
+   "before": "(缺失)",
+   "after": "modify packages/app/test/attachment-registry.spec.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— c[2] 逐字要求在 TASK-007 的 attachment-registry.ts 上扩展（原 test.unit[3] 误指向 c[2] 自身禁止存在的 workspace/attachment-store.ts 的同名测试）"
+  },
+  {
+   "file": "tasks/TASK-016.json",
+   "field": "files[+] packages/app/src/main/preview/convert-host.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/preview/convert-host.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[0] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-016.json",
+   "field": "files[+] packages/app/src/main/preview/office-safety.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/preview/office-safety.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[1] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-016.json",
+   "field": "files[+] packages/app/src/main/preview/preview-window.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/preview/preview-window.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[2] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-016.json",
+   "field": "files[+] packages/app/src/main/preview/convert-path.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/preview/convert-path.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[4] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-016.json",
+   "field": "files[+] packages/app/src/main/artifacts/artifact-store.test.ts",
+   "before": "(缺失)",
+   "after": "create packages/app/src/main/artifacts/artifact-store.test.ts",
+   "reason": "路径闭合：补录 files[] 条目 —— test.unit[3] 引用，原无 files[] 条目"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "test.unit[0]",
+   "before": "packages/app/src/main/workspace/path-guard.test.ts",
+   "after": "packages/app/test/workspace-capability.spec.ts",
+   "reason": "c[0] 禁止 workspace/path-guard.ts 存在，收容用例明确追加在 TASK-007 的 workspace-capability.spec.ts 上"
+  },
+  {
+   "file": "tasks/TASK-015.json",
+   "field": "test.unit[3]",
+   "before": "packages/app/src/main/workspace/attachment-store.test.ts",
+   "after": "packages/app/test/attachment-registry.spec.ts",
+   "reason": "c[2] 禁止 workspace/attachment-store.ts 存在，结构化字段扩展落在 TASK-007 的 attachment-registry.ts / attachment-registry.spec.ts 上"
+  },
+  {
+   "file": "tasks/TASK-010.json",
+   "field": "files[0].action",
+   "before": "create",
+   "after": "modify",
+   "reason": "闭合规则4：TASK-005(w4) files[10] 已 create 同一路径，同一文件不能被创建两次；TASK-010(w9) 对其为增量修改"
+  },
+  {
+   "file": "plan.json",
+   "field": "unreachable_exit_gates[0]",
+   "before": "{\"status\":\"blocked-by-credential\"}",
+   "after": "{\"status\":\"blocked-by-credential\",\"acceptance_status\":\"用户已确认接受\",\"user_confirmed\":true,\"user_confirmed_date\":\"2026-08-02\"}",
+   "reason": "裁决A：用户已确认接受 M4 的 blocked-by-credential / not-tested 状态（机器状态值 status 原样保留）"
+  },
+  {
+   "file": "plan.json",
+   "field": "unreachable_exit_gates[1]",
+   "before": "{\"status\":\"not-tested\"}",
+   "after": "{\"status\":\"not-tested\",\"acceptance_status\":\"用户已确认接受\",\"user_confirmed\":true,\"user_confirmed_date\":\"2026-08-02\"}",
+   "reason": "裁决A：用户已确认接受 M4 的 blocked-by-credential / not-tested 状态（机器状态值 status 原样保留）"
+  },
+  {
+   "file": "plan.json",
+   "field": "unreachable_exit_gates[2]",
+   "before": "{\"status\":\"blocked-by-credential\"}",
+   "after": "{\"status\":\"blocked-by-credential\",\"acceptance_status\":\"用户已确认接受\",\"user_confirmed\":true,\"user_confirmed_date\":\"2026-08-02\"}",
+   "reason": "裁决A：用户已确认接受 M4 的 blocked-by-credential / not-tested 状态（机器状态值 status 原样保留）"
+  },
+  {
+   "file": "plan.json",
+   "field": "unreachable_exit_gates[3]",
+   "before": "{\"status\":\"blocked-by-credential\"}",
+   "after": "{\"status\":\"blocked-by-credential\",\"acceptance_status\":\"用户已确认接受\",\"user_confirmed\":true,\"user_confirmed_date\":\"2026-08-02\"}",
+   "reason": "裁决A：用户已确认接受 M4 的 blocked-by-credential / not-tested 状态（机器状态值 status 原样保留）"
+  },
+  {
+   "file": "tasks/TASK-011.json",
+   "field": "convergence.definition_of_done",
+   "before": "用户能在设置里看到版本与更新状态、手动检查、看到新版本说明与下载进度、在下载完成后选择立刻重启或稍后；正在跑任务或有没保存的东西时应用不会把它们扔掉就重启。",
+   "after": "用户能在设置里看到版本与更新状态、手动检查、看到新版本说明与下载进度、在下载完成后选择立刻重启或稍后；正在跑任务或有没保存的东西时应用不会把它们扔掉就重启；M4 的签名与真实 N→N+1 更新闭环在本环境记为未验证（not-tested / blocked-by-credential），待签名凭据与 clean VM 齐备后单独验收 —— 用户已于 2026-08-02 确认接受该状态，且该确认不削减 UpdateService 状态机、fake feed 与 docs/product/RELEASE_SETUP.md 的交付要求。",
+   "reason": "裁决A：明写签名与真实 N→N+1 更新闭环记为未验证，待凭据齐备后单独验收"
+  },
+  {
+   "file": "tasks/TASK-013.json",
+   "field": "convergence.definition_of_done",
+   "before": "三个平台的安装包和更新清单能在 CI 里可复现地产出，没有签名凭据时发布会明确失败而不是偷偷发未签名包；出问题时用户能一键导出一份不含隐私的诊断包，更新后启动失败会进入安全模式并给出退路。",
+   "after": "三个平台的安装包和更新清单能在 CI 里可复现地产出，没有签名凭据时发布会明确失败而不是偷偷发未签名包；出问题时用户能一键导出一份不含隐私的诊断包，更新后启动失败会进入安全模式并给出退路；M4 的签名与真实 N→N+1 更新闭环在本环境记为未验证（not-tested / blocked-by-credential），待签名凭据与 clean VM 齐备后单独验收 —— 用户已于 2026-08-02 确认接受该状态，且该确认不削减 UpdateService 状态机、fake feed 与 docs/product/RELEASE_SETUP.md 的交付要求。",
+   "reason": "裁决A：明写签名与真实 N→N+1 更新闭环记为未验证，待凭据齐备后单独验收"
+  },
+  {
+   "file": "plan.json",
+   "field": "deferred_requirements[10]",
+   "before": "{\"requirement_id\":\"SES-101（会话树 / 分叉可视化子项）\",\"milestone\":\"M3\",\"reason\":\"TASK-009（原 TASK-B01）的 risks 已声明：get_session_tree / get_fork_messages 只落 IPC 通道与类型，可视化会话树 UI 延期到独立迭代。M3 出口门禁 doc:330 要求的「分叉」能力因此只覆盖到数据面，UI 面未覆盖，必须在验收说明中标注未完成。\"}",
+   "after": "{\"requirement_id\":\"SES-101（会话树 / 分叉可视化子项）\",\"milestone\":\"M3\",\"reason\":\"doc/PiBuddy-product-grade-coding-agent-prompt.md 第 329 行的 M3 出口门禁列举「恢复/搜索/重命名/分叉/导出会话」，其中「分叉」能力本轮不完整达成：fork/clone/rewind 与 get_session_tree / get_fork_messages 的 RPC 与 IPC 通道、类型、以及 TASK-010 的「从此消息分叉」入口仍全部接入（数据面完整），仅缺可视化分支树 UI（分支点 / compaction / 模型变化定位）。因此 M3 出口门禁本轮记为部分达成，验收说明必须标注「分叉可视化未完成」，不得声称 M3 出口门禁完整达成。\",\"scope_retained\":\"fork / clone / rewind RPC 能力、get_session_tree 与 get_fork_messages 的 IPC 通道与契约类型、MessageItem 的「从此消息分叉」入口\",\"scope_cut\":\"可视化会话分支树 UI（树视图、分支点标注、compaction 与模型变化定位）\",\"user_confirmed\":true,\"user_confirmed_date\":\"2026-08-02\"}",
+   "reason": "裁决B：用户已确认接受 SES-101 会话树/分叉可视化 UI 裁剪；同时把 doc 行号从 330 更正为 329"
+  },
+  {
+   "file": "plan.json",
+   "field": "deferred_requirements[11]",
+   "before": "{\"requirement_id\":\"M4 三平台 clean VM 更新 E2E（QA-401 的验证面）\",\"milestone\":\"M4\",\"reason\":\"需 clean VM 与三平台原生 runner，见 plan.unreachable_exit_gates；本计划只交付 fake feed 下的状态机单测与 CI 骨架，验收状态记为 not-tested。\"}",
+   "after": "+user_confirmed:true,+user_confirmed_date:2026-08-02",
+   "reason": "裁决A：用户已确认接受"
+  },
+  {
+   "file": "plan.json",
+   "field": "deferred_requirements[12]",
+   "before": "{\"requirement_id\":\"M4 签名与公证（UPD-006 的验证面）\",\"milestone\":\"M4\",\"reason\":\"doc:455 规定签名凭据必须由产品所有者配置且 Coding Agent 不得编造；缺失时 release job 必须失败关闭，验收状态记为 blocked-by-credential。\"}",
+   "after": "+user_confirmed:true,+user_confirmed_date:2026-08-02",
+   "reason": "裁决A：用户已确认接受"
+  },
+  {
+   "file": "tasks/TASK-009.json",
+   "field": "risks[1]",
+   "before": "会话树定位（current leaf / 分支点 / compaction / 模型变化）与 fork/clone/rewind 不静默删分支，本任务只落 get_tree/get_fork_messages 的 IPC 通道与类型，可视化会话树 UI 延期到 B02 之后的独立迭代，需在验收说明中明确标注未完成",
+   "after": "会话树定位（current leaf / 分支点 / compaction / 模型变化）与 fork/clone/rewind 不静默删分支，本任务只落 get_tree/get_fork_messages 的 IPC 通道与类型，可视化会话树 UI 延期到 B02 之后的独立迭代，需在验收说明中明确标注未完成。【裁决B · 用户已于 2026-08-02 确认批准该裁剪】可视化会话树 UI 明确不在本计划交付范围内，M3 出口门禁 doc:329 的「分叉」能力本轮只达成数据面；fork/clone/rewind 与 get_session_tree / get_fork_messages 的 RPC 与 IPC 能力仍必须完整接入，验收说明须标注「分叉可视化未完成」，任何声称 M3 出口门禁完整达成的表述都是错误的",
+   "reason": "裁决B：确认该裁剪已获用户批准"
+  },
+  {
+   "file": "plan.json",
+   "field": "design_decisions[27]",
+   "before": "[裁定 · IPC handler 目录归属] 采用「域内 *-ipc.ts」：IPC 文件与其功能域代码同目录，不集中到 main/。依据 doc/PiBuddy-product-grade-coding-agent-prompt.md 第 344 行推荐目录 `src/main/update/{update-types,update-service,update-ipc,update-errors,release-integrity}.ts`（update 域的 IPC 文件位于 update 目录内），且 TASK-011/014/015/016 的 files[] 现状已是 main/update/update-ipc.ts、main/providers/providers-ipc.ts、main/workspace/workspace-ipc.ts、main/preview/preview-ipc.ts、main/artifacts/artifact-ipc.ts。main/ 只保留聚合器 registry.ts 与无独立功能域的 misc-ipc.ts。配套：裁定1 的 IPC 守卫只保留结构性断言（全仓 ipcMain 直接注册数为 0，改前实跑 13），不再把 registerHandler 计数钉死到具体 handler 文件路径。残留分歧见 errata-1.json 的 disputes：TASK-009 files[] 现状把 sessions-ipc.ts / pi-ipc.ts / misc-ipc.ts 放在 main/ 下，与本裁定的「域内」口径不一致，本轮未擅自改判 files[] 的 create 路径。",
+   "after": "[裁定 · IPC handler 目录归属 —— errata-2 终裁] 规则三条：(1) 有明确功能域的 handler 放入该域目录 —— packages/app/src/main/sessions/sessions-ipc.ts、main/pi/pi-ipc.ts、main/update/update-ipc.ts、main/providers/providers-ipc.ts、main/workspace/workspace-ipc.ts、main/preview/preview-ipc.ts、main/artifacts/artifact-ipc.ts；(2) 无单一功能域的杂项 handler（dialog / shell / settings / file / stt）平铺为 packages/app/src/main/misc-ipc.ts，不新建 main/misc/ 目录；(3) 横切设施平铺在 main/ 下 —— 守卫 packages/app/src/main/ipc-guard.ts 与聚合器 packages/app/src/main/ipc-registry.ts。依据 doc/PiBuddy-product-grade-coding-agent-prompt.md 第 344 行推荐目录 `src/main/update/{update-types,update-service,update-ipc,update-errors,release-integrity}.ts`（update 域的 IPC 文件位于 update 目录内）。packages/app/src/main/ipc/ 目录不存在也不创建，全计划不得再出现该前缀（errata-2 实测命中数 0）。配套：裁定1 的 IPC 守卫只保留结构性断言（全仓 ipcMain 直接注册数为 0，改前实跑 13），不再把 registerHandler 计数钉死到具体 handler 文件路径。errata-1 disputes 的 D-1 至此结清。",
+   "reason": "落地终裁：域内 *-ipc.ts + 杂项平铺 misc-ipc.ts + 横切平铺 ipc-registry.ts；移除 main/ipc/ 前缀"
+  },
+  {
+   "file": "plan.json",
+   "field": "design_decisions[27]",
+   "before": "[裁定 · IPC handler 目录归属 —— errata-2 终裁] 规则三条：(1) 有明确功能域的 handler 放入该域目录 —— packages/app/src/main/sessions/sessions-ipc.ts、main/pi/pi-ipc.ts、main/update/update-ipc.ts、main/providers/providers-ipc.ts、main/workspace/workspace-ipc.ts、main/preview/preview-ipc.ts、main/artifacts/artifact-ipc.ts；(2) 无单一功能域的杂项 handler（dialog / shell / settings / file / stt）平铺为 packages/app/src/main/misc-ipc.ts，不新建 main/misc/ 目录；(3) 横切设施平铺在 main/ 下 —— 守卫 packages/app/src/main/ipc-guard.ts 与聚合器 packages/app/src/main/ipc-registry.ts。依据 doc/PiBuddy-product-grade-coding-agent-prompt.md 第 344 行推荐目录 `src/main/update/{update-types,update-service,update-ipc,update-errors,release-integrity}.ts`（update 域的 IPC 文件位于 update 目录内）。packages/app/src/main/ipc/ 目录不存在也不创建，全计划不得再出现该前缀（errata-2 实测命中数 0）。配套：裁定1 的 IPC 守卫只保留结构性断言（全仓 ipcMain 直接注册数为 0，改前实跑 13），不再把 registerHandler 计数钉死到具体 handler 文件路径。errata-1 disputes 的 D-1 至此结清。",
+   "after": "[裁定 · IPC handler 目录归属 —— errata-2 终裁] 规则三条：(1) 有明确功能域的 handler 放入该域目录 —— packages/app/src/main/sessions/sessions-ipc.ts、main/pi/pi-ipc.ts、main/update/update-ipc.ts、main/providers/providers-ipc.ts、main/workspace/workspace-ipc.ts、main/preview/preview-ipc.ts、main/artifacts/artifact-ipc.ts；(2) 无单一功能域的杂项 handler（dialog / shell / settings / file / stt）平铺为 packages/app/src/main/misc-ipc.ts，不新建 main/misc/ 目录；(3) 横切设施平铺在 main/ 下 —— 守卫 packages/app/src/main/ipc-guard.ts 与聚合器 packages/app/src/main/ipc-registry.ts。依据 doc/PiBuddy-product-grade-coding-agent-prompt.md 第 344 行推荐目录 `src/main/update/{update-types,update-service,update-ipc,update-errors,release-integrity}.ts`（update 域的 IPC 文件位于 update 目录内）。不存在、也不创建以 main/ 加 ipc 子目录形式的集中 handler 目录；全计划任何字段都不得再出现该目录前缀，errata-2 已实测该前缀在 plan.json 与 16 个 task 文件中的命中数为 0。配套：裁定1 的 IPC 守卫只保留结构性断言（全仓 ipcMain 直接注册数为 0，改前实跑 13），不再把 registerHandler 计数钉死到具体 handler 文件路径。errata-1 disputes 的 D-1 至此结清。",
+   "reason": "自指清理：终裁文本自身不得再写出被禁止的目录前缀字面量，否则「前缀命中数 = 0」的自检永远无法通过"
+  },
+  {
+   "file": "plan.json",
+   "field": "path_conventions",
+   "before": "(不存在)",
+   "after": "新增 4 条解析规则",
+   "reason": "路径闭合：消除 docs/ 前缀在「仓库内 docs/product/」与「pi 包自带 docs/」之间的歧义，并登记构建产物目录的产出者"
+  },
+  {
+   "file": "tasks/TASK-003.json",
+   "field": "files[+] packages/app/resources/pi-runtime/dist/cli.js",
+   "before": "(缺失)",
+   "after": "create packages/app/resources/pi-runtime/dist/cli.js",
+   "reason": "路径闭合：补录构建产物条目，产出者为同 wave 的 packages/app/scripts/prepare-pi-runtime.mjs"
+  },
+  {
+   "file": "tasks/TASK-003.json",
+   "field": "files[+] packages/app/resources/pi-runtime/runtime-manifest.json",
+   "before": "(缺失)",
+   "after": "create packages/app/resources/pi-runtime/runtime-manifest.json",
+   "reason": "路径闭合：补录构建产物条目，产出者为同 wave 的 packages/app/scripts/prepare-pi-runtime.mjs"
+  }
+ ],
+ "change_count": 126,
+ "change_breakdown": {
+  "tasks/TASK-003.json": 8,
+  "tasks/TASK-006.json": 8,
+  "tasks/TASK-009.json": 14,
+  "tasks/TASK-010.json": 8,
+  "tasks/TASK-011.json": 17,
+  "tasks/TASK-012.json": 9,
+  "tasks/TASK-013.json": 14,
+  "tasks/TASK-014.json": 12,
+  "tasks/TASK-015.json": 12,
+  "tasks/TASK-016.json": 9,
+  "tasks/TASK-002.json": 1,
+  "tasks/TASK-004.json": 1,
+  "tasks/TASK-005.json": 1,
+  "tasks/TASK-007.json": 1,
+  "tasks/TASK-008.json": 1,
+  "plan.json": 10
+ },
+ "path_closure_audit": {
+  "method": {
+   "extraction": "对 plan.json 与全部 16 个 task JSON 递归遍历所有字符串叶子（覆盖 description / action / scope / focus_paths / read_first / implementation / convergence.criteria / convergence.verification / convergence.definition_of_done / files[].path / files[].change / test.* / reference.* / rationale.* / risks / doc_context 等全部字段），用正则 (?:[A-Za-z0-9_@.\\-]+/)*[A-Za-z0-9_.\\-]+\\.(ts|tsx|mjs|js|cjs|vue|json|md|yaml|yml|plist|db|html|css) 抽取路径与脚本名",
+   "scoping": "闭合判定只对「完全限定的仓库相对路径」生效：以 packages/ | scripts/ | tools/ | doc/ | docs/ | .github/ 开头，或为根文件白名单（package.json / pnpm-lock.yaml / pnpm-workspace.yaml / tsconfig.base.json / vitest.config.ts / vitest.workspace.ts / .gitignore）之一。裸文件名、./ 与 ../ 相对模块说明符、node_modules 绝对路径、URL、以及 .pi/ 等运行期用户数据路径不构成计划内交付物引用，不计入闭合口径",
+   "verdicts": {
+    "declared": "该路径在某个 task 的 files[] 中有 create / modify / delete 条目",
+    "repo-existing": "该路径在当前仓库中实际存在（node fs.existsSync 实测，工作根 D:/selftool/pi-ui）",
+    "external-verified": "外部依赖文档，按 plan.path_conventions 解析到绝对路径后 test -e 实测存在",
+    "negative-guard": "该路径的全部引用都是「必须不存在」的反向断言（test ! -e / 不得新建 / 严禁新建 / 必要时新建…已删除），因此无 files[] 条目正是正确状态",
+    "DANGLING": "以上四者皆非 —— 悬空引用，必须修正"
+   }
+  },
+  "totals_before": {
+   "in_scope_tokens": 246,
+   "declared": 172,
+   "repo-existing": 9,
+   "negative-guard": 3,
+   "DANGLING": 62
+  },
+  "totals_after": {
+   "in_scope_tokens": 235,
+   "declared": 221,
+   "repo-existing": 9,
+   "external-verified": 1,
+   "negative-guard": 4
+  },
+  "dangling_after": [],
+  "per_path_table": [
+   {
+    "path": ".github/workflows/ci.yml",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):create",
+     "TASK-002(w2):modify",
+     "TASK-013(w10):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-001",
+     "TASK-002",
+     "TASK-013",
+     "TASK-016"
+    ],
+    "ref_fields": 13
+   },
+   {
+    "path": ".github/workflows/release.yml",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 5
+   },
+   {
+    "path": "doc/architecture.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "doc/baseline-2026-08-02.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001"
+    ],
+    "ref_fields": 12
+   },
+   {
+    "path": "doc/PiBuddy-desktop-agent-source-audit-2026-08-02.md",
+    "verdict": "repo-existing",
+    "declared_by": [],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN"
+    ],
+    "ref_fields": 1
+   },
+   {
+    "path": "doc/PiBuddy-product-grade-coding-agent-prompt.md",
+    "verdict": "repo-existing",
+    "declared_by": [],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "doc/regression/TASK-003-runtime.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-003(w3):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-003"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "doc/regression/TASK-004-security.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-004(w3):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-004"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "doc/regression/TASK-005-runtime.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-005"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "doc/regression/TASK-006-session.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-006(w5):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-006"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "doc/regression/TASK-007-extension-ui.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-007"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "doc/regression/TASK-008-secrets.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-008(w7):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-008"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "doc/regression/TASK-009-session-center.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "doc/regression/TASK-010-perf.json",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-010(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-010"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "doc/regression/TASK-012-extension-ui.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "doc/threat-model.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-004",
+     "TASK-007",
+     "TASK-008"
+    ],
+    "ref_fields": 8
+   },
+   {
+    "path": "doc/traceability.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-003"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "docs/product/ADR-0001-update-feed.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "docs/product/RELEASE_SETUP.md",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011",
+     "TASK-013"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "docs/rpc.md",
+    "verdict": "external-verified",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-003",
+     "TASK-007"
+    ],
+    "ref_fields": 25
+   },
+   {
+    "path": "package.json",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-002",
+     "TASK-003",
+     "TASK-007",
+     "TASK-008",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 24
+   },
+   {
+    "path": "packages/app/build/entitlements.mac.plist",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/electron-builder.yml",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-003(w3):modify",
+     "TASK-013(w10):modify",
+     "TASK-016(w13):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-003",
+     "TASK-011",
+     "TASK-013",
+     "TASK-016"
+    ],
+    "ref_fields": 22
+   },
+   {
+    "path": "packages/app/electron.vite.config.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 5
+   },
+   {
+    "path": "packages/app/package.json",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):modify",
+     "TASK-003(w3):modify",
+     "TASK-011(w9):modify",
+     "TASK-016(w13):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-003",
+     "TASK-011",
+     "TASK-013",
+     "TASK-016"
+    ],
+    "ref_fields": 17
+   },
+   {
+    "path": "packages/app/resources/pi-runtime/dist/cli.js",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-003(w3):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-003"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/resources/pi-runtime/runtime-manifest.json",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-003(w3):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-003"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/scripts/build-config.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 5
+   },
+   {
+    "path": "packages/app/scripts/check-pure-js-deps.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013",
+     "TASK-016"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "packages/app/scripts/check-update-deps.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011",
+     "TASK-015"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "packages/app/scripts/check-updater-capability.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/scripts/prepare-pi-runtime.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-003(w3):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-003"
+    ],
+    "ref_fields": 11
+   },
+   {
+    "path": "packages/app/scripts/verify-release-artifacts.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 5
+   },
+   {
+    "path": "packages/app/src/main/artifacts/artifact-ipc.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/artifacts/artifact-store.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/artifacts/artifact-store.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/attachment-registry.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):create",
+     "TASK-015(w12):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-007",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 13
+   },
+   {
+    "path": "packages/app/src/main/changeset/apply.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/changeset/apply.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/changeset/changeset-store.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/main/diagnostics/support-bundle.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/diagnostics/support-bundle.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/endpoints.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-008(w7):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-008"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/extension-ui/ext-ui-contract.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/extension-ui/ext-ui-lifecycle.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/extension-ui/ext-ui-service.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/main/extension-ui/ext-ui-timeout.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/fs-atomic.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/health/health-check.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/health/health-check.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/health/safe-mode.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/index.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-004(w3):modify",
+     "TASK-011(w9):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-004",
+     "TASK-011",
+     "TASK-013",
+     "TASK-016"
+    ],
+    "ref_fields": 17
+   },
+   {
+    "path": "packages/app/src/main/ipc-guard.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-007",
+     "TASK-008",
+     "TASK-015"
+    ],
+    "ref_fields": 11
+   },
+   {
+    "path": "packages/app/src/main/ipc-registry.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create",
+     "TASK-011(w9):modify",
+     "TASK-013(w10):modify",
+     "TASK-014(w11):modify",
+     "TASK-015(w12):modify",
+     "TASK-016(w13):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-009",
+     "TASK-011",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 13
+   },
+   {
+    "path": "packages/app/src/main/ipc.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):modify",
+     "TASK-006(w5):modify",
+     "TASK-007(w6):modify",
+     "TASK-008(w7):modify",
+     "TASK-009(w8):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-005",
+     "TASK-006",
+     "TASK-007",
+     "TASK-008",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 56
+   },
+   {
+    "path": "packages/app/src/main/lifecycle/graceful-shutdown.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/logger-redact.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create",
+     "TASK-013(w10):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-013",
+     "TASK-014"
+    ],
+    "ref_fields": 8
+   },
+   {
+    "path": "packages/app/src/main/logger.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create",
+     "TASK-013(w10):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-008",
+     "TASK-011",
+     "TASK-013"
+    ],
+    "ref_fields": 14
+   },
+   {
+    "path": "packages/app/src/main/logging/logger.ts",
+    "verdict": "negative-guard",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011",
+     "TASK-013"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/misc-ipc.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create",
+     "TASK-014(w11):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-009",
+     "TASK-014"
+    ],
+    "ref_fields": 5
+   },
+   {
+    "path": "packages/app/src/main/net/outbound-guard.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-008(w7):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-008"
+    ],
+    "ref_fields": 7
+   },
+   {
+    "path": "packages/app/src/main/pi-launcher.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-003(w3):modify",
+     "TASK-012(w10):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-003",
+     "TASK-012"
+    ],
+    "ref_fields": 19
+   },
+   {
+    "path": "packages/app/src/main/pi-resources/package-install.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/pi-resources/package-install.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/pi-resources/resource-scanner.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/pi-resources/trust-store.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/pi-resources/trust-store.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/pi-runtime-manifest.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-003(w3):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-003"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/pi-supervisor.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-005",
+     "TASK-007"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "packages/app/src/main/pi/event-forwarder.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-010(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-010"
+    ],
+    "ref_fields": 5
+   },
+   {
+    "path": "packages/app/src/main/pi/event-forwarder.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):create",
+     "TASK-010(w9):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-005",
+     "TASK-010"
+    ],
+    "ref_fields": 10
+   },
+   {
+    "path": "packages/app/src/main/pi/pi-ipc.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create",
+     "TASK-010(w9):modify",
+     "TASK-012(w10):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009",
+     "TASK-010",
+     "TASK-012"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "packages/app/src/main/preview/convert-host.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/preview/convert-host.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/main/preview/convert-path.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/preview/convert-worker.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/preview/office-safety.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/preview/preview-ipc.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/preview/preview-types.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/preview/preview-window.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/preview/preview-window.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/main/providers/auth-store.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/providers/auth-store.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/main/providers/connectivity.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/providers/connectivity.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/providers/model-scope.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/providers/model-scope.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/providers/models-store.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/providers/providers-ipc.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/secret-store.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-008(w7):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-008",
+     "TASK-014"
+    ],
+    "ref_fields": 10
+   },
+   {
+    "path": "packages/app/src/main/security/window-policy.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-004(w3):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-004"
+    ],
+    "ref_fields": 8
+   },
+   {
+    "path": "packages/app/src/main/sessions-store.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):modify",
+     "TASK-006(w5):delete",
+     "TASK-009(w8):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-006",
+     "TASK-009"
+    ],
+    "ref_fields": 15
+   },
+   {
+    "path": "packages/app/src/main/sessions/session-dir.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-006(w5):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-006",
+     "TASK-009"
+    ],
+    "ref_fields": 5
+   },
+   {
+    "path": "packages/app/src/main/sessions/session-history.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/sessions/session-history.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-009",
+     "TASK-010"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "packages/app/src/main/sessions/session-index.bench.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/sessions/session-index.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/main/sessions/session-index.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009",
+     "TASK-010",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 11
+   },
+   {
+    "path": "packages/app/src/main/sessions/session-rename.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/sessions/session-rename.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/sessions/session-repository.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-006(w5):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-006",
+     "TASK-009"
+    ],
+    "ref_fields": 10
+   },
+   {
+    "path": "packages/app/src/main/sessions/sessions-ipc.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-009"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/main/settings.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):modify",
+     "TASK-008(w7):modify",
+     "TASK-014(w11):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-008",
+     "TASK-014"
+    ],
+    "ref_fields": 19
+   },
+   {
+    "path": "packages/app/src/main/update/release-integrity.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/update/release-integrity.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/update/update-errors.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/update/update-errors.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/update/update-init.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/update/update-ipc.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/update/update-schedule.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/update/update-service.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create",
+     "TASK-013(w10):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011",
+     "TASK-013"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/main/update/update-singleflight.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/update/update-types.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/usage/usage-store.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/usage/usage-store.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/workspace-registry.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):create",
+     "TASK-015(w12):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-007",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 12
+   },
+   {
+    "path": "packages/app/src/main/workspace/attachment-store.ts",
+    "verdict": "negative-guard",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 1
+   },
+   {
+    "path": "packages/app/src/main/workspace/file-editor.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/main/workspace/file-editor.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/workspace/file-tree.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/workspace/file-tree.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/workspace/path-guard.ts",
+    "verdict": "negative-guard",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 1
+   },
+   {
+    "path": "packages/app/src/main/workspace/search-worker.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/workspace/search-worker.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/main/workspace/workspace-ipc.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/workspace/workspace-store.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/preload/api/artifacts.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/preload/api/diagnostics.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/preload/api/index.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create",
+     "TASK-011(w9):modify",
+     "TASK-013(w10):modify",
+     "TASK-014(w11):modify",
+     "TASK-015(w12):modify",
+     "TASK-016(w13):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009",
+     "TASK-011",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 14
+   },
+   {
+    "path": "packages/app/src/preload/api/preview.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/preload/api/providers.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/preload/api/sessions.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009",
+     "TASK-010"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/preload/api/update.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/preload/api/workspace.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/preload/index.d.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):modify",
+     "TASK-005(w4):modify",
+     "TASK-007(w6):modify",
+     "TASK-008(w7):modify",
+     "TASK-009(w8):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-005",
+     "TASK-007",
+     "TASK-008",
+     "TASK-009"
+    ],
+    "ref_fields": 17
+   },
+   {
+    "path": "packages/app/src/preload/index.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):modify",
+     "TASK-007(w6):modify",
+     "TASK-008(w7):modify",
+     "TASK-009(w8):modify",
+     "TASK-015(w12):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-004",
+     "TASK-005",
+     "TASK-007",
+     "TASK-008",
+     "TASK-009",
+     "TASK-015"
+    ],
+    "ref_fields": 25
+   },
+   {
+    "path": "packages/app/src/renderer/index.html",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-004(w3):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-004"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/AppShell.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):modify",
+     "TASK-012(w10):modify",
+     "TASK-014(w11):modify",
+     "TASK-015(w12):modify",
+     "TASK-016(w13):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 17
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/ArtifactLibrary.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/ArtifactLink.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/ChangesetPanel.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/chat-window.perf.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-010(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-010"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/ChatView.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-006(w5):modify",
+     "TASK-010(w9):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-006",
+     "TASK-010"
+    ],
+    "ref_fields": 12
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/DiagnosticsPanel.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/ExtensionUiHost.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):modify",
+     "TASK-012(w10):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-007",
+     "TASK-012"
+    ],
+    "ref_fields": 8
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/ExtensionWidgetHost.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/FileEditorPane.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/FileTreePanel.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/InputBar.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):modify",
+     "TASK-006(w5):modify",
+     "TASK-007(w6):modify",
+     "TASK-010(w9):modify",
+     "TASK-015(w12):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-006",
+     "TASK-007",
+     "TASK-010",
+     "TASK-014",
+     "TASK-015"
+    ],
+    "ref_fields": 22
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/InstallBlockerDialog.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/MessageItem.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-004(w3):modify",
+     "TASK-010(w9):modify",
+     "TASK-016(w13):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-004",
+     "TASK-010",
+     "TASK-016"
+    ],
+    "ref_fields": 13
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/OnboardingWizard.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/PiResourcesPanel.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/PreviewPane.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/ProjectTrustDialog.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/ProviderCenter.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/QueuePanel.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-010(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-010"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/SafeModeBanner.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/SessionListPanel.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/SettingsModal.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-003(w3):modify",
+     "TASK-008(w7):modify",
+     "TASK-011(w9):modify",
+     "TASK-013(w10):modify",
+     "TASK-014(w11):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-003",
+     "TASK-008",
+     "TASK-011",
+     "TASK-013",
+     "TASK-014"
+    ],
+    "ref_fields": 13
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/Sidebar.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-006(w5):modify",
+     "TASK-009(w8):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-006",
+     "TASK-009"
+    ],
+    "ref_fields": 7
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/StatusCenter.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/ToolActivity.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-004(w3):modify",
+     "TASK-010(w9):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-004",
+     "TASK-010"
+    ],
+    "ref_fields": 9
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/TopBar.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):modify",
+     "TASK-012(w10):modify",
+     "TASK-014(w11):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-007",
+     "TASK-012",
+     "TASK-014"
+    ],
+    "ref_fields": 12
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/update-banner.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/UpdateBanner.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/UpdateSettingsPanel.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/UsagePanel.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/components/Welcome.vue",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-007"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/friendly.ts",
+    "verdict": "repo-existing",
+    "declared_by": [],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/markdown.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-004(w3):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-004",
+     "TASK-010"
+    ],
+    "ref_fields": 11
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/app.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):modify",
+     "TASK-005(w4):modify",
+     "TASK-006(w5):modify",
+     "TASK-007(w6):modify",
+     "TASK-009(w8):modify",
+     "TASK-010(w9):modify",
+     "TASK-014(w11):modify",
+     "TASK-015(w12):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-005",
+     "TASK-006",
+     "TASK-007",
+     "TASK-009",
+     "TASK-010",
+     "TASK-012",
+     "TASK-014",
+     "TASK-015"
+    ],
+    "ref_fields": 76
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/artifacts.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-016(w13):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-016"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/chat-ui.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-010(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-010"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/chat-window.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-010(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-010"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/chat-window.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-010(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-010"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/extensionUi.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-012"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/model-capability.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/model-capability.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/providers.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/send-image-capability.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-014(w11):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-014"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/send-routing.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-010(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-010"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/sessions.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-009(w8):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-009"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/update.test.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/update.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "packages/app/src/renderer/src/stores/workspace.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-015(w12):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/renderer/src/stt.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-008(w7):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-004",
+     "TASK-008"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/test/attachment-registry.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):create",
+     "TASK-015(w12):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-007",
+     "TASK-015"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/test/event-forwarder.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-005"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/test/fs-atomic.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/test/generation.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-005"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/test/ipc-guard.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-007"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/test/logger-redact.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-013"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/test/logger.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create",
+     "TASK-013(w10):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-013"
+    ],
+    "ref_fields": 7
+   },
+   {
+    "path": "packages/app/test/pi-launcher.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-003(w3):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-003",
+     "TASK-012"
+    ],
+    "ref_fields": 9
+   },
+   {
+    "path": "packages/app/test/secret-store.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-008(w7):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-008"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/test/session-dir.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-006(w5):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-006"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "packages/app/test/session-interaction.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-006(w5):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-006"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/test/settings-atomic.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-008(w7):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-008"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/test/ssrf.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-008(w7):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-008"
+    ],
+    "ref_fields": 5
+   },
+   {
+    "path": "packages/app/test/window-policy.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-004(w3):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-004"
+    ],
+    "ref_fields": 7
+   },
+   {
+    "path": "packages/app/test/workspace-capability.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-007(w6):create",
+     "TASK-015(w12):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-007",
+     "TASK-015"
+    ],
+    "ref_fields": 9
+   },
+   {
+    "path": "packages/app/tsconfig.json",
+    "verdict": "repo-existing",
+    "declared_by": [],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 1
+   },
+   {
+    "path": "packages/app/tsconfig.node.json",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/app/tsconfig.web.json",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "packages/app/vitest.config.ts",
+    "verdict": "negative-guard",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 10
+   },
+   {
+    "path": "packages/contract/package.json",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/contract/src/envelope.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-005",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 15
+   },
+   {
+    "path": "packages/contract/src/index.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 10
+   },
+   {
+    "path": "packages/contract/src/ipc-contract.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create",
+     "TASK-007(w6):modify",
+     "TASK-008(w7):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-007",
+     "TASK-008",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 24
+   },
+   {
+    "path": "packages/contract/src/ports.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002",
+     "TASK-005",
+     "TASK-015"
+    ],
+    "ref_fields": 7
+   },
+   {
+    "path": "packages/contract/src/session.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create",
+     "TASK-006(w5):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-006"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/contract/src/settings.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create",
+     "TASK-003(w3):modify",
+     "TASK-008(w7):modify"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-003",
+     "TASK-008"
+    ],
+    "ref_fields": 8
+   },
+   {
+    "path": "packages/contract/src/update.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-011(w9):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/contract/test/envelope.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 4
+   },
+   {
+    "path": "packages/contract/tsconfig.json",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/pi-sdk/package.json",
+    "verdict": "repo-existing",
+    "declared_by": [],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-002"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/pi-sdk/src/client.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):modify",
+     "TASK-006(w5):modify",
+     "TASK-012(w10):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-003",
+     "TASK-005",
+     "TASK-006",
+     "TASK-007",
+     "TASK-011",
+     "TASK-012"
+    ],
+    "ref_fields": 30
+   },
+   {
+    "path": "packages/pi-sdk/src/index.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-005"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/pi-sdk/src/jsonl.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-005"
+    ],
+    "ref_fields": 8
+   },
+   {
+    "path": "packages/pi-sdk/src/types.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-012(w10):modify"
+    ],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-012"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "packages/pi-sdk/test/client.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-001"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "packages/pi-sdk/test/lifecycle.spec.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-005(w4):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-005"
+    ],
+    "ref_fields": 8
+   },
+   {
+    "path": "packages/pi-sdk/tsconfig.json",
+    "verdict": "repo-existing",
+    "declared_by": [],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "pnpm-lock.yaml",
+    "verdict": "repo-existing",
+    "declared_by": [],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-002",
+     "TASK-011"
+    ],
+    "ref_fields": 5
+   },
+   {
+    "path": "pnpm-workspace.yaml",
+    "verdict": "repo-existing",
+    "declared_by": [],
+    "repo_exists": true,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001"
+    ],
+    "ref_fields": 3
+   },
+   {
+    "path": "scripts/check-contract-uniqueness.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-002(w2):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-002",
+     "TASK-007",
+     "TASK-008",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 17
+   },
+   {
+    "path": "scripts/check-test-discovery.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 14
+   },
+   {
+    "path": "scripts/check-workflow-pins.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-013(w10):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-001",
+     "TASK-013"
+    ],
+    "ref_fields": 8
+   },
+   {
+    "path": "scripts/probe-node-sqlite.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-009"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "tools/fake-pi/fake-pi.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-001",
+     "TASK-005"
+    ],
+    "ref_fields": 10
+   },
+   {
+    "path": "tools/fake-pi/scenarios.mjs",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-001"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "tsconfig.base.json",
+    "verdict": "repo-existing",
+    "declared_by": [],
+    "repo_exists": true,
+    "referenced_by": [
+     "TASK-002"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "vitest.config.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-009"
+    ],
+    "ref_fields": 6
+   },
+   {
+    "path": "vitest.workspace.ts",
+    "verdict": "declared",
+    "declared_by": [
+     "TASK-001(w1):create"
+    ],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001"
+    ],
+    "ref_fields": 5
+   }
+  ],
+  "negative_guards": [
+   {
+    "path": "packages/app/src/main/logging/logger.ts",
+    "verdict": "negative-guard",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-011",
+     "TASK-013"
+    ],
+    "ref_fields": 2
+   },
+   {
+    "path": "packages/app/src/main/workspace/attachment-store.ts",
+    "verdict": "negative-guard",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 1
+   },
+   {
+    "path": "packages/app/src/main/workspace/path-guard.ts",
+    "verdict": "negative-guard",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "TASK-015"
+    ],
+    "ref_fields": 1
+   },
+   {
+    "path": "packages/app/vitest.config.ts",
+    "verdict": "negative-guard",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ],
+    "ref_fields": 10
+   }
+  ],
+  "external_verified": [
+   {
+    "path": "docs/rpc.md",
+    "verdict": "external-verified",
+    "declared_by": [],
+    "repo_exists": false,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-003",
+     "TASK-007"
+    ],
+    "ref_fields": 25
+   }
+  ],
+  "script_wave_table": [
+   {
+    "script": "packages/app/scripts/build-config.mjs",
+    "create_task": [
+     "TASK-013"
+    ],
+    "create_wave": 10,
+    "create_entry_count": 1,
+    "reference_waves": [
+     10
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 10,
+    "referenced_by": [
+     "TASK-013"
+    ]
+   },
+   {
+    "script": "packages/app/scripts/check-pure-js-deps.mjs",
+    "create_task": [
+     "TASK-013"
+    ],
+    "create_wave": 10,
+    "create_entry_count": 1,
+    "reference_waves": [
+     10,
+     13
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 10,
+    "referenced_by": [
+     "TASK-013",
+     "TASK-016"
+    ]
+   },
+   {
+    "script": "packages/app/scripts/check-update-deps.mjs",
+    "create_task": [
+     "TASK-011"
+    ],
+    "create_wave": 9,
+    "create_entry_count": 1,
+    "reference_waves": [
+     9,
+     12
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 9,
+    "referenced_by": [
+     "TASK-011",
+     "TASK-015"
+    ]
+   },
+   {
+    "script": "packages/app/scripts/check-updater-capability.mjs",
+    "create_task": [
+     "TASK-011"
+    ],
+    "create_wave": 9,
+    "create_entry_count": 1,
+    "reference_waves": [
+     9
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 9,
+    "referenced_by": [
+     "TASK-011"
+    ]
+   },
+   {
+    "script": "packages/app/scripts/prepare-pi-runtime.mjs",
+    "create_task": [
+     "TASK-003"
+    ],
+    "create_wave": 3,
+    "create_entry_count": 1,
+    "reference_waves": [
+     3
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 3,
+    "referenced_by": [
+     "PLAN",
+     "TASK-003"
+    ]
+   },
+   {
+    "script": "packages/app/scripts/verify-release-artifacts.mjs",
+    "create_task": [
+     "TASK-013"
+    ],
+    "create_wave": 10,
+    "create_entry_count": 1,
+    "reference_waves": [
+     10
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 10,
+    "referenced_by": [
+     "TASK-013"
+    ]
+   },
+   {
+    "script": "scripts/check-contract-uniqueness.mjs",
+    "create_task": [
+     "TASK-002"
+    ],
+    "create_wave": 2,
+    "create_entry_count": 1,
+    "reference_waves": [
+     1,
+     2,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13
+    ],
+    "raw_wave_comparison": "YES",
+    "inversion": "NO（形式命中，已逐字取证判为非执行引用）",
+    "adjudication": "TASK-001 c[9] 为显式排除说明，wave 1 不执行",
+    "effective_earliest_execution_wave": 2,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-002",
+     "TASK-007",
+     "TASK-008",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ]
+   },
+   {
+    "script": "scripts/check-test-discovery.mjs",
+    "create_task": [
+     "TASK-001"
+    ],
+    "create_wave": 1,
+    "create_entry_count": 1,
+    "reference_waves": [
+     1,
+     8,
+     9,
+     10,
+     11,
+     12,
+     13
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 1,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-009",
+     "TASK-010",
+     "TASK-011",
+     "TASK-012",
+     "TASK-013",
+     "TASK-014",
+     "TASK-015",
+     "TASK-016"
+    ]
+   },
+   {
+    "script": "scripts/check-workflow-pins.mjs",
+    "create_task": [
+     "TASK-013"
+    ],
+    "create_wave": 10,
+    "create_entry_count": 1,
+    "reference_waves": [
+     1,
+     10
+    ],
+    "raw_wave_comparison": "YES",
+    "inversion": "NO（形式命中，已逐字取证判为非执行引用）",
+    "adjudication": "TASK-001 implementation[13] 为前向说明，wave 1 不执行",
+    "effective_earliest_execution_wave": 10,
+    "referenced_by": [
+     "TASK-001",
+     "TASK-013"
+    ]
+   },
+   {
+    "script": "scripts/probe-node-sqlite.mjs",
+    "create_task": [
+     "TASK-001"
+    ],
+    "create_wave": 1,
+    "create_entry_count": 1,
+    "reference_waves": [
+     1,
+     8
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 1,
+    "referenced_by": [
+     "PLAN",
+     "TASK-001",
+     "TASK-009"
+    ]
+   },
+   {
+    "script": "tools/fake-pi/fake-pi.mjs",
+    "create_task": [
+     "TASK-001"
+    ],
+    "create_wave": 1,
+    "create_entry_count": 1,
+    "reference_waves": [
+     1,
+     4
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 1,
+    "referenced_by": [
+     "TASK-001",
+     "TASK-005"
+    ]
+   },
+   {
+    "script": "tools/fake-pi/scenarios.mjs",
+    "create_task": [
+     "TASK-001"
+    ],
+    "create_wave": 1,
+    "create_entry_count": 1,
+    "reference_waves": [
+     1
+    ],
+    "raw_wave_comparison": "NO",
+    "inversion": "NO",
+    "effective_earliest_execution_wave": 1,
+    "referenced_by": [
+     "TASK-001"
+    ]
+   }
+  ],
+  "script_wave_adjudications": [
+   {
+    "script": "scripts/check-contract-uniqueness.mjs",
+    "create_wave": 2,
+    "earliest_reference_wave": 1,
+    "verdict": "非倒挂",
+    "evidence": "TASK-001 convergence.criteria[9] 逐字写：「另：`node scripts/check-contract-uniqueness.mjs` 一步不在本任务写入 —— 该脚本由 TASK-002（wave 2）创建，且其判据 (b) 要求 packages/* 中恰有 1 个 contract 包，wave 1 时为 0 个必然退出码 1；改由 TASK-002 在创建脚本的同一 wave 追加该 CI 步骤（闸门脚本创建 wave <= 引用 wave）」。该 wave-1 引用是显式排除说明而非执行要求，实际最早执行 wave 为 2 == 创建 wave 2"
+   },
+   {
+    "script": "scripts/check-workflow-pins.mjs",
+    "create_wave": 10,
+    "earliest_reference_wave": 1,
+    "verdict": "非倒挂",
+    "evidence": "TASK-001 implementation[13] 逐字写：「ci.yml 的所有第三方 action 一次到位地用 40 位 SHA 固定，使 TASK-013 的 scripts/check-workflow-pins.mjs 在本文件上直接通过（CT-14）」。这是对下游闸门的前向说明，wave 1 不执行该脚本；实际执行点为 TASK-013 convergence.criteria[3]，wave 10 == 创建 wave 10"
+   }
+  ],
+  "modify_without_source": [],
+  "duplicate_creates": [],
+  "duplicate_create_resolved": [
+   {
+    "path": "packages/app/src/main/pi/event-forwarder.ts",
+    "before": "TASK-005(w4):create 与 TASK-010(w9):create 同时存在",
+    "after": "TASK-010 files[0].action 改为 modify",
+    "reason": "同一文件不能被创建两次；TASK-005(w4) 为首创者，TASK-010(w9) 为增量修改。修正后 modify wave 9 > create wave 4，闭合规则 4 通过"
+   }
+  ],
+  "build_outputs_declared": [
+   {
+    "path": "packages/app/resources/pi-runtime/dist/cli.js",
+    "producer": "packages/app/scripts/prepare-pi-runtime.mjs",
+    "producer_task": "TASK-003",
+    "producer_wave": 3,
+    "action": "errata-2 已在 TASK-003 files[] 补录 create 条目"
+   },
+   {
+    "path": "packages/app/resources/pi-runtime/runtime-manifest.json",
+    "producer": "packages/app/scripts/prepare-pi-runtime.mjs",
+    "producer_task": "TASK-003",
+    "producer_wave": 3,
+    "action": "errata-2 已在 TASK-003 files[] 补录 create 条目"
+   }
+  ]
+ },
+ "empirical_runs": [
+  {
+   "id": "SC1-main-ipc-prefix",
+   "command": "cat plan.json tasks/*.json | grep -o 'main/ipc/' | wc -l",
+   "cwd": "D:/selftool/pi-ui/.workflow/scratch/20260802-plan-P0-pibuddy-m0-m5/outputs",
+   "exit_code": 0,
+   "stdout": "0",
+   "expectation": "期望 0（全计划不得再出现 main/ipc/ 前缀）"
+  },
+  {
+   "id": "SC0-json-validity",
+   "command": "for f in plan.json tasks/*.json; do node -e \"JSON.parse(require('fs').readFileSync('$f','utf8'))\" || echo INVALID $f; done; echo ALL_PARSED_OK",
+   "cwd": "D:/selftool/pi-ui/.workflow/scratch/20260802-plan-P0-pibuddy-m0-m5/outputs",
+   "exit_code": 0,
+   "stdout": "ALL_PARSED_OK",
+   "expectation": "期望全部解析成功"
+  },
+  {
+   "id": "SC2-stale-prefix-session-repository",
+   "command": "cat plan.json tasks/*.json | grep -o 'src/main/session-repository.ts' | wc -l",
+   "cwd": "D:/selftool/pi-ui/.workflow/scratch/20260802-plan-P0-pibuddy-m0-m5/outputs",
+   "exit_code": 0,
+   "stdout": "0",
+   "expectation": "期望 0（session-repository.ts 一律位于 main/sessions/ 下）"
+  },
+  {
+   "id": "SC2-stale-prefix-app-scripts",
+   "command": "cat plan.json tasks/*.json | grep -oE '[^/a-zA-Z]scripts/(prepare-pi-runtime|build-config|verify-release-artifacts|check-update-deps|check-pure-js-deps|check-updater-capability)\\.mjs' | wc -l",
+   "cwd": "D:/selftool/pi-ui/.workflow/scratch/20260802-plan-P0-pibuddy-m0-m5/outputs",
+   "exit_code": 0,
+   "stdout": "0",
+   "expectation": "期望 0（这 6 个脚本一律带 packages/app/ 前缀）"
+  },
+  {
+   "id": "SC2-logging-dir-positive-refs",
+   "command": "cat plan.json tasks/*.json | grep -o 'src/main/logging/' | wc -l",
+   "cwd": "D:/selftool/pi-ui/.workflow/scratch/20260802-plan-P0-pibuddy-m0-m5/outputs",
+   "exit_code": 0,
+   "stdout": "5",
+   "expectation": "仅允许出现在「不得新建 main/logging/logger.ts」这类反向守卫与历史说明中；下方 logging_negative_guards 逐条列出"
+  },
+  {
+   "id": "T003-c8",
+   "command": "test -e packages/app/scripts/prepare-pi-runtime.mjs && echo EXISTS || echo MISSING",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "MISSING",
+   "expectation": "脚本尚未创建，期望 MISSING（criterion 当前为假，非恒真）"
+  },
+  {
+   "id": "T006-c4-a",
+   "command": "rg -c 'MAX_SESSIONS_SCANNED = 200' packages/app/src/main/sessions/session-repository.ts",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 2,
+   "stdout": "",
+   "stderr": "rg: packages/app/src/main/sessions/session-repository.ts: IO error for operation on packages/app/src/main/sessions/session-repository.ts: 系统找不到指定的路径。 (os error 3)",
+   "expectation": "文件尚不存在，rg 退出 2；c[4] 为正向 contains 断言，缺文件即不满足（非恒真）"
+  },
+  {
+   "id": "T006-c4-b",
+   "command": "rg -c 'MAX_SESSION_HEAD_BYTES' packages/app/src/main/sessions/session-repository.ts",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 2,
+   "stdout": "",
+   "stderr": "rg: packages/app/src/main/sessions/session-repository.ts: IO error for operation on packages/app/src/main/sessions/session-repository.ts: 系统找不到指定的路径。 (os error 3)",
+   "expectation": "同上"
+  },
+  {
+   "id": "T006-c5",
+   "command": "rg -c 'parseError' packages/app/src/main/sessions/session-repository.ts",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 2,
+   "stdout": "",
+   "stderr": "rg: packages/app/src/main/sessions/session-repository.ts: IO error for operation on packages/app/src/main/sessions/session-repository.ts: 系统找不到指定的路径。 (os error 3)",
+   "expectation": "同上"
+  },
+  {
+   "id": "T009-c4-a",
+   "command": "rg --no-filename -c 'sessions:list' packages/app/src | awk '{s+=$1} END{print s+0}'",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "2",
+   "expectation": "期望终态 0；当前 2（非恒真）"
+  },
+  {
+   "id": "T009-c4-b",
+   "command": "rg --no-filename -c 'export async function listSessionsForWorkspace' packages/app/src/main | awk '{s+=$1} END{print s+0}'",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "0",
+   "expectation": "期望终态 1；当前 0（非恒假：TASK-006 会先建立该实现）"
+  },
+  {
+   "id": "T009-c4-c",
+   "command": "test ! -e packages/app/src/main/sessions/session-repository.ts && echo PASS || echo FAIL",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "PASS",
+   "expectation": "期望终态 PASS；当前 PASS（该分句在 TASK-006 建立该文件后转 FAIL，再由本任务删除后转回 PASS，故非恒真）"
+  },
+  {
+   "id": "T009-c4-d",
+   "command": "rg --no-filename -c 'MAX_SESSIONS_SCANNED' packages/app/src/main | awk '{s+=$1} END{print s+0}'",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "0",
+   "expectation": "期望终态 0；当前 0"
+  },
+  {
+   "id": "T009-c4-e",
+   "command": "test -e packages/app/src/main/sessions/sessions-ipc.ts && echo EXISTS || echo MISSING",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "MISSING",
+   "expectation": "归一后的 handler 路径，当前 MISSING"
+  },
+  {
+   "id": "T009-c19+T011-c20+T012-c18+T013-c19+T014-c22+T015-c19+T016-c20",
+   "command": "rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "13",
+   "expectation": "期望终态 0；当前 13（非恒真），本轮只改这些 criteria 的说明性括注，断言本体未动"
+  },
+  {
+   "id": "T011-c0-a",
+   "command": "rg -n 'electron-updater|electron-log|electron-builder' packages/app/package.json",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "13:    \"dist\": \"electron-vite build && electron-builder\",\n30:    \"electron-builder\": \"^26.0.0\",",
+   "expectation": "期望终态三行精确版本；当前仅 electron-builder ^26.0.0（含 ^，非恒真）"
+  },
+  {
+   "id": "T011-c0-b",
+   "command": "test -e packages/app/scripts/check-update-deps.mjs && echo EXISTS || echo MISSING",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "MISSING",
+   "expectation": "当前 MISSING"
+  },
+  {
+   "id": "T011-c8",
+   "command": "test -e packages/app/scripts/check-updater-capability.mjs && echo EXISTS || echo MISSING",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "MISSING",
+   "expectation": "当前 MISSING；本轮已在 TASK-011(w9) files[] 补录 create 条目"
+  },
+  {
+   "id": "T012-c12-a",
+   "command": "test -e packages/app/src/main/pi/pi-ipc.ts && echo EXISTS || echo MISSING",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "MISSING",
+   "expectation": "归一后的 handler 路径，当前 MISSING"
+  },
+  {
+   "id": "T012-c12-b",
+   "command": "rg --no-filename -c 'respondUi\\(' packages/app/src/main | awk '{s+=$1} END{print s+0}'",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "1",
+   "expectation": "当前 1（既有实现在 ipc.ts），终态需迁至 main/pi/pi-ipc.ts"
+  },
+  {
+   "id": "T013-c0-a",
+   "command": "rg -c 'npmmirror' packages/app/electron-builder.yml",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "1",
+   "expectation": "期望终态 0；当前 1（非恒真）"
+  },
+  {
+   "id": "T013-c0-b",
+   "command": "rg -n -A3 '^mac:' packages/app/electron-builder.yml",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "28:mac:\n29-  target:\n30-    - dmg\n31-  category: public.app-category.productivity",
+   "expectation": "期望终态 target 含 dmg 与 zip；当前只有 dmg（非恒真）"
+  },
+  {
+   "id": "T013-c0-c",
+   "command": "test -e packages/app/scripts/build-config.mjs && echo EXISTS || echo MISSING",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "MISSING",
+   "expectation": "当前 MISSING"
+  },
+  {
+   "id": "T013-c1",
+   "command": "test -e packages/app/scripts/verify-release-artifacts.mjs && echo EXISTS || echo MISSING",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "MISSING",
+   "expectation": "当前 MISSING"
+  },
+  {
+   "id": "T014-c2-a",
+   "command": "test -e packages/app/src/main/misc-ipc.ts && echo EXISTS || echo MISSING",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "MISSING",
+   "expectation": "归一后的杂项 handler 路径（平铺），当前 MISSING"
+  },
+  {
+   "id": "T014-c2-b",
+   "command": "rg --no-filename -c 'assertHttpsOrLocalhost' packages/app/src | awk '{s+=$1} END{print s+0}'",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "0",
+   "expectation": "期望终态 0；当前 0"
+  },
+  {
+   "id": "T014-c2-c",
+   "command": "rg --no-filename -c '\\bfetch\\(' packages/app/src/main -g '*.ts' -g '!net/outbound-guard.ts' -g '!*.test.ts' | awk '{s+=$1} END{print s+0}'",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "1",
+   "expectation": "期望终态 0；当前 1（非恒真）"
+  },
+  {
+   "id": "T015-c18",
+   "command": "node packages/app/scripts/check-update-deps.mjs",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 1,
+   "stdout": "",
+   "stderr": "node:internal/modules/cjs/loader:1459\r\n  throw err;\r\n  ^\r\n\r\nError: Cannot find module 'D:\\selftool\\pi-ui\\packages\\app\\scripts\\check-update-deps.mjs'\r\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1456:15)\r\n    at defaultResolveImpl (node:internal/modules/cjs/loader:1066:19)\r\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1071:22)\r\n    at Module._load (node:internal/modules/cjs/loader:1242:25)\r\n    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)\r\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\r\n    at node:internal/main/run_main_module:33:47 {\r\n  code: 'MODULE_NOT_FOUND',\r\n  requireStack: []\r\n}\r\n\r\nNode.js v24.14.0",
+   "expectation": "期望终态退出码 0；当前 MODULE_NOT_FOUND 非 0（非恒真）"
+  },
+  {
+   "id": "T011-c24+T013-c5-negguard",
+   "command": "test ! -e packages/app/src/main/logging/logger.ts && echo PASS || echo FAIL",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "PASS",
+   "expectation": "反向守卫，本轮刻意保留原样：终裁选定 main/logger.ts 平铺，故 logging/logger.ts 必须不存在"
+  },
+  {
+   "id": "T015-c2-negguard",
+   "command": "test ! -e packages/app/src/main/workspace/attachment-store.ts && echo PASS || echo FAIL",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "PASS",
+   "expectation": "反向守卫，保留"
+  },
+  {
+   "id": "T015-c0-negguard",
+   "command": "test ! -e packages/app/src/main/workspace/path-guard.ts && echo PASS || echo FAIL",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "PASS",
+   "expectation": "反向守卫，保留"
+  },
+  {
+   "id": "ext-doc-rpc",
+   "command": "test -e \"node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md\" && echo EXISTS || echo MISSING",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 0,
+   "stdout": "EXISTS",
+   "expectation": "plan.path_conventions 中 docs/*.md 的解析基址实测"
+  },
+  {
+   "id": "esc-T006-c1-4bs",
+   "command": "rg -c -F '.replace(/^[/\\\\\\\\]/, \"\")' packages/app/src/main/sessions-store.ts",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 1,
+   "stdout": "",
+   "expectation": "TASK-006 c[1] 的四反斜杠写法在现有源码上命中 0 / 退出 1"
+  },
+  {
+   "id": "esc-T006-c1-2bs",
+   "command": "rg -c -F '.replace(/^[/\\\\]/, \"\")' packages/app/src/main/sessions-store.ts",
+   "cwd": "D:/selftool/pi-ui",
+   "exit_code": 1,
+   "stdout": "",
+   "expectation": "两反斜杠写法同样命中 0 / 退出 1；现有实现实为 .replace(/[\\\\/:]/g, \"-\")"
+  }
+ ],
+ "final_self_check": {
+  "1_main_ipc_prefix_hits": {
+   "expected": 0,
+   "actual": 0,
+   "command": "cat plan.json tasks/*.json | grep -o 'main/ipc/' | wc -l",
+   "pass": true,
+   "note": "注意：design_decisions[27] 的终裁文本本身也不得写出该前缀字面量，否则本自检永远不可能为 0；本轮已把该句改为描述性表述"
+  },
+  "2_dangling_references": {
+   "expected": 0,
+   "actual": 0,
+   "before": 62,
+   "pass": true,
+   "table_ref": "path_closure_audit.per_path_table（逐条 235 行）"
+  },
+  "3_script_wave_inversion": {
+   "expected": 0,
+   "raw_wave_comparison_hits": [
+    "scripts/check-contract-uniqueness.mjs",
+    "scripts/check-workflow-pins.mjs"
+   ],
+   "actual_after_adjudication": 0,
+   "pass": true,
+   "table_ref": "path_closure_audit.script_wave_table（逐个脚本的 create wave 与全部引用 wave 对照）+ script_wave_adjudications（两条形式命中已逐字取证判为非执行引用）"
+  },
+  "3b_logging_dir_references": {
+   "statement": "全计划 main/logging/ 前缀的每一处引用逐条列举，确认无任何一处是「期望该文件存在」的正向引用",
+   "total": 9,
+   "positive_references": 0,
+   "entries": [
+    {
+     "file": "plan.json",
+     "field": "design_decisions[17]",
+     "excerpt": "-redact.ts 由其 import。其后所有任务一律消费，不得新建第二个实现 —— TASK-013 原本要新建 main/logging/logger.ts（electron-log）与 logg",
+     "kind": "negative-guard（要求该路径不存在）"
+    },
+    {
+     "file": "tasks/TASK-002.json",
+     "field": "convergence.criteria[10]",
+     "excerpt": "s+=$1} END{print s+0}'` 输出 1（TASK-013 只允许 modify 这两个文件，不得新建 main/logging/logger.ts；该断言不随目录调整失效）",
+     "kind": "negative-guard（要求该路径不存在）"
+    },
+    {
+     "file": "tasks/TASK-011.json",
+     "field": "convergence.criteria[24]",
+     "excerpt": "{s+=$1} END{print s+0}'` 输出 1 且 `test ! -e packages/app/src/main/logging/logger.ts`。本任务锁定的 electron-lo",
+     "kind": "negative-guard（要求该路径不存在）"
+    },
+    {
+     "file": "tasks/TASK-013.json",
+     "field": "action",
+     "excerpt": " packages/app/src/main/logger.ts 上扩展（裁定4：全计划只允许一个日志器实现，不得新建 main/logging/logger.ts）：MAX_LOG_BYTES = 5 ",
+     "kind": "negative-guard（要求该路径不存在）"
+    },
+    {
+     "file": "tasks/TASK-013.json",
+     "field": "convergence.criteria[5]",
+     "excerpt": "那个。本任务只允许 modify TASK-002 的 logger.ts，不得新建 packages/app/src/main/logging/logger.ts（`test ! -e packages",
+     "kind": "negative-guard（要求该路径不存在）"
+    },
+    {
+     "file": "tasks/TASK-013.json",
+     "field": "convergence.criteria[5]",
+     "excerpt": "/app/src/main/logging/logger.ts` 且 `rg --no-filenam",
+     "kind": "errata-2 变更说明散文（记录被更正的旧写法）"
+    },
+    {
+     "file": "tasks/TASK-013.json",
+     "field": "files[8].change",
+     "excerpt": "ntimeId/sessionId 三个必填上下文键、把 redactSecrets 挂到写出函数内（裁定4：不得新建 main/logging/logger.ts）",
+     "kind": "negative-guard（要求该路径不存在）"
+    },
+    {
+     "file": "tasks/TASK-013.json",
+     "field": "files[22].change",
+     "excerpt": "[errata-2 补录] c[4] 引用（原 test.unit[0] 误写为 src/main/logging/redact.test.ts），原无 files[] 条目",
+     "kind": "errata-2 变更说明散文（记录被更正的旧写法）"
+    },
+    {
+     "file": "tasks/TASK-013.json",
+     "field": "files[23].change",
+     "excerpt": "] 要求在 TASK-002(w2) 建立的该 spec 上追加轮转断言（原 test.unit[1] 误写为 src/main/logging/logger.test.ts）",
+     "kind": "errata-2 变更说明散文（记录被更正的旧写法）"
+    }
+   ]
+  },
+  "4_invariance": {
+   "statement": "依赖图、wave 划分、task 集合、各 task criteria 条数、requirement_traceability（35 条）与本轮修改前逐字段完全一致",
+   "all_pass": true,
+   "checks": [
+    {
+     "name": "plan.task_ids 逐字段一致",
+     "pass": true,
+     "before_sha256": "812702ccbeaec73c190cb5f2a4e90c306d33beffbea6329735991cd3927d2fb5",
+     "after_sha256": "812702ccbeaec73c190cb5f2a4e90c306d33beffbea6329735991cd3927d2fb5",
+     "value": "16 个"
+    },
+    {
+     "name": "plan.waves 逐字段一致",
+     "pass": true,
+     "before_sha256": "7ebe2a5da0494e0587c13cd0c93b2db529c5971585ed89c236e7bff483ab92e7",
+     "after_sha256": "7ebe2a5da0494e0587c13cd0c93b2db529c5971585ed89c236e7bff483ab92e7",
+     "value": "13 个 wave"
+    },
+    {
+     "name": "plan.requirement_traceability 逐字段一致（35 条）",
+     "pass": true,
+     "before_sha256": "182c4353cacfb303ae9b23686ea51a5d671de71ba88440cfb9cab2030130769a",
+     "after_sha256": "182c4353cacfb303ae9b23686ea51a5d671de71ba88440cfb9cab2030130769a",
+     "count_before": 35,
+     "count_after": 35
+    },
+    {
+     "name": "plan.protected_features 逐字段一致",
+     "pass": true,
+     "before_sha256": "2afe342bec500466443882e0f08c9d10c3232ef30f27d5ca600d0a070145156f",
+     "after_sha256": "2afe342bec500466443882e0f08c9d10c3232ef30f27d5ca600d0a070145156f"
+    },
+    {
+     "name": "plan.task_count / complexity / recommended_execution",
+     "pass": true,
+     "before_sha256": "cc74cb8036edf2102a93c2002d3ca74305724507a6493fad1c98d0beeddb4cb9",
+     "after_sha256": "cc74cb8036edf2102a93c2002d3ca74305724507a6493fad1c98d0beeddb4cb9"
+    },
+    {
+     "name": "TASK-001.depends_on",
+     "pass": true,
+     "before_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "after_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+     "value": "[]"
+    },
+    {
+     "name": "TASK-001.wave",
+     "pass": true,
+     "before_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "after_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "value": 1
+    },
+    {
+     "name": "TASK-001.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "b17ef6d19c7a5b1ee83b907c595526dcb1eb06db8227d650d5dda0a9f4ce8cd9",
+     "after_sha256": "b17ef6d19c7a5b1ee83b907c595526dcb1eb06db8227d650d5dda0a9f4ce8cd9",
+     "value": 16
+    },
+    {
+     "name": "TASK-001.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "after_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "value": 1
+    },
+    {
+     "name": "TASK-001.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "25bf5b1c5da1ad1678ff836e462f149b9a2a3f2a19dbca557683681f16c06e6a",
+     "after_sha256": "25bf5b1c5da1ad1678ff836e462f149b9a2a3f2a19dbca557683681f16c06e6a"
+    },
+    {
+     "name": "TASK-002.depends_on",
+     "pass": true,
+     "before_sha256": "c3191fc99716fe4faa11de8497042bbc909515828c7a3ab90cdcea69cec6c882",
+     "after_sha256": "c3191fc99716fe4faa11de8497042bbc909515828c7a3ab90cdcea69cec6c882",
+     "value": "[\"TASK-001\"]"
+    },
+    {
+     "name": "TASK-002.wave",
+     "pass": true,
+     "before_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "after_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "value": 2
+    },
+    {
+     "name": "TASK-002.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "9400f1b21cb527d7fa3d3eabba93557a18ebe7a2ca4e471cfe5e4c5b4ca7f767",
+     "after_sha256": "9400f1b21cb527d7fa3d3eabba93557a18ebe7a2ca4e471cfe5e4c5b4ca7f767",
+     "value": 19
+    },
+    {
+     "name": "TASK-002.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "after_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "value": 1
+    },
+    {
+     "name": "TASK-002.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "4c0be70398021d6b0bc15721d8e42c3aced1d5ee4d6b38b6ccf322cc814c3a0b",
+     "after_sha256": "4c0be70398021d6b0bc15721d8e42c3aced1d5ee4d6b38b6ccf322cc814c3a0b"
+    },
+    {
+     "name": "TASK-003.depends_on",
+     "pass": true,
+     "before_sha256": "34412ec9e77c7c759bd9311129540afd58e77d7701d38e01536af999058fce4a",
+     "after_sha256": "34412ec9e77c7c759bd9311129540afd58e77d7701d38e01536af999058fce4a",
+     "value": "[\"TASK-002\"]"
+    },
+    {
+     "name": "TASK-003.wave",
+     "pass": true,
+     "before_sha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+     "after_sha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+     "value": 3
+    },
+    {
+     "name": "TASK-003.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "9400f1b21cb527d7fa3d3eabba93557a18ebe7a2ca4e471cfe5e4c5b4ca7f767",
+     "after_sha256": "9400f1b21cb527d7fa3d3eabba93557a18ebe7a2ca4e471cfe5e4c5b4ca7f767",
+     "value": 19
+    },
+    {
+     "name": "TASK-003.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "after_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "value": 2
+    },
+    {
+     "name": "TASK-003.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "99b3ff668ff2021f1ed31e0031a1b7df9b0f0a0df7f32cad0ff3cfbe60e603ed",
+     "after_sha256": "99b3ff668ff2021f1ed31e0031a1b7df9b0f0a0df7f32cad0ff3cfbe60e603ed"
+    },
+    {
+     "name": "TASK-004.depends_on",
+     "pass": true,
+     "before_sha256": "34412ec9e77c7c759bd9311129540afd58e77d7701d38e01536af999058fce4a",
+     "after_sha256": "34412ec9e77c7c759bd9311129540afd58e77d7701d38e01536af999058fce4a",
+     "value": "[\"TASK-002\"]"
+    },
+    {
+     "name": "TASK-004.wave",
+     "pass": true,
+     "before_sha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+     "after_sha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+     "value": 3
+    },
+    {
+     "name": "TASK-004.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "8527a891e224136950ff32ca212b45bc93f69fbb801c3b1ebedac52775f99e61",
+     "after_sha256": "8527a891e224136950ff32ca212b45bc93f69fbb801c3b1ebedac52775f99e61",
+     "value": 14
+    },
+    {
+     "name": "TASK-004.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "after_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "value": 2
+    },
+    {
+     "name": "TASK-004.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "36ff01c6eef6ee412be9aec29ea3c1606b3710bbf7ebce1a4f229bc5cada1e35",
+     "after_sha256": "36ff01c6eef6ee412be9aec29ea3c1606b3710bbf7ebce1a4f229bc5cada1e35"
+    },
+    {
+     "name": "TASK-005.depends_on",
+     "pass": true,
+     "before_sha256": "6c8da799dc4fb931a0c79afc780941c2788d8b1b7f3627eb3647a130bb41f851",
+     "after_sha256": "6c8da799dc4fb931a0c79afc780941c2788d8b1b7f3627eb3647a130bb41f851",
+     "value": "[\"TASK-002\",\"TASK-003\"]"
+    },
+    {
+     "name": "TASK-005.wave",
+     "pass": true,
+     "before_sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
+     "after_sha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
+     "value": 4
+    },
+    {
+     "name": "TASK-005.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "f5ca38f748a1d6eaf726b8a42fb575c3c71f1864a8143301782de13da2d9202b",
+     "after_sha256": "f5ca38f748a1d6eaf726b8a42fb575c3c71f1864a8143301782de13da2d9202b",
+     "value": 20
+    },
+    {
+     "name": "TASK-005.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "after_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "value": 2
+    },
+    {
+     "name": "TASK-005.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "471aeb62e5e39f0d7a09156e70fc11e51c4bd0a35ff5fe3b8b36ef9debe48724",
+     "after_sha256": "471aeb62e5e39f0d7a09156e70fc11e51c4bd0a35ff5fe3b8b36ef9debe48724"
+    },
+    {
+     "name": "TASK-006.depends_on",
+     "pass": true,
+     "before_sha256": "babd50652622908ce2e648229ffb8edf3cdd81b5990e1637544a9a23605165c1",
+     "after_sha256": "babd50652622908ce2e648229ffb8edf3cdd81b5990e1637544a9a23605165c1",
+     "value": "[\"TASK-005\"]"
+    },
+    {
+     "name": "TASK-006.wave",
+     "pass": true,
+     "before_sha256": "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d",
+     "after_sha256": "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d",
+     "value": 5
+    },
+    {
+     "name": "TASK-006.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "6f4b6612125fb3a0daecd2799dfd6c9c299424fd920f9b308110a2c1fbd8f443",
+     "after_sha256": "6f4b6612125fb3a0daecd2799dfd6c9c299424fd920f9b308110a2c1fbd8f443",
+     "value": 21
+    },
+    {
+     "name": "TASK-006.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "after_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "value": 2
+    },
+    {
+     "name": "TASK-006.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "adcf84ab3bc0cee2872cc87d65c01c67a0164f8007dd095657b53937c350b0ef",
+     "after_sha256": "adcf84ab3bc0cee2872cc87d65c01c67a0164f8007dd095657b53937c350b0ef"
+    },
+    {
+     "name": "TASK-007.depends_on",
+     "pass": true,
+     "before_sha256": "cfc6b40b9d58aa3765c918d46d6778247a7675a6277218e8fde0040a6032b3fe",
+     "after_sha256": "cfc6b40b9d58aa3765c918d46d6778247a7675a6277218e8fde0040a6032b3fe",
+     "value": "[\"TASK-005\",\"TASK-006\"]"
+    },
+    {
+     "name": "TASK-007.wave",
+     "pass": true,
+     "before_sha256": "e7f6c011776e8db7cd330b54174fd76f7d0216b612387a5ffcfb81e6f0919683",
+     "after_sha256": "e7f6c011776e8db7cd330b54174fd76f7d0216b612387a5ffcfb81e6f0919683",
+     "value": 6
+    },
+    {
+     "name": "TASK-007.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "785f3ec7eb32f30b90cd0fcf3657d388b5ff4297f2f9716ff66e9b69c05ddd09",
+     "after_sha256": "785f3ec7eb32f30b90cd0fcf3657d388b5ff4297f2f9716ff66e9b69c05ddd09",
+     "value": 22
+    },
+    {
+     "name": "TASK-007.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+     "after_sha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+     "value": 3
+    },
+    {
+     "name": "TASK-007.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "ede31a457de796adfd8ff460a3ce26d6889dedeb124ac16fdb02344113cba602",
+     "after_sha256": "ede31a457de796adfd8ff460a3ce26d6889dedeb124ac16fdb02344113cba602"
+    },
+    {
+     "name": "TASK-008.depends_on",
+     "pass": true,
+     "before_sha256": "726af04d7178eb4b7e379ae83b2b926c675421b849de4efccf7bea083f8c70c7",
+     "after_sha256": "726af04d7178eb4b7e379ae83b2b926c675421b849de4efccf7bea083f8c70c7",
+     "value": "[\"TASK-007\"]"
+    },
+    {
+     "name": "TASK-008.wave",
+     "pass": true,
+     "before_sha256": "7902699be42c8a8e46fbbb4501726517e86b22c56a189f7625a6da49081b2451",
+     "after_sha256": "7902699be42c8a8e46fbbb4501726517e86b22c56a189f7625a6da49081b2451",
+     "value": 7
+    },
+    {
+     "name": "TASK-008.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "4ec9599fc203d176a301536c2e091a19bc852759b255bd6818810a42c5fed14a",
+     "after_sha256": "4ec9599fc203d176a301536c2e091a19bc852759b255bd6818810a42c5fed14a",
+     "value": 18
+    },
+    {
+     "name": "TASK-008.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "after_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "value": 2
+    },
+    {
+     "name": "TASK-008.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "928e60e4e90d5103ea583e9b68e6f1d6fa23813748d7e22018ac8e363c5ceaac",
+     "after_sha256": "928e60e4e90d5103ea583e9b68e6f1d6fa23813748d7e22018ac8e363c5ceaac"
+    },
+    {
+     "name": "TASK-009.depends_on",
+     "pass": true,
+     "before_sha256": "f179b735af4bdadc368e827116956fe8bb1047521311cd322160bea4ee9c6deb",
+     "after_sha256": "f179b735af4bdadc368e827116956fe8bb1047521311cd322160bea4ee9c6deb",
+     "value": "[\"TASK-001\",\"TASK-002\",\"TASK-006\",\"TASK-007\",\"TASK-008\"]"
+    },
+    {
+     "name": "TASK-009.wave",
+     "pass": true,
+     "before_sha256": "2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a3",
+     "after_sha256": "2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a3",
+     "value": 8
+    },
+    {
+     "name": "TASK-009.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
+     "after_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
+     "value": 24
+    },
+    {
+     "name": "TASK-009.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "after_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "value": 1
+    },
+    {
+     "name": "TASK-009.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "e880e4efb83854263bfd4501fbdf4a3cf9c5980dd5b99004b4b60f94bcedbed5",
+     "after_sha256": "e880e4efb83854263bfd4501fbdf4a3cf9c5980dd5b99004b4b60f94bcedbed5"
+    },
+    {
+     "name": "TASK-010.depends_on",
+     "pass": true,
+     "before_sha256": "407955fb37af96c0925f61d8572fc07fe94c0c17d5074e89f2c9f04f943587b2",
+     "after_sha256": "407955fb37af96c0925f61d8572fc07fe94c0c17d5074e89f2c9f04f943587b2",
+     "value": "[\"TASK-005\",\"TASK-009\"]"
+    },
+    {
+     "name": "TASK-010.wave",
+     "pass": true,
+     "before_sha256": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
+     "after_sha256": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
+     "value": 9
+    },
+    {
+     "name": "TASK-010.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "f5ca38f748a1d6eaf726b8a42fb575c3c71f1864a8143301782de13da2d9202b",
+     "after_sha256": "f5ca38f748a1d6eaf726b8a42fb575c3c71f1864a8143301782de13da2d9202b",
+     "value": 20
+    },
+    {
+     "name": "TASK-010.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "after_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "value": 1
+    },
+    {
+     "name": "TASK-010.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "81836edd69f369bfdc9d5133aac8a5c90a869aed42bfda6a350d221a114f5ed0",
+     "after_sha256": "81836edd69f369bfdc9d5133aac8a5c90a869aed42bfda6a350d221a114f5ed0"
+    },
+    {
+     "name": "TASK-011.depends_on",
+     "pass": true,
+     "before_sha256": "10023497912a2bc26dbc9bcc3a9239d54606ab4000bce7d35c48c295f9fcde7c",
+     "after_sha256": "10023497912a2bc26dbc9bcc3a9239d54606ab4000bce7d35c48c295f9fcde7c",
+     "value": "[\"TASK-001\",\"TASK-002\",\"TASK-004\",\"TASK-007\",\"TASK-009\"]"
+    },
+    {
+     "name": "TASK-011.wave",
+     "pass": true,
+     "before_sha256": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
+     "after_sha256": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
+     "value": 9
+    },
+    {
+     "name": "TASK-011.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "5f9c4ab08cac7457e9111a30e4664920607ea2c115a1433d7be98e97e64244ca",
+     "after_sha256": "5f9c4ab08cac7457e9111a30e4664920607ea2c115a1433d7be98e97e64244ca",
+     "value": 26
+    },
+    {
+     "name": "TASK-011.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "after_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "value": 2
+    },
+    {
+     "name": "TASK-011.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "102394daa93f2b304aede4231b6cb44cd2c8c911af3ec3ca53b336ec3bc20e77",
+     "after_sha256": "102394daa93f2b304aede4231b6cb44cd2c8c911af3ec3ca53b336ec3bc20e77"
+    },
+    {
+     "name": "TASK-012.depends_on",
+     "pass": true,
+     "before_sha256": "5603bb66c1ced0482facb5bf55a2de8fcd55fbc01e596f9c1c7f0c72f1f97205",
+     "after_sha256": "5603bb66c1ced0482facb5bf55a2de8fcd55fbc01e596f9c1c7f0c72f1f97205",
+     "value": "[\"TASK-003\",\"TASK-005\",\"TASK-009\",\"TASK-010\"]"
+    },
+    {
+     "name": "TASK-012.wave",
+     "pass": true,
+     "before_sha256": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
+     "after_sha256": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
+     "value": 10
+    },
+    {
+     "name": "TASK-012.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
+     "after_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
+     "value": 24
+    },
+    {
+     "name": "TASK-012.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "after_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "value": 1
+    },
+    {
+     "name": "TASK-012.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "a6abfa9c3773d8ab7fd71c75978104955921385449046ca10cd6b5221e66f759",
+     "after_sha256": "a6abfa9c3773d8ab7fd71c75978104955921385449046ca10cd6b5221e66f759"
+    },
+    {
+     "name": "TASK-013.depends_on",
+     "pass": true,
+     "before_sha256": "6b02c299ef28bd9fce03816f88d348a0c0dcb26b790916c54fbf33c56c798d8a",
+     "after_sha256": "6b02c299ef28bd9fce03816f88d348a0c0dcb26b790916c54fbf33c56c798d8a",
+     "value": "[\"TASK-011\"]"
+    },
+    {
+     "name": "TASK-013.wave",
+     "pass": true,
+     "before_sha256": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
+     "after_sha256": "4a44dc15364204a80fe80e9039455cc1608281820fe2b24f1e5233ade6af1dd5",
+     "value": 10
+    },
+    {
+     "name": "TASK-013.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
+     "after_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
+     "value": 24
+    },
+    {
+     "name": "TASK-013.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "after_sha256": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+     "value": 1
+    },
+    {
+     "name": "TASK-013.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "31e8eee2988c130383979e52062a50f3c7d0ccd5a8d0ab835f368150bb6e106e",
+     "after_sha256": "31e8eee2988c130383979e52062a50f3c7d0ccd5a8d0ab835f368150bb6e106e"
+    },
+    {
+     "name": "TASK-014.depends_on",
+     "pass": true,
+     "before_sha256": "93905e32016415a123841232cffca8e1b88ea29edfe109d28bfeb0ffbc558a16",
+     "after_sha256": "93905e32016415a123841232cffca8e1b88ea29edfe109d28bfeb0ffbc558a16",
+     "value": "[\"TASK-008\",\"TASK-009\",\"TASK-012\",\"TASK-013\"]"
+    },
+    {
+     "name": "TASK-014.wave",
+     "pass": true,
+     "before_sha256": "4fc82b26aecb47d2868c4efbe3581732a3e7cbcc6c2efb32062c08170a05eeb8",
+     "after_sha256": "4fc82b26aecb47d2868c4efbe3581732a3e7cbcc6c2efb32062c08170a05eeb8",
+     "value": 11
+    },
+    {
+     "name": "TASK-014.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "670671cd97404156226e507973f2ab8330d3022ca96e0c93bdbdb320c41adcaf",
+     "after_sha256": "670671cd97404156226e507973f2ab8330d3022ca96e0c93bdbdb320c41adcaf",
+     "value": 27
+    },
+    {
+     "name": "TASK-014.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+     "after_sha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+     "value": 3
+    },
+    {
+     "name": "TASK-014.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "8c13c2b352e9e3f0033fcc7620188f3e1313f2b99dad2d5a7c727070c5c332d2",
+     "after_sha256": "8c13c2b352e9e3f0033fcc7620188f3e1313f2b99dad2d5a7c727070c5c332d2"
+    },
+    {
+     "name": "TASK-015.depends_on",
+     "pass": true,
+     "before_sha256": "9f7a224f71fbea48b2eb00af303b84cbac88ee9fc04ee162e0af12f7d79e33cc",
+     "after_sha256": "9f7a224f71fbea48b2eb00af303b84cbac88ee9fc04ee162e0af12f7d79e33cc",
+     "value": "[\"TASK-007\",\"TASK-010\",\"TASK-014\"]"
+    },
+    {
+     "name": "TASK-015.wave",
+     "pass": true,
+     "before_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918",
+     "after_sha256": "6b51d431df5d7f141cbececcf79edf3dd861c3b4069f0b11661a3eefacbba918",
+     "value": 12
+    },
+    {
+     "name": "TASK-015.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
+     "after_sha256": "c2356069e9d1e79ca924378153cfbbfb4d4416b1f99d41a2940bfdb66c5319db",
+     "value": 24
+    },
+    {
+     "name": "TASK-015.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "after_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "value": 2
+    },
+    {
+     "name": "TASK-015.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "87433405ad928499b765d0c8a2852597147b5f5ea60ff34ee523bd7508a77c81",
+     "after_sha256": "87433405ad928499b765d0c8a2852597147b5f5ea60ff34ee523bd7508a77c81"
+    },
+    {
+     "name": "TASK-016.depends_on",
+     "pass": true,
+     "before_sha256": "953a9d56bbd1c3f62c2749f821a6b5f7dc201733146b68f7de5283c5c0836b9e",
+     "after_sha256": "953a9d56bbd1c3f62c2749f821a6b5f7dc201733146b68f7de5283c5c0836b9e",
+     "value": "[\"TASK-015\"]"
+    },
+    {
+     "name": "TASK-016.wave",
+     "pass": true,
+     "before_sha256": "3fdba35f04dc8c462986c992bcf875546257113072a909c162f7e470e581e278",
+     "after_sha256": "3fdba35f04dc8c462986c992bcf875546257113072a909c162f7e470e581e278",
+     "value": 13
+    },
+    {
+     "name": "TASK-016.convergence.criteria 条数",
+     "pass": true,
+     "before_sha256": "5f9c4ab08cac7457e9111a30e4664920607ea2c115a1433d7be98e97e64244ca",
+     "after_sha256": "5f9c4ab08cac7457e9111a30e4664920607ea2c115a1433d7be98e97e64244ca",
+     "value": 26
+    },
+    {
+     "name": "TASK-016.[UI-observable] 条数",
+     "pass": true,
+     "before_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "after_sha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+     "value": 2
+    },
+    {
+     "name": "TASK-016.id/type/priority/effort/scope-task-identity",
+     "pass": true,
+     "before_sha256": "fb5e4f8828f50c1b4899dd468670f0bd2504cf3cb74a04874e8ca3b26507abfe",
+     "after_sha256": "fb5e4f8828f50c1b4899dd468670f0bd2504cf3cb74a04874e8ca3b26507abfe"
+    }
+   ],
+   "requirement_traceability": {
+    "count": 35,
+    "before_sha256": "182c4353cacfb303ae9b23686ea51a5d671de71ba88440cfb9cab2030130769a",
+    "after_sha256": "182c4353cacfb303ae9b23686ea51a5d671de71ba88440cfb9cab2030130769a",
+    "identical": true
+   },
+   "files_count_delta": {
+    "TASK-001": 0,
+    "TASK-002": 1,
+    "TASK-003": 3,
+    "TASK-004": 1,
+    "TASK-005": 1,
+    "TASK-006": 1,
+    "TASK-007": 1,
+    "TASK-008": 1,
+    "TASK-009": 3,
+    "TASK-010": 5,
+    "TASK-011": 9,
+    "TASK-012": 5,
+    "TASK-013": 4,
+    "TASK-014": 6,
+    "TASK-015": 6,
+    "TASK-016": 5
+   },
+   "files_count_delta_note": "files[] 条数是本轮唯一被允许增长的计数（补录悬空引用的交付条目）；criteria 条数、depends_on、wave 均零变化"
+  },
+  "5_ui_observable_per_wave": {
+   "expected": "每个交付 wave >= 1 条 [UI-observable]",
+   "per_wave": {
+    "wave1": {
+     "tasks": [
+      "TASK-001"
+     ],
+     "ui_observable_total": 1
+    },
+    "wave2": {
+     "tasks": [
+      "TASK-002"
+     ],
+     "ui_observable_total": 1
+    },
+    "wave3": {
+     "tasks": [
+      "TASK-003",
+      "TASK-004"
+     ],
+     "ui_observable_total": 4
+    },
+    "wave4": {
+     "tasks": [
+      "TASK-005"
+     ],
+     "ui_observable_total": 2
+    },
+    "wave5": {
+     "tasks": [
+      "TASK-006"
+     ],
+     "ui_observable_total": 2
+    },
+    "wave6": {
+     "tasks": [
+      "TASK-007"
+     ],
+     "ui_observable_total": 3
+    },
+    "wave7": {
+     "tasks": [
+      "TASK-008"
+     ],
+     "ui_observable_total": 2
+    },
+    "wave8": {
+     "tasks": [
+      "TASK-009"
+     ],
+     "ui_observable_total": 1
+    },
+    "wave9": {
+     "tasks": [
+      "TASK-010",
+      "TASK-011"
+     ],
+     "ui_observable_total": 3
+    },
+    "wave10": {
+     "tasks": [
+      "TASK-012",
+      "TASK-013"
+     ],
+     "ui_observable_total": 2
+    },
+    "wave11": {
+     "tasks": [
+      "TASK-014"
+     ],
+     "ui_observable_total": 3
+    },
+    "wave12": {
+     "tasks": [
+      "TASK-015"
+     ],
+     "ui_observable_total": 2
+    },
+    "wave13": {
+     "tasks": [
+      "TASK-016"
+     ],
+     "ui_observable_total": 2
+    }
+   },
+   "pass": true,
+   "per_task": {
+    "TASK-001": 1,
+    "TASK-002": 1,
+    "TASK-003": 2,
+    "TASK-004": 2,
+    "TASK-005": 2,
+    "TASK-006": 2,
+    "TASK-007": 3,
+    "TASK-008": 2,
+    "TASK-009": 1,
+    "TASK-010": 1,
+    "TASK-011": 2,
+    "TASK-012": 1,
+    "TASK-013": 1,
+    "TASK-014": 3,
+    "TASK-015": 2,
+    "TASK-016": 2
+   }
+  },
+  "6_modified_criteria_empirically_run": {
+   "statement": "本轮修改过的每条 criteria 均已实跑，记录当前输出，确认非恒真也非恒假",
+   "modified_criteria": [
+    "tasks/TASK-003.json convergence.criteria[8]",
+    "tasks/TASK-006.json convergence.criteria[4]",
+    "tasks/TASK-006.json convergence.criteria[5]",
+    "tasks/TASK-009.json convergence.criteria[4]",
+    "tasks/TASK-009.json convergence.criteria[19]",
+    "tasks/TASK-011.json convergence.criteria[0]",
+    "tasks/TASK-011.json convergence.criteria[8]",
+    "tasks/TASK-011.json convergence.criteria[20]",
+    "tasks/TASK-012.json convergence.criteria[12]",
+    "tasks/TASK-012.json convergence.criteria[18]",
+    "tasks/TASK-013.json convergence.criteria[0]",
+    "tasks/TASK-013.json convergence.criteria[1]",
+    "tasks/TASK-013.json convergence.criteria[19]",
+    "tasks/TASK-014.json convergence.criteria[2]",
+    "tasks/TASK-014.json convergence.criteria[22]",
+    "tasks/TASK-015.json convergence.criteria[18]",
+    "tasks/TASK-015.json convergence.criteria[19]",
+    "tasks/TASK-016.json convergence.criteria[20]"
+   ],
+   "modified_criteria_count": 18,
+   "runs_ref": "empirical_runs（逐条命令 + exit_code + stdout）",
+   "conclusion": "全部被修改的 criteria 在当前仓库状态下判定为 FALSE（对应「工作尚未执行」），且其为真的条件依赖于计划内的具体交付物，因此既非恒真也非恒假。唯一需要单独说明的是 TASK-009 c[4] 的分句 `test ! -e packages/app/src/main/sessions/session-repository.ts`：它当前为 PASS，但因 TASK-006(w5) 会先创建该文件、TASK-009(w8) 再删除它，该分句在 wave 5 与 wave 8 之间为 FALSE，故非恒真"
+  },
+  "7_json_validity": {
+   "files_checked": 17,
+   "invalid": 0,
+   "command": "for f in plan.json tasks/*.json; do node -e \"JSON.parse(require('fs').readFileSync('$f','utf8'))\" || echo INVALID $f; done; echo ALL_PARSED_OK",
+   "stdout": "ALL_PARSED_OK"
+  }
+ },
+ "findings_not_fixed": {
+  "note": "以下问题在本轮全量扫描中确认存在，但与路径无关，改动它们会触碰「严禁改动与路径无关的 criteria 语义」的红线，故只取证不修改，留待下一轮裁决",
+  "items": [
+   {
+    "id": "NF-1",
+    "severity": "medium",
+    "topic": "TASK-001 c[4] 的 test.include 断言可能被 vitest.workspace.ts 架空",
+    "detail": "TASK-001 同时 create 仓库根 vitest.config.ts 与 vitest.workspace.ts。vitest 在存在 workspace 文件时以 workspace 定义的项目集合为准，根 config 的 test.include 是否仍对项目发现生效取决于 vitest 版本行为。c[4] 断言的是根 vitest.config.ts 的 test.include 内容，若被架空则该断言变成「配置文件里写了这行字」而不再等价于「测试真的被发现」。缓解现状：TASK-001 c[13] 与 TASK-009/010/011/012/013/014/015/016 的 CT-21 条目都额外要求 `node scripts/check-test-discovery.mjs` 退出码 0 且 discovered === onDisk —— 该闸门是行为断言，能独立兜住发现范围。建议下一轮把 c[4] 从「文件内容断言」改为「以 check-test-discovery.mjs 的实际发现集合为准」，或删除 vitest.workspace.ts 之一",
+    "recommendation": "下一轮语义修订；本轮不动"
+   },
+   {
+    "id": "NF-2",
+    "severity": "low",
+    "topic": "TASK-006 c[1] 的反斜杠转义疑似多写一层",
+    "detail": "解码后 criteria 文本为 `contains '.replace(/^[/\\\\]/, \"\")'`（即期望源码中出现两个连续反斜杠）。TypeScript 中匹配 / 或 \\ 的字符类正确写法是 /^[/\\\\]/ 在源码文本层面即为反斜杠两枚，故此条实际可能是正确的；但现有实现 packages/app/src/main/sessions-store.ts:20 为 `workspace.replace(/[\\\\/:]/g, \"-\")`，两种写法在当前仓库上实跑命中均为 0（rg -F 退出码 1，见 empirical_runs 的 esc-T006-c1-4bs 与 esc-T006-c1-2bs），无法从现有代码反推期望形态。全 16 个 task 共 373 条 criteria 中，解码后含连续双反斜杠的仅 4 条，另 3 条（TASK-006 c[7] 的 \"D:\\\\x\" JS 字符串字面量、TASK-009 c[14] 的双引号 shell 串内 \\\\( 、TASK-013 c[4] 的 \"C:\\\\Users\\\\yehh\" JS 字面量）经复核写法均正确",
+    "recommendation": "下一轮由实现者在写 session-dir.ts 时以实际源码形态为准校准；本轮不动"
+   },
+   {
+    "id": "NF-3",
+    "severity": "low",
+    "topic": "TASK-006 c[4]/c[5] 采用自然语言 contains 而非可执行命令",
+    "detail": "两条均为「<path> contains 'X'」的散文式断言，缺少 errata-1 建立的 SYS-1 前置守卫写法（`test -e <path> && [ ... ]`）。因其为正向断言（要求包含），文件缺失时不满足，不存在「任务没做反而通过」的空洞通过风险，故不构成恒真；但与全计划其余 criteria 的可执行风格不一致。本轮只归一了其中的路径（main/session-repository.ts → main/sessions/session-repository.ts），未改写断言形式",
+    "recommendation": "下一轮统一为可执行命令；本轮不动"
+   },
+   {
+    "id": "NF-4",
+    "severity": "info",
+    "topic": "doc/regression/TASK-010-perf.json 是测试运行期产物而非手写交付物",
+    "detail": "该文件由 TASK-010 c[8] 的 packages/app/src/renderer/src/components/chat-window.perf.test.ts 在运行时写出。为满足「悬空引用 = 0」的闭合口径，本轮已在 TASK-010 files[] 补录 create 条目并在 change 字段注明其产出方式。若下一轮认为运行期产物不应出现在 files[] 中，可改为在 plan.path_conventions 中登记，二者等价",
+    "recommendation": "口径选择问题，无功能影响"
+   },
+   {
+    "id": "NF-5",
+    "severity": "info",
+    "topic": "plan.protected_features 与 requirement_traceability 中 docs/rpc.md 等 25 处引用未改为完全限定路径",
+    "detail": "这些是对 pi 依赖包自带文档的证据引用。requirement_traceability 受本轮「逐字段完全一致」的不变量约束，不能修改；为保持同一 shorthand 在全计划内解析一致，protected_features 中的同类引用也一并保持原样。改为通过新增的 plan.path_conventions 登记解析基址，并对 rpc.md / session-format.md / settings.md / providers.md / models.md / security.md / packages.md / environment-variables.md 八个文件逐个 test -e 实测存在",
+    "recommendation": "无需处理"
+   }
+  ]
+ },
+ "disputes": {
+  "resolved": [
+   {
+    "id": "D-1",
+    "topic": "TASK-009 把 sessions-ipc.ts / pi-ipc.ts / misc-ipc.ts 放在集中 IPC 目录下，与「域内 *-ipc.ts」裁定不一致",
+    "status": "RESOLVED",
+    "resolution": "按用户终裁执行 R1/R2/R4：sessions-ipc.ts → main/sessions/、pi-ipc.ts → main/pi/、misc-ipc.ts → main/（平铺）、registry.ts → main/ipc-registry.ts（平铺）。全计划该目录前缀命中数实测 0"
+   },
+   {
+    "id": "D-2",
+    "topic": "pi-ipc.ts / misc-ipc.ts 原本 modify-before-create 断链",
+    "status": "RESOLVED",
+    "resolution": "errata-1 在 TASK-009(w8) 补录的 create 条目保留并随本轮迁移到新路径；本轮实测 modify_without_source 计数为 0"
+   }
+  ],
+  "open": []
+ }
+}

@@ -1,0 +1,25 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+out/
+release/
+*.tsbuildinfo
+
+# 参考材料（只读，不属于 PiBuddy 代码，体积原因排除）
+source/
+
+# 运行时下载物
+resources/pi-runtime/
+
+# 日志与临时文件
+*.log
+.workflow/scratch/*/outputs/tmp*
+.workflow/embedding*
+.workflow/*.zvec
+.workflow/search-cache.json
+
+# 系统
+.DS_Store
+Thumbs.db

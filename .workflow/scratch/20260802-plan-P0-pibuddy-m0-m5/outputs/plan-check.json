@@ -1,0 +1,267 @@
+{
+  "verdict": "CRITICAL",
+  "round": "1/3",
+  "criteria_results": [
+    {
+      "criterion": "1. 需求覆盖",
+      "verdict": "PASS",
+      "evidence": "doc L141-497 内用正则全量扫描得 29 个需求 ID，全部出现在 plan.requirement_traceability（36 条）中，静默遗漏 0 条。M0-M5 共 18 条出口门禁，13 条有明确 task 承接，5 条（M1 clean VM packaged smoke、M1 packaged E2E、M4 签名、M4 clean VM N→N+1、M5 三平台预览矩阵）落在 unreachable_exit_gates 并标 not-tested/blocked-by-credential，无一条被静默跳过。deferred_requirements 13 条中 10 条为 M6-M9 越界 ID（doc 行号 502/510/517/534/541/559/567/584/593/599 实测一致），3 条为范围内子项延期且理由指向 doc:455 凭据约束。反向差集：traceability 36 条中 7 条 ID 在 doc 全文零命中——QA-001~004 与 OBS-001~002 是 M0 章节（doc 本身不发 ID，仅 8 条无 ID bullet）的合理编号补齐，但 EXT-001（标 M1）在 doc M1 中不存在，实为 SES-002 子条目 doc:207 被误升格为独立 ID。另 doc:150（五端口接口）与 doc:151（Pinia 按 sessionId 归一化）在 traceability 中无独立行，但 TASK-002 收敛条件已实质覆盖。",
+      "affected_tasks": ["TASK-002"]
+    },
+    {
+      "criterion": "2. 可行性（含 pi 0.83.0 RPC 真实性核对）",
+      "verdict": "CRITICAL",
+      "evidence": "RPC 层引用准确率极高：15 个窄方法命令、全部事件名、9 个 Extension UI method、streamingBehavior 两取值（'steer'/'followUp' 驼峰）、setWidget(rpc.md:1268-1283)、setTitle(1285-1296)、dialog timeout(1152/1172)、get_tree(724-750)、get_fork_messages(671-692)、set_session_name(772-789)、export_html(574-595)、compact(374-411) 全部真实存在且语义相符。计划中从未出现臆造的 get_session_tree。但存在一处硬性不可行：TASK-010 用 get_entries + since 做「初始窗口 60 条 + 向上加载更早历史」（TASK-010.json:93 与 :132）。rpc.md:696 原文规定 since 语义为『pass the last entry id you have seen as since to get only entries strictly after it』——只能向新方向增量，且无 limit/before 参数，pi 0.83.0 不存在任何反向分页 API；rpc.md:722 另规定 since 不匹配时返回 success:false 而非空数组。该设计必须重做为「一次性全量 get_entries 后在渲染层窗口切片」。次要：TASK-006 要在 Electron 主进程 import SessionManager，而 @earendil-works/pi-coding-agent 是纯 ESM（exports 仅 import 条件，实测 require 失败），收敛条件仅静态 grep 'SessionManager.list('，无法暴露打包期/运行期 ESM 互操作失败。",
+      "affected_tasks": ["TASK-010", "TASK-006"]
+    },
+    {
+      "criterion": "3. 依赖正确性",
+      "verdict": "WARN",
+      "evidence": "脚本校验：环 0；wave 序违规 0（全部 15 条依赖边均满足 dep.wave < task.wave）；孤儿 0；dangling dep 0。跨分片占位符已在 depends_on 层面全部解析为具体 task ID（design_decisions 逐条记录 PARTA:M0/M1/M2 的解析结果）。但 tasks/TASK-009.json:167 仍残留字面量 'PARTA:M0'：『若 PARTA:M0 未提供 vitest：在 packages/app 加 devDependency vitest@3.2.4…』——按判定规则残留 PARTA: 字符串记 CRITICAL，惟其位于 implementation 的条件性散文而非依赖边，执行者无法解析该标识符指向 TASK-001。另发现语义张力：TASK-007 收敛[4] 硬性要求 stores/app.ts 保留 streamingBehavior: \"steer\"，而其后代 TASK-010 收敛[4] 要求 send() 改发原生 {type:'steer'}/{type:'follow_up'} 命令，两者对同一文件同一语义给出相反锚点。",
+      "affected_tasks": ["TASK-009", "TASK-007", "TASK-010"]
+    },
+    {
+      "criterion": "4. 收敛质量（重点：能否抓住运行时静默回归）",
+      "verdict": "CRITICAL",
+      "evidence": "整体质量突出：约 215 条 criteria 中主观语言仅 3 处命中（TASK-007[18] 『正常工作』、TASK-010[4] 与 [5] 的『之类的』），其余均为 grep 命中数、精确字面量、退出码或带具体输入输出的单测断言。关键抽查通过：33ms 折叠 delta 化的静默丢字符，TASK-010[1] 用『投入 200 条单字符 text_delta（同 contentIndex）后 flush，断言输出事件数===1 且 delta 拼接与 200 字符按序完全相等』——该断言确实会在回退到旧整条覆盖式折叠时失败，是真正可证伪的。但发现一条不可能失败的条件：TASK-014[5] 断言『window.piBuddy.pi.command 未被调用』，而其祖先 TASK-007（经 TASK-009→TASK-008 传递，已脚本确认 TASK-007 ∈ ancestors(TASK-014)）收敛[0][1][2] 已把 pi.command 从 main/preload/renderer 三处彻底删除——断言一个不存在的方法未被调用恒为真，图片能力拦截这一实质意图因此零验证。另 TASK-010[1] 只约束折叠后的 delta 拼接，未约束同一 message_update 事件内的两个全量快照字段 message 与 assistantMessageEvent.partial（rpc.md:917『Contains both the partial message and a streaming delta event』）取窗口内哪一条；若实现保留首条快照，delta 拼对而快照陈旧，单测照样绿。",
+      "affected_tasks": ["TASK-014", "TASK-010", "TASK-007"]
+    },
+    {
+      "criterion": "5. read_first 完整性",
+      "verdict": "PASS",
+      "evidence": "脚本逐 task 校验 files[].path 是否全部被 read_first[] 前缀覆盖：16/16 通过，缺失 0 项，无空 read_first。read_first 条目数 11-29，且普遍附带真相源与精确行号（如 TASK-006 指向 dist/core/session-manager.js:240-255 并特别提示第 245 行的前导分隔符剥离；TASK-005 指向 rpc.md:20-38 说明协议不提供 sequence 需自行注入）。缺陷为行号准确性而非完整性：TASK-014 read_first 把『get_available_models 返回的 Model 结构与 input 能力』标为 rpc.md 259-278，实际 Model 结构与 input:[\"text\",\"image\"] 定义在 1367-1387；而 TASK-014[5] 正是要用 Model.input 判断图片支持，执行者按该行号读不到字段定义。",
+      "affected_tasks": ["TASK-014"]
+    },
+    {
+      "criterion": "6. action 具体性",
+      "verdict": "PASS",
+      "evidence": "16 个 action 均含可直接落地的具体值，无『让 X 对齐 Y』式模糊引用。抽样：TASK-016 给出 utilityProcess.fork 完整调用形态、CONVERT_LIMITS 四个常量精确数值、BrowserWindow webPreferences 六个键值与 partition 名、完整 CSP 字符串；TASK-003 给出 import.meta.resolve 具体调用与 ENV_ALLOWLIST；TASK-001 明确『禁止 git remote add / git push』与 vitest 版本号。唯一实质缺口在 TASK-016：action 与 implementation[2] 只说『Office 解析库选型时优先选择纯 JS 且默认不执行宏的库』，未指定任何具体库名，而 risks[0] 自承『若引入原生依赖会与 npmRebuild: false 冲突』——这是一个带打包后果的未决选型，见 pressure_pass。",
+      "affected_tasks": ["TASK-016"]
+    },
+    {
+      "criterion": "7. 波次结构（同 wave files 交集）",
+      "verdict": "PASS",
+      "evidence": "13 个波次中仅 wave 3（TASK-003+TASK-004）、wave 9（TASK-010+TASK-011）、wave 10（TASK-012+TASK-013）为多 task 波次，脚本两两求交结果均为空集。design_decisions 显示该约束是刻意的硬约束：TASK-008 与 TASK-009 无语义依赖但同改 ipc.ts / preload/index.ts / preload/index.d.ts，因此专门加了一条写冲突排序边；TASK-010 与 TASK-012 同建 ipc/pi-ipc.ts 同样加边。惟交集计算基于 files[]，而 8 个 B 分片 task 的 files[] 遗漏了 criteria 中引用的测试文件（见 issues），碰撞检测实际跑在不完整的文件集上。",
+      "affected_tasks": []
+    },
+    {
+      "criterion": "8. 完整性（孤儿 task）",
+      "verdict": "PASS",
+      "evidence": "16 个 task 全部接入 DAG：TASK-001 为唯一根（depends_on 为空且被 4 个 task 依赖），TASK-016 为唯一叶。plan.task_ids 16 个与 tasks/ 目录 16 个文件一一对应，requirement_traceability 中 16/16 task 均被至少一条需求引用，未引用 task 为 0。",
+      "affected_tasks": []
+    },
+    {
+      "criterion": "9. UI-observable 覆盖",
+      "verdict": "PASS",
+      "evidence": "13/13 波次均含 [UI-observable] 条件，16/16 task 各含至少 1 条，全计划共 27 条。抽查条件描述的确为界面可观察结果而非代码结构：TASK-006[19]『人为让发送失败后输入框文字、图片缩略图、文件条目三者全部原样保留』；TASK-015[7]『点重新载入后编辑器缓冲区内容 === 外部编辑器写入的内容』；TASK-012[8]『扩展弹窗 timeout 到期后本地对话框自动消失并提示助手已不再等待这个回答』；TASK-016[7]『打开带宏的恶意 Office 样本时预览正常显示文本内容但宏不执行、无任何外部网络请求』。均为用户视角可判定的结果。",
+      "affected_tasks": []
+    },
+    {
+      "criterion": "额外必查 A. 不可达门禁未被伪装",
+      "verdict": "PASS",
+      "evidence": "对全部 215 条 criteria 正则扫描 clean VM / 签名 / signed / 公证 / notariz / N→N+1 / 三平台 / 更新闭环 / staple，仅 2 条命中且均非伪装：TASK-003[17] 主动自我限定『本机 win-unpacked smoke，非 clean VM，验收状态记 packaged-smoke』；TASK-009[6] 为『手写签名』的假阳性（指函数签名）。无任何 task 声称达成 M4 真实 N→N+1 签名更新闭环或 clean VM packaged E2E。TASK-013[2] 反向落实了 doc:455 约束，要求 release.yml 含显式失败步骤『if [ -z \"${WIN_CSC_LINK}\" ]; then echo \"::error::WIN_CSC_LINK missing - release blocked\"; exit 1; fi』，即缺凭据时 release job 失败关闭而非用自签名包冒充。unreachable_exit_gates 6 条与 task convergence 无一处矛盾。",
+      "affected_tasks": []
+    },
+    {
+      "criterion": "额外必查 B. 无 mock/空按钮/TODO 冒充完成",
+      "verdict": "PASS",
+      "evidence": "对 16 个 task 的 implementation[] 扫描 TODO/占位/先留/后续补齐/暂不实现/留空/stub/待补/placeholder/空实现/以后再/暂时跳过，仅 1 处命中：TASK-002 impl[2]『UpdateService 留空壳给 M4/M5』——该项属契约包内的 interface 声明，实现由 TASK-011（update-service.ts 十态状态机）与 TASK-013 落地，为正当的接口先行而非占位冒充。TASK-016 risks[2] 更主动要求『未覆盖的子格式必须返回 unsupported 并给出可行动提示，不得渲染成空白冒充成功』。",
+      "affected_tasks": []
+    },
+    {
+      "criterion": "额外必查 C. SES-001 跨平台陷阱",
+      "verdict": "PASS",
+      "evidence": "TASK-006[7] 为纯函数单测且显式声明『纯函数直接吃已归一化字符串，不经平台 path.resolve』，并要求『该测试在 Windows 上执行 pnpm -w test 时通过』。逐条核算期望值与 pi 真实公式的一致性——真实公式见 dist/core/session-manager.js:245 `const safePath = `--${resolvedCwd.replace(/^[/\\\\]/, \"\").replace(/[/\\\\:]/g, \"-\")}--`;`：encodeSessionDirSegment(\"/home/u\") 剥前导斜杠得 home/u，替换得 home-u，包裹得 --home-u--（期望值正确，且 includes(\"---\")===false 成立）；encodeSessionDirSegment(\"D:\\\\x\") 无前导分隔符，': ' 与 '\\\\' 各替换为 '-' 得 D--x，包裹得 --D--x--（期望值正确）；encodeSessionDirSegment(\"C:\\\\Users\\\\yehh\") 同理得 --C--Users-yehh--（期望值正确）。三个期望值全部与真实公式吻合，且不依赖真实文件系统或 path.resolve，在 Windows 上可真实失败。TASK-006[1] 另要求函数体 contains '.replace(/^[/\\\\]/, \"\")'，直接锚定审计文档已确认的 POSIX 前导 '-' 缺陷修复点。",
+      "affected_tasks": []
+    },
+    {
+      "criterion": "额外必查 D. 33ms 折叠与 delta 化冲突",
+      "verdict": "WARN",
+      "evidence": "核心断言到位且可证伪：TASK-010[1] 要求 event-forwarder.test.ts 投入 200 条单字符 text_delta（同 contentIndex）flush 后断言输出事件数===1 且 assistantMessageEvent.delta 与 200 字符按序拼接完全相等，并要求 rg 'collapsed[collapsed.length - 1] = e;' 无输出以证明旧整条覆盖式折叠已删除。rpc.md:952-953 原文实证 delta 确为增量（\"Hello\" → \" world\"），故 TASK-010 的拼帧方向假设成立。residual_risks RR-04 亦把该项定级 critical 并指定同一缓解。缺口有二：其一，该断言未约束折叠后 message 与 assistantMessageEvent.partial 两个全量快照取窗口内哪一条（rpc.md:917 明确同事件同时携带二者），若保留首条则 delta 拼对而快照陈旧，单测仍绿；其二，rpc.md:954 的 text_end 自带 content 全量文本，是天然自校验点，计划未利用。",
+      "affected_tasks": ["TASK-010"]
+    },
+    {
+      "criterion": "额外必查 E. 既有功能保护（protected_features 15 项）",
+      "verdict": "PASS",
+      "evidence": "15 项特征逐项在 criteria 中有回归锚点，三个重点项均已落实：activityTick 滚动驱动——TASK-005[15] 要求 grep 'activityTick.value++' 输出 >=1，TASK-010[2] 要求 rg activityTick 在 app.ts 与 ChatView.vue 仍有命中并新增『activityTick 递增时 stickToBottom 为真则 scrollTop 被设为 scrollHeight』单测；组件内 ref 展开态——TASK-010[5] 要求提到 store 并禁止 MessageItem.vue/ToolActivity.vue 内再出现 const expanded = ref(false) 或 const openThinking = ref(；toolRuns 分区——TASK-002[14] 刻意锁定 grep 'toolRuns = reactive' 输出 1（M0 不迁移，避免 ToolActivity.vue:39『run 为 undefined 即 running』在分区后让工具卡片永久转圈），推迟到 TASK-010[6] 要求对 !run 与 running 分开处理并显示『工具记录已不可用』、rg \"!run || run.status === 'running'\" 无输出。TASK-001[11][12] 另建立 doc/baseline-2026-08-02.md 15 项手工 smoke 基线作为逐波次对照。",
+      "affected_tasks": []
+    },
+    {
+      "criterion": "额外必查 F. git 前提",
+      "verdict": "PASS",
+      "evidence": "TASK-001 action 明确『在 D:/selftool/pi-ui 执行 git init 并提交基线 commit（禁止 git remote add / git push）』，implementation[0] 复述『全程不执行 git remote add、不执行 git push』。收敛条件双重锁定：[1]『git -C D:/selftool/pi-ui remote 输出为空（0 行），证明未配置任何 remote』；[2]『git rev-list --count HEAD 输出 1 且 git status --porcelain 输出为空』。[10] 另要求 grep -c 'secrets\\.' .github/workflows/ci.yml 输出 0。",
+      "affected_tasks": []
+    }
+  ],
+  "issues": [
+    {
+      "severity": "critical",
+      "task_id": "TASK-010",
+      "description": "SES-102 的历史消息分页设计依赖 pi 0.83.0 不存在的能力。TASK-010.json:93 称『以 get_entries 的 entryId 作游标向前分页』，:132 称『初始窗口 60 条，向上加载调用 { type: 'get_entries', since }』。但 rpc.md:696 原文规定 since 语义为『pass the last entry id you have seen as since to get only entries strictly after it』——只能返回该 id 之后的更新条目，方向与『向上加载更早历史』相反；该命令无 limit/before/reverse 参数，pi 0.83.0 亦无任何其它反向分页 API（get_tree 同为全量）。此外 rpc.md:722 规定 since 不匹配任何 entry id 时响应为 success:false 而非空数组，计划未处理该分支。",
+      "suggested_fix": "把 chat-window.ts 的取数模型改为：会话打开时不带 since 调一次 get_entries 拿全量条目缓存到 main 侧（或复用 TASK-009 的 SQLite 索引），渲染层只做窗口切片与虚拟化，向上加载纯粹是切片游标前移而非再次 RPC；get_entries + since 仅保留用于会话打开后的增量追加。相应收敛条件改为断言『向上加载不产生新的 get_entries 调用（spy 调用次数恒为 1）』与『since 返回 success:false 时进入 loadError 分支并可 retry()』。"
+    },
+    {
+      "severity": "critical",
+      "task_id": "TASK-014",
+      "description": "收敛条件[5] 恒为真，无法失败。原文断言『send-image-capability.test.ts 断言当 currentModel.input 不含 image 且 images.length > 0 时，window.piBuddy.pi.command 未被调用且触发了 warning 通知』。但脚本已确认 TASK-007 ∈ ancestors(TASK-014)（路径 TASK-014→TASK-009→TASK-007），而 TASK-007 收敛[0][1][2] 要求 pi:command 在 main/preload 命中数为 0、preload 通用 command 方法删除、renderer 中 piBuddy.pi.command 命中数为 0。断言一个已被彻底删除的方法未被调用永远成立，PROV-101 的图片能力拦截这一实质意图因此零验证。此为 B 分片按改造前代码基线撰写、合并时未随 A 分片更新的残留。",
+      "suggested_fix": "把断言目标换成 TASK-007 定义的窄方法：『断言 window.piBuddy.pi.prompt 未被调用（spy 调用次数为 0）且 notifier 收到 level=warning 的通知，通知文案含当前模型 id 与「不支持图片」』。同时全量复查 TASK-009~016 中其它按旧 API 形态撰写的断言。"
+    },
+    {
+      "severity": "critical",
+      "task_id": "TASK-009",
+      "description": "跨分片占位符字符串残留。tasks/TASK-009.json:167 的 implementation 条目仍为『若 PARTA:M0 未提供 vitest：在 packages/app 加 devDependency vitest@3.2.4，新建 packages/app/vitest.config.ts…』。按本轮判定规则，残留 PARTA: 字符串记 CRITICAL。缓解事实：依赖边层面占位符已全部解析（TASK-009.depends_on 为 [TASK-001,002,006,007,008]，无占位符），plan.design_decisions 亦逐条记录了 PARTA:M0/M1/M2 的解析结果，故这是散文残留而非依赖图缺陷；但执行者无法解析 'PARTA:M0' 指向哪个 task，该条件分支形同悬空。",
+      "suggested_fix": "改写为『若 TASK-001 已在根 package.json 建立 vitest 与 vitest.workspace.ts（该前置已由 depends_on 保证），本任务直接复用；仅当 packages/app 需要独立 test environment 时新增 packages/app/vitest.config.ts（test.environment=\"node\"、include=[\"src/**/*.test.ts\"]）』。并对 16 个 task 全文再跑一次 PARTA:/PARTB: 扫描确认清零。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-009,TASK-010,TASK-011,TASK-012,TASK-013,TASK-014,TASK-015,TASK-016",
+      "description": "8 个 B 分片 task 的 files[] 系统性遗漏 criteria 中引用的测试文件与脚本，A 分片（TASK-001~008）则无一遗漏。实测：TASK-009 缺 session-rename.test.ts、session-index.bench.test.ts；TASK-010 缺 send-routing.test.ts；TASK-011 缺 update-init.test.ts、stores/update.test.ts、update-schedule.test.ts、scripts/check-updater-capability.mjs；TASK-012 缺 package-install.test.ts；TASK-013 缺 redact.test.ts、logger.test.ts；TASK-014 缺 auth-store.test.ts、settings-redaction.test.ts、connectivity.test.ts、send-image-capability.test.ts；TASK-015 缺 path-guard.test.ts、workspace-ipc.test.ts、file-editor.test.ts；TASK-016 缺 convert-host.test.ts、office-safety.test.ts。后果是同波次 files 交集碰撞检测跑在不完整文件集上（wave 9 的 TASK-010/011、wave 10 的 TASK-012/013 均受影响）。",
+      "suggested_fix": "把每条 criteria 中出现的 *.test.ts 与 scripts/*.mjs 全部补进对应 task 的 files[]，然后重跑同波次 files 交集校验确认仍为空集。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-013",
+      "description": "收敛条件[3] 给出的命令无法执行。原文为『rg -n \"uses: (?!actions/checkout@[0-9a-f]{40})\" .github/workflows/release.yml』，但 ripgrep 基于 Rust regex crate，默认不支持 look-around。实测报错：regex parse error / error: look-around, including look-ahead and look-behind, is not supported / Consider enabling PCRE2 with the --pcre2 flag，退出码 2。执行者按字面执行会得到非零退出码并误判为『校验失败』。",
+      "suggested_fix": "删掉该 rg 命令，只保留同条已声明的 scripts/check-workflow-pins.mjs（用 node 解析 workflow YAML，对每个 uses: 值断言匹配 /@[0-9a-f]{40}$/，不匹配即 exit 1），收敛条件改为断言该脚本退出码为 0；若确需 rg 则加 --pcre2 flag。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-010",
+      "description": "delta 折叠只约束了拼接结果，未约束同事件内的全量快照。rpc.md:917 明确 message_update『Contains both the partial message and a streaming delta event』，即同一事件同时携带顶层 message 与 assistantMessageEvent.partial 两个全量快照。TASK-010[1] 仅断言折叠后事件数===1 且 delta 拼接相等；若实现把 200 条折叠成 1 条时保留了第一条的 message/partial，delta 正确而快照停留在首帧，liveAssistant 骨架与 token 计数等下游全部错误，且该单测照样通过。",
+      "suggested_fix": "在 TASK-010[1] 追加断言：『折叠结果的 assistantMessageEvent.partial 与顶层 message 必须全等于窗口内最后一条输入事件的对应字段（用 toEqual 深比较）』。另可利用 rpc.md:954 的 text_end 自带 content 全量文本，加一条『text_end 到达时断言累积拼接结果 === 该事件的 content』作为自校验。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-007,TASK-010",
+      "description": "对同一文件同一语义给出相反锚点。TASK-007[4] 硬性要求 stores/app.ts contains 'streamingBehavior: \"steer\"'，理由是回归保护（PiBuddy 历来不调用 pi 的 steer 命令，流式插话靠 prompt + streamingBehavior，rpc.md:65 规定流式中不带该字段的 prompt 直接 error）。其后代 TASK-010[4] 则要求 send() 分流后发出原生 {type:'steer'} 与 {type:'follow_up'}。二者若都按字面执行，TASK-010 完成后 TASK-007[4] 的锚点不再成立。RPC 核对确认 steer(rpc.md:80-100) 与 follow_up(102-122) 均真实存在，故 TASK-010 方向可行，问题是迁移未被显式声明。",
+      "suggested_fix": "在 TASK-010 的 description/risks 中显式声明『本任务取代 TASK-007[4] 的 streamingBehavior 锚点，改用原生 steer/follow_up 命令』，并把 TASK-010[4] 中『若仍保留兼容分支』的模糊表述改为二选一的确定状态；同时注意 streamingBehavior 取值为驼峰 'followUp' 而命令名为下划线 'follow_up'，收敛条件应分别锚定以防混用。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-014",
+      "description": "read_first 行号指错，且指错的正是该 task 收敛条件所依赖的字段定义。read_first 条目写『rpc.md 第 259-278 行（get_available_models 返回的 Model 结构与 input 能力）』，但 259-277 仅写『contains an array of full Model objects』，Model 的实际结构与 input:[\"text\",\"image\"] 定义在 rpc.md:1367-1387。而 TASK-014[5] 正是要用 Model.input 判断图片支持能力。",
+      "suggested_fix": "把该 read_first 条目改为『rpc.md 第 259-277 行（get_available_models 命令形状）与第 1367-1387 行（Model 结构与 input 能力数组，图片支持判定真相源）』。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-006",
+      "description": "ESM-only 打包风险未被任何收敛条件覆盖。@earendil-works/pi-coding-agent 的 package.json exports 仅有 import 条件、无 require（实测 require 该包失败）。TASK-006 要在 Electron 主进程 import { SessionManager } 并调用 SessionManager.list（该 API 确为公开导出，.d.ts:348），但主进程通常打包为 CJS。当前收敛[0] 只断言源码 contains 'SessionManager.list(' 与 'from \"@earendil-works/pi-coding-agent\"'，纯静态字符串匹配无法暴露打包期或运行期的 ESM 互操作失败。附带澄清：TASK-006 把 getDefaultSessionDirPath 仅作真相源阅读、自行实现 encodeSessionDirSegment 的做法是正确的——该函数在 dist/core/session-manager.js:242 无 export 关键字、.d.ts 无声明、深路径导入被 exports 封死（实测 ERR_PACKAGE_PATH_NOT_EXPORTED）、根入口亦未再导出，确实不可导入。",
+      "suggested_fix": "追加运行时收敛条件：『packages/app/test/session-dir.spec.ts 中实际调用一次 SessionManager.list(cwd) 并断言返回数组（而非仅静态 grep）』，以及『pnpm --filter @pibuddy/app build 后检查 out/main 产物中该包为 external 或已正确产出 ESM』。若 electron-vite main 输出为 CJS，改用动态 import() 并在条件中锚定。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-012",
+      "description": "dialog timeout 的竞态方向只覆盖了一半。rpc.md:1152 原文『If a dialog method includes a timeout field, the agent-side will auto-resolve with a default value when the timeout expires. The client does not need to track timeouts.』——超时是 agent 侧自解析，客户端计时器纯属 UI 清理。TASK-012[2] 断言了『本地过期后 respond 返回 {ok:false, reason:expired} 且 client.respondUi 未被调用』这一方向，但未断言反向竞态：本地 timer 若比上游先触发（时长或起点不一致），会在上游仍在等待时关闭对话框，用户失去应答机会且 agent 只能拿到 undefined 默认值。",
+      "suggested_fix": "追加断言：『本地 timer 的时长严格等于请求携带的 timeout 值，且起点为收到 pi:ui-request 的时刻；投入 {timeout:100} 后在 t=90ms 调 respond 仍能成功回传（client.respondUi 被调用 1 次），仅在 t>100ms 后才返回 expired』。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-010",
+      "description": "residual_risks 自己承诺的缓解未完全落到收敛条件。RR-02 的 mitigation 写明『TASK-010 收敛条件要求展开状态以稳定 key（toolCallId / contentIndex + messageId 复合键）存储，并有「回收组件后重新挂载展开状态不变」的单测』，但 TASK-010[5] 只要求状态搬到 store 且『key 为 messageKey/toolCallId』，没有那条重新挂载的单测。RR-01 的 mitigation 写明『TASK-010 的 [UI-observable] 条件必须包含「长回复流式期间聊天区持续跟随滚动到底部」』，但 TASK-010[7] 覆盖的是队列/草稿/800 条滚动性能，未含该句（仅 [2] 有一条 activityTick→scrollTop 单测）。另 TASK-010[4][5] 使用『之类的』这一模糊措辞描述标识符名，使 grep 验证无法进行。",
+      "suggested_fix": "TASK-010[5] 追加『新增单测：设置 expandedTools[toolCallId]=true 后卸载并重新挂载 ToolActivity 组件，断言展开态仍为 true』；TASK-010[7] 追加『长回复流式期间聊天区持续跟随滚动到底部，不需手动滚动即可看到最新文字』；把两处『之类的』改为确定的容器名（openThinking / expandedTools）以便 grep 锚定。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-016",
+      "description": "Office/PDF 解析库选型未决，且该决定带打包后果。action 与 implementation[2] 只给出『优先选择纯 JS 且默认不执行宏的库』这一方向性约束，未指定任何具体库名与版本；risks[0] 自承『若引入原生依赖会与 npmRebuild: false 冲突，需同步改打包配置并在 ADR 中记录』。同时 implementation[3][4] 要求为十类 PreviewKind 与四类错误各写 fixture、criteria[3] 要求『一个含 VBA 宏与远程模板引用的 fixture』，但 files[] 中无任何 fixture 文件，也未说明这些样本从何获取或如何生成。",
+      "suggested_fix": "在 action 中钉死具体依赖（如 mammoth/xlsx/pdfjs-dist 等纯 JS 方案）与精确版本，并追加收敛条件『packages/app/package.json 中新增的转换依赖均无 install 脚本与 .node 二进制（node -e 校验），electron-builder.yml 的 npmRebuild 保持 false』；把 fixture 目录（如 packages/app/test/fixtures/preview/）纳入 files[]，并在 implementation 中说明恶意宏样本的生成方式（如用 xlsx 库写一个含 vbaProject.bin 的最小 xlsm）。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-014",
+      "description": "compact 后 contextUsage 为 null 的窗口期未被处理。rpc.md:572 明确 get_session_stats 的 contextUsage.tokens/percent 在压缩后为 null。protected_features A09 已记录 TopBar.vue:53 当前用 ?? null 正确处理、TopBar.vue:71 有 v-if 判空，并警告『M3 若接入 compact 手动压缩，压缩后 percent 为 null 的窗口期必须保留判空，否则显示 NaN%』。TASK-014[6] 的用量聚合与 risks 只提到『压缩后重置统计』，未提 null 需单独处理；TASK-007[3] 已把 compact 列入 15 个窄方法，即本计划确实会接入手动压缩。",
+      "suggested_fix": "在 TASK-014 追加收敛条件『usage-store 聚合遇到 contextUsage === null 或 contextUsage.percent === null 时跳过该采样而非记为 0，单测覆盖；TopBar 在 percent 为 null 时不渲染百分比文本（断言 DOM 不含 \"NaN\"）』。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "TASK-009,TASK-010,TASK-011,TASK-012,TASK-013,TASK-014,TASK-015,TASK-016",
+      "description": "B 分片收敛密度系统性低于 A 分片约 2.2 倍，且规模更大。A 分片（TASK-001~008）平均 11.9 个 files 配 17.25 条 criteria（1.45 条/文件）；B 分片（TASK-009~016）平均 17.1 个 files 仅配 11.25 条 criteria（0.66 条/文件），且每个 B task 的 11-13 条中固定有 1 条是复制粘贴的『唯一契约包』通用条件、1 条是 typecheck/test 退出码。实际针对性条件约 8-10 条，要覆盖 SQLite 索引、preload 全量重构、十态更新状态机、三平台 CI、Provider 中心、文件服务与 changeset、沙箱预览与 artifact 仓库等大面积新建能力。已发现的 TASK-014[5] 恒真断言与 TASK-010 快照缺口即为该密度不足的具体表现。",
+      "suggested_fix": "对 8 个 B task 逐个补齐到与 A 分片相当的密度（每个新建的 main 侧模块至少 1 条针对其导出函数签名与关键常量的断言），优先补 TASK-015（20 files/11 criteria）与 TASK-016（17 files/11 criteria）这两个密度最低者。"
+    },
+    {
+      "severity": "warning",
+      "task_id": "plan.json",
+      "description": "requirement_traceability 中 7 条 ID 在 doc 全文零命中，其中 1 条为纯虚构。QA-001~004 与 OBS-001~002 属 M0 章节的编号补齐——doc M0（L141-161）本身不发 ID，只有 8 条无 ID bullet，规划器自造编号可以理解，但这 6 个编号未回写 doc，会导致 doc:99 要求的 traceability.md 无法双向追踪。EXT-001（标 M1）则是把 SES-002 的子条目 doc:207『runtime/session 更换时清理或按 scope 恢复 queue、Extension UI request、status、live assistant、tool run』误升格为独立需求，doc M1 中不存在该 ID。另 doc:150（五端口接口）与 doc:151（Pinia 按 sessionId 归一化）在 traceability 中无独立行，虽已被 TASK-002 收敛条件实质覆盖，但从需求侧查不到。",
+      "suggested_fix": "把 EXT-001 合并回 SES-002；为 doc:150/151 补两行（建议命名 ARCH-001/ARCH-002）；在 TASK-002 产出的 doc/traceability.md 中开一节说明 QA-001~004 与 OBS-001~002 系 M0 无 ID 章节的本地编号并标注其对应的 doc 行号，使双向追踪可闭合。"
+    }
+  ],
+  "confidence": {
+    "overall": 0.75,
+    "dimensions": {
+      "requirements_coverage": 0.93,
+      "task_quality": 0.72,
+      "dependency_correctness": 0.82,
+      "estimation_accuracy": 0.55,
+      "collision_safety": 0.8
+    },
+    "weakest_dimension": "estimation_accuracy",
+    "factors": {
+      "completeness": 0.85,
+      "specificity": 0.88,
+      "structural_validity": 0.93,
+      "user_validation": 0.15,
+      "consistency": 0.65
+    },
+    "calculation": "overall = 0.85*0.30 + 0.88*0.25 + 0.93*0.20 + 0.15*0.15 + 0.65*0.10 = 0.255 + 0.220 + 0.186 + 0.0225 + 0.065 = 0.7485 ≈ 0.75",
+    "notes": {
+      "user_validation": "0.15 —— 本轮以 -y 跳过交互澄清，用户未逐条确认过任何设计取舍。至少 9 项高影响决策纯由规划器单方面作出且未经用户确认：(1) M0 自造 QA-001~004/OBS-001~002 六个需求编号；(2) SES-101 会话树/分叉可视化 UI 延期至独立迭代（M3 出口门禁 doc:329 明列「分叉」）；(3) toolRuns 刻意不在 M0 迁移而推迟到 TASK-010；(4) UpdateState.sequence 重命名为 stateSequence；(5) B04 的 vault 统一到 A08 的 secret-store；(6) v1 不做真实二进制自动回滚（改为 health marker + safe mode + 分阶段放量）；(7) 16 个 task 不得拆分合并这一硬约束导致关键路径拉到 13 个波次（RR-07 自承可缩短 1 波）；(8) 波次边界由写冲突而非里程碑决定，使 M1/M2、M3/M4 交错并行；(9) 三平台/签名门禁记为 not-tested/blocked-by-credential 的验收口径。这些取舍多数有充分证据支撑，但用户零确认，故该因子取低值。",
+      "estimation_accuracy": "0.55 —— 16 个 task 中 15 个统一标为 effort=large、仅 TASK-004 为 medium，粒度信息量接近于零；plan.estimated_time 给出 121 小时/7255 分钟的总量但无 per-task 分解可供交叉验证。更实质的信号是 B 分片规模与收敛密度倒挂（files 更多而 criteria 更少），暗示 B 分片工作量被系统性低估；TASK-016 的库选型未决与 fixture 来源未定亦属典型的隐藏工作量。",
+      "consistency": "0.65 —— 跨分片一致性是本计划最弱环节：TASK-014[5] 引用已被 TASK-007 删除的 pi.command；TASK-007[4] 与 TASK-010[4] 对 steer 语义给出相反锚点；TASK-009 残留 PARTA:M0 字面量；TASK-014 read_first 行号指向错误章节；8 个 B task 的 files[] 系统性遗漏测试文件。这些全部是 A/B 两分片各自撰写后合并时未完全对齐所致。"
+    }
+  },
+  "pressure_pass": {
+    "task_id": "TASK-016",
+    "why_highest_complexity": "在 16 个 task 中综合复杂度最高且收敛密度最低。规模：17 个 files、10 条 implementation、effort=large，位于 wave 13（唯一叶节点），其祖先包含全部其余 15 个 task，任何上游偏差都在此汇总。跨度：单个 task 同时交付四个异质子系统——(a) utilityProcess 沙箱转换主机（进程隔离、四类硬上限、env 清洗）、(b) 独立 partition 的受限预览 BrowserWindow（webRequest 拦截 + CSP + javascript:false）、(c) 十类 PreviewKind 的 Office/PDF/CSV/图片解析（宏与远程模板禁用）、(d) 带版本化与状态机的 artifact 仓库（SQLite 建表 + generating/ready/failed/conflicted 四态 + 版本化链接解析）。安全权重：它是 M5 出口门禁 doc:495『恶意文档不能执行宏/脚本、访问主 renderer 或任意网络』的唯一承接者，也是全计划唯一需要新建第二个 BrowserWindow 安全边界的任务（且必须不沿用主窗口的 sandbox:false 现状）。密度：17 files 仅配 11 条 criteria（0.65 条/文件），为全计划最低档，其中还有 2 条是通用模板条件。相比之下 TASK-007（删除通用 pi.command 改 15 个窄方法）虽改动面广，但 14 files 配 19 条极其具体的 criteria（含 6 类路径穿越输入、4 类 IPC 守卫断言、11 项手工回归清单），风险已被充分锚定。",
+    "read_first_sufficient": false,
+    "convergence_falsifiable": true,
+    "action_executable": false,
+    "findings": [
+      "read_first 的 26 个条目覆盖了全部 17 个 files[].path 与四个关键上游产出（path-guard.ts 的 root containment、attachment-store.ts 的 hash 与 capability 语义、changeset-store.ts 的取数口径、session-index.ts 的 SQLite 迁移模式），并特别标注 main/index.ts 第 5-30 行『sandbox: false 是主窗口现状，预览窗口不得沿用』——这条负向提示质量很高。但缺三类执行者独立完成所必需的信息：其一，无任何 Office/PDF 解析库的选型依据或候选清单（既无 packages/app/package.json 现有依赖的指引，也无 ADR）；其二，无 fixture 来源说明（criteria[3] 要求含 VBA 宏与远程模板引用的样本，implementation[3][4] 要求十类 PreviewKind 与四类错误各一个 fixture，共约 14 个样本，files[] 中零 fixture 条目）；其三，无 electron-builder.yml 的 asar/npmRebuild 现状条目，而 implementation[8] 与 risks[0][1] 恰恰都依赖该文件的当前配置来判断 worker 路径解析与原生依赖冲突。",
+      "convergence 整体可证伪，多数条件设计得当：criteria[2] 的三条断言（超 timeoutMs 被 kill 返回 code='timeout'、超 maxInputBytes 直接拒绝且未 fork 子进程、子进程 env 不含 PIBUDDY_ 前缀或 _API_KEY 后缀变量）都能真实失败；criteria[4] 的『原文件在转换失败后 sha256 不变』是对四类错误路径的强不变量；criteria[5] 的『同一逻辑产物二次生成 version+1 而非覆盖』直接锚定版本化语义；criteria[6] 的『把 artifact 文件移动到别处后历史消息链接仍能解析到该版本』证明链接走 artifact 表而非路径。criteria[1] 的 webRequest 拦截计数 >= 1 且请求被 cancel 亦可失败。",
+      "但 criteria[1] 的后半句偏弱：『断言页面中脚本未执行（用转换输出中的可观察副作用检查，如 DOM 未被修改）』。由于 action 已同时设定 javascript: false 与 CSP script-src 'none'，脚本在该窗口物理上无法执行，该断言接近恒真，无法区分『拦截生效』与『拦截根本没写但窗口本来就不执行 JS』。建议改为对拦截层单独施压：在允许 JS 的对照窗口中验证 webRequest 规则本身能拦下 https 与 file 越界请求。",
+      "action 不可独立执行的根因是一个未决的带后果选型。action 与 implementation[2] 只给方向『Office 解析库选型时优先选择纯 JS 且默认不执行宏的库』，而 risks[0] 自承『若引入原生依赖会与 npmRebuild: false 冲突，选型必须优先纯 JS；若不得不用原生依赖需同步改打包配置并在 ADR 中记录』。这等于把一个会反向影响打包配置与 M4 已完成的 CI 产物校验（TASK-013 的 verify-release-artifacts.mjs）的决定留给执行者临场决断，且没有任何收敛条件约束该决定的结果。十类 PreviewKind 的覆盖度也完全取决于所选库（risks[2] 亦承认），但 criteria 中没有一条断言十类各自可用。",
+      "其余 action 要素具体度充分，可直接落地：utilityProcess.fork 的完整调用形态含 env 与 stdio、CONVERT_LIMITS 四个常量精确到字节（50MB/100MB/30_000ms/512MB）、BrowserWindow webPreferences 六个键值与 partition 名 'sandbox:preview'、完整 CSP 字符串、临时目录路径构造 path.join(app.getPath('temp'), 'pibuddy-convert', randomUUID())。artifacts 表 14 个列名与 status 四个取值也已钉死。",
+      "另有两处与上游的衔接未被条件锚定：implementation[5] 称『复用 B01 的 SQLite 连接新增 artifacts 表与 user_version 迁移』，但 TASK-009 的 SESSION_INDEX_SCHEMA_VERSION 与 PRAGMA user_version 是会话索引自己的版本号，两套表共用一个 user_version 时的迁移顺序未定义，且 criteria 中无跨 task 的 schema 版本协同断言（TASK-015 的 changeset 表同样复用该 DB，即三个 task 写同一个 user_version）。implementation[8]『在 packaged 构建（asar:false）里复测』与 TASK-003 收敛[11] 要求的『electron-builder.yml contains asar: true 且 asar: false 命中数为 0』直接矛盾——TASK-003 已把 asar 改为 true，TASK-016 仍按 asar:false 的旧现状撰写。"
+    ]
+  },
+  "devils_advocate": [
+    "get_entries 的方向性错误可能不止影响 TASK-010。TASK-009 的 SQLite 增量索引声称用 scan_offset 做增量解析、criteria[3] 断言『第二次 syncWorkspace 返回 reparsed === 0』，这条路径直接读 JSONL 文件不走 RPC，本身成立；但 TASK-010 一旦改为『全量 get_entries 后渲染层切片』，对于 800 条以上的长会话，全量 RPC 往返与 JSON 解析会落在 main 线程上，恰好触碰 TASK-010[7] 自己设定的『800 条消息流式期间主线程无 >200ms 长任务』门槛。真正的解法可能是让消息读取彻底走 TASK-009 的 SQLite 索引而完全不用 get_entries，但目前两个 task 的取数口径是分裂的（TASK-009 索引只存 name/firstMessage/messageCount 等元数据，不存消息体）——这个架构缺口在两个 task 的边界处，谁都没负责。",
+    "预览窗口的 partition 隔离可能不足以满足 doc:495 的『不能访问主 renderer』。action 用 partition: 'sandbox:preview' 隔离存储，但同进程模型下 Electron 默认会把同源页面放进同一渲染进程；预览内容源自 file:// 转换输出，与主窗口的 file:// 加载路径（TASK-004[5] 确认 packaged 走 file://）可能被判为同源，从而共享渲染进程。计划没有任何条件断言预览窗口与主窗口的 OS 进程 ID 不同。建议追加 process isolation 断言，否则『不能访问主 renderer』只在纸面成立。",
+    "15 项 protected_features 的手工 smoke 基线是全计划唯一的回归防线，但它本身没有防腐机制。TASK-001 产出 doc/baseline-2026-08-02.md 并要求逐项打勾，此后 12 个波次的 [UI-observable] 条件都以它为对照。可是没有任何条件要求该文档随功能演进更新——例如 TASK-007 删除 pi.command、TASK-010 把展开态搬进 store、TASK-014 改变模型恢复语义之后，基线清单中对应条目的『期望行为』已经变了。到 wave 10 之后，执行者对照一份描述改造前行为的清单做回归，会同时产生假阳性（把预期变更判为回归）与假阴性（照着旧描述打勾而漏掉真回归）。建议每个改变既有行为的 task 追加一条『同步更新 baseline 文档对应条目』的收敛条件。",
+    "『唯一契约包』这条通用条件在 8 个 B task 中逐字复制，但它只断言 grep -c \"from '@pibuddy/contract'\" >= 1，即每个新文件只要引用一次契约包即可通过——完全不阻止该文件同时在本地再定义一套结构相同的 interface（只要不同名即可绕过同名重复检查）。RR-06 担心的『preload/index.d.ts 被波次 6/7/8 连续三次重写、每次都可能重新引入手工同步的类型』，靠这条条件挡不住。真正有效的做法是 TASK-009[6] 那种『index.d.ts 含 export type PiBuddyApi = typeof api，不再逐字段手写签名』的结构性约束，但该约束只在 TASK-009 出现一次，后续 TASK-011/013/014/015/016 都会往 preload/api/ 里加新命名空间，没有条件保证它们继续走推导而非手写。",
+    "TASK-013 要求 release job 在缺凭据时失败关闭，这是对 doc:455 的正确落实；但 CI 中同时存在 TASK-001[9] 定义的 ci.yml（install/typecheck/test/build）。计划没有说明当 release.yml 因缺凭据必然失败时，仓库的 CI 状态展示是什么——如果 release workflow 在每次 push 或 tag 上都红，团队会迅速习惯性忽略红灯，从而丧失 ci.yml 真实失败时的信号价值。建议把 release.yml 的触发条件限定为显式 workflow_dispatch 或 tag，并在 RELEASE_SETUP.md 中写明『凭据到位前不启用自动触发』。",
+    "abort 语义在 TASK-005 与 TASK-011 之间存在未言明的耦合。protected_features A06 指出 M1 RUN-003 要求 stop 顺序为 graceful abort → terminate → kill process tree，并警告『若 abort 语义被 runtime supervisor 接管，必须区分中止当前 turn 与终止进程，否则停止按钮会杀掉整个会话』。TASK-005 收敛[3] 只断言 client.ts contains 'taskkill'、'/T'、'/F'（即进程树终止路径存在），没有任何条件断言 UI 上的停止按钮走的仍是 turn 级 abort 而非进程级 kill。TASK-011[10] 的『停止任务并安装』又引入了第三个调用方。三处共用同一套停止语义而无一条区分性断言。",
+    "TASK-008 的 SSRF 防护有 17 个拒绝用例，质量很高，但 TASK-014 引入了新的出网面（Provider 连通性测试、自定义 OpenAI 兼容 endpoint）而其 criteria[2] 只覆盖三个拒绝用例（169.254.169.254、file://、10.x）。若 TASK-014 的 assertHttpsOrLocalhost 是独立于 TASK-008 outbound-guard 的第二套实现，那 17 个用例的防护强度不会自动继承——DNS rebinding、八进制/十六进制 IP 编码、302 重定向到元数据端点这些在 TASK-008 中被显式覆盖的向量，在 Provider 路径上全部裸奔。criteria 中没有任何条件要求两者复用同一个 safeFetch。"
+  ],
+  "readiness_gate": {
+    "blocked": true,
+    "blocking_reasons": [
+      "TASK-010 的 SES-102 历史分页设计依赖 pi 0.83.0 不存在的能力：get_entries 的 since 只能向新方向增量（rpc.md:696），无 limit/before/reverse 参数，全协议无反向分页 API。该任务的核心取数模型必须重做后才能执行，否则执行者会在 wave 9 撞墙并临场发明替代方案。",
+      "TASK-014 收敛条件[5] 恒为真（断言已被祖先 TASK-007 彻底删除的 window.piBuddy.pi.command 未被调用），PROV-101 的图片能力拦截实质零验证。按判定规则，无法失败的收敛条件等同未验证。",
+      "TASK-009.json:167 残留跨分片占位符字面量 'PARTA:M0'，按本轮判定规则记 CRITICAL（依赖边层面已全部解析，属散文残留，修复成本低）。"
+    ],
+    "enumerated_conditions_status": {
+      "coverage_below_40_percent": false,
+      "any_task_missing_read_first_or_convergence": false,
+      "pressure_pass_not_done": false,
+      "cycles_exist": false,
+      "note": "题面列举的四项形式化阻塞条件全部通过（覆盖率 100%、16/16 task read_first 与 convergence 齐备、pressure pass 已对 TASK-016 完成、DAG 无环）。此处仍判 blocked=true，是因为核对中发现了列举清单未预期的硬性不可行项（TASK-010 依赖不存在的 RPC 能力）与恒真收敛条件（TASK-014[5]）——放行会导致执行者在 wave 9 与 wave 11 分别遭遇设计返工与虚假通过。三项均为局部修复，预计一轮修订即可解除。"
+    }
+  },
+  "_metadata": {
+    "checker": "workflow-plan-checker",
+    "checked_at": "2026-08-02",
+    "plan_source": "D:/selftool/pi-ui/.workflow/scratch/20260802-plan-P0-pibuddy-m0-m5/outputs/plan.json",
+    "tasks_checked": 16,
+    "criteria_examined": 215,
+    "verification_sources": [
+      "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md (L141-497, 29 个需求 ID 全量扫描)",
+      "C:/nvm4w/nodejs/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md (1576 行, RPC 命令与事件真相源)",
+      "C:/nvm4w/nodejs/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js (getDefaultSessionDirPath:242-247)",
+      "C:/nvm4w/nodejs/node_modules/@earendil-works/pi-coding-agent/docs/{security,packages,providers,models,settings,session-format,environment-variables}.md",
+      "exploration-architecture.json / exploration-implementation.json / exploration-risk.json"
+    ],
+    "read_only": true,
+    "task_files_modified": 0
+  }
+}

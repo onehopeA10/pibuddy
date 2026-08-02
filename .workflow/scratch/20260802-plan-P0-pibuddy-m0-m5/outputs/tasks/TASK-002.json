@@ -1,0 +1,336 @@
+{
+  "id": "TASK-002",
+  "title": "M0 架构护栏：@pibuddy/contract 共享契约 + 事件 envelope + 端口接口 + 脱敏日志",
+  "description": "当前 main/preload/renderer/SDK 之间零共享契约：AppSettings 在 main/settings.ts:5-13 与 preload/index.d.ts:28-36 重复声明，SessionMeta 在 main/sessions-store.ts:5-12 与 preload/index.d.ts:19-26 重复声明，PickedFile/StartResult/STT 请求/图片返回/pi:start 参数各重复 2-3 处，共 7 处类型重复；16 个 IPC channel 零运行时校验；渲染进程用硬编码相对路径 '../../../preload/index.d' 跨层引用。本任务新建 @pibuddy/contract 包作为四方唯一真相源，定义带 7 字段的统一事件 envelope（未知协议版本 fail closed），声明 M1-M5 所需的五个端口接口（只定型不实现），落地结构化脱敏轮转日志，并把 runtime/lifecycle 状态在 Pinia store 中改为按 sessionId 归一化。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "refactor",
+  "priority": "high",
+  "effort": "large",
+  "action": "新建 packages/contract（name \"@pibuddy/contract\"，dependencies 直接引入 \"zod\": \"^4.4.3\"，当前 zod 仅作为 pi 的传递依赖存在于 lockfile，两个 workspace 包都没有直接依赖）；导出 export const PROTOCOL_VERSION = 1 与 PiEnvelope<T> {protocolVersion, workspaceId, sessionId, runtimeId, generation, sequence, occurredAt, payload}；导出 parseEnvelope(raw) 在 raw.protocolVersion !== PROTOCOL_VERSION 时返回 {ok:false, reason:\"protocol-version-mismatch\"}；导出 ports.ts 中 PiRuntimeSupervisor / SessionRepository / SettingsStore / PermissionEngine / UpdateService 五个 interface；把 packages/app/electron.vite.config.ts:8 的 externalizeDepsPlugin({exclude:[\"@pibuddy/pi-sdk\"]}) 改为 exclude:[\"@pibuddy/pi-sdk\",\"@pibuddy/contract\"]；在 tsconfig.node.json.include 与 tsconfig.web.json.include 各追加 \"../contract/src/**/*.ts\"，并在 tsconfig.web.json.paths 与 electron.vite.config.ts renderer.resolve.alias 增加 \"@contract\"；新建 packages/app/src/main/logger.ts 做键名脱敏 + 5MB 轮转保留 5 份。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/contract + packages/app 构建配置与 main/logger",
+  "focus_paths": [
+    "packages/contract/src/",
+    "packages/app/src/main/logger.ts"
+  ],
+  "read_first": [
+    "packages/app/electron.vite.config.ts",
+    "packages/app/tsconfig.node.json",
+    "packages/app/tsconfig.web.json",
+    "packages/app/tsconfig.json",
+    "packages/pi-sdk/tsconfig.json",
+    "tsconfig.base.json",
+    "packages/app/src/preload/index.d.ts",
+    "packages/app/src/main/settings.ts",
+    "packages/app/src/main/sessions-store.ts",
+    "packages/app/src/renderer/src/stores/app.ts",
+    "packages/pi-sdk/src/types.ts",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Events' 章节（第 832-1080 行，用于对齐 payload 类型）",
+    "pnpm-lock.yaml 中 zod 条目（确认当前仅为传递依赖）",
+    "packages/contract/package.json",
+    "packages/contract/tsconfig.json",
+    "packages/contract/src/envelope.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/contract/src/ports.ts",
+    "packages/contract/src/settings.ts",
+    "packages/contract/src/session.ts",
+    "packages/contract/src/index.ts",
+    "packages/contract/test/envelope.spec.ts",
+    "packages/app/package.json",
+    "packages/app/src/renderer/src/components/InputBar.vue",
+    "packages/app/src/main/logger.ts",
+    "packages/app/test/logger.spec.ts",
+    "doc/architecture.md",
+    "doc/threat-model.md",
+    "doc/traceability.md"
+  ],
+  "depends_on": [
+    "TASK-001"
+  ],
+  "wave": 2,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "packages/contract/package.json contains '\"name\": \"@pibuddy/contract\"' 且 dependencies 中 contains '\"zod\"'",
+      "packages/contract/src/envelope.ts contains 'export const PROTOCOL_VERSION = 1'",
+      "packages/contract/src/envelope.ts 同时 contains 全部 8 个信封字段名：'protocolVersion'、'workspaceId'、'sessionId'、'runtimeId'、'generation'、'sequence'、'occurredAt'、'payload'；且导出泛型 `export interface PiEnvelope<T>` 与包装函数 `export function wrapEnvelope`（CT-04：折叠发生在信封之后，折叠判据读 envelope.payload，故 payload 必须是信封的正式字段而非隐含约定）",
+      "packages/contract/src/envelope.ts contains 'protocol-version-mismatch'",
+      "packages/contract/src/ports.ts 同时 contains 'interface PiRuntimeSupervisor'、'interface SessionRepository'、'interface SettingsStore'、'interface PermissionEngine'、'interface UpdateService'；且 PermissionEngine 的方法名恰为 checkFrame / checkPayload / checkRate 三个（`rg -c 'checkFrame|checkPayload|checkRate' packages/contract/src/ports.ts` 输出 >= 3），使 TASK-007 的 ipc-guard.ts 可以 `implements PermissionEngine`（CT-20）",
+      "packages/app/electron.vite.config.ts contains 'exclude: [\"@pibuddy/pi-sdk\", \"@pibuddy/contract\"]'",
+      "packages/app/tsconfig.node.json contains '../contract/src/**/*.ts' 且 packages/app/tsconfig.web.json contains '../contract/src/**/*.ts'",
+      "`test -e packages/app/src/renderer && [ \"$(rg -c 'preload/index.d' packages/app/src/renderer | wc -l)\" -eq 0 ]`（改前实测 2 处：stores/app.ts:17 与 InputBar.vue:5，故此断言当前为假）（stores/app.ts:17 与 InputBar.vue:5 的硬编码跨层引用已全部改为 @contract）",
+      "[裁定6 · 逐个可执行] 对 AppSettings / SessionMeta / PickedFile / StartResult 四个具名类型逐一执行 `rg --no-filename -c 'export (interface|type) <NAME>\\b' packages/app/src packages/pi-sdk/src | awk '{s+=$1} END{print s+0}'`，四次输出全部为 0；对同样四个名字执行 `rg --no-filename -c 'export (interface|type) <NAME>\\b' packages/contract/src | awk '{s+=$1} END{print s+0}'`，四次输出全部为 1。改前实测：AppSettings 在 main/settings.ts:5 与 preload/index.d.ts:28 各一处、SessionMeta 在 main/sessions-store.ts:5 与 preload/index.d.ts:19 各一处、PickedFile 在 preload/index.d.ts:38、StartResult 在 preload/index.d.ts:13，contract 侧四个全为 0 —— 八条断言当前全部为假",
+      "[裁定6 · 三个内联匿名类型同样收敛] packages/contract/src 导出 `SttTranscribeRequest`（{ endpointId, audio, mimeType }）、`ReadImageResult`（{ data, mimeType }）、`PiStartParams`（{ workspaceId, session? }）三个具名类型（`rg --no-filename -c 'export (interface|type) (SttTranscribeRequest|ReadImageResult|PiStartParams)\\b' packages/contract/src | awk '{s+=$1} END{print s+0}'` 输出 3）；且 packages/app/src/preload/index.ts 引用这三个名字（`rg -c 'SttTranscribeRequest|ReadImageResult|PiStartParams' packages/app/src/preload/index.ts` 输出 >= 3），同时内联对象类型字面量已消失：`test -e packages/app/src/preload/index.ts && [ \"$(rg -c 'workspace: string; session\\?: string|\\{ data: string; mimeType: string \\}' packages/app/src/preload/index.ts | wc -l)\" -eq 0 ]`（改前实测三处内联：index.ts:15 pi:start 参数、index.ts:35 图片返回、index.ts:50 STT 请求）",
+      "[裁定4 · 唯一日志器] packages/app/src/main/logger.ts 是全计划唯一的日志器实现：contains 'MAX_LOG_BYTES' 且 contains 'MAX_LOG_FILES' 且 contains 'export function createLogger'；脱敏规则抽到 packages/app/src/main/logger-redact.ts 并由 logger.ts import（`rg -c \"from './logger-redact\" packages/app/src/main/logger.ts` 输出 >= 1），logger-redact.ts contains '/apiKey|authorization|token|secret|password/i'。唯一性结构断言：`rg --no-filename -c 'export function createLogger' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1，且 `rg --no-filename -c 'export (function|const) redactSecrets' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1（TASK-013 只允许 modify 这两个文件，不得新建 main/logging/logger.ts；该断言不随目录调整失效）",
+      "packages/app/test/logger.spec.ts 断言：向 logger 传入 {apiKey:'sk-live-XYZ', prompt:'机密正文'} 后落盘内容 not contains 'sk-live-XYZ' 且 not contains '机密正文' 且 contains 'promptLength'；该测试在 pnpm -w test 中通过",
+      "packages/contract/test/envelope.spec.ts 断言 parseEnvelope({protocolVersion:2,...}).ok === false，且 parseEnvelope 缺失 sequence 字段时 ok === false；该测试在 pnpm -w test 中通过",
+      "packages/app/src/renderer/src/stores/app.ts contains 'runtimeScope' 且 contains 'Record<string, RuntimeScope>'，started/streaming/runtimeId/generation 已按 sessionId 归一化，同时保留同名 computed 代理使各组件调用点零改动",
+      "`[ \"$(rg -c --no-filename 'toolRuns = reactive' packages/app/src/renderer/src/stores/app.ts | awk '{s+=$1} END{print s+0}')\" -eq 1 ]`（M0 不迁移 toolRuns，避免 ToolActivity.vue:12 查不到 run 时按 ToolActivity.vue:39 逻辑永久转圈）",
+      "pnpm typecheck 退出码为 0，pnpm -w test 退出码为 0，pnpm --filter @pibuddy/app build 退出码为 0",
+      "[UI-observable] pnpm --filter @pibuddy/app dev 启动后，仍可完成一次「输入 → 流式文本增量 → thinking 折叠 → tool 卡片展开 → 费用与 context 显示」全流程，且 DevTools 控制台无新增报错",
+      "[裁定6 · 契约唯一性闸门就位] scripts/check-contract-uniqueness.mjs 存在且 `node scripts/check-contract-uniqueness.mjs` 退出码 0；把该脚本改为对 packages/contract/src 加入一个与 packages/app/src 同名的 `export interface AppSettings` 后重跑，退出码为 1 且输出含该文件路径与行号（自证该闸门会失败，而非永远为真）；且该脚本已接入 CI：.github/workflows/ci.yml contains 'node scripts/check-contract-uniqueness.mjs'，该接入为 modify 而非 create（CT-14，ci.yml 由 TASK-001 一次性 create）",
+      "[裁定3 前置 · 原子写唯一实现] packages/app/src/main/fs-atomic.ts 导出 `export function writeJsonAtomic(filePath: string, value: unknown): void`，实现为 写 <file>.tmp → fsyncSync → renameSync，contains 'fsyncSync' 且 contains 'renameSync' 且 contains '.tmp'；结构断言 `rg --no-filename -c 'export function writeJsonAtomic' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1（TASK-007 的 workspace 记录、TASK-008 的 settings.json、TASK-014 的 auth.json、TASK-013 的 health marker 四处一律 import 此函数，不得各写一份）；packages/app/test/fs-atomic.spec.ts 断言：在 rename 之前注入异常时原文件字节未变且 .tmp 被清理"
+    ],
+    "verification": "cd D:/selftool/pi-ui && pnpm install && pnpm typecheck && pnpm -w test && pnpm --filter @pibuddy/app build && grep -rc 'preload/index.d' packages/app/src/renderer",
+    "definition_of_done": "主进程、preload、渲染进程与 SDK 四方共用同一套类型与运行时 schema，所有跨进程事件都带可校验的统一信封且未知协议版本被拒绝，敏感信息不会落盘，架构依赖方向与需求追踪有文档可查。"
+  },
+  "files": [
+    {
+      "path": "packages/contract/package.json",
+      "action": "create",
+      "target": "包声明",
+      "change": "name \"@pibuddy/contract\"，private true，type module，main/types 指向 ./src/index.ts（与 @pibuddy/pi-sdk 一致，以源码形式被消费），dependencies 加 \"zod\": \"^4.4.3\""
+    },
+    {
+      "path": "packages/contract/tsconfig.json",
+      "action": "create",
+      "target": "tsconfig",
+      "change": "extends ../../tsconfig.base.json，types [\"node\"]，include [\"src\"]，与 packages/pi-sdk/tsconfig.json 保持一致（非 composite，由 app 直接 include 源码）"
+    },
+    {
+      "path": "packages/contract/src/envelope.ts",
+      "action": "create",
+      "target": "PiEnvelope / PROTOCOL_VERSION / parseEnvelope",
+      "change": "定义 7 字段 envelope 的 TS 类型与 zod schema；parseEnvelope 先校验 protocolVersion 再校验结构，任一不符返回 {ok:false, reason}，绝不放行未知版本"
+    },
+    {
+      "path": "packages/contract/src/ipc-contract.ts",
+      "action": "create",
+      "target": "channel 常量与 per-channel schema",
+      "change": "导出 CHANNELS 常量对象（覆盖现有 13 个 invoke + 3 个 push channel 名），并为每个 channel 定义 requestSchema / responseSchema，供 A07 收窄 IPC 时直接消费"
+    },
+    {
+      "path": "packages/contract/src/ports.ts",
+      "action": "create",
+      "target": "五个端口接口",
+      "change": "只定义 interface 与依赖方向注释（renderer → preload → main → pi-sdk → pi，禁止反向），不写任何实现，M1-M5 分别落地"
+    },
+    {
+      "path": "packages/contract/src/settings.ts",
+      "action": "create",
+      "target": "AppSettings 唯一定义",
+      "change": "合并 main/settings.ts:5-13 与 preload/index.d.ts:28-36 的重复声明为单一 zod schema + 推导类型"
+    },
+    {
+      "path": "packages/contract/src/session.ts",
+      "action": "create",
+      "target": "SessionSummary 唯一定义",
+      "change": "合并 main/sessions-store.ts:5-12 与 preload/index.d.ts:19-26；预留 cwd / runtimeVersion / parseError 字段供 A05 填充"
+    },
+    {
+      "path": "packages/contract/src/index.ts",
+      "action": "create",
+      "target": "桶导出",
+      "change": "export * from 上述各模块"
+    },
+    {
+      "path": "packages/contract/test/envelope.spec.ts",
+      "action": "create",
+      "target": "envelope fail-closed 测试",
+      "change": "覆盖版本不匹配、缺字段、sequence 非单调三类输入"
+    },
+    {
+      "path": "packages/app/package.json",
+      "action": "modify",
+      "target": "dependencies",
+      "change": "增加 \"@pibuddy/contract\": \"workspace:*\""
+    },
+    {
+      "path": "packages/app/electron.vite.config.ts",
+      "action": "modify",
+      "target": "main.plugins 与 renderer.resolve.alias",
+      "change": "第 8 行 exclude 数组追加 \"@pibuddy/contract\"（不加会在运行时变成无法解析的 external）；renderer alias 增加 \"@contract\" 指向 ../contract/src/index.ts；同时把 \"@sdk\" 由 ../pi-sdk/src/types.ts 保持不变"
+    },
+    {
+      "path": "packages/app/tsconfig.node.json",
+      "action": "modify",
+      "target": "include",
+      "change": "追加 \"../contract/src/**/*.ts\""
+    },
+    {
+      "path": "packages/app/tsconfig.web.json",
+      "action": "modify",
+      "target": "include 与 paths",
+      "change": "include 追加 \"../contract/src/**/*.ts\"；paths 增加 \"@contract\": [\"../contract/src/index.ts\"]"
+    },
+    {
+      "path": "packages/app/src/main/settings.ts",
+      "action": "modify",
+      "target": "AppSettings 声明",
+      "change": "删除本地 interface，改为 import type { AppSettings } from \"@pibuddy/contract\""
+    },
+    {
+      "path": "packages/app/src/main/sessions-store.ts",
+      "action": "modify",
+      "target": "SessionMeta 声明",
+      "change": "删除本地 interface，改为从 @pibuddy/contract 导入（本文件将在 A05 被 session-repository.ts 取代，此处只做去重）"
+    },
+    {
+      "path": "packages/app/src/preload/index.d.ts",
+      "action": "modify",
+      "target": "重复类型声明",
+      "change": "删除 StartResult/SessionMeta/AppSettings/PickedFile/STT 请求/图片返回 共 6 组本地声明，统一 re-export 自 @pibuddy/contract"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/app.ts",
+      "action": "modify",
+      "target": "第 17 行 import 与 runtime/lifecycle 状态",
+      "change": "把 import ... from \"../../../preload/index.d\" 改为 from \"@contract\"；新增 interface RuntimeScope {started:boolean; streaming:boolean; runtimeId:string; generation:number} 与 runtimeScope: Record<string, RuntimeScope>，并保留 started/streaming 同名 computed 代理，组件调用点不改"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/InputBar.vue",
+      "action": "modify",
+      "target": "第 5 行 import",
+      "change": "把 \"../../../preload/index.d\" 改为 \"@contract\""
+    },
+    {
+      "path": "packages/app/src/main/logger.ts",
+      "action": "create",
+      "target": "结构化脱敏轮转日志",
+      "change": "JSONL 落盘至 app.getPath('userData')/logs/pibuddy-YYYYMMDD.log；redact() 递归剔除匹配 /apiKey|authorization|token|secret|password/i 的键；prompt/message 正文只记 promptLength 数字；环境变量只记 allowlist 命中的键名不记值；MAX_LOG_BYTES = 5*1024*1024，MAX_LOG_FILES = 5"
+    },
+    {
+      "path": "packages/app/test/logger.spec.ts",
+      "action": "create",
+      "target": "脱敏断言",
+      "change": "验证 API key 与 prompt 正文不落盘、promptLength 存在、轮转在超过 MAX_LOG_BYTES 后触发"
+    },
+    {
+      "path": "doc/architecture.md",
+      "action": "create",
+      "target": "架构与依赖方向",
+      "change": "记录 5 跳事件流（pi stdout → jsonl 分帧 → client 分派 → ipc 33ms 批处理 → preload → store reducer）、四层依赖方向硬规则与 @pibuddy/contract 的定位"
+    },
+    {
+      "path": "doc/threat-model.md",
+      "action": "create",
+      "target": "威胁模型",
+      "change": "按 STRIDE 覆盖现有 16 个 IPC channel，逐条标注 M2 对应的 SEC-001..SEC-005 缓解措施"
+    },
+    {
+      "path": "doc/traceability.md",
+      "action": "create",
+      "target": "需求追踪矩阵",
+      "change": "建立 RUN-/SES-/SEC-/EXT-/OBS-/QA- 需求 ID ↔ TASK-A01..A08 ↔ 验收条件 的三列对照表"
+    },
+    {
+      "path": "packages/app/src/main/logger-redact.ts",
+      "action": "create",
+      "target": "唯一脱敏实现",
+      "change": "export function redactSecrets(input)；键名正则 + Bearer + home 路径归一为 ~；被 logger.ts、TASK-013 的 support-bundle、TASK-014 的 connectivity 共同 import（裁定4）"
+    },
+    {
+      "path": "packages/app/src/main/fs-atomic.ts",
+      "action": "create",
+      "target": "唯一原子写实现",
+      "change": "writeJsonAtomic：tmp + fsync + rename；被 workspace 记录 / settings.json / auth.json / health marker 四处复用"
+    },
+    {
+      "path": "scripts/check-contract-uniqueness.mjs",
+      "action": "create",
+      "target": "契约唯一性闸门",
+      "change": "contract 名字集合与 app/pi-sdk 的同名 export 碰撞检测 + 第二套契约包检测 + 跨层 preload/index.d type import 检测；接入 ci.yml"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "action": "modify",
+      "target": "PR CI",
+      "change": "在 TASK-001 交付的 ci.yml 上追加 `node scripts/check-contract-uniqueness.mjs` 一步；不得重建该文件（CT-14）"
+    },
+    {
+      "path": "packages/app/test/fs-atomic.spec.ts",
+      "action": "create",
+      "target": "writeJsonAtomic 单测",
+      "change": "[errata-2 补录] rename 前注入异常时原文件字节未变且 .tmp 被清理（c[18] 要求该文件存在，原无 files[] 条目）"
+    }
+  ],
+  "implementation": [
+    "pnpm create 目录 packages/contract，写 package.json（含 zod ^4.4.3 直接依赖）与 tsconfig.json，执行 pnpm install",
+    "写 envelope.ts：先写 zod schema piEnvelopeSchema，再由 z.infer 推导 PiEnvelope；parseEnvelope 第一步就比对 PROTOCOL_VERSION，不等则直接返回 {ok:false, reason:'protocol-version-mismatch'}，不进入结构校验",
+    "写 ports.ts 五个 interface：PiRuntimeSupervisor 至少含 start/stop/dispose/currentGeneration；SessionRepository 至少含 list/resolveSessionDir；SettingsStore 含 load/save/migrate；PermissionEngine 含 checkFrame/checkPayload/checkRate；UpdateService 留空壳给 M4/M5",
+    "把 main/settings.ts、main/sessions-store.ts、preload/index.d.ts 中 7 处重复类型逐一删除并改为从 @pibuddy/contract 导入",
+    "改 electron.vite.config.ts 第 8 行 exclude 数组与 renderer alias；改两个 tsconfig 的 include/paths",
+    "把 stores/app.ts:17 与 InputBar.vue:5 的 '../../../preload/index.d' 改为 '@contract'",
+    "在 stores/app.ts 引入 runtimeScope 归一化结构：新增 currentSessionId ref 与 runtimeScope Record，把 started/streaming 改为读写 runtimeScope[currentSessionId]，并导出同名 computed 保持组件 API 不变；显式不动 items/toolRuns/queue/statusTexts（M0 边界）",
+    "写 main/logger.ts 与 test/logger.spec.ts",
+    "写 doc/architecture.md、doc/threat-model.md、doc/traceability.md",
+    "跑 pnpm typecheck / pnpm -w test / pnpm --filter @pibuddy/app build，再人工跑一次 dev 全流程 smoke",
+    "抽 logger-redact.ts 与 fs-atomic.ts 两个单点实现，并在 envelope.ts 中把 payload 立为正式字段（CT-04 的前置）",
+    "写 scripts/check-contract-uniqueness.mjs 并接入 ci.yml，替代 8 个 B 分片任务中无机器判据的「契约唯一性」文字条"
+  ],
+  "test": {
+    "commands": [
+      "pnpm typecheck",
+      "pnpm -w test",
+      "pnpm --filter @pibuddy/app build"
+    ],
+    "unit": [
+      "packages/contract/test/envelope.spec.ts",
+      "packages/app/test/logger.spec.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "typecheck / test / build 三者退出码均为 0",
+      "renderer 目录下对 preload/index.d 的引用数为 0",
+      "logger 输出不含 API key 与 prompt 正文"
+    ]
+  },
+  "reference": {
+    "pattern": "包结构照抄 packages/pi-sdk（type module + main 指向 src/index.ts + 非 composite，由 app 直接 include 源码消费，tsconfig.base.json noEmit:true）",
+    "files": [
+      "packages/pi-sdk/package.json",
+      "packages/pi-sdk/tsconfig.json",
+      "packages/app/electron.vite.config.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "先立契约再改行为。envelope 的 7 个字段是 RUN-002 代际治理与 SEC-002 收窄接口的共同前提；类型去重把 7 处重复声明收敛为唯一真相源，后续任务改一处即全链路生效。",
+    "decision_factors": [
+      "16 个 channel 零运行时校验",
+      "7 处类型重复必然漂移",
+      "M1 的 generation 治理需要信封字段先就位"
+    ],
+    "tradeoffs": "M0 只归一化 runtime/lifecycle 状态，toolRuns/items 保持全局，避免一次性改动触碰 ToolActivity.vue 的卡片渲染闭环；代价是 store 中短期并存两种状态组织方式。"
+  },
+  "risks": [
+    "electron.vite.config.ts:8 的 externalizeDepsPlugin exclude 若漏加 @pibuddy/contract，构建通过但运行时报无法解析的 external —— 必须用 pnpm --filter @pibuddy/app build 后实际启动验证",
+    "zod 当前仅是 pi 的传递依赖，必须在 packages/contract/package.json 显式声明为直接依赖，否则 pnpm 严格模式下解析失败",
+    "runtimeScope 归一化若破坏 activityTick（stores/app.ts:79,125-134）会导致流式期间 ChatView 不再滚底且无任何报错 —— 归一化范围必须排除 activityTick"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "跨进程类型契约",
+      "事件信封",
+      "日志",
+      "架构文档"
+    ],
+    "affected_components": [
+      "packages/contract",
+      "packages/app/src/main",
+      "packages/app/src/preload",
+      "packages/app/src/renderer/src/stores"
+    ],
+    "affected_requirements": [
+      "OBS-001",
+      "OBS-002",
+      "QA-004"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "90m",
+    "risk": "medium",
+    "autonomous": true,
+    "checkpoint": false,
+    "wave": 2
+  },
+  "origin_shard": "A",
+  "origin_id": "TASK-A02"
+}

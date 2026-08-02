@@ -1,0 +1,481 @@
+{
+  "nodes": [
+    {
+      "id": "TASK-001",
+      "origin_shard": "A",
+      "origin_id": "TASK-A01",
+      "wave": 1,
+      "milestone": "M0",
+      "title": "M0 工程基线：git 快照 + vitest + fake Pi RPC fixture + 最小 CI",
+      "estimated_time": "60m",
+      "risk": "medium"
+    },
+    {
+      "id": "TASK-002",
+      "origin_shard": "A",
+      "origin_id": "TASK-A02",
+      "wave": 2,
+      "milestone": "M0",
+      "title": "M0 架构护栏：@pibuddy/contract 共享契约 + 事件 envelope + 端口接口 + 脱敏日志",
+      "estimated_time": "90m",
+      "risk": "medium"
+    },
+    {
+      "id": "TASK-003",
+      "origin_shard": "A",
+      "origin_id": "TASK-A03",
+      "wave": 3,
+      "milestone": "M1",
+      "title": "RUN-001 可靠内置 Pi runtime：ESM 解析 + 构建期自包含目录 + manifest 定位 + 环境变量白名单",
+      "estimated_time": "75m",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-004",
+      "origin_shard": "A",
+      "origin_id": "TASK-A06",
+      "wave": 3,
+      "milestone": "M2",
+      "title": "SEC-001 + SEC-005 窗口与内容安全：sandbox / CSP / 导航拦截 / 权限收敛 / 渲染侧限额",
+      "estimated_time": "70m",
+      "risk": "medium"
+    },
+    {
+      "id": "TASK-005",
+      "origin_shard": "A",
+      "origin_id": "TASK-A04",
+      "wave": 4,
+      "milestone": "M1",
+      "title": "RUN-002 + RUN-003 运行时代际状态机与 SDK 可靠性垂直切片",
+      "estimated_time": "120m",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-006",
+      "origin_shard": "A",
+      "origin_id": "TASK-A05",
+      "wave": 5,
+      "milestone": "M1",
+      "title": "SES-001 + SES-002 会话解析统一与交互一致性垂直切片",
+      "estimated_time": "110m",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-007",
+      "origin_shard": "A",
+      "origin_id": "TASK-A07",
+      "wave": 6,
+      "milestone": "M2",
+      "title": "SEC-002 + SEC-003 收窄 IPC 接口面与 workspace capability 化",
+      "estimated_time": "130m",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-008",
+      "origin_shard": "A",
+      "origin_id": "TASK-A08",
+      "wave": 7,
+      "milestone": "M2",
+      "title": "SEC-004 凭据安全存储、出站请求 SSRF 防护与设置原子写",
+      "estimated_time": "120m",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-009",
+      "origin_shard": "B",
+      "origin_id": "TASK-B01",
+      "wave": 8,
+      "milestone": "M3",
+      "title": "SES-101 会话中心：SQLite 增量索引 + 会话管理 UI + preload 命名空间分层",
+      "estimated_time": "10h",
+      "risk": "medium"
+    },
+    {
+      "id": "TASK-010",
+      "origin_shard": "B",
+      "origin_id": "TASK-B02",
+      "wave": 9,
+      "milestone": "M3",
+      "title": "SES-102 长对话与输入队列：delta 流式、分段消息源、prompt/steer/follow-up 分流与草稿恢复",
+      "estimated_time": "12h",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-011",
+      "origin_shard": "B",
+      "origin_id": "TASK-B05",
+      "wave": 9,
+      "milestone": "M4",
+      "title": "UPD-001~004 main-only UpdateService：依赖锁定、十态状态机、检测策略与更新 UI",
+      "estimated_time": "14h",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-012",
+      "origin_shard": "B",
+      "origin_id": "TASK-B03",
+      "wave": 10,
+      "milestone": "M3",
+      "title": "EXT-101/EXT-102 Extension UI 全方法覆盖、dialog timeout 与 Pi 资源中心（含 project trust）",
+      "estimated_time": "12h",
+      "risk": "medium"
+    },
+    {
+      "id": "TASK-013",
+      "origin_shard": "B",
+      "origin_id": "TASK-B06",
+      "wave": 10,
+      "milestone": "M4",
+      "title": "UPD-005~007 + OBS-101 三平台产物与签名 CI、结构化日志诊断、更新后 health check 与 safe mode",
+      "estimated_time": "14h",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-014",
+      "origin_shard": "B",
+      "origin_id": "TASK-B04",
+      "wave": 11,
+      "milestone": "M3",
+      "title": "PROV-101 + UX-101 Provider 与模型中心、用量页与首次启动向导",
+      "estimated_time": "14h",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-015",
+      "origin_shard": "B",
+      "origin_id": "TASK-B07",
+      "wave": 12,
+      "milestone": "M5",
+      "title": "FS-101 + FS-102 Workspace 文件服务、结构化附件、编辑器冲突检测与 Agent changeset diff",
+      "estimated_time": "16h",
+      "risk": "high"
+    },
+    {
+      "id": "TASK-016",
+      "origin_shard": "B",
+      "origin_id": "TASK-B08",
+      "wave": 13,
+      "milestone": "M5",
+      "title": "ART-101 + ART-102 受限沙箱预览、Office/PDF 转换与 Artifact 仓库",
+      "estimated_time": "16h",
+      "risk": "high"
+    }
+  ],
+  "edges": [
+    {
+      "from": "TASK-001",
+      "to": "TASK-002",
+      "from_origin": "TASK-A01",
+      "to_origin": "TASK-A02",
+      "cross_shard": false,
+      "reason": "A02 的 contract 单测与 logger 单测需要 A01 的 vitest workspace 与 pnpm -w test 入口"
+    },
+    {
+      "from": "TASK-002",
+      "to": "TASK-003",
+      "from_origin": "TASK-A02",
+      "to_origin": "TASK-A03",
+      "cross_shard": false,
+      "reason": "pi-launcher 的 piRuntimeMode/piExternalCommand 定义在 packages/contract/src/settings.ts"
+    },
+    {
+      "from": "TASK-002",
+      "to": "TASK-004",
+      "from_origin": "TASK-A02",
+      "to_origin": "TASK-A06",
+      "cross_shard": false,
+      "reason": "window-policy 的拒绝日志走 A02 的脱敏 logger，CSP 常量随 contract 一起下发"
+    },
+    {
+      "from": "TASK-002",
+      "to": "TASK-005",
+      "from_origin": "TASK-A02",
+      "to_origin": "TASK-A04",
+      "cross_shard": false,
+      "reason": "supervisor 注入的事件信封 PiEnvelope 与 PROTOCOL_VERSION 由 A02 定义"
+    },
+    {
+      "from": "TASK-003",
+      "to": "TASK-005",
+      "from_origin": "TASK-A03",
+      "to_origin": "TASK-A04",
+      "cross_shard": false,
+      "reason": "supervisor.start 依赖 A03 的 buildPiSpawn / manifest / assertRuntimeHandshake"
+    },
+    {
+      "from": "TASK-005",
+      "to": "TASK-006",
+      "from_origin": "TASK-A04",
+      "to_origin": "TASK-A05",
+      "cross_shard": false,
+      "reason": "会话切换与发送失败处理建立在 A04 的 runtimeId/generation 状态机之上"
+    },
+    {
+      "from": "TASK-005",
+      "to": "TASK-007",
+      "from_origin": "TASK-A04",
+      "to_origin": "TASK-A07",
+      "cross_shard": false,
+      "reason": "15 个窄 channel 直接替换 A04 建立的 supervisor 调用口"
+    },
+    {
+      "from": "TASK-006",
+      "to": "TASK-007",
+      "from_origin": "TASK-A05",
+      "to_origin": "TASK-A07",
+      "cross_shard": false,
+      "reason": "workspaceId 化要同时改写 A05 的 SessionRepository 入参与 Sidebar 调用点"
+    },
+    {
+      "from": "TASK-007",
+      "to": "TASK-008",
+      "from_origin": "TASK-A07",
+      "to_origin": "TASK-A08",
+      "cross_shard": false,
+      "reason": "secret/endpoint/STT 通道复用 A07 的 ipc-guard 前置校验框架，且同改 ipc.ts / preload/index.ts"
+    },
+    {
+      "from": "TASK-001",
+      "to": "TASK-009",
+      "from_origin": "TASK-A01",
+      "to_origin": "TASK-B01",
+      "cross_shard": true,
+      "reason": "session-index 单测与 SQLite 迁移测试需要 A01 的 vitest 与 fake Pi fixture"
+    },
+    {
+      "from": "TASK-002",
+      "to": "TASK-009",
+      "from_origin": "TASK-A02",
+      "to_origin": "TASK-B01",
+      "cross_shard": true,
+      "reason": "preload/api/*.ts 的类型必须从 @pibuddy/contract 的 session/ipc-contract 导入，而非再造一套"
+    },
+    {
+      "from": "TASK-006",
+      "to": "TASK-009",
+      "from_origin": "TASK-A05",
+      "to_origin": "TASK-B01",
+      "cross_shard": true,
+      "reason": "SQLite 增量索引取代 A05 的 SessionRepository 全量扫描，复用其 resolveSessionDir 口径"
+    },
+    {
+      "from": "TASK-007",
+      "to": "TASK-009",
+      "from_origin": "TASK-A07",
+      "to_origin": "TASK-B01",
+      "cross_shard": true,
+      "reason": "ipc/registry.ts 分层必须建立在 A07 的窄 channel + assertMainFrame 框架之上，且对外暴露 workspaceId 而非绝对路径"
+    },
+    {
+      "from": "TASK-008",
+      "to": "TASK-009",
+      "from_origin": "TASK-A08",
+      "to_origin": "TASK-B01",
+      "cross_shard": true,
+      "reason": "写冲突排序边：A08 与 B01 同改 packages/app/src/main/ipc.ts、src/preload/index.ts、src/preload/index.d.ts（非语义依赖，仅避免同波次写冲突）"
+    },
+    {
+      "from": "TASK-005",
+      "to": "TASK-010",
+      "from_origin": "TASK-A04",
+      "to_origin": "TASK-B02",
+      "cross_shard": true,
+      "reason": "delta 拼帧的折叠规则必须挂在 A04 的 generation 过滤与信封注入之后，否则跨代 delta 会拼进新会话"
+    },
+    {
+      "from": "TASK-009",
+      "to": "TASK-010",
+      "from_origin": "TASK-B01",
+      "to_origin": "TASK-B02",
+      "cross_shard": false,
+      "reason": "草稿与队列按 session 持久化复用 B01 的 getDraft/saveDraft 与同一 SQLite 连接"
+    },
+    {
+      "from": "TASK-001",
+      "to": "TASK-011",
+      "from_origin": "TASK-A01",
+      "to_origin": "TASK-B05",
+      "cross_shard": true,
+      "reason": "update 状态机单测与 fake feed 依赖 A01 的 vitest 与 CI"
+    },
+    {
+      "from": "TASK-002",
+      "to": "TASK-011",
+      "from_origin": "TASK-A02",
+      "to_origin": "TASK-B05",
+      "cross_shard": true,
+      "reason": "update 事件下发使用 @pibuddy/contract 的 PiEnvelope 与 ipc-contract schema"
+    },
+    {
+      "from": "TASK-004",
+      "to": "TASK-011",
+      "from_origin": "TASK-A06",
+      "to_origin": "TASK-B05",
+      "cross_shard": true,
+      "reason": "同改 packages/app/src/main/index.ts，且 UpdateBanner 受 A06 的 CSP 与渲染白名单约束"
+    },
+    {
+      "from": "TASK-007",
+      "to": "TASK-011",
+      "from_origin": "TASK-A07",
+      "to_origin": "TASK-B05",
+      "cross_shard": true,
+      "reason": "update-ipc 必须注册进 A07 的 ipc-guard 白名单，renderer 不得触达 feed URL/token"
+    },
+    {
+      "from": "TASK-009",
+      "to": "TASK-011",
+      "from_origin": "TASK-B01",
+      "to_origin": "TASK-B05",
+      "cross_shard": false,
+      "reason": "update-ipc 注册进 B01 产出的 ipc/registry.ts，preload/api/update.ts 挂在 B01 的 api 聚合对象上"
+    },
+    {
+      "from": "TASK-003",
+      "to": "TASK-012",
+      "from_origin": "TASK-A03",
+      "to_origin": "TASK-B03",
+      "cross_shard": true,
+      "reason": "project trust 的 -a/-na 单次覆盖参数要接进 A03 的 buildPiSpawn 参数装配"
+    },
+    {
+      "from": "TASK-005",
+      "to": "TASK-012",
+      "from_origin": "TASK-A04",
+      "to_origin": "TASK-B03",
+      "cross_shard": true,
+      "reason": "按 runtime generation 清理僵尸 uiRequests 依赖 A04 的代际状态机"
+    },
+    {
+      "from": "TASK-009",
+      "to": "TASK-012",
+      "from_origin": "TASK-B01",
+      "to_origin": "TASK-B03",
+      "cross_shard": false,
+      "reason": "ext-ui 与 pi-resources 的 IPC 注册进 B01 的 ipc/registry.ts"
+    },
+    {
+      "from": "TASK-010",
+      "to": "TASK-012",
+      "from_origin": "TASK-B02",
+      "to_origin": "TASK-B03",
+      "cross_shard": false,
+      "reason": "写冲突排序边：B02 与 B03 同建同改 packages/app/src/main/pi/pi-ipc.ts（原分片 B 已排在不同波次，此处显式化为依赖边）"
+    },
+    {
+      "from": "TASK-011",
+      "to": "TASK-013",
+      "from_origin": "TASK-B05",
+      "to_origin": "TASK-B06",
+      "cross_shard": false,
+      "reason": "签名 CI 与 health check/safe mode 直接扩展 B05 的 update-service.ts 状态机与 marker 写入点"
+    },
+    {
+      "from": "TASK-008",
+      "to": "TASK-014",
+      "from_origin": "TASK-A08",
+      "to_origin": "TASK-B04",
+      "cross_shard": true,
+      "reason": "硬依赖：Provider API key 与 sttApiKey 统一落在 A08 的 packages/app/src/main/secret-store.ts（safeStorage），不得再建第二套密钥库"
+    },
+    {
+      "from": "TASK-013",
+      "to": "TASK-014",
+      "from_origin": "TASK-B03",
+      "to_origin": "TASK-B04",
+      "cross_shard": false,
+      "reason": "【轮次三新增】硬依赖：TASK-014 c[21] 要求 providers/connectivity.ts 从 TASK-013 扩规则后的 packages/app/src/main/logger-redact.ts 导入 redactSecrets（裁定4：全仓唯一脱敏实现）。原计划仅靠 wave 序（w10 < w11）侥幸成立，未声明依赖边，属轮次二 near-miss 第 8 项。"
+    },
+    {
+      "from": "TASK-009",
+      "to": "TASK-014",
+      "from_origin": "TASK-B01",
+      "to_origin": "TASK-B04",
+      "cross_shard": false,
+      "reason": "providers-ipc 注册进 B01 的 ipc/registry.ts，preload/api/providers.ts 挂在 api 聚合对象上"
+    },
+    {
+      "from": "TASK-012",
+      "to": "TASK-014",
+      "from_origin": "TASK-B03",
+      "to_origin": "TASK-B04",
+      "cross_shard": false,
+      "reason": "首启向导的 project trust 步骤复用 B03 的 trust-store，且同改 TopBar.vue / AppShell.vue"
+    },
+    {
+      "from": "TASK-007",
+      "to": "TASK-015",
+      "from_origin": "TASK-A07",
+      "to_origin": "TASK-B07",
+      "cross_shard": true,
+      "reason": "workspace 服务的 root containment 与 attachment token 语义由 A07 的 workspace-registry / attachment-registry / ipc-guard(PermissionEngine) 定义"
+    },
+    {
+      "from": "TASK-010",
+      "to": "TASK-015",
+      "from_origin": "TASK-B02",
+      "to_origin": "TASK-B07",
+      "cross_shard": false,
+      "reason": "InputBar 附件链路与 stores/app.ts 的 send() 由 B02 先完成分流改造，B07 再替换为结构化 attachment"
+    },
+    {
+      "from": "TASK-014",
+      "to": "TASK-015",
+      "from_origin": "TASK-B04",
+      "to_origin": "TASK-B07",
+      "cross_shard": false,
+      "reason": "按模型 input capabilities 拦截附件依赖 B04 的 model-scope，且同改 AppShell.vue 与 ipc registry"
+    },
+    {
+      "from": "TASK-015",
+      "to": "TASK-016",
+      "from_origin": "TASK-B07",
+      "to_origin": "TASK-B08",
+      "cross_shard": false,
+      "reason": "预览输入必须先过 B07 的 path-guard，artifact 来源口径与 changeset-store 保持同一取数方式"
+    }
+  ],
+  "cycles": [],
+  "critical_path": [
+    "TASK-001",
+    "TASK-002",
+    "TASK-003",
+    "TASK-005",
+    "TASK-006",
+    "TASK-007",
+    "TASK-008",
+    "TASK-009",
+    "TASK-010",
+    "TASK-012",
+    "TASK-014",
+    "TASK-015",
+    "TASK-016"
+  ],
+  "critical_path_note": "13 个节点、13 个波次，等于总波次数——关键路径即全长串行链，缩短它只能通过拆分 TASK-009（B01）对 A 分片 ipc.ts / preload 的写冲突耦合，本次合并未做此拆分（硬约束：16 个 task 不得合并删除或改写职责）。",
+  "parallel_opportunities": [
+    {
+      "wave": 3,
+      "task_ids": [
+        "TASK-003",
+        "TASK-004"
+      ],
+      "note": "M1 runtime 定位与 M2 安全窗口互不触碰同一文件，可并行"
+    },
+    {
+      "wave": 9,
+      "task_ids": [
+        "TASK-010",
+        "TASK-011"
+      ],
+      "note": "M3 流式改造与 M4 更新服务文件集不相交，可并行"
+    },
+    {
+      "wave": 10,
+      "task_ids": [
+        "TASK-012",
+        "TASK-013"
+      ],
+      "note": "M3 Extension 生态与 M4 发布诊断文件集不相交，可并行"
+    }
+  ]
+}

@@ -1,0 +1,245 @@
+{
+  "id": "TASK-008",
+  "title": "SEC-004 凭据安全存储、出站请求 SSRF 防护与设置原子写",
+  "description": "实测：settings.ts:30 用 JSON.stringify 明文写盘，无 safeStorage；settings:get 把明文 API key 回传渲染进程；ipc.ts:199-204 的 baseUrl 完全来自渲染进程，除去尾斜杠外零处理，无协议校验、无白名单、不阻断 169.254.169.254 与内网段，且把 Bearer token 一并发送到攻击者指定的主机；fetch 无 signal 无超时，audio 无 byteLength 上限，成功分支 resp.json() 无大小限制。本任务把凭据迁入 OS 安全存储，让主进程按保存的 endpoint ID 自行发起请求（渲染进程不再同时提交任意 base URL 与 key），并加入完整的 SSRF 防护与设置文件原子写。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "security",
+  "priority": "high",
+  "effort": "large",
+  "action": "新建 packages/app/src/main/secret-store.ts 用 electron safeStorage.isEncryptionAvailable() / encryptString / decryptString 把密钥以 base64 存入 userData/secrets.json，不可用时 fail closed 拒绝保存并提示用户；settings:get 的返回值移除 sttApiKey，改为 sttApiKeyConfigured: boolean 与 sttApiKeyLast4: string；新建 packages/app/src/main/endpoints.ts 保存 {endpointId, baseUrl, model} 并由主进程按 endpointId 取密钥发起请求，stt:transcribe 的入参收窄为 {endpointId, audio, mimeType} 且 audio.byteLength <= MAX_AUDIO_BYTES = 25*1024*1024；新建 packages/app/src/main/net/outbound-guard.ts 导出 normalizeEndpointUrl(raw)（要求 protocol === \"https:\"、剥离 URL 中的用户名密码、host 转小写与 punycode）与 assertPublicAddress(hostname)（先把整数/八进制/十六进制 IP 形式归一化，再 dns.promises.lookup(hostname,{all:true}) 并对每个地址拒绝 127.0.0.0/8、0.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16、100.64.0.0/10、::1、fc00::/7、fe80::/10，以及 ::ffff: 前缀的 IPv4-mapped 地址需解包后重新判定）与 safeFetch（redirect: \"manual\"、最多 3 跳且每跳重新执行 normalize + assert、AbortSignal 组合 CONNECT_TIMEOUT_MS = 5000 与 OVERALL_TIMEOUT_MS = 60000、MAX_RESPONSE_BYTES = 2*1024*1024、content-type 必须以 application/json 开头、错误信息脱敏不回显 URL 与请求头）；packages/app/src/main/settings.ts 改为 SETTINGS_SCHEMA_VERSION = 1 + migrate() + 原子写（写 settings.json.tmp → fs.fsyncSync(fd) → fs.renameSync）+ settings.json.bak 备份。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/settings.ts + secret-store + net + STT 链路",
+  "focus_paths": [
+    "packages/app/src/main/",
+    "packages/app/src/renderer/src/"
+  ],
+  "read_first": [
+    "packages/app/src/main/settings.ts",
+    "packages/app/src/main/ipc.ts",
+    "packages/app/src/preload/index.ts",
+    "packages/app/src/preload/index.d.ts",
+    "packages/app/src/renderer/src/stt.ts",
+    "packages/app/src/renderer/src/components/SettingsModal.vue",
+    "packages/contract/src/settings.ts",
+    "packages/app/src/main/ipc-guard.ts",
+    "packages/app/src/main/logger.ts",
+    "doc/threat-model.md",
+    "packages/app/src/main/secret-store.ts",
+    "packages/app/src/main/endpoints.ts",
+    "packages/app/src/main/net/outbound-guard.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/app/test/ssrf.spec.ts",
+    "packages/app/test/settings-atomic.spec.ts",
+    "packages/app/test/secret-store.spec.ts"
+  ],
+  "depends_on": [
+    "TASK-007"
+  ],
+  "wave": 7,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "`[ \"$(rg -c --no-filename 'safeStorage' packages/app/src/main/secret-store.ts | awk '{s+=$1} END{print s+0}')\" -ge 2 ]` 且 contains 'isEncryptionAvailable()' 且 contains 'encryptString' 且 contains 'decryptString'",
+      "[CT-09 · STT 配置态字段名全计划唯一口径] `test -e packages/app/src/preload/index.d.ts && [ \"$(rg -c 'sttApiKey\\b' packages/app/src/preload/index.d.ts | wc -l)\" -eq 0 ]`；packages/contract/src/settings.ts contains 'sttApiKeyConfigured' 且 contains 'sttApiKeyLast4' 且导出常量数组 `export const APP_SETTINGS_PUBLIC_KEYS`，其元素不含 'sttApiKey'（`test -e packages/contract/src/settings.ts && [ \"$(rg -c \\\"'sttApiKey'\\\" packages/contract/src/settings.ts | wc -l)\" -eq 0 ]`）。TASK-014 不得引入 sttApiKeySet 这一第三种拼写：`rg --no-filename -c 'sttApiKeySet' packages/app/src packages/contract/src | awk '{s+=$1} END{print s+0}'` 输出 0",
+      "`test -e packages/app/src/preload/index.ts && [ \"$(rg -c 'baseUrl|apiKey' packages/app/src/preload/index.ts | wc -l)\" -eq 0 ]`（改前实测 index.ts:50 的 STT 请求内联类型同时含 baseUrl 与 apiKey，故此断言当前为假）（渲染进程不再能同时提交任意 base URL 与密钥）",
+      "[CT-07 · STT 请求 schema 全计划唯一形状] packages/contract/src 的 `SttTranscribeRequest` 字段恰为 endpointId / audio / mimeType 三个（单测断言 zod schema 的 `.shape` 键集合排序后 === ['audio','endpointId','mimeType']）；stt:transcribe handler 经 registerHandler 以该 schema 注册，其 handler 体内 apiKey 命中数为 0（node 脚本按 handler 回调体行号区间判定），baseUrl/apiKey/model 一律由 main 侧按 endpointId 查配置得到。TASK-014 不得把入参收窄为 {audio, mimeType}",
+      "packages/app/src/main/net/outbound-guard.ts 同时 contains '169.254.169.254'、'100.64'、'172.16'、'192.168'、'fc00::'、'fe80::'、'::ffff:'、'::1'",
+      "packages/app/src/main/net/outbound-guard.ts contains 'redirect: \"manual\"' 且 contains 'MAX_RESPONSE_BYTES = 2 * 1024 * 1024' 且 contains 'CONNECT_TIMEOUT_MS = 5000' 且 contains 'OVERALL_TIMEOUT_MS = 60000' 且 contains 'application/json'",
+      "packages/app/src/main/net/outbound-guard.ts contains 'dns' 与 'lookup'，且在每次 redirect 后重新调用 normalizeEndpointUrl 与 assertPublicAddress（用 node 脚本断言 redirect 循环体内同时出现这两个函数名）",
+      "[CT-08 · 出站单一原语] packages/app/test/ssrf.spec.ts 断言以下 17 个输入全部抛出 OUTBOUND_BLOCKED：'http://api.example.com/'（非 https）、'https://localhost/'、'https://127.0.0.1/'、'https://127.1/'、'https://0.0.0.0/'、'https://2130706433/'、'https://0177.0.0.1/'、'https://0x7f000001/'、'https://[::1]/'、'https://[::ffff:127.0.0.1]/'、'https://10.0.0.5/'、'https://172.16.0.1/'、'https://192.168.1.1/'、'https://100.64.0.1/'、'https://169.254.169.254/'、'https://metadata.google.internal/'、以及 stub lookup 使公网域名解析到 10.0.0.1 的 DNS rebinding 场景；该测试在 `pnpm -w test` 中通过。并断言全 main 只有一条出站路径：`rg --no-filename -c '\\bfetch\\(' packages/app/src/main -g '*.ts' -g '!net/outbound-guard.ts' -g '!*.spec.ts' -g '!*.test.ts' | awk '{s+=$1} END{print s+0}'` 输出 0，且 `rg --no-filename -c 'assertHttpsOrLocalhost' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0（TASK-014 的 testProvider / discoverModels 两条新出站路径必须复用 safeFetch，不得另立放行 localhost 的第二套判定）",
+      "packages/app/test/ssrf.spec.ts 断言：stub fetch 返回 302 Location: 'http://169.254.169.254/latest/meta-data/' 时 safeFetch 抛 OUTBOUND_BLOCKED 而非跟随；返回体超过 MAX_RESPONSE_BYTES 时抛错；content-type 为 'text/html' 时抛错；抛出的错误消息 not contains 完整 URL 且 not contains 'Authorization'",
+      "packages/app/src/main/settings.ts contains 'SETTINGS_SCHEMA_VERSION = 1' 且 contains 'function migrate'，且其写入路径复用唯一原子写实现：contains \"from './fs-atomic\" 且 contains 'writeJsonAtomic('；`rg --no-filename -c 'fsyncSync|renameSync' packages/app/src/main -g '*.ts' -g '!fs-atomic.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（原子写只有 fs-atomic.ts 一份实现，settings.json / auth.json / workspaces.json / health marker 四处一律复用）",
+      "`test -e packages/app/src/main/settings.ts && [ \"$(rg -c 'writeFileSync\\(settingsPath\\(' packages/app/src/main/settings.ts | wc -l)\" -eq 0 ]`（第 30 行的直接覆写已被 writeJsonAtomic 取代）",
+      "packages/app/test/settings-atomic.spec.ts 断言：(a) 模拟写入 tmp 后崩溃（tmp 存在但未 rename）时 loadSettings() 的返回对象与上一版本内容 deep-equal（用 assert.deepStrictEqual，而非人工判断「仍返回上一版本」）；(b) 一个不含 schemaVersion 字段的旧 settings.json 经 migrate 后 loadSettings() 返回对象的 schemaVersion === SETTINGS_SCHEMA_VERSION 且原有用户字段逐项保留；该测试在 `pnpm -w test` 中通过",
+      "packages/app/test/secret-store.spec.ts 断言：(a) safeStorage.isEncryptionAvailable() 返回 false 时 saveSecret('stt.apiKey','sk-live-XYZ') 抛错，且 secrets 落盘文件 not contains 'sk-live-XYZ'；(b) safeStorage 可用时 saveSecret('stt.apiKey','sk-live-XYZ') 后 loadSecret('stt.apiKey') === 'sk-live-XYZ'，且 secrets 落盘文件 not contains 'sk-live-XYZ'",
+      "pnpm typecheck 退出码 0，pnpm -w test 退出码 0，pnpm --filter @pibuddy/app build 退出码 0",
+      "[UI-observable] 手动：在设置里填入 STT API key 并保存，重启应用后设置界面显示「已配置 ····<尾四位>」而非明文；DevTools 中 await window.piBuddy.settings.get() 的返回对象不包含任何完整密钥字段",
+      "[UI-observable] 手动，逐项判定并记录在 doc/regression/TASK-008-secrets.md：(a) 语音输入按钮录音后 ChatView 输入框 value 长度 > 0（端点由主进程按 endpointId 发起）；(b) 把自定义端点填为 'https://169.254.169.254/v1' 保存时被拒绝，提示文案 contains '内网' 或 contains 'OUTBOUND_BLOCKED'；(c) 填为 'http://api.example.com/v1' 被拒绝，提示文案 contains 'HTTPS'；(d) (b)(c) 两次拒绝后重新读取 settings 文件，其中不含这两个 URL（拒绝不得半落盘）",
+      "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173，故此断言当前为假、只有真正完成迁移才转真；该断言不钉死任何 handler 文件，handler 迁移后依然成立）；且本任务新增/改写的 2 个 channel 全部经包装器注册：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main/ipc.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 2",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 字段匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言本仓 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1"
+    ],
+    "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && pnpm --filter @pibuddy/app build && grep -c 'sttApiKey' packages/app/src/preload/index.d.ts && grep -c 'baseUrl' packages/app/src/preload/index.ts",
+    "definition_of_done": "PiBuddy 自有密钥（STT API key 等由 PiBuddy 直接使用的凭据）永不明文落盘：一律经 safeStorage 加密后存入 secret-store，safeStorage 不可用时 fail-closed 拒绝保存并给出可读原因。Provider 凭据是例外且必须显式声明：pi 运行时自身要读 ~/.pi/agent/auth.json，故该文件由 TASK-014 以 0o600 + 原子写 + 写前备份的文件权限模型保护，不纳入「不明文落盘」的约束范围（CT-24：若不作此收窄，Linux 上 safeStorage 缺失时实现者会拒写 auth.json，PROV-101 的目标直接失败）。所有出站请求经唯一的 safeFetch，settings.json 的每次写入都是原子的。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/secret-store.ts",
+      "action": "create",
+      "target": "safeStorage 密钥保管",
+      "change": "saveSecret(key, value) / loadSecret(key) / describeSecret(key) 返回 {configured, last4}；safeStorage 不可用时抛 SECRET_STORE_UNAVAILABLE 并拒绝以任何形式落盘明文"
+    },
+    {
+      "path": "packages/app/src/main/endpoints.ts",
+      "action": "create",
+      "target": "端点注册表",
+      "change": "保存 {endpointId, kind:'stt'|'provider', baseUrl, model}；保存前经 normalizeEndpointUrl + assertPublicAddress 校验；渲染进程只见 endpointId 与展示名"
+    },
+    {
+      "path": "packages/app/src/main/net/outbound-guard.ts",
+      "action": "create",
+      "target": "SSRF 防护与安全 fetch",
+      "change": "normalizeEndpointUrl / parseNumericIpForms / assertPublicAddress / safeFetch；safeFetch 手动处理最多 3 跳 redirect 且每跳重新校验，组合 connect 与 overall 两级超时，按 MAX_RESPONSE_BYTES 流式截断，校验 content-type，错误信息统一脱敏"
+    },
+    {
+      "path": "packages/app/src/main/settings.ts",
+      "action": "modify",
+      "target": "loadSettings / saveSettings（第 19-32 行）",
+      "change": "引入 SETTINGS_SCHEMA_VERSION 与 migrate()；saveSettings 改为写 tmp → fsyncSync → renameSync，并在覆盖前把旧文件复制为 .bak；密钥字段不再进入 settings.json 而转交 secret-store；写入一律经 fs-atomic.ts 的 writeJsonAtomic，本文件不得再出现 fsyncSync/renameSync 的第二份实现"
+    },
+    {
+      "path": "packages/app/src/main/ipc.ts",
+      "action": "modify",
+      "target": "settings:get / settings:set / stt:transcribe（第 131-134、173-212 行）",
+      "change": "settings:get 返回值剔除密钥并补 sttApiKeyConfigured / sttApiKeyLast4；settings:set 中的密钥字段路由到 secret-store；stt:transcribe 入参收窄为 {endpointId, audio, mimeType}，校验 MAX_AUDIO_BYTES 后由 endpoints + secret-store 组装请求并经 safeFetch 发出"
+    },
+    {
+      "path": "packages/contract/src/settings.ts",
+      "action": "modify",
+      "target": "AppSettings schema",
+      "change": "移除 sttApiKey；新增 sttEndpointId、sttApiKeyConfigured、sttApiKeyLast4 与 settingsSchemaVersion"
+    },
+    {
+      "path": "packages/contract/src/ipc-contract.ts",
+      "action": "modify",
+      "target": "stt / settings channel schema",
+      "change": "stt:transcribe 的 requestSchema 改为 {endpointId, audio, mimeType} 并加 byteLength 上限；settings channel 的 response schema 不含任何密钥字段"
+    },
+    {
+      "path": "packages/app/src/preload/index.ts",
+      "action": "modify",
+      "target": "stt.transcribe 与 settings",
+      "change": "transcribe 入参去掉 baseUrl 与 apiKey；新增 settings.setSecret(kind, value) 与 settings.describeSecret(kind)"
+    },
+    {
+      "path": "packages/app/src/preload/index.d.ts",
+      "action": "modify",
+      "target": "类型",
+      "change": "同步移除密钥与 baseUrl 相关字段"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stt.ts",
+      "action": "modify",
+      "target": "转写调用",
+      "change": "改为传 endpointId + audio + mimeType；不再持有或传递密钥"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/SettingsModal.vue",
+      "action": "modify",
+      "target": "STT 与端点配置区",
+      "change": "密钥输入框保存后展示「已配置 ····<尾四位>」，不回填明文；自定义端点保存失败时展示主进程返回的可读错误（必须 HTTPS / 不允许内网地址）"
+    },
+    {
+      "path": "packages/app/test/ssrf.spec.ts",
+      "action": "create",
+      "target": "SSRF 用例集",
+      "change": "17 个阻断输入 + redirect 到内网 + 超大响应体 + 错误 content-type + 错误信息脱敏"
+    },
+    {
+      "path": "packages/app/test/settings-atomic.spec.ts",
+      "action": "create",
+      "target": "原子写与迁移测试",
+      "change": "崩溃残留 tmp 场景、旧版本文件迁移场景"
+    },
+    {
+      "path": "packages/app/test/secret-store.spec.ts",
+      "action": "create",
+      "target": "密钥保管测试",
+      "change": "safeStorage 可用与不可用两条路径，均断言磁盘不含明文"
+    },
+    {
+      "path": "doc/regression/TASK-008-secrets.md",
+      "action": "create",
+      "target": "密钥与出站人工回归记录",
+      "change": "[errata-2 补录] c[15] 要求该文件存在并含勾选行，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "写 secret-store.ts：safeStorage.isEncryptionAvailable() 为 false 时直接抛 SECRET_STORE_UNAVAILABLE，绝不降级为明文写盘",
+    "写 outbound-guard.ts 的 parseNumericIpForms：先处理 2130706433 / 0177.0.0.1 / 0x7f000001 / 127.1 这四类简写与进制形式，统一转为点分十进制后再判定",
+    "写 assertPublicAddress：dns.promises.lookup(hostname,{all:true}) 后逐个判定；遇到 ::ffff: 前缀先解包成 IPv4 再判定；命中任一保留段抛 OUTBOUND_BLOCKED",
+    "写 safeFetch：redirect:'manual'，循环最多 3 次，每次读取 Location 后重新 normalizeEndpointUrl + assertPublicAddress；用 AbortSignal.any 组合 connect 与 overall 两级超时；读响应时按 MAX_RESPONSE_BYTES 累计截断；校验 content-type 前缀；catch 中统一替换为脱敏错误",
+    "写 endpoints.ts：保存端点前跑一次 normalize + assert，保存后只向渲染进程返回 endpointId 与展示名",
+    "改 settings.ts：加 SETTINGS_SCHEMA_VERSION 与 migrate；saveSettings 用 tmp + fsyncSync + renameSync 三步原子写并保留 .bak",
+    "改 ipc.ts 三个 handler：settings:get 剔除密钥并补 configured/last4；settings:set 把密钥路由到 secret-store；stt:transcribe 收窄入参、校验 MAX_AUDIO_BYTES、经 endpoints + secret-store + safeFetch 发起",
+    "改 contract 的 settings 与 ipc-contract schema，改 preload、stt.ts 与 SettingsModal.vue",
+    "写三个测试文件并跑 pnpm -w test",
+    "人工验证：密钥只显示尾四位、语音转写仍成功、内网端点与 http 端点保存被拒"
+  ],
+  "test": {
+    "commands": [
+      "pnpm -w test",
+      "pnpm typecheck",
+      "pnpm --filter @pibuddy/app build"
+    ],
+    "unit": [
+      "packages/app/test/ssrf.spec.ts",
+      "packages/app/test/settings-atomic.spec.ts",
+      "packages/app/test/secret-store.spec.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "17 个 SSRF 输入全部阻断",
+      "preload 中 baseUrl 与 apiKey 出现次数均为 0",
+      "磁盘 settings/secrets 文件不含明文密钥",
+      "崩溃残留 tmp 后设置仍可正常加载"
+    ]
+  },
+  "reference": {
+    "pattern": "handler 前置校验复用 A07 的 ipc-guard（assertMainFrame + schema + 尺寸 + 限流）；错误脱敏复用 A02 的 logger-redact.ts 的 redactSecrets（裁定4：全仓唯一脱敏实现）",
+    "files": [
+      "packages/app/src/main/ipc-guard.ts",
+      "packages/app/src/main/logger.ts",
+      "packages/app/src/main/settings.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "凭据保管、请求发起权与 SSRF 防护是同一条因果链：只要渲染进程还能同时提交 baseUrl 与 key，加密存储就没有意义。因此把请求发起权整体上移到主进程，渲染进程只提交 endpointId，密钥永不跨进程。",
+    "decision_factors": [
+      "ipc.ts:199-204 把 Bearer token 发往渲染进程指定的任意主机",
+      "settings.ts:30 明文写盘且 settings:get 回传明文",
+      "fetch 无超时无体积上限"
+    ],
+    "tradeoffs": "DNS rebinding 的彻底防护需要在 connect 阶段固定已校验的 IP；本任务采用「每跳重新解析 + 校验」的实现，并在 doc/threat-model.md 中记录残余风险与后续用自定义 lookup 固定地址的改进方向。"
+  },
+  "risks": [
+    "safeStorage 在部分 Linux 桌面环境不可用，fail closed 会让用户无法保存密钥——必须给出明确的界面提示与文档说明，而不是静默降级为明文",
+    "assertPublicAddress 依赖 DNS 解析，离线或内网 DNS 场景可能误判；错误信息需可区分「解析失败」与「地址被阻断」",
+    "把 STT 请求发起权上移后，若 A06 引入的 CSP connect-src 'self' 与渲染进程残留的直连代码冲突，会表现为转写静默失败——必须实际录一次音验证",
+    "settings.json 迁移必须保证旧字段（provider/modelId/thinkingLevel/workspace）无损，否则用户重启后工作目录与模型选择丢失"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "设置持久化",
+      "API key 管理",
+      "语音转写",
+      "自定义端点"
+    ],
+    "affected_components": [
+      "packages/app/src/main/secret-store.ts",
+      "packages/app/src/main/net/outbound-guard.ts",
+      "packages/app/src/main/settings.ts",
+      "packages/app/src/renderer/src/components/SettingsModal.vue"
+    ],
+    "affected_requirements": [
+      "SEC-004",
+      "OBS-002"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "120m",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": true,
+    "wave": 7
+  },
+  "origin_shard": "A",
+  "origin_id": "TASK-A08"
+}

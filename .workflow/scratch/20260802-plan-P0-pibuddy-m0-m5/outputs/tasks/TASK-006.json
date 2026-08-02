@@ -1,0 +1,235 @@
+{
+  "id": "TASK-006",
+  "title": "SES-001 + SES-002 会话解析统一与交互一致性垂直切片",
+  "description": "实测修正（与审计文档描述不同）：pi 的真实算法在 session-manager.js:245 为 `--${resolvedCwd.replace(/^[/\\\\]/,\"\").replace(/[/\\\\:]/g,\"-\")}--`，比 PiBuddy 的 sessions-store.ts:20 多一步剥离前导分隔符。对拍结果：D:\\x 与 C:\\Users\\yehh 两者一致，/home/u 在 pi 侧为 --home-u--、PiBuddy 侧为 ---home-u--（三连字符）。即该缺陷在 Windows 上完全不可见，只在 macOS/Linux 上让历史会话恒为空，因此验收必须是跨平台纯函数单测。另：PI_CODING_AGENT_DIR / PI_CODING_AGENT_SESSION_DIR / settings.sessionDir 三级优先链一个都没读，client.ts:78 也没传 --session-dir；listSessions 全同步 readdirSync+statSync+readFileSync 全量入内存且 agent_settled 每次触发。SES-002 侧：newTask()/openSession() 只判 resp.success 未读 data.cancelled（rpc.md 第 137-160、597-615 行明确 extension 可 veto）；app.ts:408-411 发送失败时 return 而非 throw，导致 InputBar.vue:139-147 的 await 之后三行照常清空，文本+图片+文件附件全丢；app.ts:331-347 的 start() 对新建与恢复历史会话不分支，用全局 settings 无条件覆盖会话原有 model/thinkingLevel。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "fix",
+  "priority": "high",
+  "effort": "large",
+  "action": "新建 packages/app/src/main/sessions/session-repository.ts 实现 @pibuddy/contract 的 SessionRepository：优先调用 pi 公开导出的 SessionManager.list(cwd, sessionDir)（已确认为 dist/index.js 第 23 行导出的静态方法，签名 static list(cwd: string, sessionDir?: string, onProgress?): Promise<SessionInfo[]>，返回含 path/id/cwd/name/created/modified/messageCount/firstMessage）；导出纯函数 encodeSessionDirSegment(resolvedPath: string): string 严格复刻 `--${resolvedPath.replace(/^[/\\\\]/,\"\").replace(/[/\\\\:]/g,\"-\")}--` 作为回退；sessionDir 解析优先级实现为 settings.sessionDir → process.env.PI_CODING_AGENT_SESSION_DIR → path.join(process.env.PI_CODING_AGENT_DIR, \"sessions\", encodeSessionDirSegment(...)) → path.join(os.homedir(), \".pi\", \"agent\", \"sessions\", encodeSessionDirSegment(path.resolve(cwd)))；全部 I/O 改用 node:fs/promises 并设 MAX_SESSIONS_SCANNED = 200、MAX_SESSION_HEAD_BYTES = 1_048_576；在 packages/pi-sdk/src/client.ts 的 args 组装处补 args.push(\"--session-dir\", o.sessionDir)；渲染进程 store 的 newTask/openSession 增加 resp.data.cancelled === true 分支，send() 返回 Promise<boolean> 且 InputBar.submit 改为 if (await store.send(...)) 才清空并补 catch；新增 resetSessionScopedState() 统一清 items/toolRuns/queue/statusTexts/uiRequests/liveAssistant/streaming/stats 并在 start 与 newTask 中调用；start(sessionPath) 仅在 sessionPath === undefined 时应用 settings 的 provider/modelId/thinkingLevel。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/sessions/session-repository.ts + renderer 会话交互链路",
+  "focus_paths": [
+    "packages/app/src/main/",
+    "packages/app/src/renderer/src/stores/",
+    "packages/app/src/renderer/src/components/"
+  ],
+  "read_first": [
+    "packages/app/src/main/sessions-store.ts",
+    "packages/app/src/main/ipc.ts",
+    "packages/app/src/renderer/src/stores/app.ts",
+    "packages/app/src/renderer/src/components/InputBar.vue",
+    "packages/app/src/renderer/src/components/Sidebar.vue",
+    "packages/app/src/renderer/src/components/ChatView.vue",
+    "packages/pi-sdk/src/client.ts",
+    "packages/contract/src/session.ts",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js 第 240-255 行（getDefaultSessionDirPath 真相源，注意第 245 行的前导分隔符剥离）",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.d.ts 第 125-139 行（SessionInfo 字段）与第 348 行（static list 签名）",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 137-160 行（new_session 的 data.cancelled）与第 597-615 行（switch_session 的 data.cancelled）",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/environment-variables.md 第 76-77 行",
+    "packages/app/src/main/sessions/session-repository.ts",
+    "packages/app/test/session-dir.spec.ts",
+    "packages/app/test/session-interaction.spec.ts"
+  ],
+  "depends_on": [
+    "TASK-005"
+  ],
+  "wave": 5,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "[裁定5 · 枚举单一路径] packages/app/src/main/sessions/session-repository.ts contains 'SessionManager.list(' 且 contains 'from \"@earendil-works/pi-coding-agent\"'，并导出唯一枚举入口 `export async function listSessionsForWorkspace`。全仓枚举实现唯一：`rg --no-filename -c 'export async function listSessionsForWorkspace' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1（TASK-009 在 wave 8 把该实现替换为 SQLite 索引版本时，本断言仍要求恰为 1，故任何时刻都不存在两套枚举器）",
+      "[裁定5 · resolver 与枚举分离] packages/app/src/main/sessions/session-dir.ts contains 'export function encodeSessionDirSegment' 且 contains '.replace(/^[/\\\\\\\\]/, \"\")'；该文件为纯函数模块，`test -e packages/app/src/main/sessions/session-dir.ts && [ \"$(rg -c 'readdir|readFile|statSync|fs\\.' packages/app/src/main/sessions/session-dir.ts | wc -l)\" -eq 0 ]`（resolver 不碰文件系统，故 TASK-009 替换枚举器时它原样存活）",
+      "packages/app/src/main/sessions/session-dir.ts 同时 contains 'PI_CODING_AGENT_SESSION_DIR'、'PI_CODING_AGENT_DIR'、'settings.sessionDir'，且导出 `export function resolveSessionDir(cwd: string, settings: AppSettings): string` 实现四级优先链；packages/app/test/session-dir.spec.ts 对四级各给一个用例，断言返回值分别落在 settings 指定目录 / 两个环境变量目录 / homedir 默认目录",
+      "`test -e packages/app/src/main/sessions/session-repository.ts && [ \"$(rg -c 'readFileSync|readdirSync|statSync' packages/app/src/main/sessions/session-repository.ts | wc -l)\" -eq 0 ]`（全部改为 node:fs/promises，不阻塞主进程）；且 `test ! -e packages/app/src/main/sessions-store.ts`（裁定5：旧的同步全量枚举路径整体消失；改前实测该文件 parseSessionFile 用 fs.readFileSync 整文件读入并 split('\\n') 全量解析，见 sessions-store.ts:49，故此断言当前为假）",
+      "packages/app/src/main/sessions/session-repository.ts contains 'MAX_SESSIONS_SCANNED = 200' 且 contains 'MAX_SESSION_HEAD_BYTES'",
+      "packages/app/src/main/sessions/session-repository.ts contains 'parseError'，单个损坏 JSONL 只在该条目上标记 parseError 而不影响其它条目",
+      "packages/pi-sdk/src/client.ts contains '\"--session-dir\"'",
+      "packages/app/test/session-dir.spec.ts 断言 encodeSessionDirSegment(\"/home/u\") === \"--home-u--\" 且 encodeSessionDirSegment(\"/home/u\").includes(\"---\") === false 且 encodeSessionDirSegment(\"D:\\\\x\") === \"--D--x--\" 且 encodeSessionDirSegment(\"C:\\\\Users\\\\yehh\") === \"--C--Users-yehh--\"；该测试在 `pnpm -w test` 中通过（纯函数直接吃已归一化字符串，不经平台 path.resolve）",
+      "`[ \"$(rg -c --no-filename 'cancelled' packages/app/src/renderer/src/stores/app.ts | awk '{s+=$1} END{print s+0}')\" -ge 2 ]`（newTask 与 openSession 各一处）",
+      "packages/app/src/renderer/src/stores/app.ts contains 'export function registerSessionScopedReset' 且 contains 'function resetSessionScopedState'，且 `rg -c 'resetSessionScopedState\\(\\)' packages/app/src/renderer/src/stores/app.ts` 输出 >= 2（start 与 newTask 各调用一次）。resetSessionScopedState 的实现为「遍历已注册的 reset 回调并逐个执行」而非手写字段枚举 —— 单测断言：调用 registerSessionScopedReset(spy) 后再调 resetSessionScopedState()，spy 恰被调用 1 次",
+      "[CT-25 · 清空语义与状态归属解耦] app.ts 自身注册的 reset 回调覆盖 items / toolRuns / queue / statusTexts / uiRequests / liveAssistant 六项（单测：构造非空状态后调 resetSessionScopedState()，逐项断言 items.value.length===0、Object.keys(toolRuns).length===0、queue.value.length===0、Object.keys(statusTexts).length===0、uiRequests.value.length===0、liveAssistant.value===null）。TASK-012 把 uiRequests / statusTexts 迁到 stores/extensionUi.ts 后，改为由该 store 调 registerSessionScopedReset 自行注册，本条的六项断言逐字不变仍须通过 —— 断言的是行为不是字段位置",
+      "[send() 签名锁定 · 由 TASK-006 定义] `rg -c 'export async function send\\(opts: SendOptions = \\{\\}\\): Promise<boolean>' packages/app/src/renderer/src/stores/app.ts` 输出 1（该签名被 TASK-006/007/010/014/015 五个任务共同依赖，任一任务改写签名即在此断言上失败）",
+      "packages/app/src/renderer/src/components/InputBar.vue contains 'if (await store.send(' 且 contains 'catch'；`store.editorText = \"\"` 的每处出现位置全部落在该 if 分支体内（用 node 脚本断言清空语句行号大于 if 行号且小于对应右花括号行号）",
+      "[near-miss · 显式 else 分支] packages/app/src/renderer/src/stores/app.ts 的 start() 中 `if (sessionPath === undefined)` 分支包裹 settings 的 provider/modelId 恢复与 set_thinking_level 调用；该 if 必须带 else 分支，且 else 块内不出现 setModel —— 用 node 脚本按行号区间断言：else 起止行之间 `rg` 到 'setModel' 的次数为 0。else 块是 TASK-014 c[4] 写入 modelMismatchPrompt 的落点，缺 else 会使两任务对同一处的要求互斥",
+      "packages/app/src/renderer/src/stores/app.ts 中 set_thinking_level 调用前存在与 result.state 当前值的比较（grep 该行上下文 contains 'thinkingLevel !=='）",
+      "packages/app/src/renderer/src/stores/app.ts contains 'sessionLoadError'，且 ChatView.vue contains '重试' 按钮绑定重新加载 messages",
+      "packages/app/src/renderer/src/stores/app.ts contains 'REFRESH_SESSIONS_DEBOUNCE_MS = 2000'，且全仓定义唯一：`rg --no-filename -c 'REFRESH_SESSIONS_DEBOUNCE_MS =' packages/app/src/renderer | awk '{s+=$1} END{print s+0}'` 输出 1（near-miss：该常量归属在 app.ts 与 sessions store 之间摇摆，TASK-009 带同一断言复验）；单测用 fake timers 断言 10 次连续 agent_settled 后推进 2000ms，底层枚举恰被调用 1 次",
+      "packages/app/test/session-interaction.spec.ts 断言：new_session 返回 {success:true, data:{cancelled:true}} 时 items 长度不变且发出警告通知；switch_session 同理；send 返回 success:false 时 send() 解析为 false；三组用例在 pnpm -w test 中通过",
+      "pnpm typecheck 退出码 0，pnpm -w test 退出码 0",
+      "[UI-observable] 手动：输入一段文字并附加 1 张图片与 1 个文件，人为让发送失败（停掉运行时），输入框文字、图片缩略图、文件条目三者全部原样保留；恢复后直接点发送可成功",
+      "[UI-observable] 手动，逐项可判定并记录在 doc/regression/TASK-006-session.md：(a) 侧栏历史会话列表条目数 >= 1，且每条同时显示 名称/首条消息/消息数/修改时间 四个字段（缺任一判 FAIL）；(b) 打开一个曾用非当前模型的历史会话，顶栏显示的模型字符串 === 该会话 JSONL 中记录的 model id，且 !== 全局 settings 的 modelId；(c) 在会话 A 触发一次 tool 调用与一次 Extension UI select 后切到会话 B，断言 DOM 中 tool 卡片数 === 0、状态文字元素数 === 0、Extension UI 弹窗数 === 0"
+    ],
+    "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && node -e \"const{encodeSessionDirSegment}=require('./packages/app/src/main/sessions/session-repository.ts');\" || true",
+    "definition_of_done": "无论在 Windows 还是 macOS/Linux，用户都能看到与 pi 命令行完全一致的历史会话列表并正确切换；发送失败时用户输入永不丢失；扩展否决新建或切换会话时界面保持原状而非显示假空白；恢复历史会话时沿用该会话原有的模型与思考力度。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/sessions/session-repository.ts",
+      "action": "create",
+      "target": "SessionRepository 实现",
+      "change": "唯一枚举实现（wave 5 版本）：优先 SessionManager.list(cwd, sessionDir)，失败时回退自实现的异步扫描；导出 listSessionsForWorkspace；返回 contract 的 SessionSummary 含 id/path/cwd/name/firstMessage/messageCount/modified/runtimeVersion/parseError。TASK-009 在 wave 8 用 SQLite 索引版本原地替换本实现（裁定5：任何时刻只有一个枚举器）"
+    },
+    {
+      "path": "packages/app/src/main/sessions-store.ts",
+      "action": "delete",
+      "target": "整文件",
+      "change": "由 session-repository.ts 完全取代；删除前确认 ipc.ts 的 sessions:list 已改为引用新模块"
+    },
+    {
+      "path": "packages/app/src/main/ipc.ts",
+      "action": "modify",
+      "target": "sessions:list handler",
+      "change": "改为 await sessionRepository.list({workspace, settings})，并把解析放入异步路径不阻塞 main"
+    },
+    {
+      "path": "packages/pi-sdk/src/client.ts",
+      "action": "modify",
+      "target": "PiClientOptions 与 start() 的 args 组装",
+      "change": "PiClientOptions 新增 sessionDir?: string；在第 78 行附近的 args 组装中补 if (o.sessionDir) args.push(\"--session-dir\", o.sessionDir)"
+    },
+    {
+      "path": "packages/contract/src/session.ts",
+      "action": "modify",
+      "target": "SessionSummary schema",
+      "change": "补齐 cwd / runtimeVersion / parseError 字段并同步 zod schema"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/app.ts",
+      "action": "modify",
+      "target": "newTask / openSession / send / start / resetSessionScopedState / refreshSessions",
+      "change": "newTask 与 openSession 增加 data.cancelled 分支；send 改为返回 boolean；新增 resetSessionScopedState 替代 app.ts:428-440 的手写枚举并在 start(app.ts:317-355) 中调用；start 用 sessionPath === undefined 分支控制是否套用全局 settings；set_thinking_level 前比较当前值；新增 sessionLoadError 与 REFRESH_SESSIONS_DEBOUNCE_MS = 2000"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/InputBar.vue",
+      "action": "modify",
+      "target": "submit()（第 133-149 行）",
+      "change": "改为 const ok = await store.send(...); if (ok) { 清空三项 }；补 catch 分支给出错误提示，消除 void submit() 下的静默未处理 rejection"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ChatView.vue",
+      "action": "modify",
+      "target": "消息区",
+      "change": "当 store.sessionLoadError 非空时显示错误条与「重试」按钮，点击重新拉取 get_messages"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/Sidebar.vue",
+      "action": "modify",
+      "target": "会话列表项",
+      "change": "展示 name / firstMessage / messageCount / modified，并对 parseError 非空的条目显示「解析失败」标记而不隐藏该条目"
+    },
+    {
+      "path": "packages/app/test/session-dir.spec.ts",
+      "action": "create",
+      "target": "跨平台目录名纯函数测试",
+      "change": "四组 encodeSessionDirSegment 断言（POSIX 无三连字符、Windows 盘符、含冒号）+ 四级 resolveSessionDir 优先链各一个用例"
+    },
+    {
+      "path": "packages/app/test/session-interaction.spec.ts",
+      "action": "create",
+      "target": "会话交互一致性测试",
+      "change": "覆盖 cancelled veto、发送失败保留草稿、恢复历史会话不被全局设置覆盖三组用例"
+    },
+    {
+      "path": "packages/app/src/main/sessions/session-dir.ts",
+      "action": "create",
+      "target": "会话目录 resolver 纯函数",
+      "change": "encodeSessionDirSegment + resolveSessionDir 四级优先链；不碰文件系统，故 TASK-009 替换枚举器时原样存活（裁定5）"
+    },
+    {
+      "path": "doc/regression/TASK-006-session.md",
+      "action": "create",
+      "target": "会话交互人工回归记录",
+      "change": "[errata-2 补录] c[20] 要求该文件存在并含勾选行，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "先写 packages/app/test/session-dir.spec.ts 的四条断言（红），再实现 encodeSessionDirSegment 使其转绿——因为该缺陷在 Windows 上运行时完全不可见，纯函数单测是唯一验证手段",
+    "实现 resolveSessionDir(cwd, settings)：按 settings.sessionDir → PI_CODING_AGENT_SESSION_DIR → PI_CODING_AGENT_DIR/sessions/<seg> → homedir/.pi/agent/sessions/<seg> 四级返回",
+    "实现 list()：先 try SessionManager.list(cwd, sessionDir)，把 SessionInfo 映射为 contract 的 SessionSummary；catch 时回退自实现的 fs/promises 扫描，按 modified 倒序、限 MAX_SESSIONS_SCANNED 条、每文件只读前 MAX_SESSION_HEAD_BYTES",
+    "单个文件解析失败只填 parseError 字段并保留该条目，不 throw、不影响其它条目",
+    "在 pi-sdk client.ts 的 PiClientOptions 加 sessionDir 并在 args 中补 --session-dir；在 ipc.ts 的 pi:start 传入解析结果",
+    "删除 sessions-store.ts，改 ipc.ts 的 sessions:list 指向新模块",
+    "store 侧：newTask 与 openSession 读 resp.data.cancelled，为 true 时 notify('warning', ...) 并直接 return，不清空任何状态",
+    "store 侧：send 改为返回 boolean（失败返回 false 并 notify），InputBar.submit 只在 true 时清空 editorText/images/files 并补 catch",
+    "store 侧：抽 resetSessionScopedState() 并在 start 与 newTask 调用，取代 app.ts:428-440 的手写字段枚举",
+    "store 侧：start(sessionPath) 用 if (sessionPath === undefined) 包裹全局 settings 的 provider/modelId/thinkingLevel 恢复；set_thinking_level 前与 result.state 当前值比较",
+    "store 侧：openSession 中 get_messages 失败时设 sessionLoadError，ChatView 显示重试按钮",
+    "store 侧：refreshSessions 加 2000ms 防抖，避免 agent_settled 每次触发全量扫描",
+    "跑 pnpm -w test 与 pnpm typecheck，再人工做草稿保留与历史会话模型两项 UI 验证"
+  ],
+  "test": {
+    "commands": [
+      "pnpm -w test",
+      "pnpm typecheck",
+      "pnpm --filter @pibuddy/app build"
+    ],
+    "unit": [
+      "packages/app/test/session-dir.spec.ts",
+      "packages/app/test/session-interaction.spec.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "encodeSessionDirSegment(\"/home/u\") 无三连字符",
+      "session-repository.ts 中同步 fs API 出现次数 0",
+      "cancelled 分支覆盖 new_session 与 switch_session",
+      "发送失败后草稿三项全部保留"
+    ]
+  },
+  "reference": {
+    "pattern": "会话目录编码严格对齐 pi 的 dist/core/session-manager.js:245；会话列表优先复用 pi 公开导出的 SessionManager.list 而非自行实现，避免第二套算法再次漂移",
+    "files": [
+      "packages/app/src/main/sessions-store.ts",
+      "packages/pi-sdk/src/client.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "会话解析与会话交互是同一条用户路径（看到列表 → 切换 → 发送），且都改动 ipc.ts / store / InputBar，拆开会产生两次重写与中间不可用态。目录名缺陷用纯函数单测锁定，是唯一能在 Windows 开发机上验证跨平台正确性的手段。",
+    "decision_factors": [
+      "缺陷在 Windows 上不可见，必须用单测而非手工验证",
+      "pi 已公开导出 SessionManager.list，自实现算法必然二次漂移",
+      "草稿丢失是用户可感知的高频数据损失"
+    ],
+    "tradeoffs": "依赖 pi 的公开导出会引入版本耦合，故保留自实现回退路径并由 runtime-manifest 的版本号做能力判断。"
+  },
+  "risks": [
+    "SessionManager.list 是 async 且会扫描整个目录，大量历史会话时首屏可能变慢——必须配合 MAX_SESSIONS_SCANNED 与防抖，并把调用放在异步路径避免阻塞 main",
+    "删除 sessions-store.ts 时若 ipc.ts 仍有残留 import 会导致构建失败，删除前必须先改引用",
+    "InputBar.submit 改为条件清空后，若 store.send 在成功路径抛异常会导致草稿滞留但消息已发出，需在 send 内部把「已被 RPC 接受」作为返回 true 的唯一判据（对齐 rpc.md 第 74-78 行：success:true 即表示已接受/已入队/已处理）"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "会话列表",
+      "会话切换",
+      "新任务",
+      "消息发送",
+      "模型与思考力度恢复"
+    ],
+    "affected_components": [
+      "packages/app/src/main/sessions/session-repository.ts",
+      "packages/app/src/renderer/src/stores/app.ts",
+      "packages/app/src/renderer/src/components/InputBar.vue"
+    ],
+    "affected_requirements": [
+      "SES-001",
+      "SES-002"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "110m",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": true,
+    "wave": 5
+  },
+  "origin_shard": "A",
+  "origin_id": "TASK-A05"
+}

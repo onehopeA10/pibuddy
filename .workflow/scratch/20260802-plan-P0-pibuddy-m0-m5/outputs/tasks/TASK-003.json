@@ -1,0 +1,213 @@
+{
+  "id": "TASK-003",
+  "title": "RUN-001 可靠内置 Pi runtime：ESM 解析 + 构建期自包含目录 + manifest 定位 + 环境变量白名单",
+  "description": "实测确认 @earendil-works/pi-coding-agent 0.83.0 的 package.json exports 只有 types 与 import 两个条件、没有 require，因此 pi-launcher.ts:14-15 的 createRequire().resolve('@earendil-works/pi-coding-agent') 在 dev 与 prod 下 100% 抛 ERR_PACKAGE_PATH_NOT_EXPORTED，被第 24 行空 catch 吞掉后永远回退到全局 pi 命令，内置版本形同虚设。第二重独立风险：electron-builder.yml 的 files 只列 out/** 与 package.json 未含 node_modules，且 packages/app/node_modules/@earendil-works/pi-coding-agent 是指向根 .pnpm 的 symlink，即使修好 resolve 打包产物里仍然没有 pi。本任务用 ESM 解析 + 构建期产出自包含 runtime 目录 + runtime-manifest.json 定位彻底解决，并恢复应用主代码 asar:true、对子进程环境变量做白名单。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "fix",
+  "priority": "high",
+  "effort": "large",
+  "action": "重写 packages/app/src/main/pi-launcher.ts：删除 createRequire 全部用法，dev 分支改用 fileURLToPath(import.meta.resolve(\"@earendil-works/pi-coding-agent\")) 得到 dist/index.js 后取同级 cli.js；packaged 分支只读 path.join(process.resourcesPath, \"pi-runtime\", \"runtime-manifest.json\") 并按其中 entry 字段定位；新增 const ENV_ALLOWLIST = [\"PATH\",\"HOME\",\"USERPROFILE\",\"APPDATA\",\"LOCALAPPDATA\",\"TMP\",\"TEMP\",\"SystemRoot\",\"ComSpec\",\"LANG\",\"LC_ALL\",\"PI_CODING_AGENT_DIR\",\"PI_CODING_AGENT_SESSION_DIR\",\"HTTP_PROXY\",\"HTTPS_PROXY\",\"NO_PROXY\"] 并显式只补 ELECTRON_RUN_AS_NODE:\"1\"；删除第 28 行的 shell: isWin 改为全 argv + shell:false；新建 packages/app/scripts/prepare-pi-runtime.mjs 用 fs.cp(realpath, dest, {recursive:true, dereference:true}) 产出 packages/app/resources/pi-runtime/ 与 runtime-manifest.json {name, version, entry:\"dist/cli.js\", builtAt, protocolVersion:1, capabilities, sha256}；electron-builder.yml 把 asar:false 改为 asar:true 并用 extraResources 投递 pi-runtime。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/pi-launcher.ts + 构建流水线",
+  "focus_paths": [
+    "packages/app/src/main/",
+    "packages/app/scripts/"
+  ],
+  "read_first": [
+    "packages/app/src/main/pi-launcher.ts",
+    "packages/app/electron-builder.yml",
+    "packages/app/package.json",
+    "packages/pi-sdk/src/client.ts",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/package.json（exports 字段真相源：只有 types 与 import，无 require）",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Starting RPC Mode' 章节（第 7-19 行）",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/environment-variables.md 第 70-85 行",
+    "packages/contract/src/settings.ts",
+    "packages/app/src/renderer/src/components/SettingsModal.vue",
+    "packages/app/src/main/pi-runtime-manifest.ts",
+    "packages/app/scripts/prepare-pi-runtime.mjs",
+    "packages/app/test/pi-launcher.spec.ts"
+  ],
+  "depends_on": [
+    "TASK-002"
+  ],
+  "wave": 3,
+  "parallel_group": "w3",
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'createRequire' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（改前实测该文件含 createRequire，故此断言当前为假）",
+      "packages/app/src/main/pi-launcher.ts contains 'import.meta.resolve(\"@earendil-works/pi-coding-agent\")' 且 contains 'fileURLToPath'",
+      "packages/app/src/main/pi-launcher.ts contains 'process.resourcesPath' 且 contains 'runtime-manifest.json'",
+      "packages/app/src/main/pi-launcher.ts contains 'ENV_ALLOWLIST' 且 contains 'ELECTRON_RUN_AS_NODE'",
+      "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'shell: isWin|shell: true' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`",
+      "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -U -c 'catch \\{\\s*(//[^\\n]*\\s*)*\\}' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（语义为「修复后应为假」的否定型断言：当前第 24-26 行 `} catch {` + 注释 + `}` 的空 catch 仍在，该断言现在实跑判 FAIL，修复移除空 catch 后转 PASS。旧模式 `catch \\{\\}` 要求单行，对真实代码实跑 0 命中、exit 1，`wc -l` 得 0 使断言恒真）；且解析失败路径可验证：pi-launcher.ts 抛出的 Error.message 同时 contains 原始 err.message 的子串与固定错误码字面量 'PI_RUNTIME_RESOLVE_FAILED'，logger 收到一条 level==='error' 且 code==='PI_RUNTIME_RESOLVE_FAILED' 的记录 —— packages/app/test/pi-launcher.spec.ts 用注入的解析失败断言这三件事",
+      "packages/app/test/pi-launcher.spec.ts 断言：在 process.env 中人为设置 NODE_OPTIONS='--inspect'、ELECTRON_RUN_AS_NODE='0'、NODE_INSPECT_RESUME_ON_START='1'、LD_PRELOAD='/tmp/x.so'、DYLD_INSERT_LIBRARIES='/tmp/y.dylib' 后，buildPiSpawn().env 中 NODE_OPTIONS/NODE_INSPECT_RESUME_ON_START/LD_PRELOAD/DYLD_INSERT_LIBRARIES 四个键均不存在，且 env.ELECTRON_RUN_AS_NODE === '1'；该测试在 pnpm -w test 中通过",
+      "packages/app/test/pi-launcher.spec.ts 断言：伪造 resourcesPath 下的 runtime-manifest.json 缺失时抛出的错误信息 contains 'runtime-manifest.json'（而非静默回退全局 pi）",
+      "pnpm --filter @pibuddy/app exec node packages/app/scripts/prepare-pi-runtime.mjs 退出码为 0",
+      "packages/app/resources/pi-runtime/dist/cli.js 文件存在且非 symlink（node -e \"console.log(require('fs').lstatSync('packages/app/resources/pi-runtime/dist/cli.js').isSymbolicLink())\" 输出 false）",
+      "packages/app/resources/pi-runtime/runtime-manifest.json contains '\"version\": \"0.83.0\"' 且 contains '\"entry\": \"dist/cli.js\"' 且 contains '\"protocolVersion\": 1' 且 contains '\"sha256\"'",
+      "packages/app/electron-builder.yml contains 'asar: true' 且 `test -e packages/app/electron-builder.yml && [ \"$(rg -c 'asar: false' packages/app/electron-builder.yml | wc -l)\" -eq 0 ]`",
+      "packages/app/electron-builder.yml contains 'extraResources:' 且 contains 'pi-runtime'",
+      "packages/app/package.json 的 dist script contains 'prepare-pi-runtime'（打包前必然产出 runtime 目录）",
+      "packages/contract/src/settings.ts contains 'piRuntimeMode' 且 contains 'external' 且 contains 'bundled'；SettingsModal.vue contains '切回内置'，且 `test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'settings.set\\(\\{ piRuntimeMode' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（external 失败时不得静默改写设置）",
+      "packages/app/src/main/pi-launcher.ts contains 'assertRuntimeHandshake'；packages/app/test/pi-launcher.spec.ts 断言 assertRuntimeHandshake({ runtimeVersion: '0.83.0', protocolVersion: 1 }, { version: '0.99.0', protocolVersion: 1 }) 抛出的 Error.message 同时 contains '0.83.0' 与 '0.99.0'；并断言 assertRuntimeHandshake({ runtimeVersion: '0.83.0', protocolVersion: 1 }, { version: '0.83.0', protocolVersion: 1 }) 不抛错",
+      "[UI-observable] 手动，逐项可判定并记录在 doc/regression/TASK-003-runtime.md（每项一行 `- [x]` + 时间戳）：(a) 把全局 pi 命令临时重命名（Windows 上 rename pi.cmd）后 `pnpm --filter @pibuddy/app dev` 仍能完成一次问答，且日志中存在一行 JSON 其 `runtimeSource === 'bundled'`；(b) 把 settings 的 piRuntimeMode 改为 external 并指向不存在的命令，界面出现的错误文案 contains 'ENOENT' 或 contains 该缺失命令名，且同一界面存在文案为「切回内置」的按钮；(c) 点击「切回内置」后可完成一次问答；(d) 上述 (b) 发生后立即读取 settings 文件，其 piRuntimeMode 仍为 'external'（失败瞬间不得自动改写用户设置）",
+      "[UI-observable] packaged-smoke：pnpm --filter @pibuddy/app dist 后运行 release/win-unpacked/PiBuddy.exe，能选择工作文件夹并完成一次问答（本机 win-unpacked smoke，非 clean VM，验收状态记 packaged-smoke）",
+      "[CT-11 · 内置运行时缺失必须抛错，禁止回退全局 pi] `rg --no-filename -c 'runtime-manifest.json' packages/app/src/main/pi-launcher.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 1，且 `test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'pi\\.cmd|which pi|command -v pi|fallbackToGlobalPi' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`。此条为全计划口径：TASK-012 修改 buildPiSpawn 追加 trust 参数时不得重新引入全局 pi 回退（TASK-012 带同一断言复验）"
+    ],
+    "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm --filter @pibuddy/app exec node packages/app/scripts/prepare-pi-runtime.mjs && node -e \"const m=require('./packages/app/resources/pi-runtime/runtime-manifest.json');console.log(m.version,m.entry,m.protocolVersion)\" && pnpm --filter @pibuddy/app dist",
+    "definition_of_done": "应用在开发与打包两种形态下都确定性地使用自带的 pi 运行时，用户机器上没有全局 pi 也能正常工作；打包产物恢复 asar 保护；pi 子进程不再继承任何可被利用的调试或注入类环境变量。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/pi-launcher.ts",
+      "action": "modify",
+      "target": "buildPiSpawn / 新增 resolvePiRuntime / assertRuntimeHandshake / ENV_ALLOWLIST",
+      "change": "删除第 1 行 createRequire import 与第 13-26 行整段 try/catch；dev 用 import.meta.resolve + fileURLToPath；packaged 只读 process.resourcesPath/pi-runtime/runtime-manifest.json；env 由 ENV_ALLOWLIST 过滤后再补 ELECTRON_RUN_AS_NODE='1'；shell 恒为 false；external 模式解析绝对路径而非依赖 shell"
+    },
+    {
+      "path": "packages/app/src/main/pi-runtime-manifest.ts",
+      "action": "create",
+      "target": "manifest 读取与校验",
+      "change": "定义 RuntimeManifest 类型与 zod schema（复用 @pibuddy/contract 的 PROTOCOL_VERSION），读取失败或 protocolVersion 不匹配时抛出含具体原因的错误"
+    },
+    {
+      "path": "packages/app/scripts/prepare-pi-runtime.mjs",
+      "action": "create",
+      "target": "构建期 runtime 产出",
+      "change": "用 import.meta.resolve 定位包根后 fs.realpathSync 解开 pnpm symlink，fs.cp(real, 'resources/pi-runtime', {recursive:true, dereference:true})，再写 runtime-manifest.json（含 dist/cli.js 的 sha256）"
+    },
+    {
+      "path": "packages/app/electron-builder.yml",
+      "action": "modify",
+      "target": "asar 与 extraResources",
+      "change": "asar: false → asar: true；新增 extraResources: - from: resources/pi-runtime, to: pi-runtime；files 增加 '!resources/**' 避免 runtime 被重复打进 asar"
+    },
+    {
+      "path": "packages/app/package.json",
+      "action": "modify",
+      "target": "scripts",
+      "change": "新增 \"prepare:runtime\": \"node packages/app/scripts/prepare-pi-runtime.mjs\"；dist 改为 \"pnpm prepare:runtime && electron-vite build && electron-builder\""
+    },
+    {
+      "path": "packages/contract/src/settings.ts",
+      "action": "modify",
+      "target": "AppSettings schema",
+      "change": "新增 piRuntimeMode: z.enum([\"bundled\",\"external\"]).default(\"bundled\") 与 piExternalCommand: z.string().optional()"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/SettingsModal.vue",
+      "action": "modify",
+      "target": "高级设置区",
+      "change": "新增「Pi 运行时」高级设置项（默认内置），external 启动失败时展示错误详情与「切回内置」按钮；按钮点击才写设置，失败本身不写设置"
+    },
+    {
+      "path": "packages/app/test/pi-launcher.spec.ts",
+      "action": "create",
+      "target": "环境变量白名单与 manifest 定位测试",
+      "change": "覆盖注入类环境变量被剔除、ELECTRON_RUN_AS_NODE 被显式置 1、manifest 缺失抛可读错误、handshake 版本不匹配抛错四组用例"
+    },
+    {
+      "path": "doc/regression/TASK-003-runtime.md",
+      "action": "create",
+      "target": "bundled runtime 人工回归记录",
+      "change": "[errata-2 补录] c[16] 要求该文件存在并含勾选行，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/resources/pi-runtime/dist/cli.js",
+      "action": "create",
+      "target": "bundled pi 运行时入口",
+      "change": "[errata-2 补录] 由同任务 packages/app/scripts/prepare-pi-runtime.mjs（wave 3）生成的构建产物；c[9] 断言该文件存在且非 symlink，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/resources/pi-runtime/runtime-manifest.json",
+      "action": "create",
+      "target": "运行时清单",
+      "change": "[errata-2 补录] 由同任务 packages/app/scripts/prepare-pi-runtime.mjs（wave 3）生成的构建产物；c[10] 断言该文件含 version / entry / protocolVersion / sha256，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "读 pi 包 package.json 确认 exports 只有 types/import 两个条件，据此删除 pi-launcher.ts 全部 createRequire 代码路径",
+    "实现 resolvePiRuntime()：app.isPackaged 为 false 时走 fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent')) → path.dirname → cli.js；为 true 时只读 process.resourcesPath/pi-runtime/runtime-manifest.json 并 join entry",
+    "实现 ENV_ALLOWLIST 过滤函数 buildChildEnv(base)：从 base 中只挑白名单键，再显式设置 ELECTRON_RUN_AS_NODE='1'，返回全新对象（不做 {...process.env} 展开）",
+    "把 buildPiSpawn 返回的 shell 恒定为 false；external 模式下用 which/where 解析出绝对路径再交给 spawn，不依赖 shell 解析 .cmd",
+    "实现 assertRuntimeHandshake(state, manifest)：比对 manifest.version 与 get_state 返回的版本，比对 manifest.protocolVersion 与 @pibuddy/contract 的 PROTOCOL_VERSION，不一致抛出含双方值的错误",
+    "写 packages/app/scripts/prepare-pi-runtime.mjs：realpathSync 解开 packages/app/node_modules/@earendil-works/pi-coding-agent 的 pnpm symlink，dereference 复制，计算 dist/cli.js 的 sha256 写入 manifest",
+    "改 electron-builder.yml 与 packages/app/package.json 的 dist 链路",
+    "在 contract 的 AppSettings 增加 piRuntimeMode/piExternalCommand，在 SettingsModal.vue 加高级设置与「切回内置」按钮",
+    "写 packages/app/test/pi-launcher.spec.ts 并跑 pnpm -w test",
+    "跑 pnpm --filter @pibuddy/app dist，运行 release/win-unpacked/PiBuddy.exe 做 packaged-smoke 并把结果记入 doc/traceability.md"
+  ],
+  "test": {
+    "commands": [
+      "pnpm -w test",
+      "pnpm typecheck",
+      "pnpm --filter @pibuddy/app exec node packages/app/scripts/prepare-pi-runtime.mjs",
+      "pnpm --filter @pibuddy/app dist"
+    ],
+    "unit": [
+      "packages/app/test/pi-launcher.spec.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "createRequire 出现次数 0",
+      "runtime-manifest.json 中 version 为 0.83.0",
+      "asar:true 且 win-unpacked 可完成一次问答",
+      "注入类环境变量在子进程 env 中不存在"
+    ]
+  },
+  "reference": {
+    "pattern": "PiSpawn 契约见 packages/pi-sdk/src/client.ts:20-28（command / prefixArgs / env / shell）；RPC 启动参数见 pi docs/rpc.md 'Starting RPC Mode'",
+    "files": [
+      "packages/pi-sdk/src/client.ts",
+      "packages/app/src/main/pi-launcher.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "resolve 缺陷与打包布局缺陷是两个独立故障点，必须分别修复并分别验证：前者用 ESM import.meta.resolve 绕开缺失的 require 条件，后者用构建期自包含目录 + manifest 摆脱对 node_modules 布局与 pnpm symlink 的任何依赖，从而让 asar:true 得以恢复。",
+    "decision_factors": [
+      "exports 无 require 条件，createRequire 路径必然失败",
+      "空 catch 让失败不可见",
+      "pnpm symlink 使 files 白名单方案不可靠",
+      "asar:false 削弱了产物完整性"
+    ],
+    "tradeoffs": "自包含复制会增大安装包体积（pi 完整 dist）；换来的是路径确定性与 asar 保护，且 manifest 的 sha256 提供了完整性校验入口。"
+  },
+  "risks": [
+    "fs.cp 的 dereference 在 Windows 上对深层嵌套 node_modules 可能触碰路径长度上限，需要在脚本中显式报错而非静默截断",
+    "asar:true 后 pi 运行时动态加载扩展/技能文件的路径必须全部落在 extraResources 投递的 pi-runtime 目录内，packaged-smoke 必须实际触发一次 tool 调用而不只是启动",
+    "import.meta.resolve 在 electron-vite 的 main 打包产物中需保持为运行时调用而非被静态内联，构建后必须实际启动验证"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "Pi 运行时定位",
+      "打包流水线",
+      "子进程环境隔离"
+    ],
+    "affected_components": [
+      "packages/app/src/main/pi-launcher.ts",
+      "packages/app/scripts",
+      "packages/app/electron-builder.yml"
+    ],
+    "affected_requirements": [
+      "RUN-001",
+      "SEC-001"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "75m",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": false,
+    "wave": 3
+  },
+  "origin_shard": "A",
+  "origin_id": "TASK-A03"
+}

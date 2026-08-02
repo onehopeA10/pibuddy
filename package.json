@@ -1,0 +1,14 @@
+{
+  "name": "pi-buddy-monorepo",
+  "private": true,
+  "description": "PiBuddy - 面向办公用户的 pi 智能体桌面助手",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @pibuddy/app dev",
+    "build": "pnpm --filter @pibuddy/app build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

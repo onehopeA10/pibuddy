@@ -1,0 +1,339 @@
+{
+  "id": "TASK-013",
+  "title": "UPD-005~007 + OBS-101 三平台产物与签名 CI、结构化日志诊断、更新后 health check 与 safe mode",
+  "description": "补齐打包与发布侧：Windows per-user NSIS（installer + latest.yml + blockmap）、macOS 在 DMG 之外补 updater 必需的 ZIP 与 latest-mac.yml（当前 mac.target 只有 dmg，是自动更新的硬缺口）、Linux AppImage + latest-linux.yml，DEB/RPM 明确降级不伪装自动安装；CI 在原生 runner 上 --publish never 构建、先上传 artifact 最后发布 channel manifest、缺签名凭据时 release job 失败关闭；正式发布不使用第三方 Electron mirror（当前 electron-builder.yml 硬编码 npmmirror，需改为仅开发环境按环境变量启用）。同时落 OBS-101：结构化脱敏日志、日志轮转与总量上限、可预览的一键 support bundle、更新 handoff 的 pending-update / last-known-good marker、更新后首次启动的轻量 health check 与失败进 safe mode。并产出 docs/product/RELEASE_SETUP.md 与更新源 ADR。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "feature",
+  "priority": "high",
+  "effort": "large",
+  "action": "修改 packages/app/electron-builder.yml：mac.target 由 `[dmg]` 改为 `[dmg, zip]` 并加 `hardenedRuntime: true`、`gatekeeperAssess: false`、`entitlements: build/entitlements.mac.plist`、`entitlementsInherit: build/entitlements.mac.plist`、`notarize: true`，`extendInfo.NSMicrophoneUsageDescription: \"PiBuddy 需要使用麦克风来把你说的话转成文字\"`；win.target 保持 nsis 且 nsis.perMachine 保持 false（per-user）；linux.target 改为 `[AppImage, deb]`；新增 `publish` 块使用 `provider: generic` + `url: ${env.PIBUDDY_UPDATE_FEED_URL}` 并把 `electronDownload.mirror` 改为仅当 `${env.PIBUDDY_USE_CN_MIRROR}` 为 true 时生效（在 packages/app/scripts/build-config.mjs 中拼装，CI 不设该变量）。在 TASK-002 建立的唯一日志器 packages/app/src/main/logger.ts 上扩展（裁定4：全计划只允许一个日志器实现，不得新建 main/logging/logger.ts）：MAX_LOG_BYTES = 5 * 1024 * 1024、MAX_LOG_FILES = 7，导出 `createLogger(scope: 'main'|'pi-runtime'|'updater'|'session-index'|'permission')`，每条日志强制带 `correlationId / runtimeId / sessionId`，并把 redactSecrets 挂到真正写盘的函数内。electron-log 的锁版仅供 electron-updater 内部使用，autoUpdater.logger 以适配器接到 createLogger('updater')。在 TASK-002 建立的唯一脱敏实现 packages/app/src/main/logger-redact.ts 上扩规则，其 `redactSecrets(input: string): string`，至少覆盖 `sk-[A-Za-z0-9_-]{16,}`、`Bearer\\s+\\S+`、`\"key\"\\s*:\\s*\"[^\"]+\"`、`os.homedir()` 绝对路径（替换为 `~`）与 `process.env` 值。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/electron-builder.yml, .github/workflows, packages/app/src/main/logging, packages/app/src/main/diagnostics, packages/app/src/main/health, docs/product",
+  "focus_paths": [
+    "packages/app/electron-builder.yml",
+    ".github/workflows/",
+    "packages/app/src/main/",
+    "packages/app/src/main/diagnostics/",
+    "packages/app/src/main/health/",
+    "docs/product/"
+  ],
+  "read_first": [
+    "packages/app/electron-builder.yml",
+    "packages/app/package.json（TASK-B05 已锁定的三个精确版本）",
+    "packages/app/src/main/index.ts",
+    "packages/app/src/main/update/update-service.ts（TASK-B05 产出的状态机与 marker 写入点）",
+    "packages/app/src/renderer/src/components/SettingsModal.vue",
+    "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 第 430-460 行（OBS-101 / QA-401 / M4 出口门禁 / 必须由产品所有者配置的真实值清单）",
+    "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 UPD-005 / UPD-006 / UPD-007 三节",
+    "packages/contract/src/index.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/contract/src/envelope.ts",
+    "packages/app/build/entitlements.mac.plist",
+    "packages/app/scripts/build-config.mjs",
+    "packages/app/scripts/verify-release-artifacts.mjs",
+    ".github/workflows/release.yml",
+    ".github/workflows/ci.yml",
+    "scripts/check-workflow-pins.mjs",
+    "packages/app/src/main/logger.ts（TASK-002 建立的唯一日志器，本任务只允许 modify）",
+    "packages/app/src/main/logger-redact.ts（TASK-002 建立的唯一脱敏实现，本任务只允许 modify）",
+    "packages/app/src/main/diagnostics/support-bundle.ts",
+    "packages/app/src/main/health/health-check.ts",
+    "packages/app/src/main/health/safe-mode.ts",
+    "packages/app/src/main/ipc-registry.ts",
+    "packages/app/src/preload/api/diagnostics.ts",
+    "packages/app/src/preload/api/index.ts",
+    "packages/app/src/renderer/src/components/DiagnosticsPanel.vue",
+    "packages/app/src/renderer/src/components/SafeModeBanner.vue",
+    "docs/product/RELEASE_SETUP.md",
+    "docs/product/ADR-0001-update-feed.md"
+  ],
+  "depends_on": [
+    "TASK-011"
+  ],
+  "wave": 10,
+  "parallel_group": "wave3",
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "packages/app/electron-builder.yml 中 mac.target 同时包含 `dmg` 与 `zip`；含 `hardenedRuntime: true`、`entitlements: build/entitlements.mac.plist`、`NSMicrophoneUsageDescription`；`test -e packages/app/electron-builder.yml && [ \"$(rg -c 'npmmirror' packages/app/electron-builder.yml | wc -l)\" -eq 0 ]`（镜像改由 packages/app/scripts/build-config.mjs 按 PIBUDDY_USE_CN_MIRROR 注入）",
+      "`pnpm --filter @pibuddy/app dist -- --win nsis --publish never` 后 packages/app/release/ 同时存在 `latest.yml`、`PiBuddy-Setup-*.exe`、`PiBuddy-Setup-*.exe.blockmap` 三个文件；packages/app/scripts/verify-release-artifacts.mjs 对 win/mac/linux 三个平台各自断言必需文件集合（win: latest.yml + exe + blockmap；mac: latest-mac.yml + *.dmg + *.zip；linux: latest-linux.yml + *.AppImage），缺任一即退出码 1",
+      "缺凭据时 release 关闭：.github/workflows/release.yml 中含形如 `if [ -z \"${WIN_CSC_LINK}\" ]; then echo \"::error::WIN_CSC_LINK missing - release blocked\"; exit 1; fi` 的显式失败步骤；build 与 publish 分离为两个 job，名字逐字为 `upload-artifacts` 与 `publish-manifest`，且 `rg -c 'needs: upload-artifacts' .github/workflows/release.yml` 输出 >= 1（用 needs 依赖声明替代原文「步骤顺序在 workflow 中可读」这一不可测措辞）；publish-manifest job 内 latest*.yml 的上传步骤是该 job 的最后一个 step（node 脚本按 steps 数组下标断言）",
+      "[look-around 不可执行 · 改写为 ripgrep 可执行的等价条件] 所有第三方 action 均以 40 位 commit SHA 固定：`rg -n '^\\s*-?\\s*uses:' .github/workflows/release.yml | rg -v '@[0-9a-f]{40}\\s*$' | wc -l` 输出 0；同一条件对 .github/workflows/ci.yml 亦成立。该校验写成 scripts/check-workflow-pins.mjs（遍历 .github/workflows/*.yml，对每行匹配 `^\\s*-?\\s*uses:` 且不以 `@<40 位 hex>` 结尾的行以退出码 1 报出 file:line）并在 CI 中运行。原文 `rg -n \"uses: (?!actions/checkout@[0-9a-f]{40})\"` 已实测无法执行：ripgrep 的 Rust regex 不支持 look-around，报 `error: look-around ... is not supported` 并以退出码 2 终止，该条既不能通过也不能失败。本轮已实跑复验：构造含 `- uses: actions/checkout@<40hex>`、`uses: actions/setup-node@<40hex>`、`- uses: pnpm/action-setup@v4` 三行的样本，旧正则 `^\\s*uses:` 只命中 1 行（漏掉两处紧凑写法，含唯一未固定项），新正则 `^\\s*-?\\s*uses:` 命中 3 行；全固定样本上 `| wc -l` 输出 0 判 PASS，含 1 处未固定的样本输出 1 判 FAIL，非恒真亦非恒假。check-workflow-pins.mjs 的退出码为主判据，rg 形式为等价旁证",
+      "packages/app/src/main/logger-redact.ts（TASK-002 建立的唯一脱敏实现，本任务在其上扩规则）的单测 packages/app/test/logger-redact.spec.ts：输入含 `sk-ant-abcdefghijklmnop1234`、`Authorization: Bearer eyJhbGciOi...`、`\"key\": \"secret-value\"`、`C:\\\\Users\\\\yehh\\\\Documents\\\\a.txt` 四种样本，断言输出中四者均不可见且 home 路径被替换为 `~`；结构断言 `rg --no-filename -c 'export (function|const) redactSecrets' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1",
+      "[裁定4 · 轮转参数落在唯一日志器上] packages/app/src/main/logger.ts 的轮转参数：`rg -c 'MAX_LOG_BYTES = 5 \\* 1024 \\* 1024' packages/app/src/main/logger.ts` 输出 1 且 `rg -c 'MAX_LOG_FILES = 7' packages/app/src/main/logger.ts` 输出 1；packages/app/test/logger.spec.ts 断言：写入使总量超过 7 个归档文件后，日志目录内文件数 === 8（当前 + 7 个归档）且被删除的恰是 mtime 最旧的那个。本任务只允许 modify TASK-002 的 logger.ts，不得新建 packages/app/src/main/logging/logger.ts（`test ! -e packages/app/src/main/logging/logger.ts` 且 `rg --no-filename -c 'export function createLogger' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1）",
+      "support bundle 可预览：packages/app/src/main/diagnostics/support-bundle.ts 导出 `previewBundle(): { path: string; sizeBytes: number; redacted: boolean }[]` 与 `exportBundle(targetPath: string)`，且 exportBundle 内每个文本文件写入前都经过 redactSecrets（单测断言写出的 zip 内容中不含预置的假 key）",
+      "health check 与 marker：packages/app/src/main/health/health-check.ts 导出 `runStartupHealthCheck(): Promise<{ ok: boolean; failed: ('db-migration'|'renderer-ready'|'pi-handshake')[] }>`；update-service 在 installAndRestart 前写 `<userData>/update-state/pending-update.json`，健康启动后写 `last-known-good.json` 并删除 pending marker；单测覆盖「连续两次 health check 失败 → safeMode=true」",
+      "[UI-observable] 用户在设置→「关于与更新」→「诊断」点击「生成诊断包」，先看到将导出文件的清单预览（路径、大小、是否已脱敏），确认后导出并可「在文件夹中显示」；健康检查失败后重启，界面顶部显示 safe mode 横幅（说明已禁用第三方扩展与自动任务）并提供「查看诊断」与「下载上一稳定版本」入口",
+      "docs/product/RELEASE_SETUP.md 存在，含 secret 名称清单（如 WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD / APPLE_TEAM_ID / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / PIBUDDY_UPDATE_FEED_URL）、申请步骤、轮换周期、过期演练、发布暂停与 hotfix 流程；`test -e docs/product/RELEASE_SETUP.md && [ \"$(rg -c 'sk-|BEGIN (RSA|PRIVATE)|-----BEGIN' docs/product/RELEASE_SETUP.md | wc -l)\" -eq 0 ]`（文档不含任何 secret 本身）；正向配对：该文件 contains 全部 6 个 secret 名称字面量（`[ \"$(rg -c --no-filename 'WIN_CSC_LINK|WIN_CSC_KEY_PASSWORD|APPLE_TEAM_ID|APPLE_ID|APPLE_APP_SPECIFIC_PASSWORD|PIBUDDY_UPDATE_FEED_URL' docs/product/RELEASE_SETUP.md | awk '{s+=$1} END{print s+0}')\" -ge 6 ]`）且 contains '轮换' 与 'hotfix'",
+      "docs/product/ADR-0001-update-feed.md 记录更新源选型（GitHub Releases vs 自建 generic feed）、asar: true（TASK-003 恢复）+ extraResources 外置 pi-runtime + asarUnpack 外置 convert-worker 对差分更新收益的实际限制、以及 v1 不做真实二进制自动回滚的决定与替代方案（health marker + safe mode + 分阶段放量 + 快速撤回 feed）。可判定条件：该文件同时 contains 'GitHub Releases'、'generic feed'、'extraResources'、'asarUnpack'、'health marker'、'safe mode' 六个字符串。产物侧的取值断言落在配置文件而非 ADR：`test -e packages/app/electron-builder.yml && [ \"$(rg -c 'asar: false' packages/app/electron-builder.yml | wc -l)\" -eq 0 ]`（原文要求 ADR 全文不含 'asar: false'，与该 ADR「记录为何弃用它」的职责直接冲突）",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1",
+      "[裁定4 · 脱敏挂在日志出口] `rg -c 'redactSecrets' packages/app/src/main/logger.ts` 输出 >= 1 且该命中位于 logger 的写出函数体内（node 脚本按以下确定规则判定：在 logger.ts 中定位调用 `fs.appendFileSync` 或 `fs.createWriteStream(...).write` 的那个函数（即真正写盘的函数，若有多个则每个都判），断言 `redactSecrets` 的调用行号落在该函数的起止行之间）；单测直接调用 `createLogger('main').info('sk-ant-0123456789abcdef')` 后，断言落盘日志文件内容不含该子串（若脱敏只在 support bundle 导出时执行，日常日志仍明文落盘，且没有任何征兆）",
+      "[脱敏不误伤诊断价值] redact.test.ts 断言 `packages/app/src/main/index.ts`、`session-abc123`、`runtimeId=7f3a` 三个不含任何密钥的样本原样保留未被替换（逐字符相等）（过度脱敏会把日志变成无法定位问题的马赛克）",
+      "[必填上下文键] logger.test.ts 断言写出的每行 JSON 都含 `correlationId`、`runtimeId`、`sessionId` 三个键；调用方未提供 correlationId 时自动生成一个而不是写入 `undefined` 或抛错",
+      "[health check 有超时不会挂死] health-check.test.ts 用 fake timers 断言：三项检查中任一永不 resolve 时，`runStartupHealthCheck()` 仍在 5000ms 内 settle 且该项出现在 failed 数组中（无超时会表现为更新后应用永远停在启动画面，日志里什么都没有）",
+      "[marker 原子写] pending-update.json 与 last-known-good.json 采用「写临时文件 + rename」替换：`[ \"$(rg -c --no-filename 'writeJsonAtomic' packages/app/src/main/health/ | awk '{s+=$1} END{print s+0}')\" -ge 2 ]`（复用 fs-atomic.ts 的唯一原子写实现，不在本目录重写 rename 逻辑）；单测断言写入过程中抛错时原 marker 文件字节未变（marker 半写会让下次启动读到损坏 JSON 并直接进 safe mode）",
+      "[safe mode 有出口] 失败计数在一次成功启动后归零：单测按 fail → fail → 断言 safeMode===true → success → 断言失败计数 === 0 且 safeMode===false（不复位会让用户永远出不了安全模式）",
+      "[镜像不进正式产物 · 正负成对] (a) 正向行为断言：`PIBUDDY_USE_CN_MIRROR= node packages/app/scripts/build-config.mjs` 的输出中 `rg -c 'npmmirror'` 为 0，而 `PIBUDDY_USE_CN_MIRROR=1 node packages/app/scripts/build-config.mjs` 的输出中 `rg -c 'npmmirror'` >= 1（两个方向都测，证明镜像注入确实由该变量控制而非根本没实现）；(b) `test -e packages/app/electron-builder.yml && [ \"$(rg -c 'npmmirror' packages/app/electron-builder.yml | wc -l)\" -eq 0 ]`；(c) 回归守卫：`test -e .github/workflows/release.yml && [ \"$(rg -c 'PIBUDDY_USE_CN_MIRROR|NPM_CONFIG_REGISTRY|npmmirror' .github/workflows/release.yml | wc -l)\" -eq 0 ]`（原文只有 (c) 且该变量全仓不存在、release.yml 由本任务新建，属恒真）",
+      "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 3 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 3 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 3。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 3` 恒假）",
+      "[外链出口唯一 · 结构断言] `rg --no-filename -c 'shell\\.openExternal' packages/app/src -g '*.ts' -g '*.vue' -g '!**/security/window-policy.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（本任务新增的外链入口一律走 TASK-004 的 openExternalSafely）",
+      "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+      "[裁定3 前置 · marker 复用唯一原子写] packages/app/src/main/health/ 下的 pending-update.json 与 last-known-good.json 一律经 fs-atomic.ts 的 writeJsonAtomic 写入：`rg -c 'writeJsonAtomic' packages/app/src/main/health/` 输出 >= 2，且 `test -e packages/app/src/main/health/ && [ \"$(rg -c 'fsyncSync|renameSync' packages/app/src/main/health/ | wc -l)\" -eq 0 ]`（不得在本目录重写第三份原子写）",
+      "[CT-14 · ci.yml 只允许 modify] 本任务对 .github/workflows/ci.yml 的操作是 modify 而非 create：改后该文件仍 contains 'pnpm build'、'node scripts/check-test-discovery.mjs'、'node scripts/check-contract-uniqueness.mjs' 三项（TASK-001 交付的闸门不得被第二次 create 覆盖丢失），并新增 contains 'node scripts/check-workflow-pins.mjs'"
+    ],
+    "verification": "pnpm --filter @pibuddy/app dist -- --win nsis --publish never && node packages/app/scripts/verify-release-artifacts.mjs win && pnpm --filter @pibuddy/app test -- src/main/logging src/main/diagnostics src/main/health && node scripts/check-workflow-pins.mjs",
+    "definition_of_done": "三个平台的安装包和更新清单能在 CI 里可复现地产出，没有签名凭据时发布会明确失败而不是偷偷发未签名包；出问题时用户能一键导出一份不含隐私的诊断包，更新后启动失败会进入安全模式并给出退路；M4 的签名与真实 N→N+1 更新闭环在本环境记为未验证（not-tested / blocked-by-credential），待签名凭据与 clean VM 齐备后单独验收 —— 用户已于 2026-08-02 确认接受该状态，且该确认不削减 UpdateService 状态机、fake feed 与 docs/product/RELEASE_SETUP.md 的交付要求。"
+  },
+  "files": [
+    {
+      "path": "packages/app/electron-builder.yml",
+      "action": "modify",
+      "target": "mac/win/linux/publish/electronDownload",
+      "change": "mac 增加 zip + hardenedRuntime + entitlements + notarize + 麦克风用途说明；linux 增加 deb；新增 publish generic；移除硬编码 npmmirror"
+    },
+    {
+      "path": "packages/app/build/entitlements.mac.plist",
+      "action": "create",
+      "target": "macOS entitlements",
+      "change": "com.apple.security.cs.allow-jit、allow-unsigned-executable-memory、device.audio-input（麦克风）"
+    },
+    {
+      "path": "packages/app/scripts/build-config.mjs",
+      "action": "create",
+      "target": "构建期配置注入",
+      "change": "按 PIBUDDY_USE_CN_MIRROR / PIBUDDY_UPDATE_FEED_URL 组装 electron-builder 覆盖项，CI 默认不启用镜像"
+    },
+    {
+      "path": "packages/app/scripts/verify-release-artifacts.mjs",
+      "action": "create",
+      "target": "产物校验",
+      "change": "按平台断言 latest*.yml / 安装包 / blockmap 齐全，版本与 package.json 一致，stable 渠道禁止 prerelease 标记"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "action": "create",
+      "target": "release workflow",
+      "change": "win/mac/linux 原生 runner 矩阵 --publish never 构建 → 校验 → 缺凭据显式失败 → upload-artifacts job → publish-manifest job（最后发布 latest*.yml）；第三方 action 全部 SHA 固定"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "action": "modify",
+      "target": "PR CI",
+      "change": "在 TASK-001 交付的 ci.yml 上追加 `node scripts/check-workflow-pins.mjs` 与 `node packages/app/scripts/check-pure-js-deps.mjs` 两步；不得重建该文件（CT-14）"
+    },
+    {
+      "path": "scripts/check-workflow-pins.mjs",
+      "action": "create",
+      "target": "action 固定校验",
+      "change": "扫描 .github/workflows/*.yml 中所有 action 引用，正则为 `^\\s*-?\\s*uses:`（必须同时匹配 `uses:` 与最常见的紧凑写法 `- uses:`），凡不以 `@<40 位 hex>` 结尾者以退出码 1 逐条报出 file:line；全部固定时退出码 0。不得使用 `rg -vc` 作为通过态判据（计数为 0 时无输出且 exit 1）"
+    },
+    {
+      "path": "packages/app/scripts/check-pure-js-deps.mjs",
+      "action": "create",
+      "target": "纯 JS 依赖闸门",
+      "change": "遍历 packages/app 已安装依赖闭包，命中 binding.gyp / `gypfile: true` / install 类脚本含 node-gyp|prebuild-install|node-pre-gyp|cmake-js / 任何 .node 文件即退出码 1。不硬编码具体包名：w10 时 TASK-016 的六个解析库尚未引入，闸门对空集合须返回 0，之后随依赖增长自动生效"
+    },
+    {
+      "path": "packages/app/src/main/logger.ts",
+      "action": "modify",
+      "target": "createLogger()",
+      "change": "在 TASK-002 建立的唯一日志器上扩展：MAX_LOG_FILES 提到 7、补 correlationId/runtimeId/sessionId 三个必填上下文键、把 redactSecrets 挂到写出函数内（裁定4：不得新建 main/logging/logger.ts）"
+    },
+    {
+      "path": "packages/app/src/main/logger-redact.ts",
+      "action": "modify",
+      "target": "redactSecrets()",
+      "change": "在 TASK-002 建立的唯一脱敏实现上扩规则（Bearer token、home 路径归一为 ~、\"key\": 形式的 JSON 值）；被 support-bundle 与 TASK-014 的 connectivity 共同 import（裁定4）"
+    },
+    {
+      "path": "packages/app/src/main/diagnostics/support-bundle.ts",
+      "action": "create",
+      "target": "previewBundle/exportBundle",
+      "change": "先出清单供用户预览再导出 zip，全部文本经 redactSecrets；crash dump 收集前需显式隐私同意标记"
+    },
+    {
+      "path": "packages/app/src/main/health/health-check.ts",
+      "action": "create",
+      "target": "runStartupHealthCheck()",
+      "change": "DB migration / renderer ready / bundled Pi handshake 三项检查，失败次数累计写入 marker"
+    },
+    {
+      "path": "packages/app/src/main/health/safe-mode.ts",
+      "action": "create",
+      "target": "safe mode",
+      "change": "连续失败进入 safe mode：禁用第三方 extension 与自动任务、暴露诊断入口与上一稳定版本下载入口"
+    },
+    {
+      "path": "packages/app/src/main/update/update-service.ts",
+      "action": "modify",
+      "target": "installAndRestart / 启动流程",
+      "change": "安装前写 pending-update marker；启动时读 marker 触发 health check，成功写 last-known-good 并清 marker"
+    },
+    {
+      "path": "packages/app/src/main/ipc-registry.ts",
+      "action": "modify",
+      "target": "registerAllIpc()",
+      "change": "追加 registerDiagnosticsIpc()"
+    },
+    {
+      "path": "packages/app/src/preload/api/diagnostics.ts",
+      "action": "create",
+      "target": "diagnostics 命名空间",
+      "change": "previewBundle / exportBundle / getSafeModeState / getHealthReport"
+    },
+    {
+      "path": "packages/app/src/preload/api/index.ts",
+      "action": "modify",
+      "target": "api 聚合",
+      "change": "加入 diagnostics 命名空间"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/DiagnosticsPanel.vue",
+      "action": "create",
+      "target": "诊断面板",
+      "change": "文件清单预览 + 脱敏说明 + 导出 + 在文件夹中显示 + crash dump 隐私选择开关"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/SafeModeBanner.vue",
+      "action": "create",
+      "target": "safe mode 横幅",
+      "change": "说明已禁用内容、查看诊断、下载上一稳定版本入口"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/SettingsModal.vue",
+      "action": "modify",
+      "target": "设置弹窗",
+      "change": "挂载 DiagnosticsPanel 到「关于与更新」下的诊断区块"
+    },
+    {
+      "path": "docs/product/RELEASE_SETUP.md",
+      "action": "create",
+      "target": "发布配置文档",
+      "change": "secret 名称、申请、轮换、过期演练、发布暂停、hotfix 流程；不含任何 secret 值"
+    },
+    {
+      "path": "docs/product/ADR-0001-update-feed.md",
+      "action": "create",
+      "target": "更新源 ADR",
+      "change": "feed 选型、asar:true + extraResources/asarUnpack 外置资源对差分更新的限制、v1 不做真实二进制回滚的决定与替代方案"
+    },
+    {
+      "path": "packages/app/test/logger-redact.spec.ts",
+      "action": "create",
+      "target": "脱敏规则单测",
+      "change": "[errata-2 补录] c[4] 引用（原 test.unit[0] 误写为 src/main/logging/redact.test.ts），原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/test/logger.spec.ts",
+      "action": "modify",
+      "target": "轮转参数单测",
+      "change": "[errata-2 补录] c[5] 要求在 TASK-002(w2) 建立的该 spec 上追加轮转断言（原 test.unit[1] 误写为 src/main/logging/logger.test.ts）"
+    },
+    {
+      "path": "packages/app/src/main/diagnostics/support-bundle.test.ts",
+      "action": "create",
+      "target": "诊断包单测",
+      "change": "[errata-2 补录] test.unit[2] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/health/health-check.test.ts",
+      "action": "create",
+      "target": "健康检查单测",
+      "change": "[errata-2 补录] test.unit[3] 引用，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "先改 electron-builder.yml 的 mac zip 与 entitlements，本地跑 `--win nsis --publish never` 确认 latest.yml + blockmap 产出，再写 verify-release-artifacts.mjs 把断言固化",
+    "把 npmmirror 从 yml 里挪到 build-config.mjs，按 PIBUDDY_USE_CN_MIRROR 注入；CI 不设该变量",
+    "写 release.yml：三个原生 runner 各自 build + 签名（凭据来自 release environment secret）+ verify；缺任一必需 secret 的显式 exit 1 步骤放在 build 之前",
+    "publish 拆两个 job：upload-artifacts 先传不可变产物，publish-manifest 最后传 latest*.yml / latest-mac.yml / latest-linux.yml，保证客户端不会看到指向不存在文件的清单",
+    "所有第三方 action 换成 40 位 commit SHA，并写 check-workflow-pins.mjs 在 CI 中强制",
+    "logging：基于 electron-log 建 scope logger，所有日志出口统一过 redactSecrets；先写 redact.test.ts 再写实现",
+    "diagnostics：previewBundle 返回清单（日志、settings 脱敏副本、update-state marker、health 报告、系统信息），exportBundle 打包 zip；crash dump 只在用户显式同意后才纳入",
+    "health：runStartupHealthCheck 三项检查各自超时 5s；结果写 <userData>/update-state/health.json；连续两次失败置 safeMode",
+    "UPD-007 分层：bundled Pi 版本跟随应用发布，禁止运行期 npm update——在 pi-launcher 旁加 `assertNoRuntimeNpmUpdate()` 说明与单测断言代码库中不存在对 `npm update` / `npm i -g` 的调用（`rg -n \"npm (update|i -g|install -g)\" packages/app/src` 无输出）；external Pi 只做版本兼容范围检测与提示",
+    "写 RELEASE_SETUP.md 与 ADR-0001，明确把「无真实凭据 / 无 clean VM」两项写进文档的验收状态章节",
+    "在任务验收说明中把 M4 出口门禁标注为 blocked-by-credential + not-tested (no clean VM)"
+  ],
+  "test": {
+    "commands": [
+      "pnpm --filter @pibuddy/app test -- src/main/logging src/main/diagnostics src/main/health",
+      "node packages/app/scripts/verify-release-artifacts.mjs win",
+      "node scripts/check-workflow-pins.mjs",
+      "rg -n \"npm (update|i -g|install -g)\" packages/app/src"
+    ],
+    "unit": [
+      "packages/app/test/logger-redact.spec.ts",
+      "packages/app/test/logger.spec.ts",
+      "packages/app/src/main/diagnostics/support-bundle.test.ts",
+      "packages/app/src/main/health/health-check.test.ts"
+    ],
+    "integration": [
+      "本地 --win nsis --publish never 构建后跑 verify-release-artifacts.mjs"
+    ],
+    "success_metrics": [
+      "win 产物三件套齐全",
+      "四类敏感样本全部脱敏",
+      "缺凭据时 release job 失败"
+    ]
+  },
+  "reference": {
+    "pattern": "electron-builder 官方多平台配置 + GitHub Actions 原生 runner 矩阵",
+    "files": [
+      "packages/app/electron-builder.yml"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "把打包/签名/CI/诊断放在同一个任务，是因为它们共享同一个「缺凭据即失败关闭」的约束边界，且都不触碰运行时状态机（B05 的领地），从而可以与 B03 并行。",
+    "decision_factors": [
+      "mac 只有 dmg 是自动更新的硬缺口，必须补 zip",
+      "OBS-101 的 health marker 与 safe mode 是更新回滚的替代方案，属于同一决策链"
+    ],
+    "tradeoffs": "本任务不产出任何已签名的正式包，也不做真实 N→N+1 验证"
+  },
+  "risks": [
+    "结构性不可达：GitHub owner/repo、Windows signing identity/Publisher、Apple Team/Developer ID/notarization、Linux manifest 签名私钥、正式下载域名必须由产品所有者提供，Coding Agent 不得编造；本任务只交付 adapter + fake feed + unsigned CI artifact，release job 保持失败关闭，验收状态写 blocked-by-credential",
+    "无 clean VM，Windows signed NSIS 真实 N→N+1 闭环无法执行，验收记 not-tested (no clean VM)；M4 出口门禁在本环境不可达，任何声称完成的表述都是错误的",
+    "差分更新收益受限的真实原因是 asar: true（TASK-003 已恢复）下 pi-runtime 经 extraResources 外置、convert-worker 经 asarUnpack 外置，两者均不参与 blockmap 差分，其体积变化会导致整包重下；需在 ADR 中如实记录。不得为了差分更新把 asar 改回 false —— TASK-003 已用 runtime-manifest.json + extraResources 消除了 pi 对 asar:false 的依赖，回退会同时破坏该任务的收敛条件与产物完整性",
+    "DEB/RPM 无可靠自更新路径，UI 必须显式降级提示，不得伪装自动安装"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "三平台打包与签名",
+      "发布流水线",
+      "日志与诊断",
+      "更新后健康检查与安全模式"
+    ],
+    "affected_components": [
+      "electron-builder",
+      "ci",
+      "main/logging",
+      "main/diagnostics",
+      "main/health"
+    ],
+    "affected_requirements": [
+      "UPD-005",
+      "UPD-006",
+      "UPD-007",
+      "OBS-101",
+      "QA-401"
+    ],
+    "adr_ids": [
+      "ADR-0001-update-feed"
+    ]
+  },
+  "meta": {
+    "estimated_time": "14h",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": true,
+    "wave": 10
+  },
+  "origin_shard": "B",
+  "origin_id": "TASK-B06"
+}

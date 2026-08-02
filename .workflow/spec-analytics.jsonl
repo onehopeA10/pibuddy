@@ -1,0 +1,2 @@
+{"type":"cli","id":"CLI-1785648459552-1","timestamp":"2026-08-02T05:27:39.552Z","command":"spec load","args":{"category":"arch","stdin":false}}
+{"type":"cli","id":"CLI-1785666075562-1","timestamp":"2026-08-02T10:21:15.562Z","command":"spec load","args":{"category":"coding","stdin":false}}

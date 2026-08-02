@@ -1,0 +1,1730 @@
+{
+  "tasks": [
+    {
+      "id": "TASK-A01",
+      "title": "M0 工程基线：git 快照 + vitest + fake Pi RPC fixture + 最小 CI",
+      "description": "当前项目不是 git 仓库、零测试、零 CI，15 项现有闭环功能的回归全部表现为运行时静默行为变化（不会引发类型错误或构建失败）。本任务建立变更留痕载体与可回归测试地基：初始化本地 git 仓库并提交基线快照（不配置 remote、不 push），接入 vitest，交付可脚本化的 fake Pi RPC 子进程 fixture（正常响应/畸形 JSON/超时/stderr/主动退出/crash/extension UI/旧 generation 延迟事件/超长行），补齐首批 pi-sdk 回归测试，并落地不含任何真实凭证的最小 CI。这是 M1/M2 全部任务的前置条件。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "chore",
+      "priority": "high",
+      "effort": "large",
+      "action": "在 D:/selftool/pi-ui 执行 git init 并提交基线 commit（禁止 git remote add / git push）；在根 package.json 增加 devDependency \"vitest\": \"^3.2.0\" 与 script \"test\": \"vitest run\"；新建 vitest.workspace.ts 列出 [\"packages/*\"]；新建 tools/fake-pi/fake-pi.mjs，通过 argv --scenario 支持字面量 \"normal\" | \"malformed-json\" | \"timeout\" | \"stderr-noise\" | \"exit-immediately\" | \"crash-mid-stream\" | \"extension-ui\" | \"stale-generation\" | \"oversized-line\"，按 rpc.md Framing 规则用 LF 分帧读写 JSONL；新建 packages/pi-sdk/test/client.spec.ts 覆盖 id 关联、事件转发、畸形行忽略、exit 事件；新建 .github/workflows/ci.yml 跑 pnpm install --frozen-lockfile / pnpm typecheck / pnpm test / pnpm build。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "repo-root + tools/ + packages/pi-sdk/test",
+      "focus_paths": [
+        "tools/fake-pi/",
+        "packages/pi-sdk/test/",
+        ".github/workflows/"
+      ],
+      "read_first": [
+        "package.json",
+        ".gitignore",
+        "pnpm-workspace.yaml",
+        "packages/pi-sdk/src/client.ts",
+        "packages/pi-sdk/src/jsonl.ts",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Protocol Overview' 与 'Framing' 章节（第 20-38 行）",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Events' 章节（第 832-1080 行，事件字段真相源）",
+        "doc/PiBuddy-product-grade-coding-agent-prompt.md"
+      ],
+      "depends_on": [],
+      "wave": 1,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "git -C D:/selftool/pi-ui rev-parse --is-inside-work-tree 输出 true",
+          "git -C D:/selftool/pi-ui remote 输出为空（0 行），证明未配置任何 remote",
+          "git -C D:/selftool/pi-ui rev-list --count HEAD 输出 1，且 git status --porcelain 输出为空",
+          ".gitignore contains 'node_modules' 且 contains 'release' 且 contains 'out'",
+          "package.json contains '\"test\": \"vitest run\"' 且 contains '\"vitest\"'",
+          "tools/fake-pi/fake-pi.mjs 同时 contains 全部 9 个场景字面量：'normal'、'malformed-json'、'timeout'、'stderr-noise'、'exit-immediately'、'crash-mid-stream'、'extension-ui'、'stale-generation'、'oversized-line'",
+          "tools/fake-pi/fake-pi.mjs contains 'indexOf(\"\\n\")'，且 grep -c 'readline' tools/fake-pi/fake-pi.mjs 输出 0（rpc.md 明确禁止 Node readline）",
+          "pnpm -w test 退出码为 0，且输出中通过用例数 >= 8",
+          "packages/pi-sdk/test/client.spec.ts contains '--scenario' 且 contains 'malformed-json' 且 contains 'exit-immediately'",
+          ".github/workflows/ci.yml contains 'pnpm typecheck' 且 contains 'pnpm test' 且 contains 'pnpm build'",
+          "grep -c 'secrets\\.' .github/workflows/ci.yml 输出 0（CI 不得引用任何真实凭证）",
+          "doc/baseline-2026-08-02.md contains '流式文本增量' 且 contains 'Extension UI' 且 contains 'packaged-smoke'，列出 15 项现有闭环功能的手工 smoke 清单",
+          "[UI-observable] 按 doc/baseline-2026-08-02.md 清单在 pnpm --filter @pibuddy/app dev 下人工走通「输入 → 流式回复 → tool 卡片展开 → 停止」，并在文档中逐项打勾记录基线状态"
+        ],
+        "verification": "cd D:/selftool/pi-ui && git rev-parse --is-inside-work-tree && git remote && git rev-list --count HEAD && pnpm -w test && pnpm typecheck && node tools/fake-pi/fake-pi.mjs --scenario exit-immediately < /dev/null; echo \"fake-pi exit=$?\"",
+        "definition_of_done": "项目具备本地 git 变更留痕能力与可执行的自动化回归测试，后续任何改动都能用 fake Pi 进程在不依赖真实 Provider 的前提下验证，且 CI 在每次改动上自动跑通类型检查、单测与构建。"
+      },
+      "files": [
+        {
+          "path": ".gitignore",
+          "action": "modify",
+          "target": "忽略规则",
+          "change": "补充 node_modules/、out/、release/、resources/pi-runtime/、*.log、.workflow/scratch/*/outputs/tmp*"
+        },
+        {
+          "path": "package.json",
+          "action": "modify",
+          "target": "root scripts/devDependencies",
+          "change": "新增 devDependencies.vitest \"^3.2.0\"；新增 scripts.test \"vitest run\"、scripts.test:watch \"vitest\""
+        },
+        {
+          "path": "vitest.workspace.ts",
+          "action": "create",
+          "target": "workspace 配置",
+          "change": "export default [\"packages/*\"]，使 packages/app 与 packages/pi-sdk 的 test/ 目录被统一发现"
+        },
+        {
+          "path": "tools/fake-pi/fake-pi.mjs",
+          "action": "create",
+          "target": "fake Pi RPC 进程",
+          "change": "读 stdin JSONL（仅按 \\n 分帧、容忍尾部 \\r），按 --scenario 输出 response/event；timeout 场景吞掉命令不回响应；crash-mid-stream 在 message_update 中途 process.exit(1)；stale-generation 在收到 stop 后延迟 300ms 仍 emit exit"
+        },
+        {
+          "path": "tools/fake-pi/scenarios.mjs",
+          "action": "create",
+          "target": "场景数据",
+          "change": "导出每个场景的事件序列常量，供 fixture 与测试共用，避免测试硬编码字符串漂移"
+        },
+        {
+          "path": "packages/pi-sdk/test/client.spec.ts",
+          "action": "create",
+          "target": "PiRpcClient 基线回归",
+          "change": "用 fake-pi.mjs 作为 spawn.command 参数验证：send() 的 id 与 response.id 一一对应；event 事件被转发；malformed-json 行被忽略且不抛异常；exit-immediately 场景触发一次 exit 事件"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "action": "create",
+          "target": "CI workflow",
+          "change": "on: [push, pull_request]；matrix os: [ubuntu-latest, windows-latest]；步骤 pnpm/action-setup + setup-node 22 + pnpm install --frozen-lockfile + pnpm typecheck + pnpm test + pnpm build；不使用任何 secrets"
+        },
+        {
+          "path": "doc/baseline-2026-08-02.md",
+          "action": "create",
+          "target": "基线快照与 smoke 清单",
+          "change": "记录改造前的 15 项闭环功能清单、每项的手工验证步骤、当前通过状态，并声明无 clean VM 时打包验收只记 packaged-smoke"
+        }
+      ],
+      "implementation": [
+        "在 D:/selftool/pi-ui 执行 git init -b main；补齐 .gitignore；git add -A；git commit -m 'chore: PiBuddy 产品化改造基线快照'。全程不执行 git remote add、不执行 git push",
+        "根 package.json 增加 devDependencies.vitest ^3.2.0 与 scripts.test；执行 pnpm install",
+        "新建 vitest.workspace.ts 内容为 export default [\"packages/*\"]",
+        "编写 tools/fake-pi/fake-pi.mjs：解析 process.argv 取 --scenario，默认 normal；stdin 上手写 LF 分帧循环（buffer.indexOf(\"\\n\")，尾部 \\r 剥离），禁止使用 node:readline",
+        "为每个命令类型返回 {\"type\":\"response\",\"id\":<原 id>,\"command\":<原 type>,\"success\":true}；new_session/switch_session 额外带 data:{cancelled:false}，并支持 --cancel 开关返回 cancelled:true",
+        "实现 malformed-json 场景：先输出一行 '{\"type\":\"message_update\"'（截断），再输出合法行，验证客户端能跳过坏行继续工作",
+        "实现 oversized-line 场景：输出一行长度 16 MB 的 JSON 字符串，用于 A04 的 JSONL buffer 上限测试",
+        "实现 stale-generation 场景：收到 {\"type\":\"abort\"} 后仍在 300ms 后 emit 一个 agent_start 事件再退出，用于 A04 的旧代际丢弃测试",
+        "新建 packages/pi-sdk/test/client.spec.ts，用 { command: process.execPath, prefixArgs: [fakePiPath, '--scenario', s] } 构造 PiSpawn 驱动 PiRpcClient",
+        "新建 .github/workflows/ci.yml；确认文件中不出现 secrets. 前缀",
+        "按 doc/baseline-2026-08-02.md 清单人工跑一遍 dev 模式，逐项记录基线通过状态"
+      ],
+      "test": {
+        "commands": [
+          "pnpm -w test",
+          "pnpm typecheck",
+          "node tools/fake-pi/fake-pi.mjs --scenario normal"
+        ],
+        "unit": [
+          "packages/pi-sdk/test/client.spec.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "pnpm -w test 退出码 0",
+          "通过用例数 >= 8",
+          "git rev-list --count HEAD == 1",
+          "git remote 输出为空"
+        ]
+      },
+      "reference": {
+        "pattern": "参照 pi 自身 docs/rpc.md 的 Framing 约定实现分帧；fixture 的 spawn 契约照抄 packages/pi-sdk/src/client.ts 中 PiSpawn 接口（command / prefixArgs / env / shell）",
+        "files": [
+          "packages/pi-sdk/src/jsonl.ts",
+          "packages/pi-sdk/src/client.ts"
+        ],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "先建测试地基再动代码。M1/M2 的所有缺陷（代际错乱、ENOENT 吞异常、草稿丢失、SSRF）在类型层面完全不可见，没有 fake 进程就无法在不接真实 Provider 的前提下复现与验收。",
+        "decision_factors": [
+          "非 git 仓库导致无变更留痕载体",
+          "零测试导致 15 项闭环功能回归无法自动检测",
+          "M1 出口门禁明确要求可用 fake process 测试"
+        ],
+        "tradeoffs": "fixture 需要与 pi 真实协议保持同步，存在漂移风险；通过 scenarios.mjs 集中常量 + 直接引用 rpc.md 行号缓解。"
+      },
+      "risks": [
+        "git init 后首次 commit 可能因未忽略 node_modules 导致巨大提交 —— 必须先写好 .gitignore 再 git add",
+        "严禁执行 git remote add / git push；本任务只在本地留痕",
+        "vitest 3 与 workspace 配置在 pnpm monorepo 下需确认 packages/app 的 vue 组件测试不被强制加载（本任务只跑 pi-sdk 测试，app 侧测试由后续任务补）"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": [
+          "测试基础设施",
+          "CI",
+          "版本留痕"
+        ],
+        "affected_components": [
+          "tools/fake-pi",
+          "packages/pi-sdk/test",
+          ".github/workflows"
+        ],
+        "affected_requirements": [
+          "QA-001",
+          "QA-002",
+          "QA-003"
+        ],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "60m",
+        "risk": "medium",
+        "autonomous": true,
+        "checkpoint": false
+      }
+    },
+    {
+      "id": "TASK-A02",
+      "title": "M0 架构护栏：@pibuddy/contract 共享契约 + 事件 envelope + 端口接口 + 脱敏日志",
+      "description": "当前 main/preload/renderer/SDK 之间零共享契约：AppSettings 在 main/settings.ts:5-13 与 preload/index.d.ts:28-36 重复声明，SessionMeta 在 main/sessions-store.ts:5-12 与 preload/index.d.ts:19-26 重复声明，PickedFile/StartResult/STT 请求/图片返回/pi:start 参数各重复 2-3 处，共 7 处类型重复；16 个 IPC channel 零运行时校验；渲染进程用硬编码相对路径 '../../../preload/index.d' 跨层引用。本任务新建 @pibuddy/contract 包作为四方唯一真相源，定义带 7 字段的统一事件 envelope（未知协议版本 fail closed），声明 M1-M5 所需的五个端口接口（只定型不实现），落地结构化脱敏轮转日志，并把 runtime/lifecycle 状态在 Pinia store 中改为按 sessionId 归一化。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "refactor",
+      "priority": "high",
+      "effort": "large",
+      "action": "新建 packages/contract（name \"@pibuddy/contract\"，dependencies 直接引入 \"zod\": \"^4.4.3\"，当前 zod 仅作为 pi 的传递依赖存在于 lockfile，两个 workspace 包都没有直接依赖）；导出 export const PROTOCOL_VERSION = 1 与 PiEnvelope<T> {protocolVersion, workspaceId, sessionId, runtimeId, generation, sequence, occurredAt, payload}；导出 parseEnvelope(raw) 在 raw.protocolVersion !== PROTOCOL_VERSION 时返回 {ok:false, reason:\"protocol-version-mismatch\"}；导出 ports.ts 中 PiRuntimeSupervisor / SessionRepository / SettingsStore / PermissionEngine / UpdateService 五个 interface；把 packages/app/electron.vite.config.ts:8 的 externalizeDepsPlugin({exclude:[\"@pibuddy/pi-sdk\"]}) 改为 exclude:[\"@pibuddy/pi-sdk\",\"@pibuddy/contract\"]；在 tsconfig.node.json.include 与 tsconfig.web.json.include 各追加 \"../contract/src/**/*.ts\"，并在 tsconfig.web.json.paths 与 electron.vite.config.ts renderer.resolve.alias 增加 \"@contract\"；新建 packages/app/src/main/logger.ts 做键名脱敏 + 5MB 轮转保留 5 份。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/contract + packages/app 构建配置与 main/logger",
+      "focus_paths": [
+        "packages/contract/src/",
+        "packages/app/src/main/logger.ts"
+      ],
+      "read_first": [
+        "packages/app/electron.vite.config.ts",
+        "packages/app/tsconfig.node.json",
+        "packages/app/tsconfig.web.json",
+        "packages/app/tsconfig.json",
+        "packages/pi-sdk/tsconfig.json",
+        "tsconfig.base.json",
+        "packages/app/src/preload/index.d.ts",
+        "packages/app/src/main/settings.ts",
+        "packages/app/src/main/sessions-store.ts",
+        "packages/app/src/renderer/src/stores/app.ts",
+        "packages/pi-sdk/src/types.ts",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Events' 章节（第 832-1080 行，用于对齐 payload 类型）",
+        "pnpm-lock.yaml 中 zod 条目（确认当前仅为传递依赖）"
+      ],
+      "depends_on": [
+        "TASK-A01"
+      ],
+      "wave": 2,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/contract/package.json contains '\"name\": \"@pibuddy/contract\"' 且 dependencies 中 contains '\"zod\"'",
+          "packages/contract/src/envelope.ts contains 'export const PROTOCOL_VERSION = 1'",
+          "packages/contract/src/envelope.ts 同时 contains 全部 7 个信封字段名：'protocolVersion'、'workspaceId'、'sessionId'、'runtimeId'、'generation'、'sequence'、'occurredAt'",
+          "packages/contract/src/envelope.ts contains 'protocol-version-mismatch'",
+          "packages/contract/src/ports.ts 同时 contains 'interface PiRuntimeSupervisor'、'interface SessionRepository'、'interface SettingsStore'、'interface PermissionEngine'、'interface UpdateService'",
+          "packages/app/electron.vite.config.ts contains 'exclude: [\"@pibuddy/pi-sdk\", \"@pibuddy/contract\"]'",
+          "packages/app/tsconfig.node.json contains '../contract/src/**/*.ts' 且 packages/app/tsconfig.web.json contains '../contract/src/**/*.ts'",
+          "grep -rc 'preload/index.d' packages/app/src/renderer 输出 0（stores/app.ts:17 与 InputBar.vue:5 的硬编码跨层引用已全部改为 @contract）",
+          "grep -c 'interface AppSettings' packages/app/src/main/settings.ts packages/app/src/preload/index.d.ts 两文件合计输出 0（唯一定义迁至 packages/contract/src/settings.ts）",
+          "grep -c 'interface SessionMeta' packages/app/src/main/sessions-store.ts packages/app/src/preload/index.d.ts 两文件合计输出 0",
+          "packages/app/src/main/logger.ts contains '/apiKey|authorization|token|secret|password/i' 且 contains 'MAX_LOG_BYTES' 且 contains 'MAX_LOG_FILES'",
+          "packages/app/test/logger.spec.ts 断言：向 logger 传入 {apiKey:'sk-live-XYZ', prompt:'机密正文'} 后落盘内容 not contains 'sk-live-XYZ' 且 not contains '机密正文' 且 contains 'promptLength'；该测试在 pnpm -w test 中通过",
+          "packages/contract/test/envelope.spec.ts 断言 parseEnvelope({protocolVersion:2,...}).ok === false，且 parseEnvelope 缺失 sequence 字段时 ok === false；该测试在 pnpm -w test 中通过",
+          "packages/app/src/renderer/src/stores/app.ts contains 'runtimeScope' 且 contains 'Record<string, RuntimeScope>'，started/streaming/runtimeId/generation 已按 sessionId 归一化，同时保留同名 computed 代理使各组件调用点零改动",
+          "grep -c 'toolRuns = reactive' packages/app/src/renderer/src/stores/app.ts 输出 1（M0 明确不迁移 toolRuns，避免 ToolActivity.vue:12 查不到 run 时按 ToolActivity.vue:39 逻辑永久转圈）",
+          "pnpm typecheck 退出码为 0，pnpm -w test 退出码为 0，pnpm --filter @pibuddy/app build 退出码为 0",
+          "[UI-observable] pnpm --filter @pibuddy/app dev 启动后，仍可完成一次「输入 → 流式文本增量 → thinking 折叠 → tool 卡片展开 → 费用与 context 显示」全流程，且 DevTools 控制台无新增报错"
+        ],
+        "verification": "cd D:/selftool/pi-ui && pnpm install && pnpm typecheck && pnpm -w test && pnpm --filter @pibuddy/app build && grep -rc 'preload/index.d' packages/app/src/renderer",
+        "definition_of_done": "主进程、preload、渲染进程与 SDK 四方共用同一套类型与运行时 schema，所有跨进程事件都带可校验的统一信封且未知协议版本被拒绝，敏感信息不会落盘，架构依赖方向与需求追踪有文档可查。"
+      },
+      "files": [
+        {
+          "path": "packages/contract/package.json",
+          "action": "create",
+          "target": "包声明",
+          "change": "name \"@pibuddy/contract\"，private true，type module，main/types 指向 ./src/index.ts（与 @pibuddy/pi-sdk 一致，以源码形式被消费），dependencies 加 \"zod\": \"^4.4.3\""
+        },
+        {
+          "path": "packages/contract/tsconfig.json",
+          "action": "create",
+          "target": "tsconfig",
+          "change": "extends ../../tsconfig.base.json，types [\"node\"]，include [\"src\"]，与 packages/pi-sdk/tsconfig.json 保持一致（非 composite，由 app 直接 include 源码）"
+        },
+        {
+          "path": "packages/contract/src/envelope.ts",
+          "action": "create",
+          "target": "PiEnvelope / PROTOCOL_VERSION / parseEnvelope",
+          "change": "定义 7 字段 envelope 的 TS 类型与 zod schema；parseEnvelope 先校验 protocolVersion 再校验结构，任一不符返回 {ok:false, reason}，绝不放行未知版本"
+        },
+        {
+          "path": "packages/contract/src/ipc-contract.ts",
+          "action": "create",
+          "target": "channel 常量与 per-channel schema",
+          "change": "导出 CHANNELS 常量对象（覆盖现有 13 个 invoke + 3 个 push channel 名），并为每个 channel 定义 requestSchema / responseSchema，供 A07 收窄 IPC 时直接消费"
+        },
+        {
+          "path": "packages/contract/src/ports.ts",
+          "action": "create",
+          "target": "五个端口接口",
+          "change": "只定义 interface 与依赖方向注释（renderer → preload → main → pi-sdk → pi，禁止反向），不写任何实现，M1-M5 分别落地"
+        },
+        {
+          "path": "packages/contract/src/settings.ts",
+          "action": "create",
+          "target": "AppSettings 唯一定义",
+          "change": "合并 main/settings.ts:5-13 与 preload/index.d.ts:28-36 的重复声明为单一 zod schema + 推导类型"
+        },
+        {
+          "path": "packages/contract/src/session.ts",
+          "action": "create",
+          "target": "SessionSummary 唯一定义",
+          "change": "合并 main/sessions-store.ts:5-12 与 preload/index.d.ts:19-26；预留 cwd / runtimeVersion / parseError 字段供 A05 填充"
+        },
+        {
+          "path": "packages/contract/src/index.ts",
+          "action": "create",
+          "target": "桶导出",
+          "change": "export * from 上述各模块"
+        },
+        {
+          "path": "packages/contract/test/envelope.spec.ts",
+          "action": "create",
+          "target": "envelope fail-closed 测试",
+          "change": "覆盖版本不匹配、缺字段、sequence 非单调三类输入"
+        },
+        {
+          "path": "packages/app/package.json",
+          "action": "modify",
+          "target": "dependencies",
+          "change": "增加 \"@pibuddy/contract\": \"workspace:*\""
+        },
+        {
+          "path": "packages/app/electron.vite.config.ts",
+          "action": "modify",
+          "target": "main.plugins 与 renderer.resolve.alias",
+          "change": "第 8 行 exclude 数组追加 \"@pibuddy/contract\"（不加会在运行时变成无法解析的 external）；renderer alias 增加 \"@contract\" 指向 ../contract/src/index.ts；同时把 \"@sdk\" 由 ../pi-sdk/src/types.ts 保持不变"
+        },
+        {
+          "path": "packages/app/tsconfig.node.json",
+          "action": "modify",
+          "target": "include",
+          "change": "追加 \"../contract/src/**/*.ts\""
+        },
+        {
+          "path": "packages/app/tsconfig.web.json",
+          "action": "modify",
+          "target": "include 与 paths",
+          "change": "include 追加 \"../contract/src/**/*.ts\"；paths 增加 \"@contract\": [\"../contract/src/index.ts\"]"
+        },
+        {
+          "path": "packages/app/src/main/settings.ts",
+          "action": "modify",
+          "target": "AppSettings 声明",
+          "change": "删除本地 interface，改为 import type { AppSettings } from \"@pibuddy/contract\""
+        },
+        {
+          "path": "packages/app/src/main/sessions-store.ts",
+          "action": "modify",
+          "target": "SessionMeta 声明",
+          "change": "删除本地 interface，改为从 @pibuddy/contract 导入（本文件将在 A05 被 session-repository.ts 取代，此处只做去重）"
+        },
+        {
+          "path": "packages/app/src/preload/index.d.ts",
+          "action": "modify",
+          "target": "重复类型声明",
+          "change": "删除 StartResult/SessionMeta/AppSettings/PickedFile/STT 请求/图片返回 共 6 组本地声明，统一 re-export 自 @pibuddy/contract"
+        },
+        {
+          "path": "packages/app/src/renderer/src/stores/app.ts",
+          "action": "modify",
+          "target": "第 17 行 import 与 runtime/lifecycle 状态",
+          "change": "把 import ... from \"../../../preload/index.d\" 改为 from \"@contract\"；新增 interface RuntimeScope {started:boolean; streaming:boolean; runtimeId:string; generation:number} 与 runtimeScope: Record<string, RuntimeScope>，并保留 started/streaming 同名 computed 代理，组件调用点不改"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/InputBar.vue",
+          "action": "modify",
+          "target": "第 5 行 import",
+          "change": "把 \"../../../preload/index.d\" 改为 \"@contract\""
+        },
+        {
+          "path": "packages/app/src/main/logger.ts",
+          "action": "create",
+          "target": "结构化脱敏轮转日志",
+          "change": "JSONL 落盘至 app.getPath('userData')/logs/pibuddy-YYYYMMDD.log；redact() 递归剔除匹配 /apiKey|authorization|token|secret|password/i 的键；prompt/message 正文只记 promptLength 数字；环境变量只记 allowlist 命中的键名不记值；MAX_LOG_BYTES = 5*1024*1024，MAX_LOG_FILES = 5"
+        },
+        {
+          "path": "packages/app/test/logger.spec.ts",
+          "action": "create",
+          "target": "脱敏断言",
+          "change": "验证 API key 与 prompt 正文不落盘、promptLength 存在、轮转在超过 MAX_LOG_BYTES 后触发"
+        },
+        {
+          "path": "doc/architecture.md",
+          "action": "create",
+          "target": "架构与依赖方向",
+          "change": "记录 5 跳事件流（pi stdout → jsonl 分帧 → client 分派 → ipc 33ms 批处理 → preload → store reducer）、四层依赖方向硬规则与 @pibuddy/contract 的定位"
+        },
+        {
+          "path": "doc/threat-model.md",
+          "action": "create",
+          "target": "威胁模型",
+          "change": "按 STRIDE 覆盖现有 16 个 IPC channel，逐条标注 M2 对应的 SEC-001..SEC-005 缓解措施"
+        },
+        {
+          "path": "doc/traceability.md",
+          "action": "create",
+          "target": "需求追踪矩阵",
+          "change": "建立 RUN-/SES-/SEC-/EXT-/OBS-/QA- 需求 ID ↔ TASK-A01..A08 ↔ 验收条件 的三列对照表"
+        }
+      ],
+      "implementation": [
+        "pnpm create 目录 packages/contract，写 package.json（含 zod ^4.4.3 直接依赖）与 tsconfig.json，执行 pnpm install",
+        "写 envelope.ts：先写 zod schema piEnvelopeSchema，再由 z.infer 推导 PiEnvelope；parseEnvelope 第一步就比对 PROTOCOL_VERSION，不等则直接返回 {ok:false, reason:'protocol-version-mismatch'}，不进入结构校验",
+        "写 ports.ts 五个 interface：PiRuntimeSupervisor 至少含 start/stop/dispose/currentGeneration；SessionRepository 至少含 list/resolveSessionDir；SettingsStore 含 load/save/migrate；PermissionEngine 含 checkFrame/checkPayload/checkRate；UpdateService 留空壳给 M4/M5",
+        "把 main/settings.ts、main/sessions-store.ts、preload/index.d.ts 中 7 处重复类型逐一删除并改为从 @pibuddy/contract 导入",
+        "改 electron.vite.config.ts 第 8 行 exclude 数组与 renderer alias；改两个 tsconfig 的 include/paths",
+        "把 stores/app.ts:17 与 InputBar.vue:5 的 '../../../preload/index.d' 改为 '@contract'",
+        "在 stores/app.ts 引入 runtimeScope 归一化结构：新增 currentSessionId ref 与 runtimeScope Record，把 started/streaming 改为读写 runtimeScope[currentSessionId]，并导出同名 computed 保持组件 API 不变；显式不动 items/toolRuns/queue/statusTexts（M0 边界）",
+        "写 main/logger.ts 与 test/logger.spec.ts",
+        "写 doc/architecture.md、doc/threat-model.md、doc/traceability.md",
+        "跑 pnpm typecheck / pnpm -w test / pnpm --filter @pibuddy/app build，再人工跑一次 dev 全流程 smoke"
+      ],
+      "test": {
+        "commands": [
+          "pnpm typecheck",
+          "pnpm -w test",
+          "pnpm --filter @pibuddy/app build"
+        ],
+        "unit": [
+          "packages/contract/test/envelope.spec.ts",
+          "packages/app/test/logger.spec.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "typecheck / test / build 三者退出码均为 0",
+          "renderer 目录下对 preload/index.d 的引用数为 0",
+          "logger 输出不含 API key 与 prompt 正文"
+        ]
+      },
+      "reference": {
+        "pattern": "包结构照抄 packages/pi-sdk（type module + main 指向 src/index.ts + 非 composite，由 app 直接 include 源码消费，tsconfig.base.json noEmit:true）",
+        "files": [
+          "packages/pi-sdk/package.json",
+          "packages/pi-sdk/tsconfig.json",
+          "packages/app/electron.vite.config.ts"
+        ],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "先立契约再改行为。envelope 的 7 个字段是 RUN-002 代际治理与 SEC-002 收窄接口的共同前提；类型去重把 7 处重复声明收敛为唯一真相源，后续任务改一处即全链路生效。",
+        "decision_factors": [
+          "16 个 channel 零运行时校验",
+          "7 处类型重复必然漂移",
+          "M1 的 generation 治理需要信封字段先就位"
+        ],
+        "tradeoffs": "M0 只归一化 runtime/lifecycle 状态，toolRuns/items 保持全局，避免一次性改动触碰 ToolActivity.vue 的卡片渲染闭环；代价是 store 中短期并存两种状态组织方式。"
+      },
+      "risks": [
+        "electron.vite.config.ts:8 的 externalizeDepsPlugin exclude 若漏加 @pibuddy/contract，构建通过但运行时报无法解析的 external —— 必须用 pnpm --filter @pibuddy/app build 后实际启动验证",
+        "zod 当前仅是 pi 的传递依赖，必须在 packages/contract/package.json 显式声明为直接依赖，否则 pnpm 严格模式下解析失败",
+        "runtimeScope 归一化若破坏 activityTick（stores/app.ts:79,125-134）会导致流式期间 ChatView 不再滚底且无任何报错 —— 归一化范围必须排除 activityTick"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": [
+          "跨进程类型契约",
+          "事件信封",
+          "日志",
+          "架构文档"
+        ],
+        "affected_components": [
+          "packages/contract",
+          "packages/app/src/main",
+          "packages/app/src/preload",
+          "packages/app/src/renderer/src/stores"
+        ],
+        "affected_requirements": [
+          "OBS-001",
+          "OBS-002",
+          "QA-004"
+        ],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "90m",
+        "risk": "medium",
+        "autonomous": true,
+        "checkpoint": false
+      }
+    },
+    {
+      "id": "TASK-A03",
+      "title": "RUN-001 可靠内置 Pi runtime：ESM 解析 + 构建期自包含目录 + manifest 定位 + 环境变量白名单",
+      "description": "实测确认 @earendil-works/pi-coding-agent 0.83.0 的 package.json exports 只有 types 与 import 两个条件、没有 require，因此 pi-launcher.ts:14-15 的 createRequire().resolve('@earendil-works/pi-coding-agent') 在 dev 与 prod 下 100% 抛 ERR_PACKAGE_PATH_NOT_EXPORTED，被第 24 行空 catch 吞掉后永远回退到全局 pi 命令，内置版本形同虚设。第二重独立风险：electron-builder.yml 的 files 只列 out/** 与 package.json 未含 node_modules，且 packages/app/node_modules/@earendil-works/pi-coding-agent 是指向根 .pnpm 的 symlink，即使修好 resolve 打包产物里仍然没有 pi。本任务用 ESM 解析 + 构建期产出自包含 runtime 目录 + runtime-manifest.json 定位彻底解决，并恢复应用主代码 asar:true、对子进程环境变量做白名单。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "fix",
+      "priority": "high",
+      "effort": "large",
+      "action": "重写 packages/app/src/main/pi-launcher.ts：删除 createRequire 全部用法，dev 分支改用 fileURLToPath(import.meta.resolve(\"@earendil-works/pi-coding-agent\")) 得到 dist/index.js 后取同级 cli.js；packaged 分支只读 path.join(process.resourcesPath, \"pi-runtime\", \"runtime-manifest.json\") 并按其中 entry 字段定位；新增 const ENV_ALLOWLIST = [\"PATH\",\"HOME\",\"USERPROFILE\",\"APPDATA\",\"LOCALAPPDATA\",\"TMP\",\"TEMP\",\"SystemRoot\",\"ComSpec\",\"LANG\",\"LC_ALL\",\"PI_CODING_AGENT_DIR\",\"PI_CODING_AGENT_SESSION_DIR\",\"HTTP_PROXY\",\"HTTPS_PROXY\",\"NO_PROXY\"] 并显式只补 ELECTRON_RUN_AS_NODE:\"1\"；删除第 28 行的 shell: isWin 改为全 argv + shell:false；新建 packages/app/scripts/prepare-pi-runtime.mjs 用 fs.cp(realpath, dest, {recursive:true, dereference:true}) 产出 packages/app/resources/pi-runtime/ 与 runtime-manifest.json {name, version, entry:\"dist/cli.js\", builtAt, protocolVersion:1, capabilities, sha256}；electron-builder.yml 把 asar:false 改为 asar:true 并用 extraResources 投递 pi-runtime。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/pi-launcher.ts + 构建流水线",
+      "focus_paths": [
+        "packages/app/src/main/",
+        "packages/app/scripts/"
+      ],
+      "read_first": [
+        "packages/app/src/main/pi-launcher.ts",
+        "packages/app/electron-builder.yml",
+        "packages/app/package.json",
+        "packages/pi-sdk/src/client.ts",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/package.json（exports 字段真相源：只有 types 与 import，无 require）",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Starting RPC Mode' 章节（第 7-19 行）",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/environment-variables.md 第 70-85 行",
+        "packages/contract/src/settings.ts",
+        "packages/app/src/renderer/src/components/SettingsModal.vue"
+      ],
+      "depends_on": [
+        "TASK-A02"
+      ],
+      "wave": 3,
+      "parallel_group": "w3",
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "grep -c 'createRequire' packages/app/src/main/pi-launcher.ts 输出 0",
+          "packages/app/src/main/pi-launcher.ts contains 'import.meta.resolve(\"@earendil-works/pi-coding-agent\")' 且 contains 'fileURLToPath'",
+          "packages/app/src/main/pi-launcher.ts contains 'process.resourcesPath' 且 contains 'runtime-manifest.json'",
+          "packages/app/src/main/pi-launcher.ts contains 'ENV_ALLOWLIST' 且 contains 'ELECTRON_RUN_AS_NODE'",
+          "grep -c 'shell: isWin' packages/app/src/main/pi-launcher.ts 输出 0，且 grep -c 'shell: true' packages/app/src/main/pi-launcher.ts 输出 0",
+          "grep -c 'catch {}' packages/app/src/main/pi-launcher.ts 输出 0（原第 24-26 行的空 catch 已消除，解析失败必须记录到 logger 并向上抛出可读原因）",
+          "packages/app/test/pi-launcher.spec.ts 断言：在 process.env 中人为设置 NODE_OPTIONS='--inspect'、ELECTRON_RUN_AS_NODE='0'、NODE_INSPECT_RESUME_ON_START='1'、LD_PRELOAD='/tmp/x.so'、DYLD_INSERT_LIBRARIES='/tmp/y.dylib' 后，buildPiSpawn().env 中 NODE_OPTIONS/NODE_INSPECT_RESUME_ON_START/LD_PRELOAD/DYLD_INSERT_LIBRARIES 四个键均不存在，且 env.ELECTRON_RUN_AS_NODE === '1'；该测试在 pnpm -w test 中通过",
+          "packages/app/test/pi-launcher.spec.ts 断言：伪造 resourcesPath 下的 runtime-manifest.json 缺失时抛出的错误信息 contains 'runtime-manifest.json'（而非静默回退全局 pi）",
+          "pnpm --filter @pibuddy/app exec node scripts/prepare-pi-runtime.mjs 退出码为 0",
+          "packages/app/resources/pi-runtime/dist/cli.js 文件存在且非 symlink（node -e \"console.log(require('fs').lstatSync('packages/app/resources/pi-runtime/dist/cli.js').isSymbolicLink())\" 输出 false）",
+          "packages/app/resources/pi-runtime/runtime-manifest.json contains '\"version\": \"0.83.0\"' 且 contains '\"entry\": \"dist/cli.js\"' 且 contains '\"protocolVersion\": 1' 且 contains '\"sha256\"'",
+          "packages/app/electron-builder.yml contains 'asar: true' 且 grep -c 'asar: false' packages/app/electron-builder.yml 输出 0",
+          "packages/app/electron-builder.yml contains 'extraResources:' 且 contains 'pi-runtime'",
+          "packages/app/package.json 的 dist script contains 'prepare-pi-runtime'（打包前必然产出 runtime 目录）",
+          "packages/contract/src/settings.ts contains 'piRuntimeMode' 且 contains 'external' 且 contains 'bundled'；SettingsModal.vue contains '切回内置'，且 grep -c 'settings.set({ piRuntimeMode' packages/app/src/main/pi-launcher.ts 输出 0（external 失败时不得静默改写设置）",
+          "packages/app/src/main/pi-launcher.ts contains 'assertRuntimeHandshake'，对 get_state 返回的版本与 manifest.version 及 protocolVersion 做比对，不一致时抛出含双方版本号的错误",
+          "[UI-observable] 手动：把全局 pi 命令临时重命名（Windows 上 rename pi.cmd），pnpm --filter @pibuddy/app dev 仍能正常启动并完成一次问答，日志中 runtime source 记为 bundled；再把 settings 的 piRuntimeMode 改为 external 并指向不存在的命令，界面出现明确错误与「切回内置」按钮，点击后恢复可用，且未在失败瞬间自动改写用户设置",
+          "[UI-observable] packaged-smoke：pnpm --filter @pibuddy/app dist 后运行 release/win-unpacked/PiBuddy.exe，能选择工作文件夹并完成一次问答（本机 win-unpacked smoke，非 clean VM，验收状态记 packaged-smoke）"
+        ],
+        "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm --filter @pibuddy/app exec node scripts/prepare-pi-runtime.mjs && node -e \"const m=require('./packages/app/resources/pi-runtime/runtime-manifest.json');console.log(m.version,m.entry,m.protocolVersion)\" && pnpm --filter @pibuddy/app dist",
+        "definition_of_done": "应用在开发与打包两种形态下都确定性地使用自带的 pi 运行时，用户机器上没有全局 pi 也能正常工作；打包产物恢复 asar 保护；pi 子进程不再继承任何可被利用的调试或注入类环境变量。"
+      },
+      "files": [
+        {
+          "path": "packages/app/src/main/pi-launcher.ts",
+          "action": "modify",
+          "target": "buildPiSpawn / 新增 resolvePiRuntime / assertRuntimeHandshake / ENV_ALLOWLIST",
+          "change": "删除第 1 行 createRequire import 与第 13-26 行整段 try/catch；dev 用 import.meta.resolve + fileURLToPath；packaged 只读 process.resourcesPath/pi-runtime/runtime-manifest.json；env 由 ENV_ALLOWLIST 过滤后再补 ELECTRON_RUN_AS_NODE='1'；shell 恒为 false；external 模式解析绝对路径而非依赖 shell"
+        },
+        {
+          "path": "packages/app/src/main/pi-runtime-manifest.ts",
+          "action": "create",
+          "target": "manifest 读取与校验",
+          "change": "定义 RuntimeManifest 类型与 zod schema（复用 @pibuddy/contract 的 PROTOCOL_VERSION），读取失败或 protocolVersion 不匹配时抛出含具体原因的错误"
+        },
+        {
+          "path": "packages/app/scripts/prepare-pi-runtime.mjs",
+          "action": "create",
+          "target": "构建期 runtime 产出",
+          "change": "用 import.meta.resolve 定位包根后 fs.realpathSync 解开 pnpm symlink，fs.cp(real, 'resources/pi-runtime', {recursive:true, dereference:true})，再写 runtime-manifest.json（含 dist/cli.js 的 sha256）"
+        },
+        {
+          "path": "packages/app/electron-builder.yml",
+          "action": "modify",
+          "target": "asar 与 extraResources",
+          "change": "asar: false → asar: true；新增 extraResources: - from: resources/pi-runtime, to: pi-runtime；files 增加 '!resources/**' 避免 runtime 被重复打进 asar"
+        },
+        {
+          "path": "packages/app/package.json",
+          "action": "modify",
+          "target": "scripts",
+          "change": "新增 \"prepare:runtime\": \"node scripts/prepare-pi-runtime.mjs\"；dist 改为 \"pnpm prepare:runtime && electron-vite build && electron-builder\""
+        },
+        {
+          "path": "packages/contract/src/settings.ts",
+          "action": "modify",
+          "target": "AppSettings schema",
+          "change": "新增 piRuntimeMode: z.enum([\"bundled\",\"external\"]).default(\"bundled\") 与 piExternalCommand: z.string().optional()"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/SettingsModal.vue",
+          "action": "modify",
+          "target": "高级设置区",
+          "change": "新增「Pi 运行时」高级设置项（默认内置），external 启动失败时展示错误详情与「切回内置」按钮；按钮点击才写设置，失败本身不写设置"
+        },
+        {
+          "path": "packages/app/test/pi-launcher.spec.ts",
+          "action": "create",
+          "target": "环境变量白名单与 manifest 定位测试",
+          "change": "覆盖注入类环境变量被剔除、ELECTRON_RUN_AS_NODE 被显式置 1、manifest 缺失抛可读错误、handshake 版本不匹配抛错四组用例"
+        }
+      ],
+      "implementation": [
+        "读 pi 包 package.json 确认 exports 只有 types/import 两个条件，据此删除 pi-launcher.ts 全部 createRequire 代码路径",
+        "实现 resolvePiRuntime()：app.isPackaged 为 false 时走 fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent')) → path.dirname → cli.js；为 true 时只读 process.resourcesPath/pi-runtime/runtime-manifest.json 并 join entry",
+        "实现 ENV_ALLOWLIST 过滤函数 buildChildEnv(base)：从 base 中只挑白名单键，再显式设置 ELECTRON_RUN_AS_NODE='1'，返回全新对象（不做 {...process.env} 展开）",
+        "把 buildPiSpawn 返回的 shell 恒定为 false；external 模式下用 which/where 解析出绝对路径再交给 spawn，不依赖 shell 解析 .cmd",
+        "实现 assertRuntimeHandshake(state, manifest)：比对 manifest.version 与 get_state 返回的版本，比对 manifest.protocolVersion 与 @pibuddy/contract 的 PROTOCOL_VERSION，不一致抛出含双方值的错误",
+        "写 scripts/prepare-pi-runtime.mjs：realpathSync 解开 packages/app/node_modules/@earendil-works/pi-coding-agent 的 pnpm symlink，dereference 复制，计算 dist/cli.js 的 sha256 写入 manifest",
+        "改 electron-builder.yml 与 packages/app/package.json 的 dist 链路",
+        "在 contract 的 AppSettings 增加 piRuntimeMode/piExternalCommand，在 SettingsModal.vue 加高级设置与「切回内置」按钮",
+        "写 packages/app/test/pi-launcher.spec.ts 并跑 pnpm -w test",
+        "跑 pnpm --filter @pibuddy/app dist，运行 release/win-unpacked/PiBuddy.exe 做 packaged-smoke 并把结果记入 doc/traceability.md"
+      ],
+      "test": {
+        "commands": [
+          "pnpm -w test",
+          "pnpm typecheck",
+          "pnpm --filter @pibuddy/app exec node scripts/prepare-pi-runtime.mjs",
+          "pnpm --filter @pibuddy/app dist"
+        ],
+        "unit": [
+          "packages/app/test/pi-launcher.spec.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "createRequire 出现次数 0",
+          "runtime-manifest.json 中 version 为 0.83.0",
+          "asar:true 且 win-unpacked 可完成一次问答",
+          "注入类环境变量在子进程 env 中不存在"
+        ]
+      },
+      "reference": {
+        "pattern": "PiSpawn 契约见 packages/pi-sdk/src/client.ts:20-28（command / prefixArgs / env / shell）；RPC 启动参数见 pi docs/rpc.md 'Starting RPC Mode'",
+        "files": [
+          "packages/pi-sdk/src/client.ts",
+          "packages/app/src/main/pi-launcher.ts"
+        ],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "resolve 缺陷与打包布局缺陷是两个独立故障点，必须分别修复并分别验证：前者用 ESM import.meta.resolve 绕开缺失的 require 条件，后者用构建期自包含目录 + manifest 摆脱对 node_modules 布局与 pnpm symlink 的任何依赖，从而让 asar:true 得以恢复。",
+        "decision_factors": [
+          "exports 无 require 条件，createRequire 路径必然失败",
+          "空 catch 让失败不可见",
+          "pnpm symlink 使 files 白名单方案不可靠",
+          "asar:false 削弱了产物完整性"
+        ],
+        "tradeoffs": "自包含复制会增大安装包体积（pi 完整 dist）；换来的是路径确定性与 asar 保护，且 manifest 的 sha256 提供了完整性校验入口。"
+      },
+      "risks": [
+        "fs.cp 的 dereference 在 Windows 上对深层嵌套 node_modules 可能触碰路径长度上限，需要在脚本中显式报错而非静默截断",
+        "asar:true 后 pi 运行时动态加载扩展/技能文件的路径必须全部落在 extraResources 投递的 pi-runtime 目录内，packaged-smoke 必须实际触发一次 tool 调用而不只是启动",
+        "import.meta.resolve 在 electron-vite 的 main 打包产物中需保持为运行时调用而非被静态内联，构建后必须实际启动验证"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": [
+          "Pi 运行时定位",
+          "打包流水线",
+          "子进程环境隔离"
+        ],
+        "affected_components": [
+          "packages/app/src/main/pi-launcher.ts",
+          "packages/app/scripts",
+          "packages/app/electron-builder.yml"
+        ],
+        "affected_requirements": [
+          "RUN-001",
+          "SEC-001"
+        ],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "75m",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": false
+      }
+    },
+    {
+      "id": "TASK-A04",
+      "title": "RUN-002 + RUN-003 运行时代际状态机与 SDK 可靠性垂直切片",
+      "description": "实测：clients Map 只按 webContentsId 索引，无 runtimeId/generation；makeEventForwarder(ipc.ts:36-77) 只返回函数不返回 dispose 句柄，client 被替换时 33ms timer 无人可清；client.ts:104-111 旧进程延迟退出仍 emit('exit')，经 ipc.ts:102 发给 renderer，stores/app.ts:287 无从辨别代际，导致刚启动成功的新会话被置 started=false 并弹「智能体进程意外退出」。SDK 侧 timeout / AbortSignal / stdin error / drain 背压 / JSONL buffer 上限全部缺失；ENOENT 实测序列为 error → close 且 exit 事件从不触发，导致 proc 永不置 null、pi:exit 永不发出、死 client 滞留在 clients map（ipc.ts:104 的 clients.set 位于 await 之前），clientFor 只抛泛化「智能体尚未启动」吞掉真因。rpc.md 全文无 sequence 概念，序号必须由 PiBuddy 自行注入。本任务作为一个垂直切片同时改造 SDK、主进程 supervisor、preload 与渲染进程 store。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "fix",
+      "priority": "high",
+      "effort": "large",
+      "action": "在 packages/pi-sdk/src/client.ts 增加 readonly runtimeId = randomUUID()、readonly generation、type RuntimePhase = \"idle\"|\"starting\"|\"running\"|\"stopping\"|\"stopped\"|\"crashed\"|\"recovering\" 与 const ALLOWED_TRANSITIONS 表（非法转换在 process.env.NODE_ENV !== \"production\" 时抛错）；send(command, opts?: {timeoutMs?: number; signal?: AbortSignal}) 默认 DEFAULT_RPC_TIMEOUT_MS = 30_000，超时或 abort 后必须 this.pending.delete(id)；注册 proc.on(\"close\") 与 proc.stdin.on(\"error\")、检查 stdin.write 返回值并在 false 时 await once(stdin,\"drain\")；jsonl.ts 增加 MAX_LINE_BYTES = 8*1024*1024 与 MAX_BUFFER_BYTES = 16*1024*1024 超限即报错并重置 buffer；stop() 实现四级阶梯 abort(1500ms) → stdin.end()(1000ms) → SIGTERM(3000ms) → Windows 用 taskkill /pid <pid> /T /F、其它平台 process.kill(-pid,'SIGKILL')；新建 packages/app/src/main/pi-supervisor.ts 实现 @pibuddy/contract 的 PiRuntimeSupervisor，为每次 start 分配不可复用的 runtimeId 与自增 generation、维护单调 sequence，并把 pi:event / pi:ui-request / pi:exit 三条 push 通道全部包进 PiEnvelope；把 ipc.ts:104 的 clients.set(wc.id, client) 移到 client.start() 之后、任何 await 之前；渲染进程 stores/app.ts 在 handleEvent 入口丢弃 generation 小于当前值或 sequence 未递增的信封，并接住 app.ts:285-287 被丢弃的三个 unsubscribe 闭包。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/pi-sdk + packages/app/src/main + preload + renderer store",
+      "focus_paths": [
+        "packages/pi-sdk/src/",
+        "packages/app/src/main/",
+        "packages/app/src/renderer/src/stores/"
+      ],
+      "read_first": [
+        "packages/pi-sdk/src/client.ts",
+        "packages/pi-sdk/src/jsonl.ts",
+        "packages/app/src/main/ipc.ts",
+        "packages/app/src/preload/index.ts",
+        "packages/app/src/renderer/src/stores/app.ts",
+        "packages/contract/src/envelope.ts",
+        "packages/contract/src/ports.ts",
+        "tools/fake-pi/fake-pi.mjs",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Protocol Overview' 与 'Framing'（第 20-38 行，确认协议不提供 sequence，需自行注入）",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Events' 章节（第 832-1080 行）"
+      ],
+      "depends_on": [
+        "TASK-A02",
+        "TASK-A03"
+      ],
+      "wave": 4,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/pi-sdk/src/client.ts contains 'DEFAULT_RPC_TIMEOUT_MS = 30_000' 且 contains 'signal?: AbortSignal'",
+          "packages/pi-sdk/src/client.ts contains 'ALLOWED_TRANSITIONS' 且同时 contains 全部 7 个相位字面量 'idle'、'starting'、'running'、'stopping'、'stopped'、'crashed'、'recovering'",
+          "packages/pi-sdk/src/client.ts contains 'proc.on(\"close\"' 且 contains 'proc.stdin.on(\"error\"' 且 contains 'once(proc.stdin, \"drain\")'",
+          "packages/pi-sdk/src/client.ts contains 'taskkill' 且 contains '/T' 且 contains '/F'",
+          "packages/pi-sdk/src/client.ts contains 'randomUUID()' 且 contains 'readonly runtimeId'",
+          "packages/pi-sdk/src/jsonl.ts contains 'MAX_LINE_BYTES' 且 contains 'MAX_BUFFER_BYTES'",
+          "packages/app/src/main/pi-supervisor.ts contains 'implements PiRuntimeSupervisor' 且 contains 'generation' 且 contains 'sequence' 且 contains 'PROTOCOL_VERSION'",
+          "packages/app/src/main/pi-supervisor.ts contains 'dispose' 且该函数体同时 contains 'clearTimeout'、'removeAllListeners'、'queue = []'（RUN-002 要求 dispose 取消 batch timer、清队列、移除 listener、拒绝 pending）",
+          "packages/app/src/main/ipc.ts 中 'clients.set(wc.id, client)' 所在行号小于该 handler 内第一个 'await ' 所在行号（用 node 脚本断言，修复 ipc.ts:104 死 client 滞留）",
+          "grep -c '智能体尚未启动' packages/app/src/main/ipc.ts 输出 0；clientFor 抛出的错误信息包含 lastSpawnError 的原始文本（ENOENT 真因不再被吞）",
+          "packages/pi-sdk/test/lifecycle.spec.ts 断言：spawn 一个不存在的可执行文件后 2000ms 内 phase 变为 'crashed'，且 'exit' 事件恰好被 emit 一次；该测试在 pnpm -w test 中通过",
+          "packages/pi-sdk/test/lifecycle.spec.ts 断言：--scenario timeout 下 send() 在 30_000ms（测试中用 timeoutMs:200 覆写）后 reject，且 client 内部 pending map 的 size 回到 0",
+          "packages/pi-sdk/test/lifecycle.spec.ts 断言：--scenario oversized-line 下 jsonl reader 抛出可捕获错误且不导致进程内存无界增长（buffer 长度在报错后归零）",
+          "packages/pi-sdk/test/lifecycle.spec.ts 断言：非法状态转换（如 stopped → running）在 NODE_ENV 非 production 时抛错",
+          "packages/app/test/generation.spec.ts 断言：先后投递 generation:2 与 generation:1 两个信封，store 处理后 started 仍为 true 且 generation:1 的 payload 未进入 items；另断言 sequence 倒退的信封被丢弃；该测试在 pnpm -w test 中通过",
+          "grep -c 'activityTick.value++' packages/app/src/renderer/src/stores/app.ts 输出 >= 1（ChatView 滚动唯一驱动必须保留）",
+          "packages/app/src/renderer/src/stores/app.ts contains 'unsubscribes' 且 subscribeOnce 中三个 window.piBuddy.pi.on* 的返回值均被存入该数组（修复 app.ts:285-287 闭包被丢弃）",
+          "pnpm typecheck 退出码 0，pnpm -w test 退出码 0",
+          "[UI-observable] 手动：在流式回复进行中连续点击两次「新任务」，界面不再弹出「智能体进程意外退出，请重新开始」，输入框保持可用且能立即发送下一条；同一操作后流式期间聊天区仍自动滚动到底部、tool 卡片仍可展开",
+          "[UI-observable] 手动：把 settings 的 piRuntimeMode 设为 external 并指向不存在的命令，界面给出的错误文案包含 ENOENT 或缺失命令名，而非泛化的「智能体尚未启动」"
+        ],
+        "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && node -e \"const s=require('fs').readFileSync('packages/app/src/main/ipc.ts','utf8').split('\\n');const set=s.findIndex(l=>l.includes('clients.set(wc.id, client)'));const aw=s.findIndex((l,i)=>i>s.findIndex(x=>x.includes('pi:start'))&&l.includes('await '));console.log('set',set,'firstAwait',aw);process.exit(set>=0&&set<aw?0:1)\"",
+        "definition_of_done": "任意一次运行时重启、崩溃或用户主动停止之后，界面状态与实际进程状态始终一致：旧代际的事件与退出通知不会污染新会话，进程启动失败会给出真实原因，主动停止与崩溃被明确区分，且没有任何请求会永久悬挂。"
+      },
+      "files": [
+        {
+          "path": "packages/pi-sdk/src/client.ts",
+          "action": "modify",
+          "target": "PiRpcClient 全类",
+          "change": "新增 runtimeId/generation/phase 与 ALLOWED_TRANSITIONS；send 增加 timeoutMs 与 signal 并在结束路径统一 pending.delete；start 中注册 proc.on('close') 与 proc.stdin.on('error')；write 检查返回值做 drain 背压；failAll 区分 stoppedByUser；stop 改为四级阶梯并对每级设超时；新增有界诊断环 diagnostics（上限 200 条）收集 malformed / orphan / duplicate response"
+        },
+        {
+          "path": "packages/pi-sdk/src/jsonl.ts",
+          "action": "modify",
+          "target": "attachJsonlReader",
+          "change": "新增 MAX_LINE_BYTES = 8*1024*1024 与 MAX_BUFFER_BYTES = 16*1024*1024；超限时调用新增的 onError 回调并把 buffer 重置为空字符串；保持现有仅按 \\n 分帧、剥离尾部 \\r 的语义不变（已符合 rpc.md Framing）"
+        },
+        {
+          "path": "packages/pi-sdk/src/index.ts",
+          "action": "modify",
+          "target": "导出面",
+          "change": "导出 RuntimePhase、RpcTimeoutError、RpcAbortedError、JsonlOverflowError"
+        },
+        {
+          "path": "packages/app/src/main/pi-supervisor.ts",
+          "action": "create",
+          "target": "PiRuntimeSupervisor 实现",
+          "change": "持有 clients: Map<number, {client, runtimeId, generation, sequence, forwarder}>；每次 start 生成 randomUUID() 与 ++generationCounter（永不复用）；forwarder 返回 {push, dispose}，dispose 清 33ms timer、清空 queue、removeAllListeners、reject pending；只转发 generation === 当前 generation 的事件；所有 push 通道用 @pibuddy/contract 的 PiEnvelope 包装并填满 7 个字段"
+        },
+        {
+          "path": "packages/app/src/main/ipc.ts",
+          "action": "modify",
+          "target": "pi:start / pi:stop / clientFor / makeEventForwarder",
+          "change": "把 makeEventForwarder（第 36-77 行）整体迁入 pi-supervisor.ts；pi:start 改为委托 supervisor；clients.set 移至 client.start() 之后、await 之前；clientFor 抛出的错误携带 lastSpawnError 原文；pi:exit 携带 runtimeId + generation"
+        },
+        {
+          "path": "packages/app/src/preload/index.ts",
+          "action": "modify",
+          "target": "onEvent / onUiRequest / onExit",
+          "change": "不再剥离 event 只传 payload，改为把完整 PiEnvelope 透传给渲染进程（第 7-11 行 subscribe 调整），并在 pagehide 时清理全部监听"
+        },
+        {
+          "path": "packages/app/src/preload/index.d.ts",
+          "action": "modify",
+          "target": "回调签名",
+          "change": "三个 on* 回调参数类型改为 PiEnvelope<AgentEvent> / PiEnvelope<ExtensionUiRequest> / PiEnvelope<{code:number|null; reason:'expected-stop'|'crash'}>"
+        },
+        {
+          "path": "packages/app/src/renderer/src/stores/app.ts",
+          "action": "modify",
+          "target": "subscribeOnce / handleEvent / start",
+          "change": "新增 currentRuntimeId、currentGeneration、lastSequence；handleEvent 入口先 parseEnvelope 再比对代际与序号，不合格直接 return；onExit 只在 generation 相同时置 started=false 并按 reason 区分「已停止」与「意外退出」；把三个 on* 返回的 unsubscribe 存入 unsubscribes 数组并在 dispose 时调用"
+        },
+        {
+          "path": "packages/pi-sdk/test/lifecycle.spec.ts",
+          "action": "create",
+          "target": "SDK 可靠性测试",
+          "change": "覆盖 ENOENT→crashed、timeout 后 pending 清空、abort signal、oversized-line、非法状态转换、stop 四级阶梯全部走完六组用例"
+        },
+        {
+          "path": "packages/app/test/generation.spec.ts",
+          "action": "create",
+          "target": "代际丢弃测试",
+          "change": "覆盖旧 generation 信封被丢弃、sequence 倒退被丢弃、同代际正常事件被接收三组用例"
+        }
+      ],
+      "implementation": [
+        "在 client.ts 顶部引入 node:crypto randomUUID 与 node:events once；构造函数接收 generation 并生成 runtimeId",
+        "定义 RuntimePhase 与 ALLOWED_TRANSITIONS 表，实现 private transition(next)，非法转换时在 NODE_ENV !== 'production' 抛错、生产环境记 diagnostics",
+        "改写 send()：生成 id 为 `${this.runtimeId}:${++this.seq}`；用 AbortSignal.timeout(timeoutMs ?? DEFAULT_RPC_TIMEOUT_MS) 与传入 signal 组合，任一触发即 pending.delete(id) 并 reject 对应错误类型",
+        "start() 中补 proc.on('close', ...)（实测 ENOENT 只走 error → close，exit 永不触发）与 proc.stdin.on('error', ...)；error 分支置 phase='crashed'、this.proc=null 并 emit('exit', null, {reason:'crash'})",
+        "改写 write()：检查 stdin.write 返回值，false 时把后续写入排入有界队列并 await once(stdin,'drain')",
+        "jsonl.ts 增加两个上限常量与 onError 回调，超限重置 buffer",
+        "改写 stop()：置 phase='stopping' 后拒绝新命令 → 发 abort RPC 等 1500ms → stdin.end() 等 1000ms → proc.kill('SIGTERM') 等 3000ms → Windows 执行 taskkill /pid <pid> /T /F，其它平台 process.kill(-pid,'SIGKILL')；每级用独立 timer 并在成功退出时清除",
+        "新建 pi-supervisor.ts，把 ipc.ts:36-77 的 makeEventForwarder 迁入并改造为返回 {push, dispose}；在 dispose 中 clearTimeout(timer)、queue=[]、client.removeAllListeners()、client.stop()",
+        "在 supervisor 中为每条外发消息填充 PiEnvelope 的 7 个字段，sequence 由每个 runtime 独立单调自增",
+        "改 ipc.ts：pi:start 委托 supervisor，clients.set 提前到 client.start() 之后且在任何 await 之前；clientFor 携带 lastSpawnError",
+        "改 preload 三个 subscribe 与 index.d.ts 签名，改渲染进程 store 的代际/序号丢弃逻辑与 unsubscribe 收集",
+        "写两个测试文件并跑 pnpm -w test；再人工做「流式中连点两次新任务」与「external 指向不存在命令」两项 UI 验证"
+      ],
+      "test": {
+        "commands": [
+          "pnpm -w test",
+          "pnpm typecheck",
+          "pnpm --filter @pibuddy/app build"
+        ],
+        "unit": [
+          "packages/pi-sdk/test/lifecycle.spec.ts",
+          "packages/app/test/generation.spec.ts"
+        ],
+        "integration": [
+          "tools/fake-pi/fake-pi.mjs --scenario stale-generation 驱动的端到端代际测试"
+        ],
+        "success_metrics": [
+          "ENOENT 后 2000ms 内 phase === 'crashed' 且 exit 恰好一次",
+          "timeout 后 pending.size === 0",
+          "旧 generation 信封 100% 被丢弃",
+          "activityTick 递增语句仍存在"
+        ]
+      },
+      "reference": {
+        "pattern": "pending map 的 id 关联现有实现（client.ts:154-165）本身正确，只需补 timeout/abort 的清理路径；33ms 批处理与累积型折叠逻辑（ipc.ts:40-71）必须原样迁移不得改变折叠语义",
+        "files": [
+          "packages/pi-sdk/src/client.ts",
+          "packages/app/src/main/ipc.ts",
+          "packages/contract/src/envelope.ts"
+        ],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "RUN-002 与 RUN-003 共享同一条生命周期链路：代际标识由 SDK 生成、由 supervisor 注入信封、由渲染进程判定丢弃；dispose 阶梯同时服务于代际切换与主动停止。拆成两个任务会让 ipc.ts / preload / store 被两次改写并产生半成品中间态。",
+        "decision_factors": [
+          "旧代际 exit 误伤新会话是用户可见的最高频故障",
+          "ENOENT 下 exit 永不触发导致死 client 滞留",
+          "rpc.md 不提供 sequence，必须自行注入"
+        ],
+        "tradeoffs": "单任务改动面覆盖 4 个层级，回归风险高；用 fake-pi 的 stale-generation / crash-mid-stream / timeout 三个场景做自动化兜底，并把 activityTick 与 33ms 折叠语义写成显式验收条件。"
+      },
+      "risks": [
+        "preload 由只传 payload 改为透传完整信封，会一次性影响 stores/app.ts:124-240 的 switch reducer 入口，必须先在 handleEvent 顶部解包再进入原有 switch，避免逐 case 改写",
+        "33ms 批处理的累积型折叠（message_update 与同 toolCallId 的 tool_execution_update 只保留最后一条）迁移时若丢失，会造成流式文本闪烁或 tool 卡片不更新",
+        "stop() 阶梯中 Windows 的 taskkill /T 会杀掉整棵进程树，若 pi 子进程正在写会话 JSONL 可能损坏文件，需在 SIGTERM 级别预留 3000ms 让其正常收尾"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": [
+          "运行时生命周期",
+          "事件转发",
+          "进程停止",
+          "错误提示"
+        ],
+        "affected_components": [
+          "packages/pi-sdk/src/client.ts",
+          "packages/pi-sdk/src/jsonl.ts",
+          "packages/app/src/main/pi-supervisor.ts",
+          "packages/app/src/renderer/src/stores/app.ts"
+        ],
+        "affected_requirements": [
+          "RUN-002",
+          "RUN-003",
+          "OBS-001"
+        ],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "120m",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": true
+      }
+    },
+    {
+      "id": "TASK-A05",
+      "title": "SES-001 + SES-002 会话解析统一与交互一致性垂直切片",
+      "description": "实测修正（与审计文档描述不同）：pi 的真实算法在 session-manager.js:245 为 `--${resolvedCwd.replace(/^[/\\\\]/,\"\").replace(/[/\\\\:]/g,\"-\")}--`，比 PiBuddy 的 sessions-store.ts:20 多一步剥离前导分隔符。对拍结果：D:\\x 与 C:\\Users\\yehh 两者一致，/home/u 在 pi 侧为 --home-u--、PiBuddy 侧为 ---home-u--（三连字符）。即该缺陷在 Windows 上完全不可见，只在 macOS/Linux 上让历史会话恒为空，因此验收必须是跨平台纯函数单测。另：PI_CODING_AGENT_DIR / PI_CODING_AGENT_SESSION_DIR / settings.sessionDir 三级优先链一个都没读，client.ts:78 也没传 --session-dir；listSessions 全同步 readdirSync+statSync+readFileSync 全量入内存且 agent_settled 每次触发。SES-002 侧：newTask()/openSession() 只判 resp.success 未读 data.cancelled（rpc.md 第 137-160、597-615 行明确 extension 可 veto）；app.ts:408-411 发送失败时 return 而非 throw，导致 InputBar.vue:139-147 的 await 之后三行照常清空，文本+图片+文件附件全丢；app.ts:331-347 的 start() 对新建与恢复历史会话不分支，用全局 settings 无条件覆盖会话原有 model/thinkingLevel。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "fix",
+      "priority": "high",
+      "effort": "large",
+      "action": "新建 packages/app/src/main/session-repository.ts 实现 @pibuddy/contract 的 SessionRepository：优先调用 pi 公开导出的 SessionManager.list(cwd, sessionDir)（已确认为 dist/index.js 第 23 行导出的静态方法，签名 static list(cwd: string, sessionDir?: string, onProgress?): Promise<SessionInfo[]>，返回含 path/id/cwd/name/created/modified/messageCount/firstMessage）；导出纯函数 encodeSessionDirSegment(resolvedPath: string): string 严格复刻 `--${resolvedPath.replace(/^[/\\\\]/,\"\").replace(/[/\\\\:]/g,\"-\")}--` 作为回退；sessionDir 解析优先级实现为 settings.sessionDir → process.env.PI_CODING_AGENT_SESSION_DIR → path.join(process.env.PI_CODING_AGENT_DIR, \"sessions\", encodeSessionDirSegment(...)) → path.join(os.homedir(), \".pi\", \"agent\", \"sessions\", encodeSessionDirSegment(path.resolve(cwd)))；全部 I/O 改用 node:fs/promises 并设 MAX_SESSIONS_SCANNED = 200、MAX_SESSION_HEAD_BYTES = 1_048_576；在 packages/pi-sdk/src/client.ts 的 args 组装处补 args.push(\"--session-dir\", o.sessionDir)；渲染进程 store 的 newTask/openSession 增加 resp.data.cancelled === true 分支，send() 返回 Promise<boolean> 且 InputBar.submit 改为 if (await store.send(...)) 才清空并补 catch；新增 resetSessionScopedState() 统一清 items/toolRuns/queue/statusTexts/uiRequests/liveAssistant/streaming/stats 并在 start 与 newTask 中调用；start(sessionPath) 仅在 sessionPath === undefined 时应用 settings 的 provider/modelId/thinkingLevel。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/session-repository.ts + renderer 会话交互链路",
+      "focus_paths": [
+        "packages/app/src/main/",
+        "packages/app/src/renderer/src/stores/",
+        "packages/app/src/renderer/src/components/"
+      ],
+      "read_first": [
+        "packages/app/src/main/sessions-store.ts",
+        "packages/app/src/main/ipc.ts",
+        "packages/app/src/renderer/src/stores/app.ts",
+        "packages/app/src/renderer/src/components/InputBar.vue",
+        "packages/app/src/renderer/src/components/Sidebar.vue",
+        "packages/app/src/renderer/src/components/ChatView.vue",
+        "packages/pi-sdk/src/client.ts",
+        "packages/contract/src/session.ts",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.js 第 240-255 行（getDefaultSessionDirPath 真相源，注意第 245 行的前导分隔符剥离）",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/dist/core/session-manager.d.ts 第 125-139 行（SessionInfo 字段）与第 348 行（static list 签名）",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 137-160 行（new_session 的 data.cancelled）与第 597-615 行（switch_session 的 data.cancelled）",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/environment-variables.md 第 76-77 行"
+      ],
+      "depends_on": [
+        "TASK-A04"
+      ],
+      "wave": 5,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/src/main/session-repository.ts contains 'SessionManager.list(' 且 contains 'from \"@earendil-works/pi-coding-agent\"'",
+          "packages/app/src/main/session-repository.ts contains 'export function encodeSessionDirSegment' 且 contains '.replace(/^[/\\\\\\\\]/, \"\")'",
+          "packages/app/src/main/session-repository.ts 同时 contains 'PI_CODING_AGENT_SESSION_DIR'、'PI_CODING_AGENT_DIR'、'settings.sessionDir'",
+          "grep -c 'readFileSync\\|readdirSync\\|statSync' packages/app/src/main/session-repository.ts 输出 0（全部改为 node:fs/promises，不阻塞主进程）",
+          "packages/app/src/main/session-repository.ts contains 'MAX_SESSIONS_SCANNED = 200' 且 contains 'MAX_SESSION_HEAD_BYTES'",
+          "packages/app/src/main/session-repository.ts contains 'parseError'，单个损坏 JSONL 只在该条目上标记 parseError 而不影响其它条目",
+          "packages/pi-sdk/src/client.ts contains '\"--session-dir\"'",
+          "packages/app/test/session-dir.spec.ts 断言 encodeSessionDirSegment(\"/home/u\") === \"--home-u--\" 且 encodeSessionDirSegment(\"/home/u\").includes(\"---\") === false 且 encodeSessionDirSegment(\"D:\\\\x\") === \"--D--x--\" 且 encodeSessionDirSegment(\"C:\\\\Users\\\\yehh\") === \"--C--Users-yehh--\"；该测试在 Windows 上执行 pnpm -w test 时通过（纯函数直接吃已归一化字符串，不经平台 path.resolve）",
+          "grep -c 'cancelled' packages/app/src/renderer/src/stores/app.ts 输出 >= 2（newTask 与 openSession 各一处）",
+          "packages/app/src/renderer/src/stores/app.ts contains 'function resetSessionScopedState' 且 grep -c 'resetSessionScopedState()' 输出 >= 2（start 与 newTask 各调用一次）",
+          "resetSessionScopedState 函数体同时 contains 'items.value = []'、'toolRuns'、'queue.value'、'statusTexts'、'uiRequests.value = []'、'liveAssistant.value = null'（替代 app.ts:428-440 的手写枚举重置）",
+          "packages/app/src/renderer/src/stores/app.ts contains 'async function send' 且其返回类型为 'Promise<boolean>'",
+          "packages/app/src/renderer/src/components/InputBar.vue contains 'if (await store.send(' 且 contains 'catch'；grep -c 'store.editorText = \"\"' 的出现位置全部落在该 if 分支体内（用 node 脚本断言清空语句行号大于 if 行号且小于对应右花括号行号）",
+          "packages/app/src/renderer/src/stores/app.ts contains 'if (sessionPath === undefined)' 且该判断包裹 settings 的 provider/modelId 恢复与 set_thinking_level 调用（恢复历史会话时不覆盖会话原有配置）",
+          "packages/app/src/renderer/src/stores/app.ts 中 set_thinking_level 调用前存在与 result.state 当前值的比较（grep 该行上下文 contains 'thinkingLevel !=='）",
+          "packages/app/src/renderer/src/stores/app.ts contains 'sessionLoadError'，且 ChatView.vue contains '重试' 按钮绑定重新加载 messages",
+          "packages/app/src/renderer/src/stores/app.ts contains 'REFRESH_SESSIONS_DEBOUNCE_MS'（agent_settled 触发的会话列表刷新做防抖，不再每次触发全量扫描）",
+          "packages/app/test/session-interaction.spec.ts 断言：new_session 返回 {success:true, data:{cancelled:true}} 时 items 长度不变且发出警告通知；switch_session 同理；send 返回 success:false 时 send() 解析为 false；三组用例在 pnpm -w test 中通过",
+          "pnpm typecheck 退出码 0，pnpm -w test 退出码 0",
+          "[UI-observable] 手动：输入一段文字并附加 1 张图片与 1 个文件，人为让发送失败（停掉运行时），输入框文字、图片缩略图、文件条目三者全部原样保留；恢复后直接点发送可成功",
+          "[UI-observable] 手动：侧栏历史会话列表非空且显示名称/首条消息/消息数/修改时间；打开一个历史会话后顶栏显示的模型为该会话原有模型而非全局设置的模型；切换会话时上一会话的 tool 卡片、状态文字与 Extension UI 请求全部清空不残留"
+        ],
+        "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && node -e \"const{encodeSessionDirSegment}=require('./packages/app/src/main/session-repository.ts');\" || true",
+        "definition_of_done": "无论在 Windows 还是 macOS/Linux，用户都能看到与 pi 命令行完全一致的历史会话列表并正确切换；发送失败时用户输入永不丢失；扩展否决新建或切换会话时界面保持原状而非显示假空白；恢复历史会话时沿用该会话原有的模型与思考力度。"
+      },
+      "files": [
+        {
+          "path": "packages/app/src/main/session-repository.ts",
+          "action": "create",
+          "target": "SessionRepository 实现",
+          "change": "优先 SessionManager.list(cwd, sessionDir)，失败时回退到自实现的异步扫描；导出纯函数 encodeSessionDirSegment；实现四级 sessionDir 优先链；返回 SessionSummary 含 id/path/cwd/name/firstMessage/messageCount/modified/runtimeVersion/parseError"
+        },
+        {
+          "path": "packages/app/src/main/sessions-store.ts",
+          "action": "delete",
+          "target": "整文件",
+          "change": "由 session-repository.ts 完全取代；删除前确认 ipc.ts 的 sessions:list 已改为引用新模块"
+        },
+        {
+          "path": "packages/app/src/main/ipc.ts",
+          "action": "modify",
+          "target": "sessions:list handler",
+          "change": "改为 await sessionRepository.list({workspace, settings})，并把解析放入异步路径不阻塞 main"
+        },
+        {
+          "path": "packages/pi-sdk/src/client.ts",
+          "action": "modify",
+          "target": "PiClientOptions 与 start() 的 args 组装",
+          "change": "PiClientOptions 新增 sessionDir?: string；在第 78 行附近的 args 组装中补 if (o.sessionDir) args.push(\"--session-dir\", o.sessionDir)"
+        },
+        {
+          "path": "packages/contract/src/session.ts",
+          "action": "modify",
+          "target": "SessionSummary schema",
+          "change": "补齐 cwd / runtimeVersion / parseError 字段并同步 zod schema"
+        },
+        {
+          "path": "packages/app/src/renderer/src/stores/app.ts",
+          "action": "modify",
+          "target": "newTask / openSession / send / start / resetSessionScopedState / refreshSessions",
+          "change": "newTask 与 openSession 增加 data.cancelled 分支；send 改为返回 boolean；新增 resetSessionScopedState 替代 app.ts:428-440 的手写枚举并在 start(app.ts:317-355) 中调用；start 用 sessionPath === undefined 分支控制是否套用全局 settings；set_thinking_level 前比较当前值；新增 sessionLoadError 与 REFRESH_SESSIONS_DEBOUNCE_MS = 2000"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/InputBar.vue",
+          "action": "modify",
+          "target": "submit()（第 133-149 行）",
+          "change": "改为 const ok = await store.send(...); if (ok) { 清空三项 }；补 catch 分支给出错误提示，消除 void submit() 下的静默未处理 rejection"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/ChatView.vue",
+          "action": "modify",
+          "target": "消息区",
+          "change": "当 store.sessionLoadError 非空时显示错误条与「重试」按钮，点击重新拉取 get_messages"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/Sidebar.vue",
+          "action": "modify",
+          "target": "会话列表项",
+          "change": "展示 name / firstMessage / messageCount / modified，并对 parseError 非空的条目显示「解析失败」标记而不隐藏该条目"
+        },
+        {
+          "path": "packages/app/test/session-dir.spec.ts",
+          "action": "create",
+          "target": "跨平台目录名纯函数测试",
+          "change": "四组断言覆盖 POSIX 路径无三连字符、Windows 盘符路径、含冒号路径；这是该缺陷在 Windows 开发机上唯一可验证的方式"
+        },
+        {
+          "path": "packages/app/test/session-interaction.spec.ts",
+          "action": "create",
+          "target": "会话交互一致性测试",
+          "change": "覆盖 cancelled veto、发送失败保留草稿、恢复历史会话不被全局设置覆盖三组用例"
+        }
+      ],
+      "implementation": [
+        "先写 packages/app/test/session-dir.spec.ts 的四条断言（红），再实现 encodeSessionDirSegment 使其转绿——因为该缺陷在 Windows 上运行时完全不可见，纯函数单测是唯一验证手段",
+        "实现 resolveSessionDir(cwd, settings)：按 settings.sessionDir → PI_CODING_AGENT_SESSION_DIR → PI_CODING_AGENT_DIR/sessions/<seg> → homedir/.pi/agent/sessions/<seg> 四级返回",
+        "实现 list()：先 try SessionManager.list(cwd, sessionDir)，把 SessionInfo 映射为 contract 的 SessionSummary；catch 时回退自实现的 fs/promises 扫描，按 modified 倒序、限 MAX_SESSIONS_SCANNED 条、每文件只读前 MAX_SESSION_HEAD_BYTES",
+        "单个文件解析失败只填 parseError 字段并保留该条目，不 throw、不影响其它条目",
+        "在 pi-sdk client.ts 的 PiClientOptions 加 sessionDir 并在 args 中补 --session-dir；在 ipc.ts 的 pi:start 传入解析结果",
+        "删除 sessions-store.ts，改 ipc.ts 的 sessions:list 指向新模块",
+        "store 侧：newTask 与 openSession 读 resp.data.cancelled，为 true 时 notify('warning', ...) 并直接 return，不清空任何状态",
+        "store 侧：send 改为返回 boolean（失败返回 false 并 notify），InputBar.submit 只在 true 时清空 editorText/images/files 并补 catch",
+        "store 侧：抽 resetSessionScopedState() 并在 start 与 newTask 调用，取代 app.ts:428-440 的手写字段枚举",
+        "store 侧：start(sessionPath) 用 if (sessionPath === undefined) 包裹全局 settings 的 provider/modelId/thinkingLevel 恢复；set_thinking_level 前与 result.state 当前值比较",
+        "store 侧：openSession 中 get_messages 失败时设 sessionLoadError，ChatView 显示重试按钮",
+        "store 侧：refreshSessions 加 2000ms 防抖，避免 agent_settled 每次触发全量扫描",
+        "跑 pnpm -w test 与 pnpm typecheck，再人工做草稿保留与历史会话模型两项 UI 验证"
+      ],
+      "test": {
+        "commands": [
+          "pnpm -w test",
+          "pnpm typecheck",
+          "pnpm --filter @pibuddy/app build"
+        ],
+        "unit": [
+          "packages/app/test/session-dir.spec.ts",
+          "packages/app/test/session-interaction.spec.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "encodeSessionDirSegment(\"/home/u\") 无三连字符",
+          "session-repository.ts 中同步 fs API 出现次数 0",
+          "cancelled 分支覆盖 new_session 与 switch_session",
+          "发送失败后草稿三项全部保留"
+        ]
+      },
+      "reference": {
+        "pattern": "会话目录编码严格对齐 pi 的 dist/core/session-manager.js:245；会话列表优先复用 pi 公开导出的 SessionManager.list 而非自行实现，避免第二套算法再次漂移",
+        "files": [
+          "packages/app/src/main/sessions-store.ts",
+          "packages/pi-sdk/src/client.ts"
+        ],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "会话解析与会话交互是同一条用户路径（看到列表 → 切换 → 发送），且都改动 ipc.ts / store / InputBar，拆开会产生两次重写与中间不可用态。目录名缺陷用纯函数单测锁定，是唯一能在 Windows 开发机上验证跨平台正确性的手段。",
+        "decision_factors": [
+          "缺陷在 Windows 上不可见，必须用单测而非手工验证",
+          "pi 已公开导出 SessionManager.list，自实现算法必然二次漂移",
+          "草稿丢失是用户可感知的高频数据损失"
+        ],
+        "tradeoffs": "依赖 pi 的公开导出会引入版本耦合，故保留自实现回退路径并由 runtime-manifest 的版本号做能力判断。"
+      },
+      "risks": [
+        "SessionManager.list 是 async 且会扫描整个目录，大量历史会话时首屏可能变慢——必须配合 MAX_SESSIONS_SCANNED 与防抖，并把调用放在异步路径避免阻塞 main",
+        "删除 sessions-store.ts 时若 ipc.ts 仍有残留 import 会导致构建失败，删除前必须先改引用",
+        "InputBar.submit 改为条件清空后，若 store.send 在成功路径抛异常会导致草稿滞留但消息已发出，需在 send 内部把「已被 RPC 接受」作为返回 true 的唯一判据（对齐 rpc.md 第 74-78 行：success:true 即表示已接受/已入队/已处理）"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": [
+          "会话列表",
+          "会话切换",
+          "新任务",
+          "消息发送",
+          "模型与思考力度恢复"
+        ],
+        "affected_components": [
+          "packages/app/src/main/session-repository.ts",
+          "packages/app/src/renderer/src/stores/app.ts",
+          "packages/app/src/renderer/src/components/InputBar.vue"
+        ],
+        "affected_requirements": [
+          "SES-001",
+          "SES-002",
+          "EXT-001"
+        ],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "110m",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": true
+      }
+    },
+    {
+      "id": "TASK-A06",
+      "title": "SEC-001 + SEC-005 窗口与内容安全：sandbox / CSP / 导航拦截 / 权限收敛 / 渲染侧限额",
+      "description": "实测：main/index.ts:18 显式 sandbox:false；CSP 在 response header 与 index.html meta 两条路径都不存在；will-navigate / setWindowOpenHandler / setPermissionRequestHandler 全项目 grep 命中均为 0；ELECTRON_RENDERER_URL 在生产二进制中若被设置仍会加载任意远程 URL。渲染侧 markdown 虽已 html:false，但链接与图片 scheme 无白名单，超长 tool output 无字节上限。本任务把主窗口的加载面、导航面、外链面与权限面全部收窄，并在渲染侧对 markdown 与 tool 输出加限额。应用确实需要麦克风（语音输入），因此权限处理器只放行主窗口发起的 audio 类 media 请求。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "security",
+      "priority": "high",
+      "effort": "medium",
+      "action": "packages/app/src/main/index.ts 把 webPreferences.sandbox 由 false 改为 true；新建 packages/app/src/main/security/window-policy.ts 导出 applyWindowPolicy(win) 与 openExternalSafely(raw)：用 session.defaultSession.webRequest.onHeadersReceived 注入 CSP 头 \"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\"；webContents.on(\"will-navigate\") 对非应用 origin 调 event.preventDefault()；setWindowOpenHandler 恒返回 {action:\"deny\"}；openExternalSafely 只放行 new URL(raw).protocol 属于 [\"https:\",\"http:\",\"mailto:\"] 且 /[\\u0000-\\u001F\\u007F]/.test(raw) 为 false 的输入；session.defaultSession.setPermissionRequestHandler 只在 wc === mainWindow.webContents 且 permission === \"media\" 且 details.mediaTypes 含 \"audio\" 时回调 true，其余一律 false，并配套 setPermissionCheckHandler；把 index.ts:25 的 if (process.env.ELECTRON_RENDERER_URL) 改为 if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL)；renderer/index.html 增加同等 CSP 的 meta 标签；renderer/src/markdown.ts 保持 html:false 并增加 validateLink 白名单与 const MAX_TOOL_OUTPUT_BYTES = 65536 截断。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/index.ts + security/ + renderer 内容渲染",
+      "focus_paths": [
+        "packages/app/src/main/",
+        "packages/app/src/renderer/"
+      ],
+      "read_first": [
+        "packages/app/src/main/index.ts",
+        "packages/app/src/preload/index.ts",
+        "packages/app/src/renderer/index.html",
+        "packages/app/src/renderer/src/markdown.ts",
+        "packages/app/src/renderer/src/components/MessageItem.vue",
+        "packages/app/src/renderer/src/components/ToolActivity.vue",
+        "packages/app/src/renderer/src/stt.ts",
+        "doc/threat-model.md",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/security.md"
+      ],
+      "depends_on": [
+        "TASK-A02"
+      ],
+      "wave": 3,
+      "parallel_group": "w3",
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "packages/app/src/main/index.ts contains 'sandbox: true' 且 grep -c 'sandbox: false' packages/app/src/main/index.ts 输出 0",
+          "packages/app/src/main/security/window-policy.ts 同时 contains \"default-src 'self'\"、\"script-src 'self'\"、\"object-src 'none'\"、\"base-uri 'none'\"、\"frame-ancestors 'none'\"、\"img-src 'self' data: blob:\"",
+          "packages/app/src/main/security/window-policy.ts contains 'will-navigate' 且 contains 'setWindowOpenHandler' 且 contains \"action: \\\"deny\\\"\" 且 contains 'setPermissionRequestHandler' 且 contains 'setPermissionCheckHandler'",
+          "packages/app/src/main/security/window-policy.ts contains 'onHeadersReceived'（CSP 通过响应头下发，覆盖 dev 的 http 加载路径）",
+          "packages/app/src/main/index.ts contains '!app.isPackaged && process.env.ELECTRON_RENDERER_URL'",
+          "packages/app/src/renderer/index.html contains 'http-equiv=\"Content-Security-Policy\"' 且 contains \"object-src 'none'\"（覆盖 packaged 的 file:// 加载路径）",
+          "grep -c 'shell.openExternal' packages/app/src 全目录输出 1，且该唯一调用点位于 window-policy.ts 的 openExternalSafely 内部",
+          "packages/app/src/renderer/src/markdown.ts contains 'html: false' 且 contains 'validateLink' 且 contains 'MAX_TOOL_OUTPUT_BYTES = 65536'",
+          "packages/app/test/window-policy.spec.ts 断言 openExternalSafely 对以下 6 个输入全部拒绝且不调用 shell.openExternal：'file:///C:/Windows/System32/calc.exe'、'javascript:alert(1)'、'data:text/html,<script>1</script>'、'vbscript:msgbox'、'search-ms:query=x'、'https://example.com/a\\u0000b'；对 'https://example.com/'、'mailto:a@b.com' 放行；该测试在 pnpm -w test 中通过",
+          "packages/app/test/window-policy.spec.ts 断言 markdown 渲染 '[x](javascript:alert(1))' 后输出 not contains 'javascript:'，渲染长度 100000 的 tool output 后输出字节数 <= 65536 + 截断标记长度",
+          "packages/app/test/window-policy.spec.ts 断言 permission handler 对 permission='media' 且 mediaTypes=['video'] 返回 false、对 'geolocation' 返回 false、对非主窗口 webContents 的 audio 请求返回 false、对主窗口 audio 请求返回 true",
+          "pnpm typecheck 退出码 0，pnpm -w test 退出码 0，pnpm --filter @pibuddy/app build 退出码 0",
+          "[UI-observable] 手动（sandbox:true 后的关键回归）：拖拽一张本地图片进输入框仍能解析出路径并作为图片附件成功发送；粘贴图片仍可用；点击语音按钮仍能弹出/获得麦克风授权并完成一次转写",
+          "[UI-observable] 手动：助手回复中的 https 链接点击后在系统浏览器打开；构造一条包含 file:// 与 javascript: 链接的回复，点击后无任何反应且控制台无未捕获异常；markdown 渲染、代码高亮、thinking 折叠、tool 卡片展开、消息窗口化渲染全部正常"
+        ],
+        "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && pnpm --filter @pibuddy/app build && grep -rc 'shell.openExternal' packages/app/src && grep -c 'sandbox: false' packages/app/src/main/index.ts",
+        "definition_of_done": "渲染进程运行在沙箱内且受严格 CSP 约束，无法被导航到任何非应用来源、无法打开新窗口、无法通过外链触发本地文件或危险 scheme，除麦克风外的所有浏览器权限一律拒绝，且恶意或超长的模型输出无法撑爆界面。"
+      },
+      "files": [
+        {
+          "path": "packages/app/src/main/index.ts",
+          "action": "modify",
+          "target": "createWindow 的 webPreferences 与加载分支（第 14-29 行）",
+          "change": "sandbox: false → sandbox: true；创建窗口后调用 applyWindowPolicy(win)；第 25 行加载分支改为 !app.isPackaged && process.env.ELECTRON_RENDERER_URL"
+        },
+        {
+          "path": "packages/app/src/main/security/window-policy.ts",
+          "action": "create",
+          "target": "applyWindowPolicy / openExternalSafely / CSP 常量",
+          "change": "集中实现 CSP 响应头注入、will-navigate 拦截、setWindowOpenHandler deny、权限请求与权限检查处理器、外链 scheme 与控制字符校验；导出 CSP_POLICY 常量供 index.html meta 与测试共用"
+        },
+        {
+          "path": "packages/app/src/renderer/index.html",
+          "action": "modify",
+          "target": "head",
+          "change": "增加 <meta http-equiv=\"Content-Security-Policy\" content=\"...\">，内容与 CSP_POLICY 保持一致，覆盖 packaged 下 file:// 加载不经过 webRequest 的路径"
+        },
+        {
+          "path": "packages/app/src/renderer/src/markdown.ts",
+          "action": "modify",
+          "target": "markdown-it 实例与导出函数",
+          "change": "显式断言 html:false；覆写 md.validateLink 只放行 https:/http:/mailto:；图片 src 只放行 https:/data:image/*/blob:；新增 MAX_TOOL_OUTPUT_BYTES = 65536 与 truncateToolOutput(text) 返回带「内容过长已截断」标记的字符串"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/MessageItem.vue",
+          "action": "modify",
+          "target": "正文渲染",
+          "change": "长文本走 truncateToolOutput；保持 openThinking 的组件内 ref 语义不变"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/ToolActivity.vue",
+          "action": "modify",
+          "target": "output 渲染（第 39 行附近）",
+          "change": "output 渲染前经 truncateToolOutput；不改动 expanded ref 与 !run 判定逻辑，避免影响卡片状态"
+        },
+        {
+          "path": "packages/app/test/window-policy.spec.ts",
+          "action": "create",
+          "target": "外链/权限/markdown 限额测试",
+          "change": "三组用例：外链 6 拒 2 放行、权限处理器 4 种组合、markdown scheme 白名单与字节截断"
+        }
+      ],
+      "implementation": [
+        "先确认 preload/index.ts 只 import 了 electron 的 contextBridge / ipcRenderer / webUtils，无任何 node 内建模块，因此 sandbox:true 不会破坏 preload（这是本任务可行的前提，必须实际核对后再改）",
+        "把 main/index.ts 的 sandbox 改为 true，并在 createWindow 内调用 applyWindowPolicy(win)",
+        "在 window-policy.ts 定义 CSP_POLICY 常量并用 session.defaultSession.webRequest.onHeadersReceived 注入 Content-Security-Policy 响应头；style-src 保留 'unsafe-inline' 以兼容 naive-ui 的运行时样式注入，并在文件内注释说明这是唯一放宽项、script-src 不放宽",
+        "注册 will-navigate：解析目标 URL，非应用 origin（dev 的 ELECTRON_RENDERER_URL origin 或 packaged 的 file:// 应用目录）一律 preventDefault",
+        "注册 setWindowOpenHandler 恒 deny",
+        "实现 openExternalSafely(raw)：先用正则拒绝控制字符，再 new URL 解析，protocol 不在白名单一律拒绝并记 logger；把渲染进程原本经 shell:open-path 打开外链的路径统一收敛到此函数（全项目仅保留一处 shell.openExternal 调用）",
+        "注册 setPermissionRequestHandler 与 setPermissionCheckHandler：仅主窗口 + media + mediaTypes 含 audio 放行",
+        "把 index.html 的 CSP meta 与 CSP_POLICY 对齐",
+        "改 markdown.ts 的 validateLink 与图片 scheme 白名单，新增 MAX_TOOL_OUTPUT_BYTES 与 truncateToolOutput，并在 MessageItem.vue 与 ToolActivity.vue 接入",
+        "写 packages/app/test/window-policy.spec.ts 并跑 pnpm -w test",
+        "人工回归：拖拽图片、粘贴图片、语音授权与转写、外链点击、markdown/代码高亮/thinking 折叠/tool 卡片/窗口化渲染"
+      ],
+      "test": {
+        "commands": [
+          "pnpm -w test",
+          "pnpm typecheck",
+          "pnpm --filter @pibuddy/app build"
+        ],
+        "unit": [
+          "packages/app/test/window-policy.spec.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "sandbox: false 出现次数 0",
+          "shell.openExternal 全项目仅 1 处调用",
+          "6 类危险外链全部被拒",
+          "tool output 渲染字节数受 65536 上限约束"
+        ]
+      },
+      "reference": {
+        "pattern": "Electron 安全基线：contextIsolation + sandbox + CSP + 导航拦截 + 窗口打开拒绝 + 权限最小化；preload 现有实现（只用 contextBridge/ipcRenderer/webUtils）天然兼容 sandbox",
+        "files": [
+          "packages/app/src/main/index.ts",
+          "packages/app/src/preload/index.ts"
+        ],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "先关掉运行环境层面的攻击面（sandbox / CSP / 导航 / 外链 / 权限），再由 A07 收窄 IPC 接口面。两者文件不重叠，可与 RUN-001 并行推进；CSP 同时用响应头与 meta 两条路径下发，是因为 packaged 下 file:// 加载不经过 webRequest。",
+        "decision_factors": [
+          "sandbox:false 是显式关闭的默认防线",
+          "CSP 两条路径均缺失",
+          "外链与权限完全无约束",
+          "preload 无 node 依赖使 sandbox:true 成本极低"
+        ],
+        "tradeoffs": "style-src 保留 'unsafe-inline' 以兼容 naive-ui 的运行时样式；这是经过评估的唯一放宽项，script-src 与 object-src 不放宽，风险已在 doc/threat-model.md 记录。"
+      },
+      "risks": [
+        "sandbox:true 后 webUtils.getPathForFile 必须仍可用（Electron 43 支持沙箱 preload 使用 webUtils），必须以拖拽图片的实际 UI 验证为准，不能只看 typecheck",
+        "CSP 的 connect-src 'self' 会阻断渲染进程直连任何外部端点——这是期望行为（STT 与 Provider 请求由主进程发起，见 A08），但若当前 stt.ts 中存在渲染侧直连会立刻失败，需在本任务中确认调用链",
+        "will-navigate 拦截若把 dev 的 HMR 导航一并拦下会导致热更新失效，判定 origin 时必须包含 ELECTRON_RENDERER_URL 的 origin"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": [
+          "窗口安全",
+          "内容安全策略",
+          "外链打开",
+          "麦克风权限",
+          "markdown 渲染",
+          "tool 输出渲染"
+        ],
+        "affected_components": [
+          "packages/app/src/main/index.ts",
+          "packages/app/src/main/security/window-policy.ts",
+          "packages/app/src/renderer/src/markdown.ts"
+        ],
+        "affected_requirements": [
+          "SEC-001",
+          "SEC-005"
+        ],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "70m",
+        "risk": "medium",
+        "autonomous": true,
+        "checkpoint": false
+      }
+    },
+    {
+      "id": "TASK-A07",
+      "title": "SEC-002 + SEC-003 收窄 IPC 接口面与 workspace capability 化",
+      "description": "实测最高危缺陷：preload/index.ts:16 暴露 command: (command: Record<string, unknown>)，经 ipc.ts:115-117 原样透传给 PiRpcClient.send，两侧零校验；pi 的 docs/rpc.md 第 454-515 行确认协议原生提供 {\"type\":\"bash\",\"command\":\"...\"} 直接执行 shell —— 因此渲染进程中任意 JS（包括模型输出诱导的 XSS）等价于本机任意命令执行。全项目 senderFrame 命中数为 0，13 个 invoke handler 无一做 frame 校验。file:read-image 接受任意绝对路径，唯一约束是扩展名查表，无 workspace 限制、无大小限制且用同步 readFileSync 阻塞主进程；shell:open-path 同类。本任务把渲染进程能触达的能力从「任意 RPC 命令 + 任意路径」收窄为「产品动作白名单 + 不透明 workspaceId/attachment token」。必须保留的分支：PiBuddy 从不调用 pi 的 steer 命令，而是用 prompt + streamingBehavior='steer'（stores/app.ts:406），rpc.md 第 65 行明确流式中不带 streamingBehavior 的 prompt 直接返回 error。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "security",
+      "priority": "high",
+      "effort": "large",
+      "action": "删除 packages/app/src/preload/index.ts:16 的 command 方法与 packages/app/src/main/ipc.ts:115-117 的 pi:command handler；在 preload 的 pi 命名空间改为暴露 prompt/steer/followUp/abort/newSession/switchSession/setModel/setThinkingLevel/getState/getMessages/getSessionStats/getAvailableModels/getAvailableThinkingLevels/compact/setSessionName 共 15 个窄方法，且 prompt 的入参保留 streamingBehavior?: \"steer\" | \"followUp\"；新建 packages/app/src/main/ipc-guard.ts 导出 assertMainFrame(event) 内容为 if (event.senderFrame !== event.sender.mainFrame) throw new Error(\"IPC_FRAME_REJECTED\")、const MAX_IPC_PAYLOAD_BYTES = 8*1024*1024、const MAX_TEXT_PAYLOAD_BYTES = 262144 与 class RateLimiter（prompt 10 次/10s，其余 30 次/10s），并让全部 handler 依次执行 assertMainFrame → zod parse（用 @pibuddy/contract 的 per-channel schema）→ 尺寸校验 → 限流；新建 packages/app/src/main/workspace-registry.ts：registerWorkspace(absPath) 用 fs.realpathSync.native 归一化后返回 randomUUID() 作为不透明 workspaceId，resolveInWorkspace(workspaceId, relativePath) 必须拒绝 path.isAbsolute 与含 '..' 的输入、await fs.realpath 后用 const rel = path.relative(root, real); if (rel.startsWith(\"..\") || path.isAbsolute(rel)) throw，禁止用 real.startsWith(root) 判定；新建 packages/app/src/main/attachment-registry.ts 用 ATTACHMENT_TTL_MS = 300000 的一次性 token 取代绝对路径，并对图片做 magic bytes 嗅探（PNG 89 50 4E 47、JPEG FF D8 FF、GIF 47 49 46 38、WEBP RIFF....WEBP、BMP 42 4D）与 MAX_IMAGE_BYTES = 10*1024*1024 校验。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/ipc.ts + security 模块 + preload + renderer 调用点",
+      "focus_paths": [
+        "packages/app/src/main/",
+        "packages/app/src/preload/",
+        "packages/app/src/renderer/src/"
+      ],
+      "read_first": [
+        "packages/app/src/main/ipc.ts",
+        "packages/app/src/preload/index.ts",
+        "packages/app/src/preload/index.d.ts",
+        "packages/app/src/renderer/src/stores/app.ts",
+        "packages/app/src/renderer/src/components/InputBar.vue",
+        "packages/app/src/renderer/src/components/TopBar.vue",
+        "packages/app/src/renderer/src/components/Welcome.vue",
+        "packages/app/src/renderer/src/components/ExtensionUiHost.vue",
+        "packages/contract/src/ipc-contract.ts",
+        "packages/app/src/main/pi-supervisor.ts",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 43-136 行（prompt / steer / follow_up 的 streamingBehavior 语义，第 65 行是必须保留的分支依据）",
+        "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 454-528 行（bash 命令直执行，说明为何必须删除通用 command 通道）",
+        "doc/threat-model.md"
+      ],
+      "depends_on": [
+        "TASK-A04",
+        "TASK-A05"
+      ],
+      "wave": 6,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "grep -c 'pi:command' packages/app/src/main/ipc.ts 输出 0 且 grep -c 'pi:command' packages/app/src/preload/index.ts 输出 0 且 grep -c 'pi:command' packages/app/src/preload/index.d.ts 输出 0",
+          "grep -c 'command:' packages/app/src/preload/index.ts 输出 0（preload/index.ts:16 的通用 command 方法已删除）",
+          "grep -rc 'piBuddy.pi.command' packages/app/src/renderer 输出 0（渲染进程全部调用点已改为窄方法）",
+          "packages/app/src/preload/index.ts 同时 contains 全部 15 个窄方法名：'prompt'、'steer'、'followUp'、'abort'、'newSession'、'switchSession'、'setModel'、'setThinkingLevel'、'getState'、'getMessages'、'getSessionStats'、'getAvailableModels'、'getAvailableThinkingLevels'、'compact'、'setSessionName'",
+          "packages/app/src/renderer/src/stores/app.ts contains 'streamingBehavior: \"steer\"'（回归保护：PiBuddy 不调用 pi 的 steer 命令，流式插话依赖 prompt + streamingBehavior，见 rpc.md 第 65 行）",
+          "grep -c 'event.senderFrame !== event.sender.mainFrame' packages/app/src/main/ipc-guard.ts 输出 >= 1，且 grep -c 'assertMainFrame(event)' packages/app/src/main/ipc.ts 输出 >= 13（覆盖全部 invoke handler）",
+          "packages/app/src/main/ipc-guard.ts contains 'MAX_IPC_PAYLOAD_BYTES = 8 * 1024 * 1024' 且 contains 'MAX_TEXT_PAYLOAD_BYTES = 262144' 且 contains 'class RateLimiter'",
+          "packages/app/src/main/ipc.ts 中每个 ipcMain.handle 的回调体首行为 assertMainFrame(event) 之后紧跟 schema.parse（用 node 脚本断言每个 handle 块内同时出现 'assertMainFrame' 与 '.parse('）",
+          "packages/app/src/main/workspace-registry.ts contains 'realpathSync.native' 且 contains 'path.relative(' 且 grep -c 'startsWith(root' packages/app/src/main/workspace-registry.ts 输出 0 且 grep -c 'real.startsWith' packages/app/src/main/workspace-registry.ts 输出 0",
+          "packages/app/src/main/workspace-registry.ts contains 'randomUUID()'，且 grep -rc 'workspace: string' packages/app/src/preload/index.d.ts 输出 0（渲染进程只持有不透明 workspaceId，绝对路径仅作为 displayPath 单向展示且不接受回传）",
+          "packages/app/src/main/attachment-registry.ts contains 'ATTACHMENT_TTL_MS = 300000' 且 contains 'MAX_IMAGE_BYTES = 10 * 1024 * 1024' 且同时 contains magic bytes 字面量 '0x89'、'0x50'、'0x4e'、'0x47'、'0xff'、'0xd8'、'0x42'、'0x4d'",
+          "grep -c 'readFileSync' packages/app/src/main/ipc.ts 输出 0（file:read-image 的同步阻塞读已改为 fs/promises）",
+          "grep -c 'shell.openPath' packages/app/src/main/ipc.ts 输出 0 或该调用仅接受 attachment token 解析出的路径（shell:open-path 不再接受渲染进程传来的任意字符串）",
+          "packages/app/test/workspace-capability.spec.ts 断言以下 6 类输入全部抛错：绝对路径 'C:/Windows/System32/drivers/etc/hosts'、'../../../etc/passwd'、指向 workspace 外目标的 symlink、超过 MAX_IMAGE_BYTES 的文件、扩展名为 .png 但首字节为 'MZ' 的 PE 文件、已过期（超过 ATTACHMENT_TTL_MS）的 token；该测试在 pnpm -w test 中通过",
+          "packages/app/test/ipc-guard.spec.ts 断言：senderFrame 与 sender.mainFrame 不相等时抛 'IPC_FRAME_REJECTED'；超过 MAX_TEXT_PAYLOAD_BYTES 的 prompt 被拒；10 秒内第 11 次 prompt 被限流拒绝；schema 不匹配的 payload 被 zod 拒绝；该测试在 pnpm -w test 中通过",
+          "pnpm typecheck 退出码 0，pnpm -w test 退出码 0，pnpm --filter @pibuddy/app build 退出码 0",
+          "[UI-observable] 手动全量回归：发送纯文本、粘贴图片发送、拖拽文件发送、流式中插话（steer）、点击停止（abort）、切换模型、切换 thinking level、新任务、切换历史会话、费用与 context 显示、语音输入 —— 11 项全部仍可用",
+          "[UI-observable] 手动：Extension UI 的 select / confirm / input / editor / notify / setStatus / set_editor_text 七种交互全部仍可正常响应并回传结果",
+          "[UI-observable] 手动：在 DevTools 控制台执行 window.piBuddy.pi.command 返回 undefined；执行 window.piBuddy.pi.prompt({text:'x'}) 正常工作；不存在任何可传入任意 channel 名、任意绝对路径或任意 URL 的入口"
+        ],
+        "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && pnpm --filter @pibuddy/app build && grep -rc 'pi:command' packages/app/src && grep -rc 'piBuddy.pi.command' packages/app/src/renderer && grep -c 'startsWith(root' packages/app/src/main/workspace-registry.ts",
+        "definition_of_done": "渲染进程即使被完全攻陷也只能触发产品定义的有限动作，无法执行任意 pi 命令（含 bash）、无法读取或打开 workspace 之外的任何文件，且所有跨进程调用都经过来源、结构、体积与频率四重校验。"
+      },
+      "files": [
+        {
+          "path": "packages/app/src/main/ipc-guard.ts",
+          "action": "create",
+          "target": "assertMainFrame / 尺寸常量 / RateLimiter",
+          "change": "统一的 handler 前置校验工具；RateLimiter 用 token bucket 按 channel + webContentsId 计数；所有拒绝路径写入 logger（脱敏）"
+        },
+        {
+          "path": "packages/app/src/main/workspace-registry.ts",
+          "action": "create",
+          "target": "workspaceId 与路径收容",
+          "change": "registerWorkspace 用 realpathSync.native 得到 canonical root 并映射到 randomUUID()；resolveInWorkspace 每次调用都重新 realpath 并用 path.relative 判定收容（防 TOCTOU 与 symlink 逃逸），另校验 stat.isFile()"
+        },
+        {
+          "path": "packages/app/src/main/attachment-registry.ts",
+          "action": "create",
+          "target": "短期 attachment capability",
+          "change": "issue(workspaceId, absPath) 返回一次性 token（TTL 300000ms）；resolve(token) 重做收容校验、大小校验与 magic bytes 嗅探，声明 mimeType 与实际字节不符即拒绝"
+        },
+        {
+          "path": "packages/app/src/main/ipc.ts",
+          "action": "modify",
+          "target": "全部 handler（第 88-213 行）",
+          "change": "删除 pi:command；把 pi 相关拆为 15 个窄 channel；每个 handler 加 assertMainFrame + contract schema.parse + 尺寸 + 限流；file:read-image → file:read-attachment(token) 且改用 fs/promises；shell:open-path / shell:show-in-folder 改为只接受 token；dialog:choose-files 返回 {token, name, size, kind} 不返回 path；dialog:choose-folder 返回 {workspaceId, displayPath}"
+        },
+        {
+          "path": "packages/contract/src/ipc-contract.ts",
+          "action": "modify",
+          "target": "channel 常量与 schema",
+          "change": "补齐 15 个 pi 窄 channel 与 attachment/workspace 相关 channel 的 request/response zod schema；prompt 的 schema 显式包含 streamingBehavior: z.enum([\"steer\",\"followUp\"]).optional()"
+        },
+        {
+          "path": "packages/app/src/preload/index.ts",
+          "action": "modify",
+          "target": "api 对象（第 13-52 行）",
+          "change": "删除 command 方法；invoke 改为私有且只接受 contract 导出的 channel 常量（不接受任意字符串）；file.pathFor 保留但其返回值只用于换取 token 不再直接外发；订阅返回 unsubscribe，并在 pagehide 事件中统一清理"
+        },
+        {
+          "path": "packages/app/src/preload/index.d.ts",
+          "action": "modify",
+          "target": "PiBuddyApi",
+          "change": "同步 15 个窄方法签名；移除任何暴露绝对路径、任意 URL、任意 channel 名与环境变量的类型"
+        },
+        {
+          "path": "packages/app/src/renderer/src/stores/app.ts",
+          "action": "modify",
+          "target": "所有 pi.command 调用点",
+          "change": "refreshState/refreshStats/refreshThinkingLevels/send/abortRun/newTask/openSession/setModel/setThinkingLevel 全部改用窄方法；send 中保留 streamingBehavior:'steer' 分支；workspace 改为持有 workspaceId + displayPath"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/InputBar.vue",
+          "action": "modify",
+          "target": "附件选择与图片读取",
+          "change": "改用 token 换取 base64；拖拽文件经 file.pathFor 后立即换 token 再丢弃路径"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/TopBar.vue",
+          "action": "modify",
+          "target": "工作目录展示",
+          "change": "展示 displayPath，操作一律基于 workspaceId"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/Welcome.vue",
+          "action": "modify",
+          "target": "选择文件夹流程",
+          "change": "接收 {workspaceId, displayPath} 而非裸路径"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/ExtensionUiHost.vue",
+          "action": "modify",
+          "target": "uiRespond 调用",
+          "change": "改用带 schema 校验的窄 channel，保留 select/confirm/input/editor/notify/setStatus/set_editor_text 七种交互的完整行为"
+        },
+        {
+          "path": "packages/app/test/workspace-capability.spec.ts",
+          "action": "create",
+          "target": "路径逃逸与附件校验测试",
+          "change": "6 类恶意输入全部拒绝"
+        },
+        {
+          "path": "packages/app/test/ipc-guard.spec.ts",
+          "action": "create",
+          "target": "四重校验测试",
+          "change": "frame / schema / 尺寸 / 限流各一组用例"
+        }
+      ],
+      "implementation": [
+        "先在 packages/contract/src/ipc-contract.ts 把 15 个窄 channel 及其 request/response schema 定型，作为 main 与 preload 的共同依据",
+        "写 ipc-guard.ts：assertMainFrame、尺寸常量、RateLimiter（token bucket，key 为 `${channel}:${webContentsId}`）",
+        "写 workspace-registry.ts：registerWorkspace 与 resolveInWorkspace；收容判定必须用 path.relative + rel.startsWith('..') || path.isAbsolute(rel)，严禁 real.startsWith(root)（前缀判定会把 /work-evil 误判为 /work 之内）",
+        "写 attachment-registry.ts：issue/resolve/revoke，resolve 时重做全部校验并做 magic bytes 嗅探",
+        "改写 ipc.ts：删除 pi:command，按 15 个窄 channel 重建 pi 相关 handler，每个 handler 统一前置四重校验；file/shell/dialog 相关 handler 改为 token 化并把 readFileSync 换成 fs/promises",
+        "改写 preload：删除 command；把 invoke 变为私有函数且只接受 contract 的 channel 常量；订阅句柄集中管理并在 pagehide 清理",
+        "改写渲染进程全部调用点；重点保留 send 中的 streamingBehavior:'steer' 分支，否则流式插话会静默失败（rpc.md 第 65 行：流式中不带 streamingBehavior 的 prompt 直接返回 error）",
+        "写两个测试文件并跑 pnpm -w test",
+        "人工执行 11 项功能回归 + 7 种 Extension UI 交互回归 + DevTools 控制台的接口面确认"
+      ],
+      "test": {
+        "commands": [
+          "pnpm -w test",
+          "pnpm typecheck",
+          "pnpm --filter @pibuddy/app build"
+        ],
+        "unit": [
+          "packages/app/test/workspace-capability.spec.ts",
+          "packages/app/test/ipc-guard.spec.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "pi:command 全项目出现次数 0",
+          "assertMainFrame 覆盖全部 13+ 个 handler",
+          "6 类路径/附件恶意输入全部被拒",
+          "11 项功能与 7 种 Extension UI 交互零回归"
+        ]
+      },
+      "reference": {
+        "pattern": "窄方法命名对齐 packages/pi-sdk/src/client.ts:182-255 已封装的命令方法；schema 复用 @pibuddy/contract；收容判定采用 path.relative 而非前缀比较",
+        "files": [
+          "packages/pi-sdk/src/client.ts",
+          "packages/contract/src/ipc-contract.ts",
+          "packages/app/src/main/ipc.ts"
+        ],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "接口收窄与路径 capability 化必须一起做：只删 pi.command 而保留 file:read-image 的任意绝对路径，攻击面只是从命令执行降级为任意文件读取。两者也共用同一套 handler 前置校验框架，分开会导致 ipc.ts 被两次重写。",
+        "decision_factors": [
+          "pi 原生 bash 命令使通用 command 通道等价于 RCE",
+          "senderFrame 校验命中数为 0",
+          "file:read-image 无路径与大小约束且同步阻塞主进程"
+        ],
+        "tradeoffs": "窄方法列表需要随产品功能演进维护；用 contract 的 channel 常量 + schema 集中定义，新增能力必须显式过一遍威胁模型。"
+      },
+      "risks": [
+        "删除 pi.command 会一次性影响 stores/app.ts 中约 10 处调用点，遗漏任一处即导致对应功能静默失效——必须以 grep 'piBuddy.pi.command' 命中数为 0 与 11 项手工回归共同验收",
+        "PiBuddy 的流式插话依赖 prompt + streamingBehavior='steer' 而非 pi 的 steer 命令；若在收窄时把插话错误地映射到 steer 方法，rpc.md 第 65 行的语义差异会让用户输入静默失败",
+        "workspaceId 化后 TopBar/Welcome 的路径展示需要 displayPath 单向下发；若某处仍把 displayPath 回传给主进程当参数用，等于绕过 capability，需在 preload 类型层面禁止（index.d.ts 中不得出现 workspace: string 形参）",
+        "ExtensionUiHost 的 editor / set_editor_text 交互涉及回传较大文本，MAX_TEXT_PAYLOAD_BYTES 上限需实测确认不会误伤正常使用"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": [
+          "IPC 接口面",
+          "文件附件",
+          "工作目录",
+          "Extension UI",
+          "流式插话"
+        ],
+        "affected_components": [
+          "packages/app/src/main/ipc.ts",
+          "packages/app/src/main/workspace-registry.ts",
+          "packages/app/src/main/attachment-registry.ts",
+          "packages/app/src/preload/index.ts"
+        ],
+        "affected_requirements": [
+          "SEC-002",
+          "SEC-003",
+          "SEC-005",
+          "EXT-001"
+        ],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "130m",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": true
+      }
+    },
+    {
+      "id": "TASK-A08",
+      "title": "SEC-004 凭据安全存储、出站请求 SSRF 防护与设置原子写",
+      "description": "实测：settings.ts:30 用 JSON.stringify 明文写盘，无 safeStorage；settings:get 把明文 API key 回传渲染进程；ipc.ts:199-204 的 baseUrl 完全来自渲染进程，除去尾斜杠外零处理，无协议校验、无白名单、不阻断 169.254.169.254 与内网段，且把 Bearer token 一并发送到攻击者指定的主机；fetch 无 signal 无超时，audio 无 byteLength 上限，成功分支 resp.json() 无大小限制。本任务把凭据迁入 OS 安全存储，让主进程按保存的 endpoint ID 自行发起请求（渲染进程不再同时提交任意 base URL 与 key），并加入完整的 SSRF 防护与设置文件原子写。",
+      "issue_id": null,
+      "issue_refs": [],
+      "type": "security",
+      "priority": "high",
+      "effort": "large",
+      "action": "新建 packages/app/src/main/secret-store.ts 用 electron safeStorage.isEncryptionAvailable() / encryptString / decryptString 把密钥以 base64 存入 userData/secrets.json，不可用时 fail closed 拒绝保存并提示用户；settings:get 的返回值移除 sttApiKey，改为 sttApiKeyConfigured: boolean 与 sttApiKeyLast4: string；新建 packages/app/src/main/endpoints.ts 保存 {endpointId, baseUrl, model} 并由主进程按 endpointId 取密钥发起请求，stt:transcribe 的入参收窄为 {endpointId, audio, mimeType} 且 audio.byteLength <= MAX_AUDIO_BYTES = 25*1024*1024；新建 packages/app/src/main/net/outbound-guard.ts 导出 normalizeEndpointUrl(raw)（要求 protocol === \"https:\"、剥离 URL 中的用户名密码、host 转小写与 punycode）与 assertPublicAddress(hostname)（先把整数/八进制/十六进制 IP 形式归一化，再 dns.promises.lookup(hostname,{all:true}) 并对每个地址拒绝 127.0.0.0/8、0.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16、100.64.0.0/10、::1、fc00::/7、fe80::/10，以及 ::ffff: 前缀的 IPv4-mapped 地址需解包后重新判定）与 safeFetch（redirect: \"manual\"、最多 3 跳且每跳重新执行 normalize + assert、AbortSignal 组合 CONNECT_TIMEOUT_MS = 5000 与 OVERALL_TIMEOUT_MS = 60000、MAX_RESPONSE_BYTES = 2*1024*1024、content-type 必须以 application/json 开头、错误信息脱敏不回显 URL 与请求头）；packages/app/src/main/settings.ts 改为 SETTINGS_SCHEMA_VERSION = 1 + migrate() + 原子写（写 settings.json.tmp → fs.fsyncSync(fd) → fs.renameSync）+ settings.json.bak 备份。",
+      "status": "pending",
+      "completed_at": null,
+      "actual_duration": null,
+      "scope": "packages/app/src/main/settings.ts + secret-store + net + STT 链路",
+      "focus_paths": [
+        "packages/app/src/main/",
+        "packages/app/src/renderer/src/"
+      ],
+      "read_first": [
+        "packages/app/src/main/settings.ts",
+        "packages/app/src/main/ipc.ts",
+        "packages/app/src/preload/index.ts",
+        "packages/app/src/preload/index.d.ts",
+        "packages/app/src/renderer/src/stt.ts",
+        "packages/app/src/renderer/src/components/SettingsModal.vue",
+        "packages/contract/src/settings.ts",
+        "packages/app/src/main/ipc-guard.ts",
+        "packages/app/src/main/logger.ts",
+        "doc/threat-model.md"
+      ],
+      "depends_on": [
+        "TASK-A07"
+      ],
+      "wave": 7,
+      "parallel_group": null,
+      "execution_group": null,
+      "executor": "agent",
+      "convergence": {
+        "criteria": [
+          "grep -c 'safeStorage' packages/app/src/main/secret-store.ts 输出 >= 2 且 contains 'isEncryptionAvailable()' 且 contains 'encryptString' 且 contains 'decryptString'",
+          "grep -c 'sttApiKey' packages/app/src/preload/index.d.ts 输出 0，且 packages/contract/src/settings.ts contains 'sttApiKeyConfigured' 且 contains 'sttApiKeyLast4'",
+          "grep -c 'baseUrl' packages/app/src/preload/index.ts 输出 0 且 grep -c 'apiKey' packages/app/src/preload/index.ts 输出 0（渲染进程不再能同时提交任意 base URL 与密钥）",
+          "packages/app/src/main/ipc.ts 的 stt:transcribe handler contains 'endpointId' 且该 handler 体内 grep 'apiKey' 命中数为 0 且 contains 'MAX_AUDIO_BYTES'",
+          "packages/app/src/main/net/outbound-guard.ts 同时 contains '169.254.169.254'、'100.64'、'172.16'、'192.168'、'fc00::'、'fe80::'、'::ffff:'、'::1'",
+          "packages/app/src/main/net/outbound-guard.ts contains 'redirect: \"manual\"' 且 contains 'MAX_RESPONSE_BYTES = 2 * 1024 * 1024' 且 contains 'CONNECT_TIMEOUT_MS = 5000' 且 contains 'OVERALL_TIMEOUT_MS = 60000' 且 contains 'application/json'",
+          "packages/app/src/main/net/outbound-guard.ts contains 'dns' 与 'lookup'，且在每次 redirect 后重新调用 normalizeEndpointUrl 与 assertPublicAddress（用 node 脚本断言 redirect 循环体内同时出现这两个函数名）",
+          "packages/app/test/ssrf.spec.ts 断言以下 17 个输入全部抛出 OUTBOUND_BLOCKED：'http://api.example.com/'（非 https）、'https://localhost/'、'https://127.0.0.1/'、'https://127.1/'、'https://0.0.0.0/'、'https://2130706433/'、'https://0177.0.0.1/'、'https://0x7f000001/'、'https://[::1]/'、'https://[::ffff:127.0.0.1]/'、'https://10.0.0.5/'、'https://172.16.0.1/'、'https://192.168.1.1/'、'https://100.64.0.1/'、'https://169.254.169.254/'、'https://metadata.google.internal/'、以及 stub lookup 使公网域名解析到 10.0.0.1 的 DNS rebinding 场景；该测试在 pnpm -w test 中通过",
+          "packages/app/test/ssrf.spec.ts 断言：stub fetch 返回 302 Location: 'http://169.254.169.254/latest/meta-data/' 时 safeFetch 抛 OUTBOUND_BLOCKED 而非跟随；返回体超过 MAX_RESPONSE_BYTES 时抛错；content-type 为 'text/html' 时抛错；抛出的错误消息 not contains 完整 URL 且 not contains 'Authorization'",
+          "packages/app/src/main/settings.ts contains 'SETTINGS_SCHEMA_VERSION = 1' 且 contains 'fsyncSync' 且 contains 'renameSync' 且 contains '.tmp' 且 contains '.bak' 且 contains 'function migrate'",
+          "grep -c 'writeFileSync(settingsPath()' packages/app/src/main/settings.ts 输出 0（第 30 行的直接覆写已被原子写取代）",
+          "packages/app/test/settings-atomic.spec.ts 断言：模拟写入 tmp 后崩溃（tmp 存在但未 rename）时 loadSettings() 仍返回上一版本内容；schema version 缺失的旧文件经 migrate 后可正常加载；该测试在 pnpm -w test 中通过",
+          "packages/app/test/secret-store.spec.ts 断言：safeStorage 不可用时 saveSecret 抛错且不落任何明文（落盘文件 not contains 明文密钥）；可用时 saveSecret → loadSecret 往返一致且磁盘文件 not contains 明文密钥",
+          "pnpm typecheck 退出码 0，pnpm -w test 退出码 0，pnpm --filter @pibuddy/app build 退出码 0",
+          "[UI-observable] 手动：在设置里填入 STT API key 并保存，重启应用后设置界面显示「已配置 ····<尾四位>」而非明文；DevTools 中 await window.piBuddy.settings.get() 的返回对象不包含任何完整密钥字段",
+          "[UI-observable] 手动：语音输入按钮录音后仍能成功转写出文字（端点由主进程按 endpointId 发起）；把自定义端点填为 'https://169.254.169.254/v1' 保存时被拒绝并给出可读错误提示；填为 'http://api.example.com/v1' 同样被拒绝并提示必须使用 HTTPS"
+        ],
+        "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && pnpm --filter @pibuddy/app build && grep -c 'sttApiKey' packages/app/src/preload/index.d.ts && grep -c 'baseUrl' packages/app/src/preload/index.ts",
+        "definition_of_done": "用户的 API key 永不以明文落盘、永不回传渲染进程；渲染进程无法指定任意请求目标从而窃取凭据或探测内网；任何出站请求都受协议、地址、跳转、超时、体积与内容类型六重约束；设置文件在断电或崩溃时不会损坏。"
+      },
+      "files": [
+        {
+          "path": "packages/app/src/main/secret-store.ts",
+          "action": "create",
+          "target": "safeStorage 密钥保管",
+          "change": "saveSecret(key, value) / loadSecret(key) / describeSecret(key) 返回 {configured, last4}；safeStorage 不可用时抛 SECRET_STORE_UNAVAILABLE 并拒绝以任何形式落盘明文"
+        },
+        {
+          "path": "packages/app/src/main/endpoints.ts",
+          "action": "create",
+          "target": "端点注册表",
+          "change": "保存 {endpointId, kind:'stt'|'provider', baseUrl, model}；保存前经 normalizeEndpointUrl + assertPublicAddress 校验；渲染进程只见 endpointId 与展示名"
+        },
+        {
+          "path": "packages/app/src/main/net/outbound-guard.ts",
+          "action": "create",
+          "target": "SSRF 防护与安全 fetch",
+          "change": "normalizeEndpointUrl / parseNumericIpForms / assertPublicAddress / safeFetch；safeFetch 手动处理最多 3 跳 redirect 且每跳重新校验，组合 connect 与 overall 两级超时，按 MAX_RESPONSE_BYTES 流式截断，校验 content-type，错误信息统一脱敏"
+        },
+        {
+          "path": "packages/app/src/main/settings.ts",
+          "action": "modify",
+          "target": "loadSettings / saveSettings（第 19-32 行）",
+          "change": "引入 SETTINGS_SCHEMA_VERSION 与 migrate()；saveSettings 改为写 tmp → fsyncSync → renameSync，并在覆盖前把旧文件复制为 .bak；密钥字段不再进入 settings.json 而转交 secret-store"
+        },
+        {
+          "path": "packages/app/src/main/ipc.ts",
+          "action": "modify",
+          "target": "settings:get / settings:set / stt:transcribe（第 131-134、173-212 行）",
+          "change": "settings:get 返回值剔除密钥并补 sttApiKeyConfigured / sttApiKeyLast4；settings:set 中的密钥字段路由到 secret-store；stt:transcribe 入参收窄为 {endpointId, audio, mimeType}，校验 MAX_AUDIO_BYTES 后由 endpoints + secret-store 组装请求并经 safeFetch 发出"
+        },
+        {
+          "path": "packages/contract/src/settings.ts",
+          "action": "modify",
+          "target": "AppSettings schema",
+          "change": "移除 sttApiKey；新增 sttEndpointId、sttApiKeyConfigured、sttApiKeyLast4 与 settingsSchemaVersion"
+        },
+        {
+          "path": "packages/contract/src/ipc-contract.ts",
+          "action": "modify",
+          "target": "stt / settings channel schema",
+          "change": "stt:transcribe 的 requestSchema 改为 {endpointId, audio, mimeType} 并加 byteLength 上限；settings channel 的 response schema 不含任何密钥字段"
+        },
+        {
+          "path": "packages/app/src/preload/index.ts",
+          "action": "modify",
+          "target": "stt.transcribe 与 settings",
+          "change": "transcribe 入参去掉 baseUrl 与 apiKey；新增 settings.setSecret(kind, value) 与 settings.describeSecret(kind)"
+        },
+        {
+          "path": "packages/app/src/preload/index.d.ts",
+          "action": "modify",
+          "target": "类型",
+          "change": "同步移除密钥与 baseUrl 相关字段"
+        },
+        {
+          "path": "packages/app/src/renderer/src/stt.ts",
+          "action": "modify",
+          "target": "转写调用",
+          "change": "改为传 endpointId + audio + mimeType；不再持有或传递密钥"
+        },
+        {
+          "path": "packages/app/src/renderer/src/components/SettingsModal.vue",
+          "action": "modify",
+          "target": "STT 与端点配置区",
+          "change": "密钥输入框保存后展示「已配置 ····<尾四位>」，不回填明文；自定义端点保存失败时展示主进程返回的可读错误（必须 HTTPS / 不允许内网地址）"
+        },
+        {
+          "path": "packages/app/test/ssrf.spec.ts",
+          "action": "create",
+          "target": "SSRF 用例集",
+          "change": "17 个阻断输入 + redirect 到内网 + 超大响应体 + 错误 content-type + 错误信息脱敏"
+        },
+        {
+          "path": "packages/app/test/settings-atomic.spec.ts",
+          "action": "create",
+          "target": "原子写与迁移测试",
+          "change": "崩溃残留 tmp 场景、旧版本文件迁移场景"
+        },
+        {
+          "path": "packages/app/test/secret-store.spec.ts",
+          "action": "create",
+          "target": "密钥保管测试",
+          "change": "safeStorage 可用与不可用两条路径，均断言磁盘不含明文"
+        }
+      ],
+      "implementation": [
+        "写 secret-store.ts：safeStorage.isEncryptionAvailable() 为 false 时直接抛 SECRET_STORE_UNAVAILABLE，绝不降级为明文写盘",
+        "写 outbound-guard.ts 的 parseNumericIpForms：先处理 2130706433 / 0177.0.0.1 / 0x7f000001 / 127.1 这四类简写与进制形式，统一转为点分十进制后再判定",
+        "写 assertPublicAddress：dns.promises.lookup(hostname,{all:true}) 后逐个判定；遇到 ::ffff: 前缀先解包成 IPv4 再判定；命中任一保留段抛 OUTBOUND_BLOCKED",
+        "写 safeFetch：redirect:'manual'，循环最多 3 次，每次读取 Location 后重新 normalizeEndpointUrl + assertPublicAddress；用 AbortSignal.any 组合 connect 与 overall 两级超时；读响应时按 MAX_RESPONSE_BYTES 累计截断；校验 content-type 前缀；catch 中统一替换为脱敏错误",
+        "写 endpoints.ts：保存端点前跑一次 normalize + assert，保存后只向渲染进程返回 endpointId 与展示名",
+        "改 settings.ts：加 SETTINGS_SCHEMA_VERSION 与 migrate；saveSettings 用 tmp + fsyncSync + renameSync 三步原子写并保留 .bak",
+        "改 ipc.ts 三个 handler：settings:get 剔除密钥并补 configured/last4；settings:set 把密钥路由到 secret-store；stt:transcribe 收窄入参、校验 MAX_AUDIO_BYTES、经 endpoints + secret-store + safeFetch 发起",
+        "改 contract 的 settings 与 ipc-contract schema，改 preload、stt.ts 与 SettingsModal.vue",
+        "写三个测试文件并跑 pnpm -w test",
+        "人工验证：密钥只显示尾四位、语音转写仍成功、内网端点与 http 端点保存被拒"
+      ],
+      "test": {
+        "commands": [
+          "pnpm -w test",
+          "pnpm typecheck",
+          "pnpm --filter @pibuddy/app build"
+        ],
+        "unit": [
+          "packages/app/test/ssrf.spec.ts",
+          "packages/app/test/settings-atomic.spec.ts",
+          "packages/app/test/secret-store.spec.ts"
+        ],
+        "integration": [],
+        "success_metrics": [
+          "17 个 SSRF 输入全部阻断",
+          "preload 中 baseUrl 与 apiKey 出现次数均为 0",
+          "磁盘 settings/secrets 文件不含明文密钥",
+          "崩溃残留 tmp 后设置仍可正常加载"
+        ]
+      },
+      "reference": {
+        "pattern": "handler 前置校验复用 A07 的 ipc-guard（assertMainFrame + schema + 尺寸 + 限流）；错误脱敏复用 A02 的 logger.redact",
+        "files": [
+          "packages/app/src/main/ipc-guard.ts",
+          "packages/app/src/main/logger.ts",
+          "packages/app/src/main/settings.ts"
+        ],
+        "examples": null
+      },
+      "rationale": {
+        "chosen_approach": "凭据保管、请求发起权与 SSRF 防护是同一条因果链：只要渲染进程还能同时提交 baseUrl 与 key，加密存储就没有意义。因此把请求发起权整体上移到主进程，渲染进程只提交 endpointId，密钥永不跨进程。",
+        "decision_factors": [
+          "ipc.ts:199-204 把 Bearer token 发往渲染进程指定的任意主机",
+          "settings.ts:30 明文写盘且 settings:get 回传明文",
+          "fetch 无超时无体积上限"
+        ],
+        "tradeoffs": "DNS rebinding 的彻底防护需要在 connect 阶段固定已校验的 IP；本任务采用「每跳重新解析 + 校验」的实现，并在 doc/threat-model.md 中记录残余风险与后续用自定义 lookup 固定地址的改进方向。"
+      },
+      "risks": [
+        "safeStorage 在部分 Linux 桌面环境不可用，fail closed 会让用户无法保存密钥——必须给出明确的界面提示与文档说明，而不是静默降级为明文",
+        "assertPublicAddress 依赖 DNS 解析，离线或内网 DNS 场景可能误判；错误信息需可区分「解析失败」与「地址被阻断」",
+        "把 STT 请求发起权上移后，若 A06 引入的 CSP connect-src 'self' 与渲染进程残留的直连代码冲突，会表现为转写静默失败——必须实际录一次音验证",
+        "settings.json 迁移必须保证旧字段（provider/modelId/thinkingLevel/workspace）无损，否则用户重启后工作目录与模型选择丢失"
+      ],
+      "code_skeleton": null,
+      "doc_context": {
+        "affected_features": [
+          "设置持久化",
+          "API key 管理",
+          "语音转写",
+          "自定义端点"
+        ],
+        "affected_components": [
+          "packages/app/src/main/secret-store.ts",
+          "packages/app/src/main/net/outbound-guard.ts",
+          "packages/app/src/main/settings.ts",
+          "packages/app/src/renderer/src/components/SettingsModal.vue"
+        ],
+        "affected_requirements": [
+          "SEC-004",
+          "OBS-002"
+        ],
+        "adr_ids": []
+      },
+      "meta": {
+        "estimated_time": "120m",
+        "risk": "high",
+        "autonomous": true,
+        "checkpoint": true
+      }
+    }
+  ]
+}

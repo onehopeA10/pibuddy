@@ -1,0 +1,296 @@
+{
+  "id": "TASK-012",
+  "title": "EXT-101/EXT-102 Extension UI 全方法覆盖、dialog timeout 与 Pi 资源中心（含 project trust）",
+  "description": "补齐 Extension UI 协议：新增 setWidget / setTitle 处理（当前静默丢弃），实现 dialog timeout（当前全库只有类型声明，没有任何实现，上游超时自行 auto-resolve 后本地 modal 仍挂着且 mask-closable:false，用户点击发出的是失效 id，client.ts:177 直写 stdin 无校验静默吞掉），按 runtime generation 清理僵尸 uiRequests，并给 respondUi 加错误边界（现在 clientFor 抛错会变成未处理 promise rejection）。同时补 5 类被 app.ts:237 静默丢弃的 AgentEvent（含三个连类型都没声明的 summarization_retry_*）。再做 Pi 资源中心第一版：枚举 user/project/package 来源的 packages/extensions/skills/prompts/themes，显示路径版本来源启用状态，支持启停与安装受信 skill，并落地 pi project trust（RPC 模式不弹 trust 提示，必须由 PiBuddy 显示并写 ~/.pi/agent/trust.json 或用 -a/-na 覆盖单次运行）。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "feature",
+  "priority": "high",
+  "effort": "large",
+  "action": "在 packages/app/src/main/extension-ui/ext-ui-service.ts 新建 `class ExtensionUiService`，持有 `Map<string, { request: ExtensionUiRequest; runtimeGeneration: number; timer: NodeJS.Timeout | null }>`；收到带 `timeout` 的 dialog 请求时 `setTimeout(() => this.expire(id), request.timeout)`，到期向 renderer 发 `pi:ui-expire` 并从表中删除；`respond(id, payload)` 先校验 id 是否仍在表中，不在则返回 `{ ok: false, reason: 'expired' }` 而不是直写 stdin；runtime 重启或 session 切换时按 generation 清空整表并广播 `pi:ui-expire-all`。packages/pi-sdk/src/types.ts 的 AgentEvent 联合类型补上 `{ type: 'summarization_retry_scheduled'; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }`、`{ type: 'summarization_retry_attempt_start'; source: 'compaction' | 'branchSummary'; reason?: string }`、`{ type: 'summarization_retry_finished' }`。ExtensionUiRequest 的 widgetKey/widgetLines/widgetPlacement/title 走新增的 widget 与 title 处理分支。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/pi-sdk/src, packages/app/src/main/extension-ui, packages/app/src/main/pi-resources, packages/app/src/renderer/src/components",
+  "focus_paths": [
+    "packages/pi-sdk/src/",
+    "packages/app/src/main/extension-ui/",
+    "packages/app/src/main/pi-resources/",
+    "packages/app/src/renderer/src/components/ExtensionUiHost.vue"
+  ],
+  "read_first": [
+    "packages/app/src/renderer/src/components/ExtensionUiHost.vue",
+    "packages/app/src/renderer/src/stores/app.ts 第 242-278 行（handleUiRequest / respondUi）与第 237 行（default: break 静默丢弃）",
+    "packages/pi-sdk/src/client.ts 第 176-178 行（respondUi 直写 stdin 无校验）",
+    "packages/pi-sdk/src/types.ts 第 209-266 行（AgentEvent 与 ExtensionUiRequest）",
+    "packages/app/src/main/pi-launcher.ts",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 1143-1334 行（Extension UI Protocol 全部方法与响应格式）与第 1100-1129 行（summarization_retry_*）",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/security.md 第 5-38 行（Project Trust：RPC 模式不弹提示、trust.json 按 canonical 目录、-a/-na 覆盖单次运行）",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/packages.md",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/settings.md 第 1-30 行（settings.json 层级与 defaultProjectTrust）",
+    "packages/contract/src/index.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/contract/src/envelope.ts",
+    "packages/app/src/main/extension-ui/ext-ui-service.ts",
+    "packages/app/src/main/extension-ui/ext-ui-contract.test.ts",
+    "packages/app/src/main/pi/pi-ipc.ts",
+    "packages/app/src/main/pi-resources/resource-scanner.ts",
+    "packages/app/src/main/pi-resources/package-install.ts",
+    "packages/app/src/main/pi-resources/trust-store.ts",
+    "packages/app/src/renderer/src/stores/extensionUi.ts",
+    "packages/app/src/renderer/src/components/ExtensionWidgetHost.vue",
+    "packages/app/src/renderer/src/components/PiResourcesPanel.vue",
+    "packages/app/src/renderer/src/components/ProjectTrustDialog.vue",
+    "packages/app/src/renderer/src/components/AppShell.vue",
+    "packages/app/src/renderer/src/components/TopBar.vue"
+  ],
+  "depends_on": [
+    "TASK-003",
+    "TASK-005",
+    "TASK-009",
+    "TASK-010"
+  ],
+  "wave": 10,
+  "parallel_group": "wave3",
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "packages/app/src/main/extension-ui/ext-ui-service.ts 含 `setTimeout(` 与 `'expired'` 与 `runtimeGeneration`；`test -e packages/app/src/main/extension-ui/ && [ \"$(rg -c 'timeout' packages/app/src/main/extension-ui/ | wc -l)\" -ge 1 ]`（正向：timeout 必须出现在实现目录，不再只出现在 pi-sdk/src/types.ts:250 的类型声明中；SYS-1：原写法对尚不存在的目录退出码 2）",
+      "contract 单测 ext-ui-contract.test.ts 覆盖 rpc.md 第 1170-1310 行列出的全部 9 个 method（select / confirm / input / editor / notify / setStatus / setWidget / setTitle / set_editor_text），每个断言：请求被路由到对应处理分支，且 4 个 dialog 方法各自能产出 value / confirmed / cancelled 三种响应形状；`pnpm --filter @pibuddy/app test -- src/main/extension-ui` 退出码 0",
+      "timeout 单测：投入 `{ method:'select', timeout: 50 }` 后等待 80ms，断言 (a) renderer 收到 `pi:ui-expire` 且本地 modal 关闭；(b) 此后对该 id 调 respond 返回 `{ ok:false, reason:'expired' }` 且 `client.respondUi` 未被调用（用 spy 断言调用次数为 0）",
+      "runtime 重启单测：generation 从 1 变为 2 后，generation=1 的挂起 dialog 全部被清理，renderer uiRequests 长度为 0，且对旧 id 作答不抛未处理 rejection（`process.on('unhandledRejection')` 计数为 0）",
+      "packages/pi-sdk/src/types.ts 含 `summarization_retry_scheduled`、`summarization_retry_attempt_start`、`summarization_retry_finished` 三个字面量（`[ \"$(rg -c --no-filename 'summarization_retry_(scheduled|attempt_start|finished)' packages/pi-sdk/src/types.ts | awk '{s+=$1} END{print s+0}')\" -ge 3 ]`）；stores/extensionUi.ts 的 handler 对这三个事件写入 statusTexts.summarization（CT-25：statusTexts 已迁出 app.ts，写入方随之迁移）。单测三条断言：投入 scheduled 后 `statusTexts.summarization` 非空且 contains '重试'；投入 attempt_start(1,3) 后其值 contains '(1/3)'；投入 finished 后 `statusTexts.summarization === undefined`（三条任一不成立即 FAIL；原文只描述「写入」而无取值断言，写入空串亦可通过）",
+      "packages/app/src/main/pi-resources/resource-scanner.ts 枚举 `~/.pi/agent/settings.json`、`<workspace>/.pi/settings.json`、`~/.pi/agent/npm/`、`~/.pi/agent/git/` 并对每条资源返回 `{ kind: 'package'|'extension'|'skill'|'prompt'|'theme', name, version, source: 'user'|'project'|'package', path, enabled, conflictWith }`；`test -e packages/app/src/renderer && [ \"$(rg -c 'exec\\(|execSync\\(|spawn\\(' packages/app/src/renderer | wc -l)\" -eq 0 ]`（renderer 不得执行任何 package manager 命令）；正向配对：`rg -c 'export async function scanResources' packages/app/src/main/pi-resources/resource-scanner.ts` 输出 1",
+      "安装 skill 只允许经 main 的白名单：packages/app/src/main/pi-resources/package-install.ts 含 `const ALLOWED_SUBCOMMANDS = ['install', 'remove'] as const`，且拒绝包含 `;`、`&&`、`|`、反引号的入参（单测 package-install.test.ts 断言这 4 类注入被拒）",
+      "project trust：packages/app/src/main/pi-resources/trust-store.ts 读写 `~/.pi/agent/trust.json`（写入经 fs-atomic.ts 的 writeJsonAtomic）；`buildPiSpawn` 的 trust 参数由单测断言而非源码字面量 —— trust-decision.test.ts 三条：(a) 无已保存决定且用户选择拒绝时 `buildPiSpawn().args` includes('-na') 且 !includes('-a')；(b) 选择信任且 trust.json 中尚无该目录时 args includes('-a') 且 !includes('-na')；(c) trust.json 中已有该目录的决定时 args 既不含 '-a' 也不含 '-na'（三条互斥，任何单一固定行为都会挂在其中两条上）；UI 文案含固定字符串「信任不等于工具权限」（`[ \"$(rg -c --no-filename '信任不等于工具权限' packages/app/src/renderer/src | awk '{s+=$1} END{print s+0}')\" -ge 1 ]`）",
+      "[UI-observable] 用户在「Pi 资源」页看到 user/project/package 三类来源的 skill 与 extension 列表（含路径、版本、来源、启用状态），可开关一个 extension 并在重启 runtime 后生效；可安装一个 skill 并在输入框输入 `/skill:` 时看到它；打开含 .pi 资源的项目时先弹出 trust 对话框，列出将加载的 project resources 与 allow/deny/remember 三个选择；扩展弹窗设置 timeout 到期后本地对话框自动消失并提示「助手已不再等待这个回答」",
+      "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/pi-sdk typecheck` 退出码 0；Extension UI 既有闭环的七个 method（select / confirm / input / editor / notify / setStatus / set_editor_text —— 即 app.ts:243-263 handleUiRequest 当前已显式处理的 case，与 TASK-007 c[17] 枚举的七种交互逐项对应）的人工回归记录写入 doc/regression/TASK-012-extension-ui.md，该文件存在且含恰 7 行以 `- [x]` 开头的条目，每行含 method 名、pi 侧收到的响应体字段值与 ISO 时间戳。注：SDK 共声明 9 个 method（packages/pi-sdk/src/types.ts:235-244），setWidget / setTitle 当前落入 default 分支被静默丢弃，属本任务 c[1] 要求新补的两个，不计入「既有闭环」",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1",
+      "[静默丢弃根除] `test -e packages/app/src/renderer/src/stores/app.ts && [ \"$(rg -c 'default:\\s*break' packages/app/src/renderer/src/stores/app.ts | wc -l)\" -eq 0 ]`；handleEvent 的 default 分支必须调用 `recordUnknownEvent(e.type)` 并累加计数，单测投入一个未知 type 后断言计数器 +1 且该 type 出现在 debug 快照里（当前的裸 break 会让新版本 pi 新增的事件永久静默消失）",
+      "[respondUi 返回值被真正使用 · 定义「附近」] 用 node 脚本判定：在 packages/app/src/main/pi/pi-ipc.ts 中定位每个 `respondUi(` 调用所在行 L，断言 (L, L+5] 行区间内存在 `if (!` 或 `=== false` 或 `.ok` 之一（区间宽度明定为 5 行，原文「命中行附近」无行距定义）；单测断言进程未运行时 respond 返回 `{ ok:false, reason:'no-runtime' }` 且 pi-sdk 的 stdin write spy 调用次数为 0（当前实现直写 stdin 并把失败静默吞掉）",
+      "[定时器不泄漏] ExtensionUiService 在 expire / respond / clearGeneration 三条路径上都执行 clearTimeout；单测重复 100 次「建带 timeout 的请求 → 立即作答」后断言 `service.pendingTimerCount === 0`（残留定时器会在几分钟后向已关闭的会话广播 expire，用户看到的是随机弹出的过期提示）",
+      "[widget 生命周期] widgetLines 为 undefined 时该 widgetKey 从 Map 中删除：单测断言 set → unset 后 `widgets.size === 0`；ExtensionWidgetHost.vue 含 `30vh` 高度上限（`[ \"$(rg -c --no-filename '30vh' packages/app/src/renderer/src/components/ExtensionWidgetHost.vue | awk '{s+=$1} END{print s+0}')\" -ge 1 ]`），单测断言超出部分产生滚动而非撑高整个输入区",
+      "[title 截断与前缀] TopBar 对 setTitle 上报值渲染为 `'PiBuddy · ' + raw.slice(0, 60)`；单测以 200 字符输入断言渲染文本长度 <= 70 且以 `PiBuddy · ` 开头（扩展可上报任意长度标题，不截断会静默撑破顶栏布局）",
+      "[trust.json 合并写入与路径归一] trust-store.test.ts 断言 (a) 写入新目录决定后，原文件中其它目录的条目原样保留（与 auth.json 同一纪律）；(b) key 为 `fs.realpathSync.native(dir)` 的结果 —— 用一个指向同一目录的 symlink 与真实路径分别写入，断言 trust.json 中只有一条记录",
+      "`test -e packages/app/src/main/pi-resources/ && [ \"$(rg -c 'readdirSync|statSync|readFileSync' packages/app/src/main/pi-resources/ | wc -l)\" -eq 0 ]` 且 `rg --no-filename -c 'fs/promises' packages/app/src/main/pi-resources/ | awk '{s+=$1} END{print s+0}'` 输出 >= 1（正负成对：SYS-1 原写法对尚不存在的目录退出码 2，且纯否定断言被「任务没做」满足）；另断言 resource-scanner 的扫描在 5000 个 fixture 条目下不阻塞——单测在扫描进行中投递一个 setImmediate 回调，断言其在 50ms 内被执行",
+      "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 6 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 6。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 6` 恒假）",
+      "[推送通道一律经信封与转发器 · 结构断言] `rg --no-filename -c '\\.send\\(\"pi:|\\.send\\(`pi:' packages/app/src/main -g '*.ts' -g '!pi/event-forwarder.ts' | awk '{s+=$1} END{print s+0}'` 输出 0 —— 本任务新增的 main→renderer 推送通道必须经 pi/event-forwarder.ts 发出，从而自动获得 PiEnvelope 包装与 generation/sequence 丢弃规则（near-miss：pi:ui-expire / pi:ui-expire-all 是 TASK-005 之后新增的推送通道，未经信封会绕过渲染侧的过期代丢弃）",
+      "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+      "[CT-11 · 不得重新引入全局 pi 回退] 本任务对 buildPiSpawn 的修改仅限追加 `-a` / `-na` trust 参数：`rg --no-filename -c 'runtime-manifest.json' packages/app/src/main/pi-launcher.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 1，且 `test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'pi\\.cmd|which pi|command -v pi|fallbackToGlobalPi' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`；TASK-003 的 packages/app/test/pi-launcher.spec.ts 在本任务改动后仍全部通过（`pnpm -w test -- pi-launcher` 退出码 0）",
+      "[CT-25 · 迁出后清空语义不丢] packages/app/src/renderer/src/stores/extensionUi.ts 在模块初始化时调用 TASK-006 的 `registerSessionScopedReset`（`rg -c 'registerSessionScopedReset' packages/app/src/renderer/src/stores/extensionUi.ts` 输出 >= 1）；单测断言：在 extensionUi store 中放入 2 条 uiRequests 与 1 条 statusTexts 后调用 app store 的 resetSessionScopedState()，两者长度均归 0 —— 即 TASK-006 c[10] 的六项断言在迁出后逐字不变仍通过。另：statusTexts.summarization 的写入方由本任务改为 extensionUi store（原 c[4] 描述写在 stores/app.ts，与本条迁出互斥，以本条为准）",
+      "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4"
+    ],
+    "verification": "pnpm --filter @pibuddy/app test -- src/main/extension-ui src/main/pi-resources && pnpm -r typecheck && 用 examples/extensions 下的 pi 示例扩展在 dev 模式逐个触发 9 个 UI method 与一次 timeout 场景",
+    "definition_of_done": "扩展弹出的任何一种交互 PiBuddy 都能正确显示和回答，超时后弹窗会自己消失而不是骗用户点一个没人接收的按钮；用户能在界面里看到并管理 Pi 的技能与扩展，能安装一个技能，打开新项目时会先被问是否信任。"
+  },
+  "files": [
+    {
+      "path": "packages/pi-sdk/src/types.ts",
+      "action": "modify",
+      "target": "AgentEvent / ExtensionUiRequest",
+      "change": "补 summarization_retry_scheduled/attempt_start/finished 三个事件成员；ExtensionUiRequest 增加 widget/title 字段的必需性说明与 UiMethod 联合类型导出"
+    },
+    {
+      "path": "packages/pi-sdk/src/client.ts",
+      "action": "modify",
+      "target": "respondUi",
+      "change": "改为 `respondUi(response): boolean`，进程未运行或 id 校验失败返回 false 而不是抛错直写 stdin"
+    },
+    {
+      "path": "packages/app/src/main/extension-ui/ext-ui-service.ts",
+      "action": "create",
+      "target": "ExtensionUiService",
+      "change": "挂起表、timeout 定时器、generation 清理、respond 校验、widget/title/status 三类 fire-and-forget 的状态维护"
+    },
+    {
+      "path": "packages/app/src/main/extension-ui/ext-ui-contract.test.ts",
+      "action": "create",
+      "target": "9 method contract tests",
+      "change": "覆盖全部 UI method 与 value/confirmed/cancelled/expired 四种响应路径"
+    },
+    {
+      "path": "packages/app/src/main/pi/pi-ipc.ts",
+      "action": "modify",
+      "target": "pi:ui-respond handler",
+      "change": "改为委托 ExtensionUiService.respond 并 try/catch 返回结构化结果；新增 pi:ui-expire / pi:ui-expire-all 广播"
+    },
+    {
+      "path": "packages/app/src/main/pi-resources/resource-scanner.ts",
+      "action": "create",
+      "target": "scanPiResources()",
+      "change": "枚举 user/project/package 三来源资源，标注启用状态与同名冲突"
+    },
+    {
+      "path": "packages/app/src/main/pi-resources/package-install.ts",
+      "action": "create",
+      "target": "runPackageCommand()",
+      "change": "白名单子命令 + 参数注入校验 + 输出流式回传，project 资源需先 trust"
+    },
+    {
+      "path": "packages/app/src/main/pi-resources/trust-store.ts",
+      "action": "create",
+      "target": "readTrust/writeTrust",
+      "change": "仅在 args 组装处追加 trust 参数：无已保存决定且用户拒绝时追加 `-na`，选择信任且尚未写入时追加 `-a`。不得改动 runtime 定位逻辑与「找不到内置运行时即抛含 runtime-manifest.json 的错误」这一行为（CT-11：TASK-003 c[7] 与本任务原描述的全局 pi 回退互斥，以 TASK-003 为准）"
+    },
+    {
+      "path": "packages/app/src/main/pi-launcher.ts",
+      "action": "modify",
+      "target": "buildPiSpawn",
+      "change": "接受 trust 决定参数，按决定追加 -a 或 -na；保持 bundled cli.js 优先与全局 pi 回退不变"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/extensionUi.ts",
+      "action": "create",
+      "target": "useExtensionUiStore",
+      "change": "从 app store 迁出 uiRequests / statusTexts，新增 widgets（稳定 key + placement + 高度上限）与 title（产品前缀 + 长度截断）状态"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ExtensionUiHost.vue",
+      "action": "modify",
+      "target": "modal 渲染",
+      "change": "订阅 pi:ui-expire 自动关闭；补 aria-label、焦点回归、Esc 取消；超时提示文案"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ExtensionWidgetHost.vue",
+      "action": "create",
+      "target": "widget 渲染区",
+      "change": "按 widgetPlacement 渲染在输入框上/下，单 widget 最大高度 30vh 超出滚动，widgetLines 为 undefined 时删除该 key"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/PiResourcesPanel.vue",
+      "action": "create",
+      "target": "Pi 资源中心",
+      "change": "资源列表 + 启停开关 + 安装/卸载/刷新/打开目录 + 冲突诊断 + trust 状态提示"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ProjectTrustDialog.vue",
+      "action": "create",
+      "target": "trust 对话框",
+      "change": "展示来源、将加载的 project resources、allow/deny/remember，并固定文案说明信任不等于工具权限"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/AppShell.vue",
+      "action": "modify",
+      "target": "根布局",
+      "change": "挂载 ExtensionWidgetHost、PiResourcesPanel 入口与 ProjectTrustDialog"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/TopBar.vue",
+      "action": "modify",
+      "target": "标题与状态区",
+      "change": "渲染 setTitle 上报的标题（加「PiBuddy · 」前缀并截断到 60 字符）"
+    },
+    {
+      "path": "packages/app/src/main/extension-ui/ext-ui-timeout.test.ts",
+      "action": "create",
+      "target": "Extension UI 超时单测",
+      "change": "[errata-2 补录] test.unit[1] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/extension-ui/ext-ui-lifecycle.test.ts",
+      "action": "create",
+      "target": "Extension UI 生命周期单测",
+      "change": "[errata-2 补录] test.unit[4] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/pi-resources/package-install.test.ts",
+      "action": "create",
+      "target": "包安装单测",
+      "change": "[errata-2 补录] test.unit[2] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/pi-resources/trust-store.test.ts",
+      "action": "create",
+      "target": "信任存储单测",
+      "change": "[errata-2 补录] test.unit[3] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "doc/regression/TASK-012-extension-ui.md",
+      "action": "create",
+      "target": "Extension UI 人工回归记录",
+      "change": "[errata-2 补录] c[9] 要求该文件存在并含勾选行，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "先读 rpc.md 第 1143-1334 行核对当前 0.83.0 版本公开的 UI method 全集，把结果写成 `export const EXTENSION_UI_METHODS = [...] as const` 作为 contract test 的唯一来源",
+    "实现 ExtensionUiService：请求入表时记录 runtimeGeneration；带 timeout 的请求挂定时器；expire 时清表 + 广播 + 不向 pi 写任何响应（上游已自行 auto-resolve）",
+    "respond 校验失败返回 { ok:false, reason:'expired'|'no-runtime' }，renderer 收到后 toast「这个请求已经过期」而不是静默",
+    "runtime 重启 / session 切换时调用 service.clearGeneration(prevGen)，广播 pi:ui-expire-all",
+    "pi-sdk：respondUi 返回 boolean；AgentEvent 补三个 summarization_retry_* 成员",
+    "stores/app.ts 的 default 分支改为：把未知事件写入 debug 日志计数器（不再纯 break），并对 turn_start/turn_end/agent_end/bash_execution_update/summarization_retry_* 补显式处理",
+    "widget：以 widgetKey 为稳定 key 存 Map，widgetLines 为空即删除；渲染最大高度 30vh；title：前缀 + 60 字符截断",
+    "资源中心：resource-scanner 读 settings.json（user + project）与 npm/git 安装目录，输出统一结构；同名同来源冲突标记 conflictWith",
+    "安装：package-install 用 execFile（非 shell）执行 settings.json 中的 npmCommand 或默认 npm，子命令白名单 install/remove，入参正则校验拒绝 shell 元字符；执行前若目标为 project 资源则先要求 trust",
+    "trust：detectProjectResources 按 security.md 第 9-16 行列出的判定条件扫描；用户决定写 trust.json（remember）或只影响本次启动（-a/-na）",
+    "回归：Extension UI 既有五方法、语音输入、模型切换、tool 卡片展开必须逐项人工确认未破坏"
+  ],
+  "test": {
+    "commands": [
+      "pnpm --filter @pibuddy/app test -- src/main/extension-ui",
+      "pnpm --filter @pibuddy/app test -- src/main/pi-resources",
+      "pnpm -r typecheck"
+    ],
+    "unit": [
+      "packages/app/src/main/extension-ui/ext-ui-contract.test.ts",
+      "packages/app/src/main/extension-ui/ext-ui-timeout.test.ts",
+      "packages/app/src/main/pi-resources/package-install.test.ts",
+      "packages/app/src/main/pi-resources/trust-store.test.ts",
+      "packages/app/src/main/extension-ui/ext-ui-lifecycle.test.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "9 个 UI method contract test 全绿",
+      "timeout 后 respondUi 调用次数为 0",
+      "shell 注入用例 4/4 被拒"
+    ]
+  },
+  "reference": {
+    "pattern": "沿用 ExtensionUiHost.vue 的 naive-ui modal 单队列渲染，只把状态与生命周期上移到 main",
+    "files": [
+      "packages/app/src/renderer/src/components/ExtensionUiHost.vue"
+    ],
+    "examples": "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/examples"
+  },
+  "rationale": {
+    "chosen_approach": "Extension UI 的真实缺陷不是「少两个方法」而是超时与生命周期缺失导致的僵尸弹窗与未处理 rejection，因此把挂起表放到 main 并以 generation 为准；资源中心先做到 M3 出口门禁要求的「安装一个受信 skill」，MCP 管理另开任务。",
+    "decision_factors": [
+      "RPC 模式不弹 trust 提示，产品必须自己补这层",
+      "renderer 直接执行包管理命令是明确禁止项"
+    ],
+    "tradeoffs": "MCP CRUD / OAuth 状态 / tool 列表 / 连接测试本轮不做，M3 出口门禁不含 MCP"
+  },
+  "risks": [
+    "EXT-102 的 MCP 管理（CRUD、启停、连接测试、OAuth 状态、tool 列表、错误诊断）本任务不实现，必须在验收说明中显式标注为未完成，不得用空面板冒充",
+    "pi 0.83.0 的 UI method 全集以 rpc.md 为准，升级 pi 版本后 contract test 需要重新对照，测试里应断言常量表与文档一致而不是硬编码 9",
+    "trust.json 写入是跨应用共享状态，误写会影响用户在终端里的 pi；写入前必须读取并合并已有决定，不得整文件覆盖"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "Extension UI",
+      "Pi 资源中心",
+      "Project Trust"
+    ],
+    "affected_components": [
+      "pi-sdk",
+      "main/extension-ui",
+      "main/pi-resources",
+      "renderer/components"
+    ],
+    "affected_requirements": [
+      "EXT-101",
+      "EXT-102"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "12h",
+    "risk": "medium",
+    "autonomous": true,
+    "checkpoint": false,
+    "wave": 10
+  },
+  "origin_shard": "B",
+  "origin_id": "TASK-B03"
+}

@@ -1,0 +1,3852 @@
+{
+  "note": "revision-round-3.json 的 tautology_full_review 的完整逐条明细：全部 16 个 task 的 344 条 convergence.criteria，每条给出断言类型与「可能失败的场景」。",
+  "generated_by": "逐条抽取 criterion 内的可执行断言片段（test -e 守卫 / 计数上下界 / 单测断言 / 退出码 / 闸门脚本 / 字面量存在性 / UI 属性取值）",
+  "total": 344,
+  "falsifiable": 344,
+  "not_falsifiable": 0,
+  "criteria": [
+    {
+      "task": "TASK-001",
+      "index": 0,
+      "excerpt": "git -C D:/selftool/pi-ui rev-parse --is-inside-work-tree 输出 true",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 1,
+      "excerpt": "git -C D:/selftool/pi-ui remote 输出为空（0 行），证明未配置任何 remote",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 2,
+      "excerpt": "git -C D:/selftool/pi-ui rev-list --count HEAD 输出 >= 1，且 git status --porcelain 输出为空（原文写死 === 1，会在执行者做第二次提交时把正确实现判为失败）",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 3,
+      "excerpt": ".gitignore contains 'node_modules' 且 contains 'release' 且 contains 'out'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 4,
+      "excerpt": "package.json contains '\"test\": \"vitest run\"' 且 devDependencies contains '\"vitest\"'；仓库根存在唯一的 vitest.config.ts，其 test.include 为 ['packages/*/src/**/*.{t…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 5,
+      "excerpt": "tools/fake-pi/fake-pi.mjs 同时 contains 全部 9 个场景字面量：'normal'、'malformed-json'、'timeout'、'stderr-noise'、'exit-immediately'、'crash-mid-stream'、'extension-…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 6,
+      "excerpt": "tools/fake-pi/fake-pi.mjs contains 'indexOf(\"\\n\")'，且 `test -e tools/fake-pi/fake-pi.mjs && [ \"$(rg -c 'readline' tools/fake-pi/fake-pi.mjs | wc -l)\" -…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e tools/fake-pi/fake-pi.mjs` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 7,
+      "excerpt": "pnpm -w test 退出码为 0，且输出中通过用例数 >= 8",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 8 时失败（空实现或漏改任一处即触发）；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 8,
+      "excerpt": "packages/pi-sdk/test/client.spec.ts contains '--scenario' 且 contains 'malformed-json' 且 contains 'exit-immediately'",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 9,
+      "excerpt": "(a) .github/workflows/ci.yml contains 'pnpm typecheck' 且 contains 'pnpm test' 且 contains 'pnpm build' 且 contains 'node scripts/check-test-discovery.mj…",
+      "assertion_kinds": [
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 10,
+      "excerpt": "`test -e .github/workflows/ci.yml && [ \"$(rg -c 'secrets\\.' .github/workflows/ci.yml | wc -l)\" -eq 0 ]`（CI 不得引用任何真实凭证）",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e .github/workflows/ci.yml` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-001",
+      "index": 11,
+      "excerpt": "doc/baseline-2026-08-02.md contains '流式文本增量' 且 contains 'Extension UI' 且 contains 'packaged-smoke'，列出 15 项现有闭环功能的手工 smoke 清单",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 12,
+      "excerpt": "[UI-observable] 按 doc/baseline-2026-08-02.md 清单在 pnpm --filter @pibuddy/app dev 下人工走通「输入 → 流式回复 → tool 卡片展开 → 停止」，并在文档中逐项打勾记录基线状态",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 13,
+      "excerpt": "[CT-21 · 测试发现范围不得被注销] (a) 工作区内 vitest 配置唯一：`find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1，且该文件为仓库…",
+      "assertion_kinds": [
+        "count-exact",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-001",
+      "index": 14,
+      "excerpt": "[CT-12 · node:sqlite 探针前置定稿] `node scripts/probe-node-sqlite.mjs` 退出码 0，且其输出写入 doc/baseline-2026-08-02.md 的「运行时能力」小节，含三行：electron 版本、Electron 内 proces…",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-001",
+      "index": 15,
+      "excerpt": "[断言写法统一 · SYS-1] doc/baseline-2026-08-02.md 含「断言写法约定」小节，逐字记录三条：(1) 否定型断言一律写作 `test -e <PATH> && [ \"$(rg -c '<PAT>' <PATH> | wc -l)\" -eq 0 ]`，路径不存在时 te…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e <PATH>` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-002",
+      "index": 0,
+      "excerpt": "packages/contract/package.json contains '\"name\": \"@pibuddy/contract\"' 且 dependencies 中 contains '\"zod\"'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 1,
+      "excerpt": "packages/contract/src/envelope.ts contains 'export const PROTOCOL_VERSION = 1'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 2,
+      "excerpt": "packages/contract/src/envelope.ts 同时 contains 全部 8 个信封字段名：'protocolVersion'、'workspaceId'、'sessionId'、'runtimeId'、'generation'、'sequence'、'occurredAt'…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 3,
+      "excerpt": "packages/contract/src/envelope.ts contains 'protocol-version-mismatch'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 4,
+      "excerpt": "packages/contract/src/ports.ts 同时 contains 'interface PiRuntimeSupervisor'、'interface SessionRepository'、'interface SettingsStore'、'interface Permissi…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 3 时失败（空实现或漏改任一处即触发）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 5,
+      "excerpt": "packages/app/electron.vite.config.ts contains 'exclude: [\"@pibuddy/pi-sdk\", \"@pibuddy/contract\"]'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 6,
+      "excerpt": "packages/app/tsconfig.node.json contains '../contract/src/**/*.ts' 且 packages/app/tsconfig.web.json contains '../contract/src/**/*.ts'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 7,
+      "excerpt": "`test -e packages/app/src/renderer && [ \"$(rg -c 'preload/index.d' packages/app/src/renderer | wc -l)\" -eq 0 ]`（改前实测 2 处：stores/app.ts:17 与 InputBar.v…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-002",
+      "index": 8,
+      "excerpt": "[裁定6 · 逐个可执行] 对 AppSettings / SessionMeta / PickedFile / StartResult 四个具名类型逐一执行 `rg --no-filename -c 'export (interface|type) <NAME>\\b' packages/app/s…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-002",
+      "index": 9,
+      "excerpt": "[裁定6 · 三个内联匿名类型同样收敛] packages/contract/src 导出 `SttTranscribeRequest`（{ endpointId, audio, mimeType }）、`ReadImageResult`（{ data, mimeType }）、`PiStartPa…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "literal-presence",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/preload/index.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 3 时失败（空实现或漏改任一处即触发）；实际计数 != 3 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-002",
+      "index": 10,
+      "excerpt": "[裁定4 · 唯一日志器] packages/app/src/main/logger.ts 是全计划唯一的日志器实现：contains 'MAX_LOG_BYTES' 且 contains 'MAX_LOG_FILES' 且 contains 'export function createLogge…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 11,
+      "excerpt": "packages/app/test/logger.spec.ts 断言：向 logger 传入 {apiKey:'sk-live-XYZ', prompt:'机密正文'} 后落盘内容 not contains 'sk-live-XYZ' 且 not contains '机密正文' 且 contain…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 12,
+      "excerpt": "packages/contract/test/envelope.spec.ts 断言 parseEnvelope({protocolVersion:2,...}).ok === false，且 parseEnvelope 缺失 sequence 字段时 ok === false；该测试在 pnpm …",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-002",
+      "index": 13,
+      "excerpt": "packages/app/src/renderer/src/stores/app.ts contains 'runtimeScope' 且 contains 'Record<string, RuntimeScope>'，started/streaming/runtimeId/generation 已…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 14,
+      "excerpt": "`[ \"$(rg -c --no-filename 'toolRuns = reactive' packages/app/src/renderer/src/stores/app.ts | awk '{s+=$1} END{print s+0}')\" -eq 1 ]`（M0 不迁移 toolRuns，…",
+      "assertion_kinds": [
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-002",
+      "index": 15,
+      "excerpt": "pnpm typecheck 退出码为 0，pnpm -w test 退出码为 0，pnpm --filter @pibuddy/app build 退出码为 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 16,
+      "excerpt": "[UI-observable] pnpm --filter @pibuddy/app dev 启动后，仍可完成一次「输入 → 流式文本增量 → thinking 折叠 → tool 卡片展开 → 费用与 context 显示」全流程，且 DevTools 控制台无新增报错",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 17,
+      "excerpt": "[裁定6 · 契约唯一性闸门就位] scripts/check-contract-uniqueness.mjs 存在且 `node scripts/check-contract-uniqueness.mjs` 退出码 0；把该脚本改为对 packages/contract/src 加入一个与 pac…",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-002",
+      "index": 18,
+      "excerpt": "[裁定3 前置 · 原子写唯一实现] packages/app/src/main/fs-atomic.ts 导出 `export function writeJsonAtomic(filePath: string, value: unknown): void`，实现为 写 <file>.tmp → …",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 0,
+      "excerpt": "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'createRequire' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（改前实测该文件含 createReq…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/pi-launcher.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-003",
+      "index": 1,
+      "excerpt": "packages/app/src/main/pi-launcher.ts contains 'import.meta.resolve(\"@earendil-works/pi-coding-agent\")' 且 contains 'fileURLToPath'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 2,
+      "excerpt": "packages/app/src/main/pi-launcher.ts contains 'process.resourcesPath' 且 contains 'runtime-manifest.json'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 3,
+      "excerpt": "packages/app/src/main/pi-launcher.ts contains 'ENV_ALLOWLIST' 且 contains 'ELECTRON_RUN_AS_NODE'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 4,
+      "excerpt": "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'shell: isWin|shell: true' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/pi-launcher.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-003",
+      "index": 5,
+      "excerpt": "`test -e packages/app/src/main/pi-launcher.ts && [ \"$(rg -c 'catch \\{\\}' packages/app/src/main/pi-launcher.ts | wc -l)\" -eq 0 ]`（原第 24-26 行的空 catch 已消…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/pi-launcher.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 6,
+      "excerpt": "packages/app/test/pi-launcher.spec.ts 断言：在 process.env 中人为设置 NODE_OPTIONS='--inspect'、ELECTRON_RUN_AS_NODE='0'、NODE_INSPECT_RESUME_ON_START='1'、LD_PRE…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-003",
+      "index": 7,
+      "excerpt": "packages/app/test/pi-launcher.spec.ts 断言：伪造 resourcesPath 下的 runtime-manifest.json 缺失时抛出的错误信息 contains 'runtime-manifest.json'（而非静默回退全局 pi）",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 8,
+      "excerpt": "pnpm --filter @pibuddy/app exec node scripts/prepare-pi-runtime.mjs 退出码为 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 9,
+      "excerpt": "packages/app/resources/pi-runtime/dist/cli.js 文件存在且非 symlink（node -e \"console.log(require('fs').lstatSync('packages/app/resources/pi-runtime/dist/cli.…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 10,
+      "excerpt": "packages/app/resources/pi-runtime/runtime-manifest.json contains '\"version\": \"0.83.0\"' 且 contains '\"entry\": \"dist/cli.js\"' 且 contains '\"protocolVersio…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 11,
+      "excerpt": "packages/app/electron-builder.yml contains 'asar: true' 且 `test -e packages/app/electron-builder.yml && [ \"$(rg -c 'asar: false' packages/app/electron…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/electron-builder.yml` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 12,
+      "excerpt": "packages/app/electron-builder.yml contains 'extraResources:' 且 contains 'pi-runtime'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 13,
+      "excerpt": "packages/app/package.json 的 dist script contains 'prepare-pi-runtime'（打包前必然产出 runtime 目录）",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 14,
+      "excerpt": "packages/contract/src/settings.ts contains 'piRuntimeMode' 且 contains 'external' 且 contains 'bundled'；SettingsModal.vue contains '切回内置'，且 `test -e pac…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/pi-launcher.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 15,
+      "excerpt": "packages/app/src/main/pi-launcher.ts contains 'assertRuntimeHandshake'；packages/app/test/pi-launcher.spec.ts 断言 assertRuntimeHandshake({ runtimeVersio…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 16,
+      "excerpt": "[UI-observable] 手动，逐项可判定并记录在 doc/regression/TASK-003-runtime.md（每项一行 `- [x]` + 时间戳）：(a) 把全局 pi 命令临时重命名（Windows 上 rename pi.cmd）后 `pnpm --filter @pibud…",
+      "assertion_kinds": [
+        "literal-presence",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败；记录文件缺失、条目行数不符、或任一项的实测取值与期望不等时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 17,
+      "excerpt": "[UI-observable] packaged-smoke：pnpm --filter @pibuddy/app dist 后运行 release/win-unpacked/PiBuddy.exe，能选择工作文件夹并完成一次问答（本机 win-unpacked smoke，非 clean VM，验…",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-003",
+      "index": 18,
+      "excerpt": "[CT-11 · 内置运行时缺失必须抛错，禁止回退全局 pi] `rg --no-filename -c 'runtime-manifest.json' packages/app/src/main/pi-launcher.ts | awk '{s+=$1} END{print s+0}'` 输出 >…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/pi-launcher.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-004",
+      "index": 0,
+      "excerpt": "packages/app/src/main/index.ts contains 'sandbox: true' 且 `test -e packages/app/src/main/index.ts && [ \"$(rg -c 'sandbox: false' packages/app/src/main…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/index.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-004",
+      "index": 1,
+      "excerpt": "packages/app/src/main/security/window-policy.ts 同时 contains \"default-src 'self'\"、\"script-src 'self'\"、\"object-src 'none'\"、\"base-uri 'none'\"、\"frame-ance…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-004",
+      "index": 2,
+      "excerpt": "packages/app/src/main/security/window-policy.ts contains 'will-navigate' 且 contains 'setWindowOpenHandler' 且 contains \"action: \\\"deny\\\"\" 且 contains 's…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-004",
+      "index": 3,
+      "excerpt": "packages/app/src/main/security/window-policy.ts contains 'onHeadersReceived'（CSP 通过响应头下发，覆盖 dev 的 http 加载路径）",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-004",
+      "index": 4,
+      "excerpt": "packages/app/src/main/index.ts contains '!app.isPackaged && process.env.ELECTRON_RENDERER_URL'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-004",
+      "index": 5,
+      "excerpt": "packages/app/src/renderer/index.html contains 'http-equiv=\"Content-Security-Policy\"' 且 contains \"object-src 'none'\"（覆盖 packaged 的 file:// 加载路径）",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-004",
+      "index": 6,
+      "excerpt": "[外链出口唯一 · 结构断言] `rg --no-filename -c 'shell\\.openExternal' packages/app/src -g '*.ts' -g '*.vue' -g '!**/security/window-policy.ts' | awk '{s+=$1} END…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-004",
+      "index": 7,
+      "excerpt": "packages/app/src/renderer/src/markdown.ts contains 'html: false' 且 contains 'validateLink' 且 contains 'MAX_TOOL_OUTPUT_BYTES = 65536'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-004",
+      "index": 8,
+      "excerpt": "packages/app/test/window-policy.spec.ts 断言 openExternalSafely 对以下 6 个输入全部拒绝且不调用 shell.openExternal：'file:///C:/Windows/System32/calc.exe'、'javascript:…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-004",
+      "index": 9,
+      "excerpt": "packages/app/test/window-policy.spec.ts 断言 markdown 渲染 '[x](javascript:alert(1))' 后输出 not contains 'javascript:'，渲染长度 100000 的 tool output 后输出字节数 <= 6…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-004",
+      "index": 10,
+      "excerpt": "packages/app/test/window-policy.spec.ts 断言 permission handler 对 permission='media' 且 mediaTypes=['video'] 返回 false、对 'geolocation' 返回 false、对非主窗口 webC…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-004",
+      "index": 11,
+      "excerpt": "pnpm typecheck 退出码 0，pnpm -w test 退出码 0，pnpm --filter @pibuddy/app build 退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-004",
+      "index": 12,
+      "excerpt": "[UI-observable] 手动（sandbox:true 后的关键回归）：拖拽一张本地图片进输入框仍能解析出路径并作为图片附件成功发送；粘贴图片仍可用；点击语音按钮仍能弹出/获得麦克风授权并完成一次转写",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-004",
+      "index": 13,
+      "excerpt": "[UI-observable] 手动，逐项可判定并记录在 doc/regression/TASK-004-security.md（每项一行 `- [x]`）：(a) 助手回复中的 https 链接点击后系统浏览器打开该 URL；(b) 构造一条含 `file:///C:/Windows/System…",
+      "assertion_kinds": [
+        "literal-presence",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败；记录文件缺失、条目行数不符、或任一项的实测取值与期望不等时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 0,
+      "excerpt": "packages/pi-sdk/src/client.ts contains 'DEFAULT_RPC_TIMEOUT_MS = 30_000' 且 contains 'signal?: AbortSignal'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 1,
+      "excerpt": "packages/pi-sdk/src/client.ts contains 'ALLOWED_TRANSITIONS' 且同时 contains 全部 7 个相位字面量 'idle'、'starting'、'running'、'stopping'、'stopped'、'crashed'、'reco…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 2,
+      "excerpt": "packages/pi-sdk/src/client.ts contains 'proc.on(\"close\"' 且 contains 'proc.stdin.on(\"error\"' 且 contains 'once(proc.stdin, \"drain\")'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 3,
+      "excerpt": "packages/pi-sdk/src/client.ts contains 'taskkill' 且 contains '/T' 且 contains '/F'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 4,
+      "excerpt": "packages/pi-sdk/src/client.ts contains 'randomUUID()' 且 contains 'readonly runtimeId'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 5,
+      "excerpt": "packages/pi-sdk/src/jsonl.ts contains 'MAX_LINE_BYTES' 且 contains 'MAX_BUFFER_BYTES'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 6,
+      "excerpt": "[CT-03/CT-04 · 信封在上游、折叠在下游] packages/app/src/main/pi-supervisor.ts contains 'implements PiRuntimeSupervisor' 且 contains 'generation' 且 contains 'seque…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 7,
+      "excerpt": "packages/app/src/main/pi/event-forwarder.ts 导出 `export function collapseEnvelopes(input: PiEnvelope<AgentEvent>[]): PiEnvelope<AgentEvent>[]`（本任务先实现按 …",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 8,
+      "excerpt": "[CT-06 · 与 handler 所在文件解耦] 用 node 脚本执行：先取 `rg -l 'pi:start' packages/app/src/main -g '*.ts'` 的命中文件列表，断言其长度恰为 1（0 个或 >1 个均判 FAIL）；再在该文件中定位 pi:start han…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-005",
+      "index": 9,
+      "excerpt": "`test -e packages/app/src/main/ipc.ts && [ \"$(rg -c '智能体尚未启动' packages/app/src/main/ipc.ts | wc -l)\" -eq 0 ]`；且 packages/pi-sdk/test/lifecycle.spec.ts…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/ipc.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 10,
+      "excerpt": "packages/pi-sdk/test/lifecycle.spec.ts 断言：spawn 一个不存在的可执行文件后 2000ms 内 phase 变为 'crashed'，且 'exit' 事件恰好被 emit 一次；该测试在 pnpm -w test 中通过",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-005",
+      "index": 11,
+      "excerpt": "packages/pi-sdk/test/lifecycle.spec.ts 断言：--scenario timeout 下 send() 在 30_000ms（测试中用 timeoutMs:200 覆写）后 reject，且 client 内部 pending map 的 size 回到 0",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-005",
+      "index": 12,
+      "excerpt": "packages/pi-sdk/test/lifecycle.spec.ts 断言：--scenario oversized-line 下 jsonl reader 抛出可捕获错误且不导致进程内存无界增长（buffer 长度在报错后归零）",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-005",
+      "index": 13,
+      "excerpt": "packages/pi-sdk/test/lifecycle.spec.ts 断言：非法状态转换（如 stopped → running）在 NODE_ENV 非 production 时抛错",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-005",
+      "index": 14,
+      "excerpt": "packages/app/test/generation.spec.ts 断言：先后投递 generation:2 与 generation:1 两个信封，store 处理后 started 仍为 true 且 generation:1 的 payload 未进入 items；另断言 sequenc…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-005",
+      "index": 15,
+      "excerpt": "`[ \"$(rg -c --no-filename 'activityTick.value\\+\\+' packages/app/src/renderer/src/stores/app.ts | awk '{s+=$1} END{print s+0}')\" -ge 1 ]`（ChatView 滚动唯一…",
+      "assertion_kinds": [
+        "count-lower-bound"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）"
+    },
+    {
+      "task": "TASK-005",
+      "index": 16,
+      "excerpt": "packages/app/src/renderer/src/stores/app.ts contains 'unsubscribes' 且 subscribeOnce 中三个 window.piBuddy.pi.on* 的返回值均被存入该数组（修复 app.ts:285-287 闭包被丢弃）",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 17,
+      "excerpt": "pnpm typecheck 退出码 0，pnpm -w test 退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 18,
+      "excerpt": "[UI-observable] 手动：在流式回复进行中连续点击两次「新任务」，界面不再弹出「智能体进程意外退出，请重新开始」，输入框保持可用且能立即发送下一条；同一操作后流式期间聊天区仍自动滚动到底部、tool 卡片仍可展开",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-005",
+      "index": 19,
+      "excerpt": "[UI-observable] 手动，记录在 doc/regression/TASK-005-runtime.md：把 settings 的 piRuntimeMode 设为 external 并指向不存在的命令，界面给出的错误文案 contains 'ENOENT' 或 contains 该缺失命…",
+      "assertion_kinds": [
+        "literal-presence",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败；记录文件缺失、条目行数不符、或任一项的实测取值与期望不等时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 0,
+      "excerpt": "[裁定5 · 枚举单一路径] packages/app/src/main/sessions/session-repository.ts contains 'SessionManager.list(' 且 contains 'from \"@earendil-works/pi-coding-agent\"…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 1,
+      "excerpt": "[裁定5 · resolver 与枚举分离] packages/app/src/main/sessions/session-dir.ts contains 'export function encodeSessionDirSegment' 且 contains '.replace(/^[/\\\\\\\\]…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/sessions/session-dir.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 2,
+      "excerpt": "packages/app/src/main/sessions/session-dir.ts 同时 contains 'PI_CODING_AGENT_SESSION_DIR'、'PI_CODING_AGENT_DIR'、'settings.sessionDir'，且导出 `export functi…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 3,
+      "excerpt": "`test -e packages/app/src/main/sessions/session-repository.ts && [ \"$(rg -c 'readFileSync|readdirSync|statSync' packages/app/src/main/sessions/session…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/sessions/session-repository.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-006",
+      "index": 4,
+      "excerpt": "packages/app/src/main/session-repository.ts contains 'MAX_SESSIONS_SCANNED = 200' 且 contains 'MAX_SESSION_HEAD_BYTES'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 5,
+      "excerpt": "packages/app/src/main/session-repository.ts contains 'parseError'，单个损坏 JSONL 只在该条目上标记 parseError 而不影响其它条目",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 6,
+      "excerpt": "packages/pi-sdk/src/client.ts contains '\"--session-dir\"'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 7,
+      "excerpt": "packages/app/test/session-dir.spec.ts 断言 encodeSessionDirSegment(\"/home/u\") === \"--home-u--\" 且 encodeSessionDirSegment(\"/home/u\").includes(\"---\") === …",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-006",
+      "index": 8,
+      "excerpt": "`[ \"$(rg -c --no-filename 'cancelled' packages/app/src/renderer/src/stores/app.ts | awk '{s+=$1} END{print s+0}')\" -ge 2 ]`（newTask 与 openSession 各一处）",
+      "assertion_kinds": [
+        "count-lower-bound"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 2 时失败（空实现或漏改任一处即触发）"
+    },
+    {
+      "task": "TASK-006",
+      "index": 9,
+      "excerpt": "packages/app/src/renderer/src/stores/app.ts contains 'export function registerSessionScopedReset' 且 contains 'function resetSessionScopedState'，且 `rg …",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 2 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 10,
+      "excerpt": "[CT-25 · 清空语义与状态归属解耦] app.ts 自身注册的 reset 回调覆盖 items / toolRuns / queue / statusTexts / uiRequests / liveAssistant 六项（单测：构造非空状态后调 resetSessionScopedSta…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-006",
+      "index": 11,
+      "excerpt": "[send() 签名锁定 · 由 TASK-006 定义] `rg -c 'export async function send\\(opts: SendOptions = \\{\\}\\): Promise<boolean>' packages/app/src/renderer/src/stores/a…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-006",
+      "index": 12,
+      "excerpt": "packages/app/src/renderer/src/components/InputBar.vue contains 'if (await store.send(' 且 contains 'catch'；`store.editorText = \"\"` 的每处出现位置全部落在该 if 分支体内…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 13,
+      "excerpt": "[near-miss · 显式 else 分支] packages/app/src/renderer/src/stores/app.ts 的 start() 中 `if (sessionPath === undefined)` 分支包裹 settings 的 provider/modelId 恢复与…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-006",
+      "index": 14,
+      "excerpt": "packages/app/src/renderer/src/stores/app.ts 中 set_thinking_level 调用前存在与 result.state 当前值的比较（grep 该行上下文 contains 'thinkingLevel !=='）",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 15,
+      "excerpt": "packages/app/src/renderer/src/stores/app.ts contains 'sessionLoadError'，且 ChatView.vue contains '重试' 按钮绑定重新加载 messages",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 16,
+      "excerpt": "packages/app/src/renderer/src/stores/app.ts contains 'REFRESH_SESSIONS_DEBOUNCE_MS = 2000'，且全仓定义唯一：`rg --no-filename -c 'REFRESH_SESSIONS_DEBOUNCE_MS …",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 17,
+      "excerpt": "packages/app/test/session-interaction.spec.ts 断言：new_session 返回 {success:true, data:{cancelled:true}} 时 items 长度不变且发出警告通知；switch_session 同理；send 返回 su…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-006",
+      "index": 18,
+      "excerpt": "pnpm typecheck 退出码 0，pnpm -w test 退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 19,
+      "excerpt": "[UI-observable] 手动：输入一段文字并附加 1 张图片与 1 个文件，人为让发送失败（停掉运行时），输入框文字、图片缩略图、文件条目三者全部原样保留；恢复后直接点发送可成功",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-006",
+      "index": 20,
+      "excerpt": "[UI-observable] 手动，逐项可判定并记录在 doc/regression/TASK-006-session.md：(a) 侧栏历史会话列表条目数 >= 1，且每条同时显示 名称/首条消息/消息数/修改时间 四个字段（缺任一判 FAIL）；(b) 打开一个曾用非当前模型的历史会话，顶栏显…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；记录文件缺失、条目行数不符、或任一项的实测取值与期望不等时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 0,
+      "excerpt": "`test -e packages/app/src/main/ipc.ts && test -e packages/app/src/preload/index.ts && test -e packages/app/src/preload/index.d.ts && [ \"$(rg -c 'pi:co…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/ipc.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-007",
+      "index": 1,
+      "excerpt": "`test -e packages/app/src/preload/index.ts && [ \"$(rg -c 'command:' packages/app/src/preload/index.ts | wc -l)\" -eq 0 ]`（preload/index.ts:16 的通用 comma…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/preload/index.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-007",
+      "index": 2,
+      "excerpt": "`test -e packages/app/src/renderer && [ \"$(rg -c 'piBuddy.pi.command' packages/app/src/renderer | wc -l)\" -eq 0 ]`（渲染进程全部调用点已改为窄方法）",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-007",
+      "index": 3,
+      "excerpt": "packages/app/src/preload/index.ts 同时 contains 全部 15 个窄方法名：'prompt'、'steer'、'followUp'、'abort'、'newSession'、'switchSession'、'setModel'、'setThinkingLeve…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 4,
+      "excerpt": "packages/app/src/renderer/src/stores/app.ts contains 'streamingBehavior: \"steer\"'（回归保护：PiBuddy 不调用 pi 的 steer 命令，流式插话依赖 prompt + streamingBehavior，见 r…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 5,
+      "excerpt": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1}…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 15 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-007",
+      "index": 6,
+      "excerpt": "packages/app/src/main/ipc-guard.ts 是全计划唯一的 handler 注册入口：`export class IpcGuard implements PermissionEngine`（contains 'implements PermissionEngine' 且同时…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 7,
+      "excerpt": "[裁定1 · 包装器内做四重校验] registerHandler 的实现体内依次出现 assertMainFrame → schema.parse → 尺寸校验（CHANNEL_MAX_BYTES 查表）→ rateLimiter.check 四步（用 node 脚本断言这四个标识在 regist…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-007",
+      "index": 8,
+      "excerpt": "packages/app/src/main/workspace-registry.ts contains 'realpathSync.native' 且 contains 'path.relative(' 且 `test -e packages/app/src/main/workspace-regi…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/workspace-registry.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 9,
+      "excerpt": "[裁定3 · workspaceId 必须持久化且跨重启稳定] `test -e packages/app/src/main/workspace-registry.ts && [ \"$(rg -c 'randomUUID' packages/app/src/main/workspace-regist…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/workspace-registry.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 10,
+      "excerpt": "[裁定2 · 唯一附件注册表] packages/app/src/main/attachment-registry.ts 是全计划唯一的附件注册表：contains 'ATTACHMENT_TTL_MS = 1800000'（30 分钟滑动过期：resolve 命中即续期，contains 'ren…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 11,
+      "excerpt": "`test -e packages/app/src/main/ipc.ts && [ \"$(rg -c 'readFileSync' packages/app/src/main/ipc.ts | wc -l)\" -eq 0 ]`（改前实测 ipc.ts:157 的 file:read-image 用…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/ipc.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-007",
+      "index": 12,
+      "excerpt": "[裁定2 · shell.openPath 只接受 token，无逃逸分支] `rg --no-filename -c 'shell\\.openPath' packages/app/src/main -g '*.ts' -g '!attachment-registry.ts' | awk '{s+=…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "literal-presence",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-007",
+      "index": 13,
+      "excerpt": "packages/app/test/workspace-capability.spec.ts 断言以下 6 类输入全部抛错：绝对路径 'C:/Windows/System32/drivers/etc/hosts'、'../../../etc/passwd'、指向 workspace 外目标的 sym…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-007",
+      "index": 14,
+      "excerpt": "packages/app/test/ipc-guard.spec.ts 断言：senderFrame 与 sender.mainFrame 不相等时抛 'IPC_FRAME_REJECTED'；超过 MAX_TEXT_PAYLOAD_BYTES 的 prompt 被拒；10 秒内第 11 次 pro…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-007",
+      "index": 15,
+      "excerpt": "pnpm typecheck 退出码 0，pnpm -w test 退出码 0，pnpm --filter @pibuddy/app build 退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 16,
+      "excerpt": "[UI-observable] 手动全量回归：发送纯文本、粘贴图片发送、拖拽文件发送、流式中插话（steer）、点击停止（abort）、切换模型、切换 thinking level、新任务、切换历史会话、费用与 context 显示、语音输入 —— 11 项全部仍可用",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 17,
+      "excerpt": "[UI-observable] 手动，七种 Extension UI 交互逐项判定并记录在 doc/regression/TASK-007-extension-ui.md（七行 `- [x]` + 时间戳）：select 返回所选项的 value；confirm 返回 true/false 且两种取…",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "记录文件缺失、条目行数不符、或任一项的实测取值与期望不等时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 18,
+      "excerpt": "[UI-observable] 手动：在 DevTools 控制台执行 `window.piBuddy.pi.command` 返回 undefined；执行 `window.piBuddy.pi.prompt({text:'x'})` 后 Promise 状态为 fulfilled（未 rejec…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/preload/index.d.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 15 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-007",
+      "index": 19,
+      "excerpt": "[send() 签名锁定 · 由 TASK-006 定义] `rg -c 'export async function send\\(opts: SendOptions = \\{\\}\\): Promise<boolean>' packages/app/src/renderer/src/stores/a…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-007",
+      "index": 20,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-007",
+      "index": 21,
+      "excerpt": "[CT-20 · PermissionRule 有定义] packages/contract/src/ipc-contract.ts 导出 `export type PermissionRule`（`rg --no-filename -c 'export (type|interface) Permi…",
+      "assertion_kinds": [
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 0,
+      "excerpt": "`[ \"$(rg -c --no-filename 'safeStorage' packages/app/src/main/secret-store.ts | awk '{s+=$1} END{print s+0}')\" -ge 2 ]` 且 contains 'isEncryptionAvaila…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 2 时失败（空实现或漏改任一处即触发）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 1,
+      "excerpt": "[CT-09 · STT 配置态字段名全计划唯一口径] `test -e packages/app/src/preload/index.d.ts && [ \"$(rg -c 'sttApiKey\\b' packages/app/src/preload/index.d.ts | wc -l)\" -eq…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/preload/index.d.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 2,
+      "excerpt": "`test -e packages/app/src/preload/index.ts && [ \"$(rg -c 'baseUrl|apiKey' packages/app/src/preload/index.ts | wc -l)\" -eq 0 ]`（改前实测 index.ts:50 的 STT …",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/preload/index.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-008",
+      "index": 3,
+      "excerpt": "[CT-07 · STT 请求 schema 全计划唯一形状] packages/contract/src 的 `SttTranscribeRequest` 字段恰为 endpointId / audio / mimeType 三个（单测断言 zod schema 的 `.shape` 键集合排序后…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-008",
+      "index": 4,
+      "excerpt": "packages/app/src/main/net/outbound-guard.ts 同时 contains '169.254.169.254'、'100.64'、'172.16'、'192.168'、'fc00::'、'fe80::'、'::ffff:'、'::1'",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 5,
+      "excerpt": "packages/app/src/main/net/outbound-guard.ts contains 'redirect: \"manual\"' 且 contains 'MAX_RESPONSE_BYTES = 2 * 1024 * 1024' 且 contains 'CONNECT_TIMEOU…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 6,
+      "excerpt": "packages/app/src/main/net/outbound-guard.ts contains 'dns' 与 'lookup'，且在每次 redirect 后重新调用 normalizeEndpointUrl 与 assertPublicAddress（用 node 脚本断言 redir…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 7,
+      "excerpt": "[CT-08 · 出站单一原语] packages/app/test/ssrf.spec.ts 断言以下 17 个输入全部抛出 OUTBOUND_BLOCKED：'http://api.example.com/'（非 https）、'https://localhost/'、'https://127.…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-008",
+      "index": 8,
+      "excerpt": "packages/app/test/ssrf.spec.ts 断言：stub fetch 返回 302 Location: 'http://169.254.169.254/latest/meta-data/' 时 safeFetch 抛 OUTBOUND_BLOCKED 而非跟随；返回体超过 MAX…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 9,
+      "excerpt": "packages/app/src/main/settings.ts contains 'SETTINGS_SCHEMA_VERSION = 1' 且 contains 'function migrate'，且其写入路径复用唯一原子写实现：contains \"from './fs-atomic\" 且 …",
+      "assertion_kinds": [
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 10,
+      "excerpt": "`test -e packages/app/src/main/settings.ts && [ \"$(rg -c 'writeFileSync\\(settingsPath\\(' packages/app/src/main/settings.ts | wc -l)\" -eq 0 ]`（第 30 行的直…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/settings.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-008",
+      "index": 11,
+      "excerpt": "packages/app/test/settings-atomic.spec.ts 断言：(a) 模拟写入 tmp 后崩溃（tmp 存在但未 rename）时 loadSettings() 的返回对象与上一版本内容 deep-equal（用 assert.deepStrictEqual，而非人工判断…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-008",
+      "index": 12,
+      "excerpt": "packages/app/test/secret-store.spec.ts 断言：(a) safeStorage.isEncryptionAvailable() 返回 false 时 saveSecret('stt.apiKey','sk-live-XYZ') 抛错，且 secrets 落盘文件 …",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 13,
+      "excerpt": "pnpm typecheck 退出码 0，pnpm -w test 退出码 0，pnpm --filter @pibuddy/app build 退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 14,
+      "excerpt": "[UI-observable] 手动：在设置里填入 STT API key 并保存，重启应用后设置界面显示「已配置 ····<尾四位>」而非明文；DevTools 中 await window.piBuddy.settings.get() 的返回对象不包含任何完整密钥字段",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 15,
+      "excerpt": "[UI-observable] 手动，逐项判定并记录在 doc/regression/TASK-008-secrets.md：(a) 语音输入按钮录音后 ChatView 输入框 value 长度 > 0（端点由主进程按 endpointId 发起）；(b) 把自定义端点填为 'https://16…",
+      "assertion_kinds": [
+        "literal-presence",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败；记录文件缺失、条目行数不符、或任一项的实测取值与期望不等时失败"
+    },
+    {
+      "task": "TASK-008",
+      "index": 16,
+      "excerpt": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1}…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 2 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-008",
+      "index": 17,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-009",
+      "index": 0,
+      "excerpt": "packages/app/src/main/sessions/session-index.ts 含 `SESSION_INDEX_SCHEMA_VERSION = 1`、`PRAGMA user_version`、`scan_offset` 三个字符串；`test -e packages/app/s…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/sessions/session-index.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-009",
+      "index": 1,
+      "excerpt": "[裁定5 + CT-01 · 旧同步枚举路径整体消失] `test ! -e packages/app/src/main/sessions-store.ts`（TASK-006 已删除该文件；原断言要求它存活并仅保留 sessionDirFor 导出，与 TASK-006 files[1] 的 ac…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `! -e packages/app/src/main/sessions-store.ts`（TASK-006` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-009",
+      "index": 2,
+      "excerpt": "`test -e packages/app/src/main/sessions/ && [ \"$(rg -c 'writeFileSync|appendFileSync|createWriteStream' packages/app/src/main/sessions/ | wc -l)\" -eq …",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/sessions/` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-009",
+      "index": 3,
+      "excerpt": "单测 packages/app/src/main/sessions/session-index.test.ts 覆盖：(a) 同一 fixture 目录连续 syncWorkspace 两次，第二次返回 `reparsed === 0`；(b) 向 fixture .jsonl 追加一条 messa…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-009",
+      "index": 4,
+      "excerpt": "[裁定5 · 唯一枚举实现与唯一 channel 集合] packages/app/src/main/ipc/sessions-ipc.ts 经 registerHandler 注册且仅注册以下 9 个 channel 常量：'sessions:query'、'sessions:rename'、's…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `! -e packages/app/src/main/sessions/session-repository.ts`` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 9 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-009",
+      "index": 5,
+      "excerpt": "rename 路径在会话为当前活动会话时发送 `{ type: 'set_session_name', name }` 并对 `resp.success === false` 抛错；单测 session-rename.test.ts 用 fake client 断言该命令被发出且索引 name 列被…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-009",
+      "index": 6,
+      "excerpt": "packages/app/src/preload/api/index.ts 存在并导出 `export const api = { pi, sessions, settings, dialog, file, shell, stt }`；packages/app/src/preload/index.t…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-009",
+      "index": 7,
+      "excerpt": "[UI-observable] 用户在侧边栏输入关键字可搜索到历史会话；右键/更多菜单可 重命名、置顶、归档、移到回收站；切到「回收站」页可恢复或彻底删除；被置顶会话固定在列表顶部；对 500 个 fixture 会话首屏 query 耗时 < 200ms（在 session-index.bench…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-009",
+      "index": 8,
+      "excerpt": "`pnpm --filter @pibuddy/app typecheck` 退出码 0，且 `pnpm -w test` 退出码 0；既有闭环功能的人工回归记录写入 doc/regression/TASK-009-session-center.md，该文件存在且含恰 4 行以 `- [x]` 开头…",
+      "assertion_kinds": [
+        "exit-code",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-009",
+      "index": 9,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-009",
+      "index": 10,
+      "excerpt": "[裁定3 · workspace_id 跨重启稳定] packages/app/src/main/sessions/session-index.ts 的 sessions 表含 `workspace_id TEXT NOT NULL` 列，取值为 TASK-007 的 workspace-regis…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/preload` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-009",
+      "index": 11,
+      "excerpt": "[CRITICAL-1 反向分页 · 正向断言在先] packages/app/src/main/sessions/session-history.ts 导出 `readEntriesBefore(args: { sourcePath: string; beforeOffset: number; l…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/sessions/session-history.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-009",
+      "index": 12,
+      "excerpt": "反向分页顺序与完整性单测 session-history.test.ts：用 1000 行 fixture 从文件末尾以 limit=60 连续反向翻页至 nextBeforeOffset===null，断言 (a) 每次返回条数 <= 60；(b) 所有页拼接并反转后的 entryId 序列与 `…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-009",
+      "index": 13,
+      "excerpt": "半行边界与一致性单测 session-history.test.ts：(a) beforeOffset 落在某行中间时不抛 JSON.parse 异常，被截断的半行丢弃且 skippedPartial === 1；(b) 两次调用之间向 fixture 追加一行后第二次调用返回 stale===tr…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-009",
+      "index": 14,
+      "excerpt": "索引 DB 落在可写目录：`[ \"$(rg -c --no-filename \"app.getPath\\\\('userData'\\\\)\" packages/app/src/main/sessions/session-index.ts | awk '{s+=$1} END{print s+0}')\" …",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/sessions/session-index.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-009",
+      "index": 15,
+      "excerpt": "[SYS-2 · 断言行为而非字面量] 索引写入事务化：单测断言 syncWorkspace 在解析到第 N 个文件时抛错后，该次 sync 的所有行被回滚 —— DB 中该 workspace 的 sessions 行数 === 本次 sync 前的行数，且 `PRAGMA user_versio…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-009",
+      "index": 16,
+      "excerpt": "[preload 分层不留悬空调用] packages/app/src/preload/api/index.ts 的 api 聚合对象恰含 pi / sessions / settings / dialog / file / shell / stt 七个键：单测断言 `Object.keys(api…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 7 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-009",
+      "index": 17,
+      "excerpt": "saveDraft 不静默吞失败：对不存在的 sourcePath 调用 saveDraft 返回 false 且不插入新行（单测断言返回值与 `SELECT COUNT(*)` 不变）；getDraft 对无草稿会话返回 null 而不是 `{}`",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-009",
+      "index": 18,
+      "excerpt": "回收站不动真相源：setStatus(path,'trashed') 后目标 .jsonl 仍存在且 sha256 与操作前相同（单测断言）；只有 purge(path) 才调用 `shell.trashItem`，`test -e packages/app/src/main/sessions/ &…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/sessions/` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-009",
+      "index": 19,
+      "excerpt": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1}…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 9 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-009",
+      "index": 20,
+      "excerpt": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.confi…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-009",
+      "index": 21,
+      "excerpt": "[CT-15 · 渲染进程不持有绝对路径] `test -e packages/app/src/preload && test -e packages/app/src/renderer/src && [ \"$(rg -c 'sourcePath' packages/app/src/preload p…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/preload` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-009",
+      "index": 22,
+      "excerpt": "[near-miss · REFRESH_SESSIONS_DEBOUNCE_MS 归属唯一] `rg --no-filename -c 'REFRESH_SESSIONS_DEBOUNCE_MS =' packages/app/src/renderer | awk '{s+=$1} END{pri…",
+      "assertion_kinds": [
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-009",
+      "index": 23,
+      "excerpt": "[near-miss · AppShell 布局契约由本任务定义] packages/app/src/renderer/src/components/AppShell.vue 含具名插槽 banner / sidebar / main / overlay 四个（`rg -c '<slot name=…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 4 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 0,
+      "excerpt": "[CT-04 · 折叠在信封之后，判据读信封 payload] packages/app/src/main/pi/event-forwarder.ts（TASK-005 已建的唯一转发器位置）的 collapseEnvelopes 签名逐字为 `export function collapseEnv…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/pi/event-forwarder.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 1,
+      "excerpt": "[CT-04 · fixture 必须经信封包装] 单测 packages/app/src/main/pi/event-forwarder.test.ts 的每个 fixture 都由 contract 的 `wrapEnvelope(...)` 构造（`rg -c 'wrapEnvelope\\('…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-010",
+      "index": 2,
+      "excerpt": "[W-4 快照取帧 · 基于信封] event-forwarder.test.ts 投入 3 条同 contentIndex 的 text_delta 信封（均由 wrapEnvelope 构造，sequence 依次为 1/2/3），fixture 字段取值明定为：第 1 帧 payload.de…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 3 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 3,
+      "excerpt": "`rg -n \"activityTick\" packages/app/src/renderer/src/stores/app.ts packages/app/src/renderer/src/components/ChatView.vue` 仍有命中，证明流式滚动驱动没有在重构中被丢掉；并新增 Ch…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 4,
+      "excerpt": "packages/app/src/renderer/src/stores/app.ts 含 `requestAnimationFrame` 与 `streamBuffer`（`[ \"$(rg -c --no-filename 'requestAnimationFrame|streamBuffer' …",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion",
+        "literal-presence",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 2 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-010",
+      "index": 5,
+      "excerpt": "[steer 传输方式锁定 · 与 TASK-007 c[4] 同向] 「立即插话」与「下一轮处理」两种产品语义都经 prompt 命令传输、靠 streamingBehavior 取值区分，不得改用原生 steer / follow_up 命令。静态断言四条：(1) `[ \"$(rg -c --n…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer/src/stores/app.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-010",
+      "index": 6,
+      "excerpt": "thinking 展开状态与 tool 展开状态存放在 store（导出名逐字为 `openThinking` 与 `expandedTools` 的两个 reactive 容器（`rg -c 'export const openThinking = reactive|export const ex…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer/src/components` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 2 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-010",
+      "index": 7,
+      "excerpt": "ToolActivity.vue 对 `!run` 与 `run.status === 'running'` 分开处理：未找到 run 时显示「工具记录已不可用」而非无限转圈；`test -e packages/app/src/renderer/src/components/ToolActivity…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer/src/components/ToolActivity.vue` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 8,
+      "excerpt": "[UI-observable] 用户在助手输出中途输入新指令，可以在发送按钮旁选择「立即插话」或「下一轮处理」（单测断言两个按钮的 aria-label 存在），队列区显示未发送项且每项同时存在「编辑」与「删除」按钮；关闭并重开应用后同一会话的草稿文本、附件条目数与未发送队列长度三者与关闭前逐项相等…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；记录文件缺失、条目行数不符、或任一项的实测取值与期望不等时失败"
+    },
+    {
+      "task": "TASK-010",
+      "index": 9,
+      "excerpt": "`pnpm --filter @pibuddy/app typecheck` 与 `pnpm --filter @pibuddy/app test -- src/main/pi src/renderer` 均退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-010",
+      "index": 10,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-010",
+      "index": 11,
+      "excerpt": "[CRITICAL-1 反向分页 · 正向断言在先] packages/app/src/renderer/src/stores/chat-window.ts 含字符串 `readHistoryBefore` 与 `beforeOffset`（`rg -c 'readHistoryBefore' pa…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 12,
+      "excerpt": "chat-window.test.ts：mock readHistoryBefore 返回三页（nextBeforeOffset 依次为 A、B、null），断言 (a) 滚动到顶部触发下一页且总请求次数恰为 3；(b) nextBeforeOffset===null 后再次滚到顶不再发请求（请求次…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 3 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 13,
+      "excerpt": "[rAF 与缓冲跨会话泄漏] 切换 session 与组件卸载时都执行 `cancelAnimationFrame(rafId)` 并把 streamBuffer 置空：单测在流式进行中切会话，断言切换后 rafId===null、streamBuffer===''、且新会话的首条消息内容不含上一会…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 14,
+      "excerpt": "[折叠节拍与窗口销毁] event-forwarder.test.ts 断言 (a) 33ms 窗口内到达的 20 条事件只触发 1 次 `wc.send`；(b) `wc.isDestroyed()` 返回 true 时 `wc.send` 调用次数为 0 且不抛异常（窗口关闭后仍投递会产生静默的…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 15,
+      "excerpt": "[队列只读语义落到 DOM] QueuePanel.vue 中已提交给 pi 的队列项（来源 queue_update）不渲染删除按钮：组件单测断言 committed 分区内 `queryAll('button')` 的 aria-label 集合不含「删除」且含「不可撤回」提示文案；本地未提交项…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 16,
+      "excerpt": "[草稿 debounce 生效] InputBar 草稿保存为 debounce 500ms：单测用 fake timers 断言 10 次连续 keystroke 后推进 500ms，`sessions.saveDraft` 恰被调用 1 次（未 debounce 会在长输入时每键一次 IPC +…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 17,
+      "excerpt": "[未读分界线不误判 · 双向断言] 单测三个场景：(a) 窗口不在底部时到达一条新消息 → 断言 `[data-unread-divider]` 数量 === 1（正向，缺失即 FAIL）；(b) 滚回底部并推进 1100ms → 断言数量 === 0；(c) 同一会话在 (a) 状态下再到达 3 …",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-010",
+      "index": 18,
+      "excerpt": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.confi…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-010",
+      "index": 19,
+      "excerpt": "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4（本任务只向既有插…",
+      "assertion_kinds": [
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 4 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-011",
+      "index": 0,
+      "excerpt": "packages/app/package.json 中 electron-updater / electron-log / electron-builder 三个版本号均为精确值且不含 `^` 或 `~`；`rg -n \"electron-updater|electron-log|electron-…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-011",
+      "index": 1,
+      "excerpt": "[CT-22 · UpdateState 归契约包] 十个状态字面量与 UpdateState / UpdateStatus / UpdateErrorCode 类型定义在 packages/contract/src/update.ts：该文件含全部十个字面量 `'unsupported'`、`'i…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 2,
+      "excerpt": "初始化顺序单测 update-init.test.ts：用 fake autoUpdater 记录属性赋值顺序，断言赋值序列为 `['autoDownload','autoInstallOnAppQuit','channel','allowPrerelease','allowDowngrade']`…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 3,
+      "excerpt": "single-flight 单测：并发调用 checkForUpdates 3 次，断言底层 checkForUpdatesAndNotify/checkForUpdates 只被调用 1 次；download 与 install 同理；listener 注册单测断言每个 updater 事件的 l…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 4,
+      "excerpt": "dev 保护单测：`app.isPackaged === false` 时 getUpdateState().status === 'unsupported'，且断言 fake autoUpdater 的 setFeedURL / checkForUpdates 调用次数为 0；仅当环境变量 `PI…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 5,
+      "excerpt": "`test -e packages/app/src/renderer && test -e packages/app/src/preload && [ \"$(rg -c 'feedURL|setFeedURL|GH_TOKEN|latest.yml' packages/app/src/rendere…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-011",
+      "index": 6,
+      "excerpt": "[CT-22 · 两套排序机制职责分离且丢弃规则只实现一遍] 传输层丢弃规则唯一实现：packages/contract/src 导出 `export function shouldAcceptEnvelope(prev, next)`（`rg --no-filename -c 'export fu…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer/src/stores` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-011",
+      "index": 7,
+      "excerpt": "检测策略单测 update-schedule.test.ts：用 fake timers 断言 (a) 首次检查在主窗口 ready 后 30_000ms 触发；(b) 之后每次间隔落在 [4h*1.10, 4h*1.20] 区间；(c) 定时器对象上调用过 `.unref()`；(d) 连续网络失…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 8,
+      "excerpt": "[取消能力双向断言] scripts/check-updater-capability.mjs 检测 electron-updater 是否导出 CancellationToken 并输出 `{ cancelSupported: true|false }`；UpdateBanner.vue 中取消按…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 9,
+      "excerpt": "[UI-observable] 在 dev 下设置 PIBUDDY_FAKE_UPDATE_FEED 指向本地 fake feed，用户可在设置→「关于与更新」看到当前版本、runtime 版本、channel、自动检查/自动下载开关、上次检查时间与「立即检查」按钮；点击后全局 banner 依次显…",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-011",
+      "index": 10,
+      "excerpt": "[UI-observable] 当有正在运行的 Agent、未保存草稿或正在录音时点击「立即重启安装」，弹出对话框提供「等待任务结束后安装」「停止任务并安装」「取消」三个选项，选择等待后状态变为 waiting-for-agent 并在收到真实 idle 事件（agent_settled）后才安装；…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/update/` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-011",
+      "index": 11,
+      "excerpt": "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/update` 退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-011",
+      "index": 12,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-011",
+      "index": 13,
+      "excerpt": "[无订阅者时状态不丢] 单测：在没有任何 renderer 订阅的情况下推进 5 次状态变更，之后首次调用 getUpdateState() 返回第 5 个状态且 stateSequence===5（renderer 是后挂载的，状态若只走事件不进快照，用户刷新窗口会看到 idle 假象）",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 14,
+      "excerpt": "[错误映射无 fallthrough] update-errors.test.ts 对 network / disk / permission / signature / metadata / unsupported / unknown 七类各给一个真实 electron-updater 错误样本，…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 15,
+      "excerpt": "[release notes 纯文本渲染] `test -e packages/app/src/renderer/src/components/UpdateBanner.vue && test -e packages/app/src/renderer/src/components/UpdateSet…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer/src/components/UpdateBanner.vue` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-011",
+      "index": 16,
+      "excerpt": "[dismiss 状态归 main] `test -e packages/app/src/renderer/src/stores/update.ts && [ \"$(rg -c 'localStorage|sessionStorage' packages/app/src/renderer/src/s…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer/src/stores/update.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 17,
+      "excerpt": "[lifecycle 亦无轮询] `test -e packages/app/src/main/lifecycle/graceful-shutdown.ts && [ \"$(rg -c 'setInterval' packages/app/src/main/lifecycle/graceful-sh…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/lifecycle/graceful-shutdown.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 18,
+      "excerpt": "[安装前校验真的会中止] release-integrity.test.ts 断言 (a) candidate semver 不严格大于 app.getVersion() 时返回 ok:false 且 errorCode==='metadata'；(b) 文件 sha512 与 manifest 不…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 19,
+      "excerpt": "[banner 只在三态渲染] UpdateBanner 组件单测遍历十个 UpdateStatus，断言仅 'available' / 'downloaded' / 'error'（且 retryable 或需用户动作）三种下渲染出可见内容，其余七态渲染结果为空（checking / not-av…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 20,
+      "excerpt": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1}…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 4 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-011",
+      "index": 21,
+      "excerpt": "[外链出口唯一 · 结构断言] `rg --no-filename -c 'shell\\.openExternal' packages/app/src -g '*.ts' -g '*.vue' -g '!**/security/window-policy.ts' | awk '{s+=$1} END…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 22,
+      "excerpt": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.confi…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-011",
+      "index": 23,
+      "excerpt": "[推送通道一律经信封与转发器 · 结构断言] `rg --no-filename -c '\\.send\\(\"pi:|\\.send\\(`pi:' packages/app/src/main -g '*.ts' -g '!pi/event-forwarder.ts' | awk '{s+=$1} END…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-011",
+      "index": 24,
+      "excerpt": "[裁定4 · 不得新建第二个日志器] `rg --no-filename -c 'export function createLogger' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1 且 `test ! -e package…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `! -e packages/app/src/main/logging/logger.ts`。本任务锁定的` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-011",
+      "index": 25,
+      "excerpt": "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4（update b…",
+      "assertion_kinds": [
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 4 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-012",
+      "index": 0,
+      "excerpt": "packages/app/src/main/extension-ui/ext-ui-service.ts 含 `setTimeout(` 与 `'expired'` 与 `runtimeGeneration`；`test -e packages/app/src/main/extension-ui/ …",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "literal-presence",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/extension-ui/` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-012",
+      "index": 1,
+      "excerpt": "contract 单测 ext-ui-contract.test.ts 覆盖 rpc.md 第 1170-1310 行列出的全部 9 个 method（select / confirm / input / editor / notify / setStatus / setWidget / setTi…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-012",
+      "index": 2,
+      "excerpt": "timeout 单测：投入 `{ method:'select', timeout: 50 }` 后等待 80ms，断言 (a) renderer 收到 `pi:ui-expire` 且本地 modal 关闭；(b) 此后对该 id 调 respond 返回 `{ ok:false, reason:…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 3,
+      "excerpt": "runtime 重启单测：generation 从 1 变为 2 后，generation=1 的挂起 dialog 全部被清理，renderer uiRequests 长度为 0，且对旧 id 作答不抛未处理 rejection（`process.on('unhandledRejection')`…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 4,
+      "excerpt": "packages/pi-sdk/src/types.ts 含 `summarization_retry_scheduled`、`summarization_retry_attempt_start`、`summarization_retry_finished` 三个字面量（`[ \"$(rg -c --…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 3 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-012",
+      "index": 5,
+      "excerpt": "packages/app/src/main/pi-resources/resource-scanner.ts 枚举 `~/.pi/agent/settings.json`、`<workspace>/.pi/settings.json`、`~/.pi/agent/npm/`、`~/.pi/agent/…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-012",
+      "index": 6,
+      "excerpt": "安装 skill 只允许经 main 的白名单：packages/app/src/main/pi-resources/package-install.ts 含 `const ALLOWED_SUBCOMMANDS = ['install', 'remove'] as const`，且拒绝包含 `;`…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-012",
+      "index": 7,
+      "excerpt": "project trust：packages/app/src/main/pi-resources/trust-store.ts 读写 `~/.pi/agent/trust.json`（写入经 fs-atomic.ts 的 writeJsonAtomic）；`buildPiSpawn` 的 trust…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 8,
+      "excerpt": "[UI-observable] 用户在「Pi 资源」页看到 user/project/package 三类来源的 skill 与 extension 列表（含路径、版本、来源、启用状态），可开关一个 extension 并在重启 runtime 后生效；可安装一个 skill 并在输入框输入 `/s…",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-012",
+      "index": 9,
+      "excerpt": "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/pi-sdk typecheck` 退出码 0；Extension UI 既有闭环的七个 method（select / confirm / input / editor …",
+      "assertion_kinds": [
+        "exit-code",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-012",
+      "index": 10,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-012",
+      "index": 11,
+      "excerpt": "[静默丢弃根除] `test -e packages/app/src/renderer/src/stores/app.ts && [ \"$(rg -c 'default:\\s*break' packages/app/src/renderer/src/stores/app.ts | wc -l)\" -…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer/src/stores/app.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 12,
+      "excerpt": "[respondUi 返回值被真正使用 · 定义「附近」] 用 node 脚本判定：在 packages/app/src/main/ipc/pi-ipc.ts 中定位每个 `respondUi(` 调用所在行 L，断言 (L, L+5] 行区间内存在 `if (!` 或 `=== false` 或 …",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 13,
+      "excerpt": "[定时器不泄漏] ExtensionUiService 在 expire / respond / clearGeneration 三条路径上都执行 clearTimeout；单测重复 100 次「建带 timeout 的请求 → 立即作答」后断言 `service.pendingTimerCount…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 14,
+      "excerpt": "[widget 生命周期] widgetLines 为 undefined 时该 widgetKey 从 Map 中删除：单测断言 set → unset 后 `widgets.size === 0`；ExtensionWidgetHost.vue 含 `30vh` 高度上限（`[ \"$(rg -c…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-012",
+      "index": 15,
+      "excerpt": "[title 截断与前缀] TopBar 对 setTitle 上报值渲染为 `'PiBuddy · ' + raw.slice(0, 60)`；单测以 200 字符输入断言渲染文本长度 <= 70 且以 `PiBuddy · ` 开头（扩展可上报任意长度标题，不截断会静默撑破顶栏布局）",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 16,
+      "excerpt": "[trust.json 合并写入与路径归一] trust-store.test.ts 断言 (a) 写入新目录决定后，原文件中其它目录的条目原样保留（与 auth.json 同一纪律）；(b) key 为 `fs.realpathSync.native(dir)` 的结果 —— 用一个指向同一目录的…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 17,
+      "excerpt": "`test -e packages/app/src/main/pi-resources/ && [ \"$(rg -c 'readdirSync|statSync|readFileSync' packages/app/src/main/pi-resources/ | wc -l)\" -eq 0 ]` …",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/pi-resources/` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 18,
+      "excerpt": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1}…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 6 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-012",
+      "index": 19,
+      "excerpt": "[推送通道一律经信封与转发器 · 结构断言] `rg --no-filename -c '\\.send\\(\"pi:|\\.send\\(`pi:' packages/app/src/main -g '*.ts' -g '!pi/event-forwarder.ts' | awk '{s+=$1} END…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 20,
+      "excerpt": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.confi…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-012",
+      "index": 21,
+      "excerpt": "[CT-11 · 不得重新引入全局 pi 回退] 本任务对 buildPiSpawn 的修改仅限追加 `-a` / `-na` trust 参数：`rg --no-filename -c 'runtime-manifest.json' packages/app/src/main/pi-launche…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/pi-launcher.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-012",
+      "index": 22,
+      "excerpt": "[CT-25 · 迁出后清空语义不丢] packages/app/src/renderer/src/stores/extensionUi.ts 在模块初始化时调用 TASK-006 的 `registerSessionScopedReset`（`rg -c 'registerSessionScope…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-012",
+      "index": 23,
+      "excerpt": "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4",
+      "assertion_kinds": [
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 4 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-013",
+      "index": 0,
+      "excerpt": "packages/app/electron-builder.yml 中 mac.target 同时包含 `dmg` 与 `zip`；含 `hardenedRuntime: true`、`entitlements: build/entitlements.mac.plist`、`NSMicrophone…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/electron-builder.yml` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-013",
+      "index": 1,
+      "excerpt": "`pnpm --filter @pibuddy/app dist -- --win nsis --publish never` 后 packages/app/release/ 同时存在 `latest.yml`、`PiBuddy-Setup-*.exe`、`PiBuddy-Setup-*.exe.b…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-013",
+      "index": 2,
+      "excerpt": "缺凭据时 release 关闭：.github/workflows/release.yml 中含形如 `if [ -z \"${WIN_CSC_LINK}\" ]; then echo \"::error::WIN_CSC_LINK missing - release blocked\"; exit 1; …",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-013",
+      "index": 3,
+      "excerpt": "[look-around 不可执行 · 改写为 ripgrep 可执行的等价条件] 所有第三方 action 均以 40 位 commit SHA 固定：`rg -n '^\\s*uses:' .github/workflows/release.yml | rg -vc '@[0-9a-f]{40}\\…",
+      "assertion_kinds": [
+        "count-exact",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-013",
+      "index": 4,
+      "excerpt": "packages/app/src/main/logger-redact.ts（TASK-002 建立的唯一脱敏实现，本任务在其上扩规则）的单测 packages/app/test/logger-redact.spec.ts：输入含 `sk-ant-abcdefghijklmnop1234`、`Aut…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-013",
+      "index": 5,
+      "excerpt": "[裁定4 · 轮转参数落在唯一日志器上] packages/app/src/main/logger.ts 的轮转参数：`rg -c 'MAX_LOG_BYTES = 5 \\* 1024 \\* 1024' packages/app/src/main/logger.ts` 输出 1 且 `rg -c '…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `! -e packages/app/src/main/logging/logger.ts`` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-013",
+      "index": 6,
+      "excerpt": "support bundle 可预览：packages/app/src/main/diagnostics/support-bundle.ts 导出 `previewBundle(): { path: string; sizeBytes: number; redacted: boolean }[]` …",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-013",
+      "index": 7,
+      "excerpt": "health check 与 marker：packages/app/src/main/health/health-check.ts 导出 `runStartupHealthCheck(): Promise<{ ok: boolean; failed: ('db-migration'|'render…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-013",
+      "index": 8,
+      "excerpt": "[UI-observable] 用户在设置→「关于与更新」→「诊断」点击「生成诊断包」，先看到将导出文件的清单预览（路径、大小、是否已脱敏），确认后导出并可「在文件夹中显示」；健康检查失败后重启，界面顶部显示 safe mode 横幅（说明已禁用第三方扩展与自动任务）并提供「查看诊断」与「下载上一稳…",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-013",
+      "index": 9,
+      "excerpt": "docs/product/RELEASE_SETUP.md 存在，含 secret 名称清单（如 WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD / APPLE_TEAM_ID / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / PIBUDD…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "literal-presence",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e docs/product/RELEASE_SETUP.md` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 6 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-013",
+      "index": 10,
+      "excerpt": "docs/product/ADR-0001-update-feed.md 记录更新源选型（GitHub Releases vs 自建 generic feed）、asar: true（TASK-003 恢复）+ extraResources 外置 pi-runtime + asarUnpack 外置…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/electron-builder.yml` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-013",
+      "index": 11,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-013",
+      "index": 12,
+      "excerpt": "[裁定4 · 脱敏挂在日志出口] `rg -c 'redactSecrets' packages/app/src/main/logger.ts` 输出 >= 1 且该命中位于 logger 的写出函数体内（node 脚本按以下确定规则判定：在 logger.ts 中定位调用 `fs.appendFi…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-013",
+      "index": 13,
+      "excerpt": "[脱敏不误伤诊断价值] redact.test.ts 断言 `packages/app/src/main/index.ts`、`session-abc123`、`runtimeId=7f3a` 三个不含任何密钥的样本原样保留未被替换（逐字符相等）（过度脱敏会把日志变成无法定位问题的马赛克）",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-013",
+      "index": 14,
+      "excerpt": "[必填上下文键] logger.test.ts 断言写出的每行 JSON 都含 `correlationId`、`runtimeId`、`sessionId` 三个键；调用方未提供 correlationId 时自动生成一个而不是写入 `undefined` 或抛错",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-013",
+      "index": 15,
+      "excerpt": "[health check 有超时不会挂死] health-check.test.ts 用 fake timers 断言：三项检查中任一永不 resolve 时，`runStartupHealthCheck()` 仍在 5000ms 内 settle 且该项出现在 failed 数组中（无超时会表现…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-013",
+      "index": 16,
+      "excerpt": "[marker 原子写] pending-update.json 与 last-known-good.json 采用「写临时文件 + rename」替换：`[ \"$(rg -c --no-filename 'writeJsonAtomic' packages/app/src/main/health/…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 2 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-013",
+      "index": 17,
+      "excerpt": "[safe mode 有出口] 失败计数在一次成功启动后归零：单测按 fail → fail → 断言 safeMode===true → success → 断言失败计数 === 0 且 safeMode===false（不复位会让用户永远出不了安全模式）",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-013",
+      "index": 18,
+      "excerpt": "[镜像不进正式产物 · 正负成对] (a) 正向行为断言：`PIBUDDY_USE_CN_MIRROR= node packages/app/scripts/build-config.mjs` 的输出中 `rg -c 'npmmirror'` 为 0，而 `PIBUDDY_USE_CN_MIRROR…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/electron-builder.yml` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-013",
+      "index": 19,
+      "excerpt": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1}…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 3 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-013",
+      "index": 20,
+      "excerpt": "[外链出口唯一 · 结构断言] `rg --no-filename -c 'shell\\.openExternal' packages/app/src -g '*.ts' -g '*.vue' -g '!**/security/window-policy.ts' | awk '{s+=$1} END…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-013",
+      "index": 21,
+      "excerpt": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.confi…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-013",
+      "index": 22,
+      "excerpt": "[裁定3 前置 · marker 复用唯一原子写] packages/app/src/main/health/ 下的 pending-update.json 与 last-known-good.json 一律经 fs-atomic.ts 的 writeJsonAtomic 写入：`rg -c 'wr…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/health/` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 2 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-013",
+      "index": 23,
+      "excerpt": "[CT-14 · ci.yml 只允许 modify] 本任务对 .github/workflows/ci.yml 的操作是 modify 而非 create：改后该文件仍 contains 'pnpm build'、'node scripts/check-test-discovery.mjs'、'…",
+      "assertion_kinds": [
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 0,
+      "excerpt": "packages/app/src/main/providers/auth-store.ts 含 `'.pi', 'agent', 'auth.json'` 与 `mode: 0o600`，且写入经 fs-atomic.ts 的 writeJsonAtomic（`rg -c 'writeJsonAto…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/providers/auth-store.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 1,
+      "excerpt": "[CT-09 · 字段名与公开键集合可机械判定] `settings:get` 的返回类型即 contract 的 `AppSettingsPublic`；单测 settings-redaction.test.ts 断言 `Object.keys(await settings.get()).sort…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 2,
+      "excerpt": "[CT-07/CT-08 · 请求形状与出站原语都不另立一套] stt:transcribe 的 baseUrl/apiKey/model 不再来自 renderer，但请求形状保持 TASK-008 c[3] 定义的 `SttTranscribeRequest`（endpointId / audi…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 3,
+      "excerpt": "连通性测试返回体经脱敏：connectivity.test.ts 断言当底层错误消息含 `sk-ant-0123456789` 时返回的 redactedMessage 不含该子串",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 4,
+      "excerpt": "模型作用域三层可验证：packages/app/src/main/providers/model-scope.ts 导出 `resolveModel({ sessionModel, workspaceDefault, globalDefault })` 且优先级为 session > workspa…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 5,
+      "excerpt": "图片能力守卫存在且被调用：新建 packages/app/src/renderer/src/stores/model-capability.ts，导出 `export function assertImageCapable(model: { id: string; input?: string[] …",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 6,
+      "excerpt": "[CT-26 · 拦截路径必须 return false 而非裸 return] 图片能力拦截双向单测 send-image-capability.test.ts：(a) 阻断用例 —— `currentModel.input = ['text']` 且 images.length===1 时，`a…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 7,
+      "excerpt": "[原恒真条改为有界枚举断言] send-image-capability.test.ts 的 setup 中断言被 stub 的 `window.piBuddy.pi` 对象 `Object.keys(...).sort()` 与 TASK-007 c[3] 列举的 15 个方法名排序后逐项相等（长…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer/src/stores/send-image-capability.test.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 15 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 8,
+      "excerpt": "[UI-observable] 用户在当前模型不支持图片时通过拖拽或粘贴添加图片，逐项以 DOM 属性判定：附件区该图片条目的 `aria-disabled` === 'true' 且其说明文本 contains 当前模型 id；发送按钮 `disabled` === true 且其 `title`…",
+      "assertion_kinds": [
+        "literal-presence",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "指定字面量在目标文件中缺席（或被禁字面量出现）时失败；对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 9,
+      "excerpt": "用量页数据来自本地聚合：packages/app/src/main/usage/usage-store.ts 按 (day, workspace_root, provider, model_id) 聚合 token/cost/context/failure_count，导出 `exportCsv()…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 10,
+      "excerpt": "[UI-observable] 全新用户首次启动看到向导：选择工作文件夹 → 选择使用内置 Pi 还是外部 Pi → 添加一个 Provider（填 API key 或自定义 OpenAI 兼容 endpoint）→ 点「测试连接」后界面显示的结果文案在成功时 contains '成功'、在失败时 …",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "literal-presence",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/renderer` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败；对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 11,
+      "excerpt": "[UI-observable] 打开一条使用了不同模型的历史会话时，顶栏提示「这个会话原来用的是 <model>，是否切换？」并提供保持/切换两个动作，不会静默覆盖；用量页能按日期与 workspace 筛选并导出 CSV",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 12,
+      "excerpt": "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/providers src/main/usage` 退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 13,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-014",
+      "index": 14,
+      "excerpt": "[auth.json 写前备份] writeCredential 在写入前把原文件复制到 `<userData>/auth-backup/auth.<epochMs>.json`；单测断言写入后备份文件存在，且其字节与写入前原文件 sha256 相同（写坏用户终端里的 pi 是不可逆事故，备份必须可…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 15,
+      "excerpt": "[Windows 权限降级如实处理] auth-store.ts 含 `process.platform === 'win32'` 分支：Windows 上 0o600 对 ACL 无效，该分支必须记录一条 warning 级日志并在 Provider 中心显示「此平台无法限制文件权限」的提示，而不…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 16,
+      "excerpt": "[key 不进日志] connectivity.test.ts 追加断言：以含 `sk-ant-0123456789` 的错误触发 testProvider 失败路径后，logger spy 捕获到的全部调用参数 JSON.stringify 后不含该子串（脱敏若只作用于返回给 renderer 的…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 17,
+      "excerpt": "[模型能力唯一来源] `test -e packages/app/src/main/providers/ && test -e packages/app/src/renderer/src/stores/providers.ts && [ \"$(rg -c 'gpt-4|claude-3|gemini…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/providers/` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 18,
+      "excerpt": "[用量增量不出负数] usage-store.test.ts 断言：当本次 get_session_stats 的 total 小于 last_seen_total（pi 侧压缩后重置）时，写入 usage_daily 的增量为 0 而非负数；断言全表 `SELECT COUNT(*) FROM u…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 19,
+      "excerpt": "[CSV 注入防护] exportCsv 对以 `=`、`+`、`-`、`@` 开头的字段值加前导单引号转义；单测断言 workspace 显示名为 `=cmd|' /C calc'!A0` 时导出行中该字段以 `'=` 开头（导出文件被 Excel 打开即执行是典型静默风险）",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 20,
+      "excerpt": "[向导可中断恢复] OnboardingWizard 每完成一步即写 `settings.onboardingStep`；单测断言在第 4 步后模拟重启，重新加载 store 时 `state.step === 4` 而非 0；且 `settings.onboardingCompletedAt` 只…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 4 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 21,
+      "excerpt": "[裁定4 · 脱敏函数复用而非各写一份] providers/connectivity.ts 的 `redactSecrets` 从 packages/app/src/main/logger-redact.ts 导入：`[ \"$(rg -c --no-filename \"from '.*logger…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 22,
+      "excerpt": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1}…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 5 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-014",
+      "index": 23,
+      "excerpt": "[send() 签名锁定 · 由 TASK-006 定义] `rg -c 'export async function send\\(opts: SendOptions = \\{\\}\\): Promise<boolean>' packages/app/src/renderer/src/stores/a…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 24,
+      "excerpt": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.confi…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-014",
+      "index": 25,
+      "excerpt": "[near-miss · settings schema 扩字段必须升版] 本任务向 settings 增加 provider / onboarding 相关字段，故 `rg -c 'SETTINGS_SCHEMA_VERSION = 2' packages/app/src/main/setting…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-014",
+      "index": 26,
+      "excerpt": "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4（Onboardi…",
+      "assertion_kinds": [
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 4 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-015",
+      "index": 0,
+      "excerpt": "[CT-18 · 收容原语全计划唯一] 不新建 packages/app/src/main/workspace/path-guard.ts（`test ! -e packages/app/src/main/workspace/path-guard.ts`）；收容判定一律复用 TASK-007 的 p…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `! -e packages/app/src/main/workspace/path-guard.ts`）；收容判定一律复用` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 1,
+      "excerpt": "`test -e packages/app/src/preload/api/workspace.ts && [ \"$(rg -c 'absolutePath|sourcePath|: string; *// *abs' packages/app/src/preload/api/workspace.t…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/preload/api/workspace.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 2,
+      "excerpt": "[裁定2 · 只扩展唯一注册表，不新建第二套] `test ! -e packages/app/src/main/workspace/attachment-store.ts`；本任务在 TASK-007 的 packages/app/src/main/attachment-registry.ts 上…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `! -e packages/app/src/main/workspace/attachment-store.ts`；本任务在` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 3,
+      "excerpt": "编辑冲突：file-editor.test.ts 断言 (a) baseMtimeMs 与 baseSha256 均匹配时写入成功；(b) 仅 mtime 变化但内容 hash 相同时允许写入（避免误报）；(c) 内容 hash 变化时返回 `{ conflict: true }` 且目标文件字节未…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 4,
+      "excerpt": "encoding/newline：packages/app/src/main/workspace/file-editor.test.ts 断言 detectEncoding() 对 UTF-8 BOM 样本返回 'utf8-bom'、对无 BOM UTF-8 样本返回 'utf8'、对 GBK 样本…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 5,
+      "excerpt": "搜索可取消分页有上限：packages/app/src/main/workspace/search-worker.ts 运行在 utility process（`utilityProcess.fork` 调用点可 grep 到），`search({ query, limit, cursor, sig…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 6,
+      "excerpt": "changeset 表与冲突检测：packages/app/src/main/changeset/changeset-store.ts 建表含 `session_id, turn_id, tool_call_id, relative_path, before_sha256, after_sha256…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-015",
+      "index": 7,
+      "excerpt": "[UI-observable] 用户在左侧文件树展开工作区（超过 5000 项的目录显示「目录过大，已折叠，点击加载」而不是卡死），双击文本文件在 CodeMirror 中打开、编辑后标题显示未保存圆点、Ctrl+S 保存；随后用外部编辑器改同一文件再保存，PiBuddy 弹出冲突对话框提供「查看差…",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-015",
+      "index": 8,
+      "excerpt": "[UI-observable] 用户把一个文件拖进输入框，附件条显示的是相对路径与文件名而不是完整绝对路径；发给 Agent 后 Agent 修改该文件，用户在「变更」面板看到该文件的 diff，可逐 hunk 或整文件接受/拒绝、可批量接受、点击可跳到编辑器对应行；若该文件在审阅期间被外部修改，接…",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-015",
+      "index": 9,
+      "excerpt": "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/workspace src/main/changeset` 退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-015",
+      "index": 10,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-015",
+      "index": 11,
+      "excerpt": "[裁定2 · capability 与过期真的被校验] `rg -c 'expiresAt' packages/app/src/main/attachment-registry.ts` 输出 >= 2（签发处 + 校验处各一）；packages/app/test/attachment-registr…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 2 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 12,
+      "excerpt": "[watch 句柄不泄漏] file-tree.test.ts 断言：对同一目录展开/折叠 200 次后活跃 watcher 数量 === 0；workspace 关闭时所有 watcher 被 close（每次切换 workspace 泄一批 fs.watch 句柄，表现为几小时后文件树停止刷新）",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 13,
+      "excerpt": "[ignore 规则真的生效] listDir 对 `node_modules`、`.git` 默认折叠且不递归；file-tree.test.ts 用含 .gitignore 的 fixture 断言（含一条 glob 模式与一条 `!` 否定模式）被忽略的文件不出现在返回项中，且被否定模式重新包…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 14,
+      "excerpt": "[搜索结果同样不泄漏绝对路径] search-worker.test.ts 断言 `JSON.stringify(result.items)` 不含 workspace canonicalRoot 子串；该断言必须覆盖 utility process 回传路径（criteria[1] 只覆盖了 wo…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 15,
+      "excerpt": "[utility process 生命周期] workspace 关闭时 search-worker 子进程被 kill：单测断言关闭后 `child.killed === true`；连续开关 workspace 20 次后进程数不增长（泄漏的 worker 在 UI 上完全无感，只表现为内存持续…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 16,
+      "excerpt": "[changeset 备份可回滚且 reject 不落盘] apply.test.ts 断言 (a) acceptChange 后 `<userData>/changeset-backup/<changeset_id>` 存在且字节 === 应用前原文件；(b) rejectChange 后目标文件…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 17,
+      "excerpt": "[unverified 变更禁止一键接受] 当 tool_execution_start 未能抓到某文件的 before 快照时该条变更 status==='unverified'；apply.test.ts 断言对 unverified 调 acceptChange 返回 `{ requiresM…",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 18,
+      "excerpt": "[新增依赖精确版本] package.json 中 codemirror 相关依赖全部为精确版本（无 `^` / `~`），并纳入 TASK-011 产出的 scripts/check-update-deps.mjs 的比对范围，`node packages/app/scripts/check-up…",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-015",
+      "index": 19,
+      "excerpt": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1}…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 8 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-015",
+      "index": 20,
+      "excerpt": "[send() 签名锁定 · 由 TASK-006 定义] `rg -c 'export async function send\\(opts: SendOptions = \\{\\}\\): Promise<boolean>' packages/app/src/renderer/src/stores/a…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 21,
+      "excerpt": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.confi…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-015",
+      "index": 22,
+      "excerpt": "[CT-17 · 预览与附件用同一句柄] 刚拖入的附件可被预览打开：单测断言 `createAttachment` 返回的 token 直接传给 `preview:open` 能成功解析（TASK-016 的 preview handler 接受 attachment token，不接受裸标识也不接…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-015",
+      "index": 23,
+      "excerpt": "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4（文件树注入 si…",
+      "assertion_kinds": [
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 4 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-016",
+      "index": 0,
+      "excerpt": "packages/app/src/main/preview/preview-window.ts 同时含 `sandbox: true`、`nodeIntegration: false`、`contextIsolation: true`、`partition: 'sandbox:preview'` 与…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/preview/preview-window.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 1,
+      "excerpt": "[可观察副作用明定] 集成断言：向预览窗口注入含 `<img src=\"https://example.com/x.png\">`、`<script src=\"https://example.com/y.js\">` 与 `<script>document.title='PWNED'</script>`…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 2,
+      "excerpt": "packages/app/src/main/preview/convert-host.ts contains 'maxInputBytes: 50 * 1024 * 1024' 且 contains 'maxOutputBytes: 100 * 1024 * 1024' 且 contains 'ti…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 3,
+      "excerpt": "宏与外部内容默认禁用：转换 worker 对 Office 文档的解析选项显式关闭宏、远程模板、外部链接与自动数据连接，且 office-safety.test.ts 用一个含 VBA 宏与远程模板引用的 fixture 断言转换输出中不含宏内容、不含 `http://` / `https://` …",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 4,
+      "excerpt": "错误可行动：损坏文件、密码保护文件、超大文件、不支持类型四类 fixture 各自返回确定的 code（'corrupt' | 'password-protected' | 'too-large' | 'unsupported'），且 convert-worker 导出常量表 `SUGGESTION…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 10 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-016",
+      "index": 5,
+      "excerpt": "artifact 表字段完整：packages/app/src/main/artifacts/artifact-store.ts 建表含 `id, kind, source_session_id, source_turn_id, source_tool_call_id, workspace_id, …",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 6,
+      "excerpt": "消息链接确定版本：MessageItem 渲染的 artifact 链接携带 `artifactId + version` 而非文件路径；单测断言把 artifact 的文件移动到别处后，历史消息中的链接仍能解析到该版本（通过 artifact 表而非路径）",
+      "assertion_kinds": [
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-016",
+      "index": 7,
+      "excerpt": "[UI-observable] 用户点击一个 Word / Excel / PPT / PDF / CSV / 图片文件，预览区渲染出的文本节点总长度 > 0（六类各测一次，任一为 0 判 FAIL）；打开一个带宏的恶意 Office 样本时：预览区文本长度 > 0、`performance.get…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 8,
+      "excerpt": "[UI-observable] 用户在「产物」库看到 Agent 生成的文件，可搜索筛选、对比两个版本、重命名、复制一份、导出、在文件夹中显示、移入回收站并恢复；Agent 正在生成时该条目显示 generating 状态，生成失败显示 failed 且原始文件仍可下载",
+      "assertion_kinds": [
+        "ui-observable"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应的 DOM 属性 / 计数 / 字段相等断言任一不成立时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 9,
+      "excerpt": "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/preview src/main/artifacts` 退出码 0",
+      "assertion_kinds": [
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 10,
+      "excerpt": "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/s…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-016",
+      "index": 11,
+      "excerpt": "[选型定死] packages/app/package.json 的 dependencies 含且仅含以下精确版本（均无 `^` / `~`）：mammoth 1.12.0、exceljs 4.4.0、unpdf 1.8.0、papaparse 5.5.4、jszip 3.10.1、fast-xm…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/package.json` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-016",
+      "index": 12,
+      "excerpt": "[无原生依赖闸门] `node packages/app/scripts/check-pure-js-deps.mjs` 退出码 0：遍历上述六个包的安装闭包，命中 binding.gyp / `gypfile: true` / install 类脚本含 node-gyp|prebuild-inst…",
+      "assertion_kinds": [
+        "exit-code",
+        "gate-script"
+      ],
+      "falsifiable": true,
+      "fails_when": "typecheck / test / build / 校验脚本任一非零退出时失败；闸门脚本检出违规时以退出码 1 终止并打印 file:line"
+    },
+    {
+      "task": "TASK-016",
+      "index": 13,
+      "excerpt": "[不走 canvas 渲染路径] `test -e packages/app/src/main/preview/convert-worker.ts && [ \"$(rg -c 'renderPageAsImage|@napi-rs/canvas' packages/app/src/main/prev…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/preview/convert-worker.ts` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）"
+    },
+    {
+      "task": "TASK-016",
+      "index": 14,
+      "excerpt": "[asar 取值与 TASK-003 一致] `test -e packages/app/electron-builder.yml && [ \"$(rg -c 'asar: false' packages/app/electron-builder.yml | wc -l)\" -eq 0 ]` 且该文…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/electron-builder.yml` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 15,
+      "excerpt": "[packaged worker 路径解析] convert-host.ts 导出 `resolveWorkerPath(): string` 且含字符串 `app.asar.unpacked`；convert-host.test.ts 断言 (a) `__dirname` 含 `app.asar`…",
+      "assertion_kinds": [
+        "unit-assertion",
+        "literal-presence"
+      ],
+      "falsifiable": true,
+      "fails_when": "对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；指定字面量在目标文件中缺席（或被禁字面量出现）时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 16,
+      "excerpt": "[临时目录必被清理] 每次转换的专属临时目录在成功与失败（含 timeout / oom / too-large）两条路径上都被递归删除：convert-host.test.ts 跑 50 次转换（其中 20 次故意失败）后断言 `fs.readdirSync(path.join(app.getPa…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-016",
+      "index": 17,
+      "excerpt": "[覆盖度如实降级 · 正向十类在先] PreviewKind 十类（markdown/text/json/csv/image/media-metadata/pdf/word/excel/ppt）各有一个正向 fixture，逐类断言 `result.kind === <该类>` 且 `result.…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion",
+        "positive-paired"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 1 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-016",
+      "index": 18,
+      "excerpt": "[artifact 软删不动磁盘文件] `setStatus(id,'trashed')` 只写 status 与 deleted_at；单测断言目标文件仍存在且 sha256 与操作前相同；`test -e packages/app/src/main/artifacts/ && [ \"$(rg -…",
+      "assertion_kinds": [
+        "guarded-negative",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标路径不存在时 `-e packages/app/src/main/artifacts/` 直接失败（不会被「任务没做」空洞通过）；路径存在但仍命中被禁模式时失败；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-016",
+      "index": 19,
+      "excerpt": "[preview 输入必过 root containment] [CT-18 · 复用唯一收容原语] preview-ipc.ts 的每个 handler 在使用入参标识前都调用 TASK-007 的 `resolveInWorkspace`（不是已被删除的 assertInsideRoot）：`[…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 3 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-016",
+      "index": 20,
+      "excerpt": "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1}…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "count-exact",
+        "unit-assertion",
+        "proven-currently-false"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 6 时失败（空实现或漏改任一处即触发）；实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；该条已附改前实测值，证明其在未实施时为假 —— 非恒真"
+    },
+    {
+      "task": "TASK-016",
+      "index": 21,
+      "excerpt": "[外链出口唯一 · 结构断言] `rg --no-filename -c 'shell\\.openExternal' packages/app/src -g '*.ts' -g '*.vue' -g '!**/security/window-policy.ts' | awk '{s+=$1} END…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-016",
+      "index": 22,
+      "excerpt": "[CT-21 · 不得新建第二个 vitest 配置] `find . -name 'vitest.config.*' -not -path './node_modules/*' -not -path './source/*' | wc -l` 输出 1 且该文件为仓库根的 vitest.confi…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion",
+        "exit-code"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 1 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出；typecheck / test / build / 校验脚本任一非零退出时失败"
+    },
+    {
+      "task": "TASK-016",
+      "index": 23,
+      "excerpt": "[near-miss · 预览分区同样收敛权限] 'sandbox:preview' 分区的 session 也注册 setPermissionRequestHandler 与 setPermissionCheckHandler，且对全部 permission 一律返回 false：`rg -c '…",
+      "assertion_kinds": [
+        "count-lower-bound",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "目标符号/字符串命中数 < 2 时失败（空实现或漏改任一处即触发）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-016",
+      "index": 24,
+      "excerpt": "[CT-17 · preview 只收 attachment token] preview 相关 handler 的入参标识字段名为 `token`：`rg --no-filename -c 'attachmentId' packages/app/src | awk '{s+=$1} END{pri…",
+      "assertion_kinds": [
+        "count-exact",
+        "unit-assertion"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 0 时失败（多做与少做都触发，超集不被接受）；对应单测的任一断言不成立时用例红灯，pnpm -w test 非零退出"
+    },
+    {
+      "task": "TASK-016",
+      "index": 25,
+      "excerpt": "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4",
+      "assertion_kinds": [
+        "count-exact"
+      ],
+      "falsifiable": true,
+      "fails_when": "实际计数 != 4 时失败（多做与少做都触发，超集不被接受）"
+    }
+  ]
+}

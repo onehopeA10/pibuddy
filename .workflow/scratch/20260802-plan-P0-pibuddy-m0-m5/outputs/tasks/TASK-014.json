@@ -1,0 +1,344 @@
+{
+  "id": "TASK-014",
+  "title": "PROV-101 + UX-101 Provider 与模型中心、用量页与首次启动向导",
+  "description": "复用 pi 的 auth/model registry，让普通用户不用打开终端就能配置账号：API key 写入 ~/.pi/agent/auth.json（0600），自定义 OpenAI 兼容 endpoint 写入 ~/.pi/agent/models.json，模型发现与连通性测试在 main 完成，key 只留 main 侧 secret-store（TASK-008 / A08 的 packages/app/src/main/secret-store.ts），renderer 只拿状态与脱敏错误。区分全局默认 / workspace 默认 / session 当前模型，打开历史会话不得无提示覆盖其记录的 model 与 thinking。图片发送前按模型 input capabilities 拦截。用量页按日/workspace/model/provider 汇总 token/cost/context/失败率并可导出 CSV/JSON。首次启动向导覆盖 workspace、bundled/external Pi、Provider、project trust、通知、可选语音，并补全局错误分级与状态中心。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "feature",
+  "priority": "high",
+  "effort": "large",
+  "action": "新建 packages/app/src/main/providers/auth-store.ts，导出 `readAuthFile(): Record<string, PiCredential>` 与 `writeCredential(providerId: string, cred: { type: 'api_key'; key: string; env?: Record<string,string> }): void`，路径固定 `path.join(os.homedir(), '.pi', 'agent', 'auth.json')`，写入用 TASK-002 的 `writeJsonAtomic(p, merged)`（tmp + fsync + rename，全仓唯一原子写实现）并随后 `fs.chmodSync(p, 0o600)`，且必须先读原文件合并（保留 OAuth 条目）、写前把原文件复制到 `<userData>/auth-backup/auth.<epochMs>.json`；新建 providers/models-store.ts 管理 `~/.pi/agent/models.json` 的自定义 provider（id/name/baseUrl/api/models[]）；新建 providers/connectivity.ts 导出 `testProvider(providerId): Promise<{ ok: boolean; latencyMs: number; errorCode?: 'auth'|'network'|'model'|'unknown'; redactedMessage?: string }>`，实现里对错误消息执行 `redactSecrets()` 后才返回 renderer。settings.ts 的 sttApiKey 迁移到 TASK-008（A08）产出的 packages/app/src/main/secret-store.ts（safeStorage 密钥库），`settings:get` 返回体中 sttApiKey 必须替换为 TASK-008 已定名的 `sttApiKeyConfigured: boolean` 与 `sttApiKeyLast4: string`（CT-09：不得引入 sttApiKeySet 这一第三种拼写）。发送图片前在 stores/app.ts 的 send() 增加 `if (images.length && !(currentModel.input ?? []).includes('image')) { notify('warning', '当前模型不支持图片…'); return false; }（CT-26：send 的签名是 Promise<boolean>，裸 return 会返回 undefined 而过不了 typecheck）`。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/providers, packages/app/src/main/settings.ts, packages/app/src/renderer/src/stores/providers.ts, 首次启动向导",
+  "focus_paths": [
+    "packages/app/src/main/providers/",
+    "packages/app/src/main/settings.ts",
+    "packages/app/src/renderer/src/components/SettingsModal.vue",
+    "packages/app/src/renderer/src/components/TopBar.vue"
+  ],
+  "read_first": [
+    "packages/app/src/main/settings.ts",
+    "packages/app/src/main/ipc.ts 第 172-212 行（stt:transcribe 的 baseUrl 完全来自 renderer）",
+    "packages/app/src/renderer/src/components/SettingsModal.vue 第 79-82 行（引导用户去终端 /login 的文案，本任务要删掉）",
+    "packages/app/src/renderer/src/stores/app.ts 第 317-355 行（start 后按 settings 覆盖 model / thinkingLevel）",
+    "packages/app/src/renderer/src/components/TopBar.vue",
+    "packages/app/src/renderer/src/components/InputBar.vue",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/providers.md 第 58-178 行（auth.json 形状、0600、Key Resolution、优先级）",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/models.md 第 1-60 行（~/.pi/agent/models.json 自定义 provider）",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 259-278 行（get_available_models 返回的 Model 结构与 input 能力）",
+    "packages/contract/src/index.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/contract/src/envelope.ts",
+    "packages/app/src/main/providers/auth-store.ts",
+    "packages/app/src/main/providers/models-store.ts",
+    "packages/app/src/main/providers/connectivity.ts",
+    "packages/app/src/main/providers/model-scope.ts",
+    "packages/app/src/main/providers/providers-ipc.ts",
+    "packages/app/src/main/usage/usage-store.ts",
+    "packages/app/src/main/misc-ipc.ts",
+    "packages/app/src/main/ipc-registry.ts",
+    "packages/app/src/preload/api/providers.ts",
+    "packages/app/src/preload/api/index.ts",
+    "packages/app/src/renderer/src/stores/model-capability.ts",
+    "packages/app/src/renderer/src/stores/providers.ts",
+    "packages/app/src/renderer/src/components/OnboardingWizard.vue",
+    "packages/app/src/renderer/src/components/ProviderCenter.vue",
+    "packages/app/src/renderer/src/components/UsagePanel.vue",
+    "packages/app/src/renderer/src/components/StatusCenter.vue",
+    "packages/app/src/renderer/src/components/AppShell.vue"
+  ],
+  "depends_on": [
+    "TASK-008",
+    "TASK-009",
+    "TASK-012",
+    "TASK-013"
+  ],
+  "wave": 11,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "packages/app/src/main/providers/auth-store.ts 含 `'.pi', 'agent', 'auth.json'` 与 `mode: 0o600`，且写入经 fs-atomic.ts 的 writeJsonAtomic（`rg -c 'writeJsonAtomic' packages/app/src/main/providers/auth-store.ts` 输出 >= 1，`test -e packages/app/src/main/providers/auth-store.ts && [ \"$(rg -c 'writeFileSync\\(' packages/app/src/main/providers/auth-store.ts | wc -l)\" -eq 0 ]`）；单测 auth-store.test.ts 断言：写入 anthropic 的 api_key 后，原文件中已存在的其它 provider 条目（含一条 OAuth 形状的条目）逐字段 deep-equal 保留",
+      "[CT-09 · 字段名与公开键集合可机械判定] `settings:get` 的返回类型即 contract 的 `AppSettingsPublic`；单测 settings-redaction.test.ts 断言 `Object.keys(await settings.get()).sort()` 与 contract 导出的常量数组 `APP_SETTINGS_PUBLIC_KEYS` 排序后逐项相等（长度也相等），且该常量数组 includes('sttApiKeyConfigured') && includes('sttApiKeyLast4') && !includes('sttApiKey') && !includes('sttApiKeySet')；另 `rg --no-filename -c 'sttApiKeySet' packages/app/src packages/contract/src | awk '{s+=$1} END{print s+0}'` 输出 0（TASK-008 c[1] 已定名为 sttApiKeyConfigured + sttApiKeyLast4，不得引入第三种拼写）。原文「命中中不存在任何返回明文 key 的路径」需人工语义判读 grep 输出，无机械判据",
+      "[CT-07/CT-08 · 请求形状与出站原语都不另立一套] stt:transcribe 的 baseUrl/apiKey/model 不再来自 renderer，但请求形状保持 TASK-008 c[3] 定义的 `SttTranscribeRequest`（endpointId / audio / mimeType 三个字段，不得收窄为 {audio, mimeType}）：packages/app/src/main/misc-ipc.ts 中该 handler 经 registerHandler 以 contract 的 SttTranscribeRequest schema 注册，main 侧按 endpointId 查配置得到 baseUrl/apiKey/model；出站一律经 TASK-008 的 safeFetch，`rg --no-filename -c 'assertHttpsOrLocalhost' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0 且 `rg --no-filename -c '\\bfetch\\(' packages/app/src/main -g '*.ts' -g '!net/outbound-guard.ts' -g '!*.test.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（testProvider 与 discoverModels 两条新出站路径同样必须走 safeFetch）；单测覆盖 http://169.254.169.254、file://、内网 10.x 三个拒绝用例，断言抛出的错误码为 OUTBOUND_BLOCKED",
+      "连通性测试返回体经脱敏：connectivity.test.ts 断言当底层错误消息含 `sk-ant-0123456789` 时返回的 redactedMessage 不含该子串",
+      "模型作用域三层可验证：packages/app/src/main/providers/model-scope.ts 导出 `resolveModel({ sessionModel, workspaceDefault, globalDefault })` 且优先级为 session > workspace > global（单测对 8 种取值组合逐一断言）；stores/app.ts 的 start() 在 TASK-006 c[13] 已备好的 else 分支内（sessionPath !== undefined，即恢复历史会话）于 `saved.modelId !== state.model.id` 时置 `modelMismatchPrompt` 而不调 setModel —— node 脚本按行号区间断言该 else 块内 `setModel` 命中数为 0 且 `modelMismatchPrompt` 命中数 >= 1",
+      "图片能力守卫存在且被调用：新建 packages/app/src/renderer/src/stores/model-capability.ts，导出 `export function assertImageCapable(model: { id: string; input?: string[] }, imageCount: number): { ok: true } | { ok: false; reason: 'no-image-support'; currentModelId: string; suggestedModelIds: string[] }`；`rg -c \"assertImageCapable\" packages/app/src/renderer/src/stores/model-capability.ts packages/app/src/renderer/src/stores/app.ts` 两个文件各 >= 1，且 app.ts 中该调用位于 send() 内 `window.piBuddy.pi.prompt` / `pi.prompt` 调用之前（裁定：插话与下一轮处理都经 prompt + streamingBehavior 传输，不存在 pi.steer / pi.followUp 方法，见 TASK-007 c[4] 与 TASK-010 c[5]）（单测断言拦截生效而非事后补救）",
+      "[CT-26 · 拦截路径必须 return false 而非裸 return] 图片能力拦截双向单测 send-image-capability.test.ts：(a) 阻断用例 —— `currentModel.input = ['text']` 且 images.length===1 时，`await store.send()` 的返回值 === false（send 的签名为 Promise<boolean>，裸 return 会返回 undefined 而过不了 typecheck），且 `window.piBuddy.pi.prompt` spy 调用次数为 0，notify 被以 'warning' 调用一次、其消息文本包含当前模型 id；(b) 放行用例 —— `currentModel.input = ['text','image']` 且 images.length===1 时，`await store.send()` === true 且 `window.piBuddy.pi.prompt` 恰被调用 1 次、其入参 images 数组长度为 1（放行路径必须真的把图片发出去）；(c) 边界用例 —— `currentModel.input` 为 undefined 且 images.length===0 时 `await store.send()` === true，不因缺字段误拦纯文本消息",
+      "[原恒真条改为有界枚举断言] send-image-capability.test.ts 的 setup 中断言被 stub 的 `window.piBuddy.pi` 对象 `Object.keys(...).sort()` 与 TASK-007 c[3] 列举的 15 个方法名排序后逐项相等（长度 === 15）；且 `test -e packages/app/src/renderer/src/stores/send-image-capability.test.ts && [ \"$(rg -c 'piBuddy.pi.command|pi\\.command\\(|pi\\.steer\\(|pi\\.followUp\\(' packages/app/src/renderer/src/stores/send-image-capability.test.ts | wc -l)\" -eq 0 ]`。原文只断言「未调用一个已被 TASK-007 删除的方法」，其真值由祖先任务保证，本任务做与不做都不改变它",
+      "[UI-observable] 用户在当前模型不支持图片时通过拖拽或粘贴添加图片，逐项以 DOM 属性判定：附件区该图片条目的 `aria-disabled` === 'true' 且其说明文本 contains 当前模型 id；发送按钮 `disabled` === true 且其 `title` contains 同一模型 id；说明旁存在文本为「切换到支持图片的模型」的按钮，点击后弹出的模型列表中每一项的 `data-model-input` 属性均 contains 'image'；选中其一后该附件条目的 `aria-disabled` === 'false' 且发送按钮 `disabled` === false；再次点击发送后消息气泡中出现 `<img>` 元素 1 个。以上以属性取值判定，不以观感判定",
+      "用量页数据来自本地聚合：packages/app/src/main/usage/usage-store.ts 按 (day, workspace_root, provider, model_id) 聚合 token/cost/context/failure_count，导出 `exportCsv(): string` 与 `exportJson(): string`；单测断言 CSV 首行为 `date,workspace,provider,model,input_tokens,output_tokens,cost,failures`",
+      "[UI-observable] 全新用户首次启动看到向导：选择工作文件夹 → 选择使用内置 Pi 还是外部 Pi → 添加一个 Provider（填 API key 或自定义 OpenAI 兼容 endpoint）→ 点「测试连接」后界面显示的结果文案在成功时 contains '成功'、在失败时 contains HTTP 状态码（形如 `401`）或 contains errno（形如 `ENOTFOUND`）之一 → project trust 选择 → 通知与语音可选项 → 完成后直接可以发出第一条消息，全程不需要打开终端；设置里不再出现「在终端里运行 pi 后用 /login」文案（`test -e packages/app/src/renderer && [ \"$(rg -c '/login' packages/app/src/renderer | wc -l)\" -eq 0 ]`）；且「测试连接」失败时的提示文案 contains HTTP 状态码（形如 `401`）或 contains errno（形如 `ENOTFOUND`）之一，单测以注入的 401 与 ENOTFOUND 两个错误分别断言",
+      "[UI-observable] 打开一条使用了不同模型的历史会话时，顶栏提示「这个会话原来用的是 <model>，是否切换？」并提供保持/切换两个动作，不会静默覆盖；用量页能按日期与 workspace 筛选并导出 CSV",
+      "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/providers src/main/usage` 退出码 0",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1",
+      "[auth.json 写前备份] writeCredential 在写入前把原文件复制到 `<userData>/auth-backup/auth.<epochMs>.json`；单测断言写入后备份文件存在，且其字节与写入前原文件 sha256 相同（写坏用户终端里的 pi 是不可逆事故，备份必须可验证）",
+      "[Windows 权限降级如实处理] auth-store.ts 含 `process.platform === 'win32'` 分支：Windows 上 0o600 对 ACL 无效，该分支必须记录一条 warning 级日志并在 Provider 中心显示「此平台无法限制文件权限」的提示，而不是假装已加固；单测在 win32 下断言 writeCredential 不抛异常且返回 `{ permissionEnforced: false }`",
+      "[key 不进日志] connectivity.test.ts 追加断言：以含 `sk-ant-0123456789` 的错误触发 testProvider 失败路径后，logger spy 捕获到的全部调用参数 JSON.stringify 后不含该子串（脱敏若只作用于返回给 renderer 的字段，key 仍会经日志落盘，这是一条不会报错的静默泄漏）",
+      "[模型能力唯一来源] `test -e packages/app/src/main/providers/ && test -e packages/app/src/renderer/src/stores/providers.ts && [ \"$(rg -c 'gpt-4|claude-3|gemini-|o1-' packages/app/src/main/providers/ packages/app/src/renderer/src/stores/providers.ts | wc -l)\" -eq 0 ]`；且正向断言：模型列表的唯一来源是 get_available_models —— 单测把 get_available_models 的 stub 返回改为一个自造模型 id `test-model-xyz`（input 含 'image'），断言 UI 的模型列表中出现该 id 且拖入图片时不被拦截（硬编码名单会在 pi 侧新增模型后静默把新模型判成不支持图片）",
+      "[用量增量不出负数] usage-store.test.ts 断言：当本次 get_session_stats 的 total 小于 last_seen_total（pi 侧压缩后重置）时，写入 usage_daily 的增量为 0 而非负数；断言全表 `SELECT COUNT(*) FROM usage_daily WHERE input_tokens < 0 OR cost < 0` 为 0",
+      "[CSV 注入防护] exportCsv 对以 `=`、`+`、`-`、`@` 开头的字段值加前导单引号转义；单测断言 workspace 显示名为 `=cmd|' /C calc'!A0` 时导出行中该字段以 `'=` 开头（导出文件被 Excel 打开即执行是典型静默风险）",
+      "[向导可中断恢复] OnboardingWizard 每完成一步即写 `settings.onboardingStep`；单测断言在第 4 步后模拟重启，重新加载 store 时 `state.step === 4` 而非 0；且 `settings.onboardingCompletedAt` 只在最后一步完成后写入（未完成时 AppShell 不渲染主界面）",
+      "[裁定4 · 脱敏函数复用而非各写一份] providers/connectivity.ts 的 `redactSecrets` 从 packages/app/src/main/logger-redact.ts 导入：`[ \"$(rg -c --no-filename \"from '.*logger-redact\" packages/app/src/main/providers/connectivity.ts | awk '{s+=$1} END{print s+0}')\" -ge 1 ]`；结构断言 `rg --no-filename -c 'export (function|const) redactSecrets' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1（全仓库只有一份实现；原文用 `grep -rc \"function redactSecrets\"` 断言 === 1，对 `export const redactSecrets = (…) =>` 的箭头函数写法会得 0，属 SYS-2 过度指定）",
+      "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 5 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 5 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 5。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 5` 恒假）",
+      "[send() 签名锁定 · 由 TASK-006 定义] `rg -c 'export async function send\\(opts: SendOptions = \\{\\}\\): Promise<boolean>' packages/app/src/renderer/src/stores/app.ts` 输出 1（该签名被 TASK-006/007/010/014/015 五个任务共同依赖，任一任务改写签名即在此断言上失败）",
+      "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+      "[near-miss · settings schema 扩字段必须升版] 本任务向 settings 增加 provider / onboarding 相关字段，故 `rg -c 'SETTINGS_SCHEMA_VERSION = 2' packages/app/src/main/settings.ts` 输出 1，且 migrate 中存在从 1 到 2 的迁移分支（`rg -c 'case 1:' packages/app/src/main/settings.ts` 输出 >= 1）；单测断言一个 schemaVersion===1 的旧文件经 migrate 后新字段取默认值且原有字段逐项保留",
+      "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4（Onboarding 向导注入 overlay 插槽，未完成时不渲染 main 插槽内容）"
+    ],
+    "verification": "pnpm --filter @pibuddy/app test -- src/main/providers src/main/usage && rg -n \"/login\" packages/app/src/renderer && rg -n \"sttApiKey\" packages/app/src/preload packages/app/src/renderer && 清空 userData 后走一遍首次启动向导",
+    "definition_of_done": "一个没用过终端的用户能在 PiBuddy 里从零配好账号、测通连接、选好模型并发出第一条消息；打开旧会话不会被悄悄换模型；用不支持图片的模型时会被拦住而不是发出去报错；能看到自己每天花了多少钱。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/providers/auth-store.ts",
+      "action": "create",
+      "target": "readAuthFile/writeCredential",
+      "change": "合并式读写 ~/.pi/agent/auth.json，0600 权限，保留既有 OAuth 条目"
+    },
+    {
+      "path": "packages/app/src/main/providers/models-store.ts",
+      "action": "create",
+      "target": "自定义 provider CRUD",
+      "change": "读写 ~/.pi/agent/models.json，支持 OpenAI 兼容 endpoint 与模型列表发现"
+    },
+    {
+      "path": "packages/app/src/main/providers/connectivity.ts",
+      "action": "create",
+      "target": "testProvider()",
+      "change": "发一次最小请求测连通，错误分类为 auth/network/model/unknown，消息经 redactSecrets 后返回"
+    },
+    {
+      "path": "packages/app/src/main/providers/model-scope.ts",
+      "action": "create",
+      "target": "resolveModel()",
+      "change": "session > workspace > global 三层解析，返回 mismatch 标记供 UI 询问"
+    },
+    {
+      "path": "packages/app/src/main/providers/providers-ipc.ts",
+      "action": "create",
+      "target": "registerProvidersIpc()",
+      "change": "providers:list / providers:save-key / providers:remove / providers:test / providers:discover-models / providers:set-scope-default"
+    },
+    {
+      "path": "packages/app/src/main/usage/usage-store.ts",
+      "action": "create",
+      "target": "UsageStore",
+      "change": "复用 B01 的 SQLite 连接新增 usage_daily 表，按日/workspace/provider/model 聚合并导出 CSV/JSON"
+    },
+    {
+      "path": "packages/app/src/main/settings.ts",
+      "action": "modify",
+      "target": "AppSettings / loadSettings / saveSettings",
+      "change": "敏感字段迁 secret-store（A08 的 packages/app/src/main/secret-store.ts）；settings:get 返回 sttApiKeyConfigured 布尔与 sttApiKeyLast4 字符串（CT-09：与 TASK-008 c[1] 同一口径）；新增 workspaceDefaults 与 globalDefaults 字段"
+    },
+    {
+      "path": "packages/app/src/main/misc-ipc.ts",
+      "action": "modify",
+      "target": "stt:transcribe",
+      "change": "入参只剩 audio/mimeType，端点与 key 从 main 配置读取，baseUrl 走 assertHttpsOrLocalhost 校验"
+    },
+    {
+      "path": "packages/app/src/main/ipc-registry.ts",
+      "action": "modify",
+      "target": "registerAllIpc()",
+      "change": "追加 registerProvidersIpc() 与 registerUsageIpc()"
+    },
+    {
+      "path": "packages/app/src/preload/api/providers.ts",
+      "action": "create",
+      "target": "providers 命名空间",
+      "change": "list/saveKey/remove/test/discoverModels/setScopeDefault/usage 查询与导出"
+    },
+    {
+      "path": "packages/app/src/preload/api/index.ts",
+      "action": "modify",
+      "target": "api 聚合",
+      "change": "加入 providers 命名空间"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/model-capability.ts",
+      "action": "create",
+      "target": "assertImageCapable()",
+      "change": "按 get_available_models 返回的 Model.input 判定图片能力，返回可切换模型建议列表；send() 在发出任何 RPC 前调用"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/providers.ts",
+      "action": "create",
+      "target": "useProvidersStore",
+      "change": "provider 列表、模型能力、连通性结果、作用域默认值、用量数据"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/OnboardingWizard.vue",
+      "action": "create",
+      "target": "首次启动向导",
+      "change": "6 步：工作文件夹 / Pi runtime 选择 / Provider / 连接测试 / project trust / 通知与语音"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ProviderCenter.vue",
+      "action": "create",
+      "target": "Provider 与模型中心",
+      "change": "provider 增删改、key 输入（只写不回显）、自定义 endpoint、模型发现、能力与 context/cost 展示、连通性测试"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/UsagePanel.vue",
+      "action": "create",
+      "target": "用量页",
+      "change": "按日/workspace/model/provider 汇总表格 + 筛选 + 导出 CSV/JSON"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/StatusCenter.vue",
+      "action": "create",
+      "target": "状态中心",
+      "change": "runtime / session / 网络与 Provider / context / 后台任务 / update 六类状态，点击展开详情"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/SettingsModal.vue",
+      "action": "modify",
+      "target": "设置弹窗",
+      "change": "接入 ProviderCenter / UsagePanel，删除终端 /login 引导文案，语音 key 改为「已配置/未配置」状态"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/TopBar.vue",
+      "action": "modify",
+      "target": "模型选择与状态",
+      "change": "挂载 StatusCenter；模型不匹配提示条；模型能力标签（图片/推理/context/单价）"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/AppShell.vue",
+      "action": "modify",
+      "target": "首屏分支",
+      "change": "未完成向导时渲染 OnboardingWizard；补 offline / permission-pending / crashed / no-model / no-session 空状态与对应动作"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/app.ts",
+      "action": "modify",
+      "target": "send / start",
+      "change": "图片能力拦截；start 时模型不匹配改为提示而非静默覆盖；错误分级（可恢复/需设置/需重启/需导出诊断）"
+    },
+    {
+      "path": "packages/app/src/main/providers/auth-store.test.ts",
+      "action": "create",
+      "target": "auth 存储单测",
+      "change": "[errata-2 补录] test.unit[0] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/providers/connectivity.test.ts",
+      "action": "create",
+      "target": "连通性探测单测",
+      "change": "[errata-2 补录] test.unit[1] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/providers/model-scope.test.ts",
+      "action": "create",
+      "target": "模型作用域单测",
+      "change": "[errata-2 补录] test.unit[2] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/usage/usage-store.test.ts",
+      "action": "create",
+      "target": "用量存储单测",
+      "change": "[errata-2 补录] test.unit[3] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/send-image-capability.test.ts",
+      "action": "create",
+      "target": "图片能力有界枚举单测",
+      "change": "[errata-2 补录] c[7] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/model-capability.test.ts",
+      "action": "create",
+      "target": "模型能力 store 单测",
+      "change": "[errata-2 补录] test.unit[5] 引用，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "先用 providers.md 第 107-131 行核对 auth.json 的真实形状与权限要求，写 auth-store 的合并式读写与单测（含 OAuth 条目保留）",
+    "models-store 支持添加自定义 OpenAI 兼容 provider：{ id, name, baseUrl, api: 'openai-completions', models: [] }，并提供 discoverModels 走 GET {baseUrl}/models",
+    "connectivity.testProvider 用最小 chat 请求或 /models 探测，错误分类 auth(401/403) / model(404) / network(ECONN*, 超时) / unknown；返回前统一 redactSecrets",
+    "把 sttApiKey 迁到 TASK-008（A08）的 packages/app/src/main/secret-store.ts，settings:get 返回布尔态；stt:transcribe 改为 main 读配置，baseUrl 校验拒绝非 https 且非 localhost、拒绝私有网段与 file:",
+    "model-scope：settings 新增 globalDefaults.model 与 workspaceDefaults[workspaceRoot].model；打开会话时用会话记录的 model 覆盖并向 UI 报 mismatch",
+    "图片拦截：在 stores/model-capability.ts 实现 assertImageCapable(model, imageCount)，判据是 get_available_models 返回的 Model.input 数组是否含 'image'；send() 最前面调用它，ok===false 时不发出任何 RPC、给 warning 通知并附「切换到支持图片的模型」快捷动作（列表按 input 含 image 过滤）",
+    "usage-store：agent_settled 后从 get_session_stats 取增量写入 usage_daily；失败次数从 auto_retry_end(success=false) 与 assistant.stopReason==='error' 累计",
+    "OnboardingWizard 六步，每步都可返回；完成后写 settings.onboardingCompletedAt；未完成时 AppShell 不渲染主界面",
+    "StatusCenter 汇总六类状态，update 状态从 B05 的 stores/update.ts 读取（若该 store 未就绪则显示 unsupported）",
+    "错误分级：新增 friendly.ts 的 classifyError(err) → 'recoverable'|'needs-setting'|'needs-restart'|'needs-diagnostics'，四类分别给重试 / 打开设置 / 重启应用 / 导出诊断包动作",
+    "键盘导航与 aria：向导与所有对话框补 role/aria-labelledby、Tab 序、Esc 关闭与关闭后焦点回归触发元素；补 prefers-reduced-motion 媒体查询关闭过渡动画",
+    "回归：语音输入、模型切换、thinking 切换、费用与 context 显示必须逐项人工确认"
+  ],
+  "test": {
+    "commands": [
+      "pnpm --filter @pibuddy/app test -- src/main/providers src/main/usage",
+      "pnpm --filter @pibuddy/app typecheck",
+      "rg -n \"sttApiKey\" packages/app/src/preload packages/app/src/renderer"
+    ],
+    "unit": [
+      "packages/app/src/main/providers/auth-store.test.ts",
+      "packages/app/src/main/providers/connectivity.test.ts",
+      "packages/app/src/main/providers/model-scope.test.ts",
+      "packages/app/src/main/usage/usage-store.test.ts",
+      "packages/app/src/renderer/src/stores/send-image-capability.test.ts",
+      "packages/app/src/renderer/src/stores/model-capability.test.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "auth.json 合并写入不丢已有条目",
+      "脱敏后返回体不含 key 子串",
+      "SSRF 三个拒绝用例全部通过"
+    ]
+  },
+  "reference": {
+    "pattern": "沿用 pi 自身的 auth.json / models.json 作为唯一凭据真相源，不另建平行体系",
+    "files": [
+      "packages/app/src/main/settings.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "PROV-101 的目标是「不用终端」，而 pi 的 API key 路径完全是文件驱动的，可以由 main 安全接管；OAuth 订阅登录是交互式 TUI 流程，RPC 无对应命令，本轮如实降级为「检测已有 OAuth 凭据并显示状态 + 引导」。UX-101 与 Provider 中心天然同属首启体验，合并成一个垂直切片才能验收「首次启动到发出第一条消息」。",
+    "decision_factors": [
+      "auth.json 优先级高于环境变量，写文件即可生效",
+      "settings.ts 现在明文写盘且回传 renderer，是必须一并修的安全债"
+    ],
+    "tradeoffs": "OAuth 订阅（Claude Pro/Max、Codex、Copilot 等）本轮不做端内登录"
+  },
+  "risks": [
+    "OAuth 订阅类 provider 端内登录本轮不实现，UI 必须显示「需在终端完成 /login」的真实状态而不是假装支持；该缺口需在验收说明中标注",
+    "写 ~/.pi/agent/auth.json 会影响用户终端里的 pi，必须合并写入并在写前备份一份到 userData",
+    "用量数据依赖 get_session_stats 的增量，pi 侧若在压缩后重置统计会导致跨会话汇总偏差，需在 usage-store 中记录 last_seen_total 做差值并对负值归零",
+    "图片能力拦截的验证不得以「pi.command 未被调用」表述——该方法已由 TASK-007 从 main/preload/renderer 三处删除，此类断言恒为真；必须断言现存窄接口 pi.prompt / pi.steer / pi.followUp 的调用次数"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "Provider 与模型中心",
+      "用量统计",
+      "首次启动向导",
+      "全局状态与错误分级"
+    ],
+    "affected_components": [
+      "main/providers",
+      "main/usage",
+      "renderer/onboarding",
+      "renderer/settings"
+    ],
+    "affected_requirements": [
+      "PROV-101",
+      "UX-101"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "14h",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": true,
+    "wave": 11
+  },
+  "origin_shard": "B",
+  "origin_id": "TASK-B04"
+}

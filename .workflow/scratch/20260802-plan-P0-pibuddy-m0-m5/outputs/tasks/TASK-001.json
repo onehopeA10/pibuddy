@@ -1,0 +1,214 @@
+{
+  "id": "TASK-001",
+  "title": "M0 工程基线：git 快照 + vitest + fake Pi RPC fixture + 最小 CI",
+  "description": "当前项目不是 git 仓库、零测试、零 CI，15 项现有闭环功能的回归全部表现为运行时静默行为变化（不会引发类型错误或构建失败）。本任务建立变更留痕载体与可回归测试地基：初始化本地 git 仓库并提交基线快照（不配置 remote、不 push），接入 vitest，交付可脚本化的 fake Pi RPC 子进程 fixture（正常响应/畸形 JSON/超时/stderr/主动退出/crash/extension UI/旧 generation 延迟事件/超长行），补齐首批 pi-sdk 回归测试，并落地不含任何真实凭证的最小 CI。这是 M1/M2 全部任务的前置条件。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "chore",
+  "priority": "high",
+  "effort": "large",
+  "action": "在 D:/selftool/pi-ui 执行 git init 并提交基线 commit（禁止 git remote add / git push）；在根 package.json 增加 devDependency \"vitest\": \"^3.2.0\" 与 script \"test\": \"vitest run\"；新建 vitest.workspace.ts 列出 [\"packages/*\"]；新建 tools/fake-pi/fake-pi.mjs，通过 argv --scenario 支持字面量 \"normal\" | \"malformed-json\" | \"timeout\" | \"stderr-noise\" | \"exit-immediately\" | \"crash-mid-stream\" | \"extension-ui\" | \"stale-generation\" | \"oversized-line\"，按 rpc.md Framing 规则用 LF 分帧读写 JSONL；新建 packages/pi-sdk/test/client.spec.ts 覆盖 id 关联、事件转发、畸形行忽略、exit 事件；新建 .github/workflows/ci.yml 跑 pnpm install --frozen-lockfile / pnpm typecheck / pnpm test / pnpm build。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "repo-root + tools/ + packages/pi-sdk/test",
+  "focus_paths": [
+    "tools/fake-pi/",
+    "packages/pi-sdk/test/",
+    ".github/workflows/"
+  ],
+  "read_first": [
+    "package.json",
+    ".gitignore",
+    "pnpm-workspace.yaml",
+    "packages/pi-sdk/src/client.ts",
+    "packages/pi-sdk/src/jsonl.ts",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Protocol Overview' 与 'Framing' 章节（第 20-38 行）",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Events' 章节（第 832-1080 行，事件字段真相源）",
+    "doc/PiBuddy-product-grade-coding-agent-prompt.md",
+    "vitest.workspace.ts",
+    "tools/fake-pi/fake-pi.mjs",
+    "tools/fake-pi/scenarios.mjs",
+    "packages/pi-sdk/test/client.spec.ts",
+    ".github/workflows/ci.yml",
+    "doc/baseline-2026-08-02.md"
+  ],
+  "depends_on": [],
+  "wave": 1,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "git -C D:/selftool/pi-ui rev-parse --is-inside-work-tree 输出 true",
+      "git -C D:/selftool/pi-ui remote 输出为空（0 行），证明未配置任何 remote",
+      "git -C D:/selftool/pi-ui rev-list --count HEAD 输出 >= 1，且 git status --porcelain 输出为空（原文写死 === 1，会在执行者做第二次提交时把正确实现判为失败）",
+      ".gitignore contains 'node_modules' 且 contains 'release' 且 contains 'out'",
+      "package.json contains '\"test\": \"vitest run\"' 且 devDependencies contains '\"vitest\"'；仓库根存在唯一的 vitest.config.ts，其 test.include 为 ['packages/*/src/**/*.{test,spec}.ts', 'packages/*/test/**/*.{test,spec}.ts']（覆盖全部 workspace 包的两种放置约定），test.exclude 含 '**/node_modules/**' 与 'source/**'",
+      "tools/fake-pi/fake-pi.mjs 同时 contains 全部 9 个场景字面量：'normal'、'malformed-json'、'timeout'、'stderr-noise'、'exit-immediately'、'crash-mid-stream'、'extension-ui'、'stale-generation'、'oversized-line'",
+      "tools/fake-pi/fake-pi.mjs contains 'indexOf(\"\\n\")'，且 `test -e tools/fake-pi/fake-pi.mjs && [ \"$(rg -c 'readline' tools/fake-pi/fake-pi.mjs | wc -l)\" -eq 0 ]`（rpc.md 逐字禁止 Node readline）",
+      "pnpm -w test 退出码为 0，且输出中通过用例数 >= 8",
+      "packages/pi-sdk/test/client.spec.ts contains '--scenario' 且 contains 'malformed-json' 且 contains 'exit-immediately'",
+      "(a) .github/workflows/ci.yml contains 'pnpm typecheck' 且 contains 'pnpm test' 且 contains 'pnpm build' 且 contains 'node scripts/check-test-discovery.mjs'；(b) 该文件中所有第三方 action 均以 40 位 commit SHA 固定 —— `rg -n '^\\s*-?\\s*uses:' .github/workflows/ci.yml | rg -v '@[0-9a-f]{40}\\s*$' | wc -l` 输出 0（正则须同时匹配 `uses:` 与紧凑写法 `- uses:`，否则漏掉最常见写法；不得用 `rg -vc`，计数为 0 时它无输出且 exit 1，通过态无法产生；不得使用 look-around，ripgrep 的 Rust regex 不支持，实测退出码 2；原文另有转义错误，在单引号 shell 串中等价于「一个字面反斜杠后跟若干 s」，永不匹配空白）；(c) 本文件由本任务一次性 create，TASK-002 与 TASK-013 只允许 modify（CT-14：两个任务同时 create 会丢掉本任务的 build 闸门）。另：`node scripts/check-contract-uniqueness.mjs` 一步不在本任务写入 —— 该脚本由 TASK-002（wave 2）创建，且其判据 (b) 要求 packages/* 中恰有 1 个 contract 包，wave 1 时为 0 个必然退出码 1；改由 TASK-002 在创建脚本的同一 wave 追加该 CI 步骤（闸门脚本创建 wave <= 引用 wave）",
+      "`test -e .github/workflows/ci.yml && [ \"$(rg -c 'secrets\\.' .github/workflows/ci.yml | wc -l)\" -eq 0 ]`（CI 不得引用任何真实凭证）",
+      "doc/baseline-2026-08-02.md contains '流式文本增量' 且 contains 'Extension UI' 且 contains 'packaged-smoke'，列出 15 项现有闭环功能的手工 smoke 清单",
+      "[UI-observable] 按 doc/baseline-2026-08-02.md 清单在 pnpm --filter @pibuddy/app dev 下人工走通「输入 → 流式回复 → tool 卡片展开 → 停止」，并在文档中逐项打勾记录基线状态",
+      "[CT-21 · 测试发现范围不得被注销] (a) 工作区内 vitest 配置唯一：`find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL），且两者均位于仓库根（./source 下的 codex / hermes-studio 为只读参考树，不在 pnpm-workspace.yaml 的 packages/* 内，故排除）；(b) `node scripts/check-test-discovery.mjs` 退出码 0，其输出的 discovered 与 onDisk 两个数字相等 —— 该脚本枚举磁盘上 packages/**/*.{spec,test}.ts（排除 node_modules）得集合 D，再从 vitest 的实际发现结果得集合 F，D ⊄ F 即退出码 1 并列出遗漏文件",
+      "[CT-12 · node:sqlite 探针前置定稿] `node scripts/probe-node-sqlite.mjs` 退出码 0，且其输出写入 doc/baseline-2026-08-02.md 的「运行时能力」小节，含三行：electron 版本、Electron 内 process.versions.node、`require('node:sqlite')` 的 OK/FAIL。该脚本必须在 Electron 运行时内探测（`ELECTRON_RUN_AS_NODE=1 <electron 可执行文件> -e \"require('node:sqlite')\"`），不得用宿主 node 代替。本轮已实测：electron 43.2.0 内 process.versions.node = 24.18.0，`require('node:sqlite')` 成功，故 TASK-009 采用 node:sqlite、electron-builder.yml 的 npmRebuild 保持 false（见 plan.json design_decisions 第 7 条）",
+      "[断言写法统一 · SYS-1] doc/baseline-2026-08-02.md 含「断言写法约定」小节，逐字记录三条：(1) 否定型断言一律写作 `test -e <PATH> && [ \"$(rg -c '<PAT>' <PATH> | wc -l)\" -eq 0 ]`，路径不存在时 test 失败即判定 FAIL；(2) 计数型断言一律写作 `[ \"$(rg -c --no-filename '<PAT>' <PATH> | awk '{s+=$1} END{print s+0}')\" -ge N ]`；(3) 禁止 `grep -rc`（对目录输出多行 file:count、对缺失路径退出码 2）与禁止正则 look-around（ripgrep 不支持，实测退出码 2）。`rg -c 'grep -rc' doc/baseline-2026-08-02.md` 输出 >= 1 用于确认该禁令被写入"
+    ],
+    "verification": "cd D:/selftool/pi-ui && git rev-parse --is-inside-work-tree && git remote && git rev-list --count HEAD && pnpm -w test && pnpm typecheck && node tools/fake-pi/fake-pi.mjs --scenario exit-immediately < /dev/null; echo \"fake-pi exit=$?\"",
+    "definition_of_done": "项目具备本地 git 变更留痕能力与可执行的自动化回归测试，后续任何改动都能用 fake Pi 进程在不依赖真实 Provider 的前提下验证，且 CI 在每次改动上自动跑通类型检查、单测与构建。"
+  },
+  "files": [
+    {
+      "path": ".gitignore",
+      "action": "modify",
+      "target": "忽略规则",
+      "change": "补充 node_modules/、out/、release/、resources/pi-runtime/、*.log、.workflow/scratch/*/outputs/tmp*"
+    },
+    {
+      "path": "package.json",
+      "action": "modify",
+      "target": "root scripts/devDependencies",
+      "change": "新增 devDependencies.vitest \"^3.2.0\"；新增 scripts.test \"vitest run\"、scripts.test:watch \"vitest\""
+    },
+    {
+      "path": "vitest.workspace.ts",
+      "action": "create",
+      "target": "workspace 配置",
+      "change": "export default [\"packages/*\"]，使 packages/app 与 packages/pi-sdk 的 test/ 目录被统一发现"
+    },
+    {
+      "path": "tools/fake-pi/fake-pi.mjs",
+      "action": "create",
+      "target": "fake Pi RPC 进程",
+      "change": "读 stdin JSONL（仅按 \\n 分帧、容忍尾部 \\r），按 --scenario 输出 response/event；timeout 场景吞掉命令不回响应；crash-mid-stream 在 message_update 中途 process.exit(1)；stale-generation 在收到 stop 后延迟 300ms 仍 emit exit"
+    },
+    {
+      "path": "tools/fake-pi/scenarios.mjs",
+      "action": "create",
+      "target": "场景数据",
+      "change": "导出每个场景的事件序列常量，供 fixture 与测试共用，避免测试硬编码字符串漂移"
+    },
+    {
+      "path": "packages/pi-sdk/test/client.spec.ts",
+      "action": "create",
+      "target": "PiRpcClient 基线回归",
+      "change": "用 fake-pi.mjs 作为 spawn.command 参数验证：send() 的 id 与 response.id 一一对应；event 事件被转发；malformed-json 行被忽略且不抛异常；exit-immediately 场景触发一次 exit 事件"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "action": "create",
+      "target": "CI workflow",
+      "change": "on: [push, pull_request]；matrix os: [ubuntu-latest, windows-latest]；步骤 pnpm/action-setup + setup-node 22 + pnpm install --frozen-lockfile + pnpm typecheck + pnpm test + pnpm build；不使用任何 secrets"
+    },
+    {
+      "path": "doc/baseline-2026-08-02.md",
+      "action": "create",
+      "target": "基线快照与 smoke 清单",
+      "change": "记录改造前的 15 项闭环功能清单、每项的手工验证步骤、当前通过状态，并声明无 clean VM 时打包验收只记 packaged-smoke"
+    },
+    {
+      "path": "vitest.config.ts",
+      "action": "create",
+      "target": "仓库根唯一 vitest 配置",
+      "change": "test.include 覆盖 packages/*/src 与 packages/*/test 两种约定；exclude 含 node_modules 与 source/**。全计划禁止任何其它任务新建第二个 vitest 配置（CT-21）"
+    },
+    {
+      "path": "scripts/check-test-discovery.mjs",
+      "action": "create",
+      "target": "spec 发现范围闸门",
+      "change": "枚举磁盘 spec 集合 D 与 vitest 实际发现集合 F，D ⊄ F 即退出码 1 并列出遗漏文件；接入 ci.yml"
+    },
+    {
+      "path": "scripts/probe-node-sqlite.mjs",
+      "action": "create",
+      "target": "Electron 运行时 node:sqlite 探针",
+      "change": "在 ELECTRON_RUN_AS_NODE 下 require('node:sqlite')，把结果写入 doc/baseline-2026-08-02.md；TASK-009 的存储选型与 electron-builder 的 npmRebuild 取值以此为准（CT-12）"
+    }
+  ],
+  "implementation": [
+    "在 D:/selftool/pi-ui 执行 git init -b main；补齐 .gitignore；git add -A；git commit -m 'chore: PiBuddy 产品化改造基线快照'。全程不执行 git remote add、不执行 git push",
+    "根 package.json 增加 devDependencies.vitest ^3.2.0 与 scripts.test；执行 pnpm install",
+    "新建 vitest.workspace.ts 内容为 export default [\"packages/*\"]",
+    "编写 tools/fake-pi/fake-pi.mjs：解析 process.argv 取 --scenario，默认 normal；stdin 上手写 LF 分帧循环（buffer.indexOf(\"\\n\")，尾部 \\r 剥离），禁止使用 node:readline",
+    "为每个命令类型返回 {\"type\":\"response\",\"id\":<原 id>,\"command\":<原 type>,\"success\":true}；new_session/switch_session 额外带 data:{cancelled:false}，并支持 --cancel 开关返回 cancelled:true",
+    "实现 malformed-json 场景：先输出一行 '{\"type\":\"message_update\"'（截断），再输出合法行，验证客户端能跳过坏行继续工作",
+    "实现 oversized-line 场景：输出一行长度 16 MB 的 JSON 字符串，用于 A04 的 JSONL buffer 上限测试",
+    "实现 stale-generation 场景：收到 {\"type\":\"abort\"} 后仍在 300ms 后 emit 一个 agent_start 事件再退出，用于 A04 的旧代际丢弃测试",
+    "新建 packages/pi-sdk/test/client.spec.ts，用 { command: process.execPath, prefixArgs: [fakePiPath, '--scenario', s] } 构造 PiSpawn 驱动 PiRpcClient",
+    "新建 .github/workflows/ci.yml；确认文件中不出现 secrets. 前缀",
+    "按 doc/baseline-2026-08-02.md 清单人工跑一遍 dev 模式，逐项记录基线通过状态",
+    "在仓库根建立唯一 vitest.config.ts，include 覆盖 packages/*/src 与 packages/*/test；全计划禁止第二个 vitest 配置（CT-21）",
+    "写 scripts/check-test-discovery.mjs 与 scripts/probe-node-sqlite.mjs，两者都接入 ci.yml",
+    "ci.yml 的所有第三方 action 一次到位地用 40 位 SHA 固定，使 TASK-013 的 scripts/check-workflow-pins.mjs 在本文件上直接通过（CT-14）"
+  ],
+  "test": {
+    "commands": [
+      "pnpm -w test",
+      "pnpm typecheck",
+      "node tools/fake-pi/fake-pi.mjs --scenario normal"
+    ],
+    "unit": [
+      "packages/pi-sdk/test/client.spec.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "pnpm -w test 退出码 0",
+      "通过用例数 >= 8",
+      "git rev-list --count HEAD == 1",
+      "git remote 输出为空"
+    ]
+  },
+  "reference": {
+    "pattern": "参照 pi 自身 docs/rpc.md 的 Framing 约定实现分帧；fixture 的 spawn 契约照抄 packages/pi-sdk/src/client.ts 中 PiSpawn 接口（command / prefixArgs / env / shell）",
+    "files": [
+      "packages/pi-sdk/src/jsonl.ts",
+      "packages/pi-sdk/src/client.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "先建测试地基再动代码。M1/M2 的所有缺陷（代际错乱、ENOENT 吞异常、草稿丢失、SSRF）在类型层面完全不可见，没有 fake 进程就无法在不接真实 Provider 的前提下复现与验收。",
+    "decision_factors": [
+      "非 git 仓库导致无变更留痕载体",
+      "零测试导致 15 项闭环功能回归无法自动检测",
+      "M1 出口门禁明确要求可用 fake process 测试"
+    ],
+    "tradeoffs": "fixture 需要与 pi 真实协议保持同步，存在漂移风险；通过 scenarios.mjs 集中常量 + 直接引用 rpc.md 行号缓解。"
+  },
+  "risks": [
+    "git init 后首次 commit 可能因未忽略 node_modules 导致巨大提交 —— 必须先写好 .gitignore 再 git add",
+    "严禁执行 git remote add / git push；本任务只在本地留痕",
+    "vitest 3 与 workspace 配置在 pnpm monorepo 下需确认 packages/app 的 vue 组件测试不被强制加载（本任务只跑 pi-sdk 测试，app 侧测试由后续任务补）"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "测试基础设施",
+      "CI",
+      "版本留痕"
+    ],
+    "affected_components": [
+      "tools/fake-pi",
+      "packages/pi-sdk/test",
+      ".github/workflows"
+    ],
+    "affected_requirements": [
+      "QA-001",
+      "QA-002",
+      "QA-003"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "60m",
+    "risk": "medium",
+    "autonomous": true,
+    "checkpoint": false,
+    "wave": 1
+  },
+  "origin_shard": "A",
+  "origin_id": "TASK-A01"
+}

@@ -1,0 +1,36 @@
+appId: com.pibuddy.app
+productName: PiBuddy
+directories:
+  output: release
+
+files:
+  - out/**
+  - package.json
+
+# pi 智能体在运行时会用 Node 直接执行 node_modules 里的 cli.js、
+# 动态加载扩展/技能文件，放进 asar 会破坏这些路径，直接不打 asar
+asar: false
+npmRebuild: false
+
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
+
+win:
+  target:
+    - nsis
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+
+linux:
+  target:
+    - AppImage
+  category: Utility

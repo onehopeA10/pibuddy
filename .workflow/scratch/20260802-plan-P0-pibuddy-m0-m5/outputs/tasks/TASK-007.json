@@ -1,0 +1,259 @@
+{
+  "id": "TASK-007",
+  "title": "SEC-002 + SEC-003 收窄 IPC 接口面与 workspace capability 化",
+  "description": "实测最高危缺陷：preload/index.ts:16 暴露 command: (command: Record<string, unknown>)，经 ipc.ts:115-117 原样透传给 PiRpcClient.send，两侧零校验；pi 的 docs/rpc.md 第 454-515 行确认协议原生提供 {\"type\":\"bash\",\"command\":\"...\"} 直接执行 shell —— 因此渲染进程中任意 JS（包括模型输出诱导的 XSS）等价于本机任意命令执行。全项目 senderFrame 命中数为 0，13 个 invoke handler 无一做 frame 校验。file:read-image 接受任意绝对路径，唯一约束是扩展名查表，无 workspace 限制、无大小限制且用同步 readFileSync 阻塞主进程；shell:open-path 同类。本任务把渲染进程能触达的能力从「任意 RPC 命令 + 任意路径」收窄为「产品动作白名单 + 不透明 workspaceId/attachment token」。必须保留的分支：PiBuddy 从不调用 pi 的 steer 命令，而是用 prompt + streamingBehavior='steer'（stores/app.ts:406），rpc.md 第 65 行明确流式中不带 streamingBehavior 的 prompt 直接返回 error。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "security",
+  "priority": "high",
+  "effort": "large",
+  "action": "删除 packages/app/src/preload/index.ts:16 的 command 方法与 packages/app/src/main/ipc.ts:115-117 的 pi:command handler；在 preload 的 pi 命名空间改为暴露 prompt/steer/followUp/abort/newSession/switchSession/setModel/setThinkingLevel/getState/getMessages/getSessionStats/getAvailableModels/getAvailableThinkingLevels/compact/setSessionName 共 15 个窄方法，且 prompt 的入参保留 streamingBehavior?: \"steer\" | \"followUp\"；新建 packages/app/src/main/ipc-guard.ts（全计划唯一的 handler 注册入口，裁定1）导出 registerHandler(channel, schema, handler) 与 class IpcGuard implements PermissionEngine（checkFrame / checkPayload / checkRate），其内部 assertMainFrame(event) 内容为 if (event.senderFrame !== event.sender.mainFrame) throw new Error(\"IPC_FRAME_REJECTED\")、const MAX_IPC_PAYLOAD_BYTES = 8*1024*1024、const MAX_TEXT_PAYLOAD_BYTES = 262144 与 class RateLimiter（prompt 10 次/10s，其余 30 次/10s），并把 ipcMain.handle / ipcMain.on 的调用点全部收敛进 ipc-guard.ts —— 其余任何文件不得直接调用（裁定1 的结构性守卫），四重校验 assertMainFrame → zod parse（用 @pibuddy/contract 的 per-channel schema）→ CHANNEL_MAX_BYTES 查表尺寸校验（stt:transcribe 25MB / file:read-attachment 10MB，其余 8MB）→ 限流 集中在包装器内执行；新建 packages/app/src/main/workspace-registry.ts：registerWorkspace(absPath) 用 fs.realpathSync.native 归一化后，以 canonical root 的 sha256 派生出稳定的不透明 workspaceId，并经 fs-atomic.ts 的 writeJsonAtomic 一次性持久化到 <userData>/workspaces.json（裁定3：禁止 randomUUID —— 进程级 UUID 跨重启即变，而 TASK-009 的 sessions.workspace_id 声明 NOT NULL 并依其过滤，重启后历史会话会全部查不到且不报任何错），resolveInWorkspace(workspaceId, relativePath) 必须拒绝 path.isAbsolute 与含 '..' 的输入、await fs.realpath 后用 const rel = path.relative(root, real); if (rel.startsWith(\"..\") || path.isAbsolute(rel)) throw，禁止用 real.startsWith(root) 判定；新建 packages/app/src/main/attachment-registry.ts 用 ATTACHMENT_TTL_MS = 1800000（30 分钟滑动过期，访问即续期）的 token 取代绝对路径，并导出 revokeAllForSession / revokeAll 供会话切换与应用退出时显式撤销全部未消费 token（裁定2：5 分钟对「添加附件后再打一段长文字」过短，24 小时对一次性 capability 过长），并对图片做 magic bytes 嗅探（PNG 89 50 4E 47、JPEG FF D8 FF、GIF 47 49 46 38、WEBP RIFF....WEBP、BMP 42 4D）与 MAX_IMAGE_BYTES = 10*1024*1024 校验。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/ipc.ts + security 模块 + preload + renderer 调用点",
+  "focus_paths": [
+    "packages/app/src/main/",
+    "packages/app/src/preload/",
+    "packages/app/src/renderer/src/"
+  ],
+  "read_first": [
+    "packages/app/src/main/ipc.ts",
+    "packages/app/src/preload/index.ts",
+    "packages/app/src/preload/index.d.ts",
+    "packages/app/src/renderer/src/stores/app.ts",
+    "packages/app/src/renderer/src/components/InputBar.vue",
+    "packages/app/src/renderer/src/components/TopBar.vue",
+    "packages/app/src/renderer/src/components/Welcome.vue",
+    "packages/app/src/renderer/src/components/ExtensionUiHost.vue",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/app/src/main/pi-supervisor.ts",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 43-136 行（prompt / steer / follow_up 的 streamingBehavior 语义，第 65 行是必须保留的分支依据）",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 454-528 行（bash 命令直执行，说明为何必须删除通用 command 通道）",
+    "doc/threat-model.md",
+    "packages/app/src/main/ipc-guard.ts",
+    "packages/app/src/main/workspace-registry.ts",
+    "packages/app/src/main/attachment-registry.ts",
+    "packages/app/test/workspace-capability.spec.ts",
+    "packages/app/test/ipc-guard.spec.ts"
+  ],
+  "depends_on": [
+    "TASK-005",
+    "TASK-006"
+  ],
+  "wave": 6,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "`test -e packages/app/src/main/ipc.ts && test -e packages/app/src/preload/index.ts && test -e packages/app/src/preload/index.d.ts && [ \"$(rg -c 'pi:command' packages/app/src/main/ipc.ts packages/app/src/preload/index.ts packages/app/src/preload/index.d.ts | wc -l)\" -eq 0 ]`（改前实测 ipc.ts:115 有一处，故此断言当前为假）",
+      "`test -e packages/app/src/preload/index.ts && [ \"$(rg -c 'command:' packages/app/src/preload/index.ts | wc -l)\" -eq 0 ]`（preload/index.ts:16 的通用 command 方法已删除）",
+      "`test -e packages/app/src/renderer && [ \"$(rg -c 'piBuddy.pi.command' packages/app/src/renderer | wc -l)\" -eq 0 ]`（渲染进程全部调用点已改为窄方法）",
+      "packages/app/src/preload/index.ts 同时 contains 全部 15 个窄方法名：'prompt'、'steer'、'followUp'、'abort'、'newSession'、'switchSession'、'setModel'、'setThinkingLevel'、'getState'、'getMessages'、'getSessionStats'、'getAvailableModels'、'getAvailableThinkingLevels'、'compact'、'setSessionName'",
+      "packages/app/src/renderer/src/stores/app.ts contains 'streamingBehavior: \"steer\"'（回归保护：PiBuddy 不调用 pi 的 steer 命令，流式插话依赖 prompt + streamingBehavior，见 rpc.md 第 65 行）",
+      "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173，故此断言当前为假、只有真正完成迁移才转真；该断言不钉死任何 handler 文件，handler 迁移后依然成立）；且本任务新增/改写的 15 个 channel 全部经包装器注册：`rg --no-filename -c 'registerHandler\\(' packages/app/src/main/ipc.ts | awk '{s+=$1} END{print s+0}'` 输出 >= 15",
+      "packages/app/src/main/ipc-guard.ts 是全计划唯一的 handler 注册入口：`export class IpcGuard implements PermissionEngine`（contains 'implements PermissionEngine' 且同时 contains 'checkFrame'、'checkPayload'、'checkRate' 三个方法名，CT-20）与 `export function registerHandler(channel, schema, handler)`；contains 'event.senderFrame !== event.sender.mainFrame'、'MAX_IPC_PAYLOAD_BYTES = 8 * 1024 * 1024'、'MAX_TEXT_PAYLOAD_BYTES = 262144'、'class RateLimiter'；且含按 channel 覆盖的上限表 `CHANNEL_MAX_BYTES`，其中 'stt:transcribe' 取 25 * 1024 * 1024、'file:read-attachment' 取 10 * 1024 * 1024（CT-10 与同构 near-miss：通用 8MB 上限先于 MAX_AUDIO_BYTES 25MB 与 MAX_IMAGE_BYTES 10MB 生效会使后两者成死代码）。ipc-guard.spec.ts 断言：9MB 的 stt:transcribe 载荷通过、26MB 被拒；11MB 的 file:read-attachment 被拒；未在表中的 channel 沿用 8MB",
+      "[裁定1 · 包装器内做四重校验] registerHandler 的实现体内依次出现 assertMainFrame → schema.parse → 尺寸校验（CHANNEL_MAX_BYTES 查表）→ rateLimiter.check 四步（用 node 脚本断言这四个标识在 registerHandler 函数体内的出现行号严格递增）；且各 handler 文件中不再需要逐个手写这四步 —— `rg --no-filename -c 'assertMainFrame\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（校验集中在包装器内，杜绝新增 channel 漏写）",
+      "packages/app/src/main/workspace-registry.ts contains 'realpathSync.native' 且 contains 'path.relative(' 且 `test -e packages/app/src/main/workspace-registry.ts && [ \"$(rg -c 'startsWith\\(root|real.startsWith' packages/app/src/main/workspace-registry.ts | wc -l)\" -eq 0 ]`（前缀判定会把 /work-evil 误判为 /work 之内）",
+      "[裁定3 · workspaceId 必须持久化且跨重启稳定] `test -e packages/app/src/main/workspace-registry.ts && [ \"$(rg -c 'randomUUID' packages/app/src/main/workspace-registry.ts | wc -l)\" -eq 0 ]`（禁止进程级 UUID）；该文件 contains 'realpathSync.native' 与 'createHash(\"sha256\")'，workspaceId 由 canonical realpath 派生并在首次注册时经 writeJsonAtomic 持久化到 `<userData>/workspaces.json`（contains 'writeJsonAtomic' 且 contains 'workspaces.json'）。packages/app/test/workspace-capability.spec.ts 断言跨重启稳定性：对同一 realpath 调用 registerWorkspace 得 id1，销毁并重新 import 模块（模拟重启）后再调用得 id2，断言 id1 === id2 且 id2 与 `<userData>/workspaces.json` 中记录的值相等；另断言两个不同目录得到的 id 不相等。渲染侧不透明：`test -e packages/app/src/preload/index.d.ts && [ \"$(rg -c 'workspace: string' packages/app/src/preload/index.d.ts | wc -l)\" -eq 0 ]`",
+      "[裁定2 · 唯一附件注册表] packages/app/src/main/attachment-registry.ts 是全计划唯一的附件注册表：contains 'ATTACHMENT_TTL_MS = 1800000'（30 分钟滑动过期：resolve 命中即续期，contains 'renewOnAccess' 或等效的续期赋值语句，attachment-registry.spec.ts 断言「签发后第 29 分钟访问一次、第 50 分钟再访问」仍成功而「签发后静置 31 分钟」失败）、contains 'MAX_IMAGE_BYTES = 10 * 1024 * 1024'、同时 contains magic bytes 字面量 '0x89'、'0x50'、'0x4e'、'0x47'、'0xff'、'0xd8'、'0x42'、'0x4d'，并导出 `revokeAllForSession(sessionId)` 与 `revokeAll()`（会话切换与应用退出时显式撤销全部未消费 token；单测断言 revokeAll() 后既有 token 一律 resolve 失败）。唯一性结构断言：`rg --no-filename -c 'ATTACHMENT_TTL_MS' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 >= 1 且 `rg -l 'ATTACHMENT_TTL_MS' packages/app/src/main | wc -l` 输出 1",
+      "`test -e packages/app/src/main/ipc.ts && [ \"$(rg -c 'readFileSync' packages/app/src/main/ipc.ts | wc -l)\" -eq 0 ]`（改前实测 ipc.ts:157 的 file:read-image 用同步 readFileSync，故此断言当前为假）（file:read-image 的同步阻塞读已改为 fs/promises）",
+      "[裁定2 · shell.openPath 只接受 token，无逃逸分支] `rg --no-filename -c 'shell\\.openPath' packages/app/src/main -g '*.ts' -g '!attachment-registry.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测 ipc.ts:164 有一处直接接受渲染进程字符串，故此条当前为假）；且 attachment-registry.ts 导出 `openAttachment(token: string)` 并在其内部调用 shell.openPath（`rg -c 'shell\\.openPath' packages/app/src/main/attachment-registry.ts` 输出 >= 1）",
+      "packages/app/test/workspace-capability.spec.ts 断言以下 6 类输入全部抛错：绝对路径 'C:/Windows/System32/drivers/etc/hosts'、'../../../etc/passwd'、指向 workspace 外目标的 symlink、超过 MAX_IMAGE_BYTES 的文件、扩展名为 .png 但首字节为 'MZ' 的 PE 文件、静置超过 ATTACHMENT_TTL_MS（30 分钟）未访问的 token；并断言一条放行用例：relativePath 为空串（即 workspace root 自身）时 resolveInWorkspace 返回成功而非拒绝 —— 该放行语义是全计划唯一口径，TASK-015 不得另建一个拒绝 root 自身的原语（CT-18）。该测试在 `pnpm -w test` 中通过",
+      "packages/app/test/ipc-guard.spec.ts 断言：senderFrame 与 sender.mainFrame 不相等时抛 'IPC_FRAME_REJECTED'；超过 MAX_TEXT_PAYLOAD_BYTES 的 prompt 被拒；10 秒内第 11 次 prompt 被限流拒绝；schema 不匹配的 payload 被 zod 拒绝；该测试在 pnpm -w test 中通过",
+      "pnpm typecheck 退出码 0，pnpm -w test 退出码 0，pnpm --filter @pibuddy/app build 退出码 0",
+      "[UI-observable] 手动全量回归：发送纯文本、粘贴图片发送、拖拽文件发送、流式中插话（steer）、点击停止（abort）、切换模型、切换 thinking level、新任务、切换历史会话、费用与 context 显示、语音输入 —— 11 项全部仍可用",
+      "[UI-observable] 手动，七种 Extension UI 交互逐项判定并记录在 doc/regression/TASK-007-extension-ui.md（七行 `- [x]` + 时间戳）：select 返回所选项的 value；confirm 返回 true/false 且两种取值各测一次；input 返回输入的字符串原文；editor 返回编辑后的全文且长度 > 0；notify 在界面出现对应文案；setStatus 使状态栏文本变为上报值；set_editor_text 使输入框 value === 上报值。每项以「pi 侧收到的响应体字段值 === 期望值」判定，不以观感判定",
+      "[UI-observable] 手动：在 DevTools 控制台执行 `window.piBuddy.pi.command` 返回 undefined；执行 `window.piBuddy.pi.prompt({text:'x'})` 后 Promise 状态为 fulfilled（未 reject），且 3 秒内 ChatView 的 user 消息节点数 +1、随后 assistant 消息节点数 +1；执行 `Object.keys(window.piBuddy.pi).sort()` 输出的数组与本任务 c[3] 列举的 15 个方法名排序后逐项相等（长度 === 15，无第 16 项）；对这 15 个方法逐一在 packages/app/src/preload/index.d.ts 中核对形参类型，全部落在有限集合内：workspace 相关形参类型为 `workspaceId: string`（不透明 id）、附件相关形参类型为 `token: string`、其余为 contract 导出的具名类型 —— `test -e packages/app/src/preload/index.d.ts && [ \"$(rg -c 'channel: string|filePath: string|url: string|path: string' packages/app/src/preload/index.d.ts | wc -l)\" -eq 0 ]` 把「无任意 channel 名/绝对路径/URL」这条无界全称断言收敛为可执行的有限枚举",
+      "[send() 签名锁定 · 由 TASK-006 定义] `rg -c 'export async function send\\(opts: SendOptions = \\{\\}\\): Promise<boolean>' packages/app/src/renderer/src/stores/app.ts` 输出 1（该签名被 TASK-006/007/010/014/015 五个任务共同依赖，任一任务改写签名即在此断言上失败）",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 字段匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言本仓 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1",
+      "[CT-20 · PermissionRule 有定义] packages/contract/src/ipc-contract.ts 导出 `export type PermissionRule`（`rg --no-filename -c 'export (type|interface) PermissionRule\\b' packages/contract/src | awk '{s+=$1} END{print s+0}'` 输出 1），字段至少含 channel / maxBytes / windowMs / maxPerWindow；TASK-015 c[10] 依赖该类型存在，缺失将使其不可满足"
+    ],
+    "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && pnpm --filter @pibuddy/app build && grep -rc 'pi:command' packages/app/src && grep -rc 'piBuddy.pi.command' packages/app/src/renderer && grep -c 'startsWith(root' packages/app/src/main/workspace-registry.ts",
+    "definition_of_done": "渲染进程即使被完全攻陷也只能触发产品定义的有限动作，无法执行任意 pi 命令（含 bash）、无法读取或打开 workspace 之外的任何文件，且所有跨进程调用都经过来源、结构、体积与频率四重校验。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/ipc-guard.ts",
+      "action": "create",
+      "target": "assertMainFrame / 尺寸常量 / RateLimiter",
+      "change": "全计划唯一的 IPC handler 注册入口（裁定1）：export class IpcGuard implements PermissionEngine（checkFrame/checkPayload/checkRate）与 export function registerHandler(channel, schema, handler)，内部依次执行 frame 校验 → zod parse → CHANNEL_MAX_BYTES 查表尺寸校验 → RateLimiter；ipcMain.handle / ipcMain.on 只允许在本文件内出现。所有拒绝路径写入 logger（经 logger-redact 脱敏）"
+    },
+    {
+      "path": "packages/app/src/main/workspace-registry.ts",
+      "action": "create",
+      "target": "workspaceId 与路径收容",
+      "change": "registerWorkspace 用 realpathSync.native 得到 canonical root，workspaceId 由该 root 的 sha256 派生并经 writeJsonAtomic 持久化到 <userData>/workspaces.json（裁定3：禁止 randomUUID，重启后同一目录必须解析出同一 id）；resolveInWorkspace 是全计划唯一的收容原语（CT-18），每次调用重新 realpath 并用 path.relative 判定，rel 为空串（root 自身）视为放行；另校验 stat.isFile()"
+    },
+    {
+      "path": "packages/app/src/main/attachment-registry.ts",
+      "action": "create",
+      "target": "短期 attachment capability",
+      "change": "全计划唯一的附件注册表（裁定2）。issue(workspaceId, absPath, capability) 返回 token（TTL 1800000ms，访问即滑动续期）；resolve(token) 重做收容校验、大小校验与 magic bytes 嗅探，声明 mimeType 与实际字节不符即拒绝；openAttachment(token) 是全 main 唯一调用 shell.openPath 的地方；revokeAllForSession / revokeAll 在会话切换与应用退出时清空。TASK-015 只允许 modify 本文件补结构化字段（relativePath/sourceName/sha256 等），不得新建 workspace/attachment-store.ts"
+    },
+    {
+      "path": "packages/app/src/main/ipc.ts",
+      "action": "modify",
+      "target": "全部 handler（第 88-213 行）",
+      "change": "删除 pi:command；把 pi 相关拆为 15 个窄 channel；每个 handler 加 assertMainFrame + contract schema.parse + 尺寸 + 限流；file:read-image → file:read-attachment(token) 且改用 fs/promises；shell:open-path / shell:show-in-folder 改为只接受 token；dialog:choose-files 返回 {token, name, size, kind} 不返回 path；dialog:choose-folder 返回 {workspaceId, displayPath}"
+    },
+    {
+      "path": "packages/contract/src/ipc-contract.ts",
+      "action": "modify",
+      "target": "channel 常量与 schema",
+      "change": "补齐 15 个 pi 窄 channel 与 attachment/workspace 相关 channel 的 request/response zod schema；prompt 的 schema 显式包含 streamingBehavior: z.enum([\"steer\",\"followUp\"]).optional()"
+    },
+    {
+      "path": "packages/app/src/preload/index.ts",
+      "action": "modify",
+      "target": "api 对象（第 13-52 行）",
+      "change": "删除 command 方法；invoke 改为私有且只接受 contract 导出的 channel 常量（不接受任意字符串）；file.pathFor 保留但其返回值只用于换取 token 不再直接外发；订阅返回 unsubscribe，并在 pagehide 事件中统一清理"
+    },
+    {
+      "path": "packages/app/src/preload/index.d.ts",
+      "action": "modify",
+      "target": "PiBuddyApi",
+      "change": "同步 15 个窄方法签名；移除任何暴露绝对路径、任意 URL、任意 channel 名与环境变量的类型"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/app.ts",
+      "action": "modify",
+      "target": "所有 pi.command 调用点",
+      "change": "refreshState/refreshStats/refreshThinkingLevels/send/abortRun/newTask/openSession/setModel/setThinkingLevel 全部改用窄方法；send 中保留 streamingBehavior:'steer' 分支；workspace 改为持有 workspaceId + displayPath"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/InputBar.vue",
+      "action": "modify",
+      "target": "附件选择与图片读取",
+      "change": "改用 token 换取 base64；拖拽文件经 file.pathFor 后立即换 token 再丢弃路径"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/TopBar.vue",
+      "action": "modify",
+      "target": "工作目录展示",
+      "change": "展示 displayPath，操作一律基于 workspaceId"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/Welcome.vue",
+      "action": "modify",
+      "target": "选择文件夹流程",
+      "change": "接收 {workspaceId, displayPath} 而非裸路径"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ExtensionUiHost.vue",
+      "action": "modify",
+      "target": "uiRespond 调用",
+      "change": "改用带 schema 校验的窄 channel，保留 select/confirm/input/editor/notify/setStatus/set_editor_text 七种交互的完整行为"
+    },
+    {
+      "path": "packages/app/test/workspace-capability.spec.ts",
+      "action": "create",
+      "target": "路径逃逸与附件校验测试",
+      "change": "6 类恶意输入全部拒绝"
+    },
+    {
+      "path": "packages/app/test/ipc-guard.spec.ts",
+      "action": "create",
+      "target": "四重校验测试",
+      "change": "frame / schema / 尺寸 / 限流各一组用例"
+    },
+    {
+      "path": "packages/app/test/attachment-registry.spec.ts",
+      "action": "create",
+      "target": "TTL 滑动过期与撤销测试",
+      "change": "29/50 分钟滑动续期成功、静置 31 分钟失败、revokeAll 后全部失效"
+    },
+    {
+      "path": "doc/regression/TASK-007-extension-ui.md",
+      "action": "create",
+      "target": "Extension UI 人工回归记录",
+      "change": "[errata-2 补录] c[17] 要求该文件存在并含勾选行，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "先在 packages/contract/src/ipc-contract.ts 把 15 个窄 channel 及其 request/response schema 定型，作为 main 与 preload 的共同依据",
+    "写 ipc-guard.ts：IpcGuard implements PermissionEngine（checkFrame/checkPayload/checkRate）+ registerHandler 包装器（frame → zod parse → CHANNEL_MAX_BYTES 尺寸 → RateLimiter），并把 ipcMain.handle/on 的调用点全部收敛到本文件内（裁定1）",
+    "写 workspace-registry.ts：workspaceId = sha256(canonical realpath) 并经 writeJsonAtomic 持久化到 <userData>/workspaces.json（裁定3，禁止 randomUUID）；resolveInWorkspace 为全计划唯一收容原语，用 path.relative + rel.startsWith('..') || path.isAbsolute(rel)，rel 为空串放行（root 自身）",
+    "写 attachment-registry.ts：issue/resolve/revokeAllForSession/revokeAll/openAttachment，TTL 1800000ms 滑动过期，resolve 时重做全部校验并做 magic bytes 嗅探（裁定2，全计划唯一注册表）",
+    "改写 ipc.ts：删除 pi:command，按 15 个窄 channel 重建 pi 相关 handler，每个 handler 统一前置四重校验；file/shell/dialog 相关 handler 改为 token 化并把 readFileSync 换成 fs/promises",
+    "改写 preload：删除 command；把 invoke 变为私有函数且只接受 contract 的 channel 常量；订阅句柄集中管理并在 pagehide 清理",
+    "改写渲染进程全部调用点；重点保留 send 中的 streamingBehavior:'steer' 分支，否则流式插话会静默失败（rpc.md 第 65 行：流式中不带 streamingBehavior 的 prompt 直接返回 error）",
+    "写两个测试文件并跑 pnpm -w test",
+    "人工执行 11 项功能回归 + 7 种 Extension UI 交互回归 + DevTools 控制台的接口面确认"
+  ],
+  "test": {
+    "commands": [
+      "pnpm -w test",
+      "pnpm typecheck",
+      "pnpm --filter @pibuddy/app build"
+    ],
+    "unit": [
+      "packages/app/test/workspace-capability.spec.ts",
+      "packages/app/test/ipc-guard.spec.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "pi:command 全项目出现次数 0",
+      "assertMainFrame 覆盖全部 13+ 个 handler",
+      "6 类路径/附件恶意输入全部被拒",
+      "11 项功能与 7 种 Extension UI 交互零回归"
+    ]
+  },
+  "reference": {
+    "pattern": "窄方法命名对齐 packages/pi-sdk/src/client.ts:182-255 已封装的命令方法；schema 复用 @pibuddy/contract；收容判定采用 path.relative 而非前缀比较",
+    "files": [
+      "packages/pi-sdk/src/client.ts",
+      "packages/contract/src/ipc-contract.ts",
+      "packages/app/src/main/ipc.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "接口收窄与路径 capability 化必须一起做：只删 pi.command 而保留 file:read-image 的任意绝对路径，攻击面只是从命令执行降级为任意文件读取。两者也共用同一套 handler 前置校验框架，分开会导致 ipc.ts 被两次重写。",
+    "decision_factors": [
+      "pi 原生 bash 命令使通用 command 通道等价于 RCE",
+      "senderFrame 校验命中数为 0",
+      "file:read-image 无路径与大小约束且同步阻塞主进程"
+    ],
+    "tradeoffs": "窄方法列表需要随产品功能演进维护；用 contract 的 channel 常量 + schema 集中定义，新增能力必须显式过一遍威胁模型。"
+  },
+  "risks": [
+    "删除 pi.command 会一次性影响 stores/app.ts 中约 10 处调用点，遗漏任一处即导致对应功能静默失效——必须以 grep 'piBuddy.pi.command' 命中数为 0 与 11 项手工回归共同验收",
+    "PiBuddy 的流式插话依赖 prompt + streamingBehavior='steer' 而非 pi 的 steer 命令；若在收窄时把插话错误地映射到 steer 方法，rpc.md 第 65 行的语义差异会让用户输入静默失败",
+    "workspaceId 化后 TopBar/Welcome 的路径展示需要 displayPath 单向下发；若某处仍把 displayPath 回传给主进程当参数用，等于绕过 capability，需在 preload 类型层面禁止（index.d.ts 中不得出现 workspace: string 形参）",
+    "ExtensionUiHost 的 editor / set_editor_text 交互涉及回传较大文本，MAX_TEXT_PAYLOAD_BYTES 上限需实测确认不会误伤正常使用"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "IPC 接口面",
+      "文件附件",
+      "工作目录",
+      "Extension UI",
+      "流式插话"
+    ],
+    "affected_components": [
+      "packages/app/src/main/ipc.ts",
+      "packages/app/src/main/workspace-registry.ts",
+      "packages/app/src/main/attachment-registry.ts",
+      "packages/app/src/preload/index.ts"
+    ],
+    "affected_requirements": [
+      "SEC-002",
+      "SEC-003",
+      "SEC-005",
+      "SES-002"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "130m",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": true,
+    "wave": 6
+  },
+  "origin_shard": "A",
+  "origin_id": "TASK-A07"
+}

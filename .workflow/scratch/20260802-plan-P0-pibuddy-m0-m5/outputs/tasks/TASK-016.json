@@ -1,0 +1,320 @@
+{
+  "id": "TASK-016",
+  "title": "ART-101 + ART-102 受限沙箱预览、Office/PDF 转换与 Artifact 仓库",
+  "description": "在受限 utility process/sidecar 中做 Office/PDF 转换，转换产物在独立 sandbox origin 的 BrowserView 中预览（无 Node、无主 preload、无主 session、CSP 阻断脚本与任意网络），保证恶意文档既不能执行宏脚本也碰不到主 renderer。第一版覆盖 Markdown / 纯文本代码 / JSON / CSV / 图片 / 音视频 metadata / PDF / Word / Excel / PPT。同时建 Artifact 仓库：稳定 ID、类型、来源 session-turn-tool、workspace、版本、hash、created/updated、preview、原始导出路径与删除状态；支持搜索筛选、版本比较、rename、duplicate、export、show in folder、回收站恢复；聊天消息链接到 artifact 的确定版本而不是易失路径；Agent 生成产物有 generating/ready/failed/conflicted 状态，转换失败不丢原文件。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "feature",
+  "priority": "medium",
+  "effort": "large",
+  "action": "新建 packages/app/src/main/preview/convert-host.ts，用 `utilityProcess.fork(convertWorkerPath, [], { env: { NODE_OPTIONS: '' }, stdio: 'pipe' })` 起转换进程，并对每次转换施加硬上限常量 `const CONVERT_LIMITS = { maxInputBytes: 50 * 1024 * 1024, maxOutputBytes: 100 * 1024 * 1024, timeoutMs: 30_000, maxRssBytes: 512 * 1024 * 1024 } as const`，超时或超限一律 kill 并返回 `{ ok: false, code: 'timeout'|'too-large'|'oom' }`；转换进程只被授予单一输入文件路径与一个专属输出临时目录（`path.join(app.getPath('temp'), 'pibuddy-convert', randomUUID())`），禁止访问其它路径。新建 preview/preview-window.ts，用 `new BrowserWindow({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: undefined, partition: 'sandbox:preview', webSecurity: true, javascript: false } })` 承载 HTML 预览，并对该 partition 注册 `session.fromPartition('sandbox:preview').webRequest.onBeforeRequest` 拦截一切非 `file://` 且非本地转换输出目录的请求，同时注入 CSP 响应头 `default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'none'; connect-src 'none'; frame-src 'none'`。解析库选型已定死为以下六个纯 JS、零原生依赖的精确版本，写入 packages/app/package.json dependencies（无 `^` / `~`）：`\"mammoth\": \"1.12.0\"`（DOCX → 结构化 HTML/文本）、`\"exceljs\": \"4.4.0\"`（XLSX/XLSM 读取）、`\"unpdf\": \"1.8.0\"`（PDF 文本抽取，pdfjs 的无 canvas 打包版，dependencies 为空）、`\"papaparse\": \"5.5.4\"`（CSV，零依赖）、`\"jszip\": \"3.10.1\"` + `\"fast-xml-parser\": \"4.5.3\"`（PPTX：解 zip 后解析 ppt/slides/slideN.xml 抽文本，无成熟纯 JS PPTX 库，如实自建最小实现）。明确排除：`xlsx`（SheetJS npm 上的 0.18.5 已停更且带未修复的原型污染 CVE-2023-30533）、`pdfjs-dist` 与 `pdf-parse`（二者均把 `@napi-rs/canvas` 列为 dependencies，会引入 .node 二进制）。`unpdf` 的 `@napi-rs/canvas` 仅为 peerDependency 且只服务于 renderPageAsImage，本任务只用 extractText，故不安装该 peer。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/preview, packages/app/src/main/artifacts, packages/app/src/renderer/src/components",
+  "focus_paths": [
+    "packages/app/src/main/preview/",
+    "packages/app/src/main/artifacts/",
+    "packages/app/src/renderer/src/components/"
+  ],
+  "read_first": [
+    "packages/app/src/main/index.ts 第 5-30 行（现有 BrowserWindow webPreferences，注意 sandbox: true（注意：主窗口的 sandbox 已由 TASK-004 c[0] 在 wave 3 改为 true，此处的历史前提已失效） 是主窗口现状，预览窗口不得沿用）",
+    "packages/app/src/main/workspace-registry.ts（TASK-007 的唯一收容原语 resolveInWorkspace，预览输入必须先过它；CT-18，原 path-guard.ts / assertInsideRoot 已在本轮撤销）",
+    "packages/app/src/main/attachment-registry.ts（TASK-007 建立、TASK-015 扩字段的唯一附件注册表，提供 hash 与 capability 语义；裁定2）",
+    "packages/app/src/main/changeset/changeset-store.ts（TASK-B07 产出，artifact 来源 session/turn/tool 的取数口径与之一致）",
+    "packages/app/src/main/sessions/session-index.ts（B01 的 SQLite 连接与迁移模式）",
+    "packages/app/src/renderer/src/components/MessageItem.vue（消息中链接 artifact 的挂载点）",
+    "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 ART-101 / ART-102 两节与 M5 出口门禁",
+    "packages/contract/src/index.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/contract/src/envelope.ts",
+    "packages/app/src/main/preview/convert-host.ts",
+    "packages/app/src/main/preview/convert-worker.ts",
+    "packages/app/src/main/preview/preview-window.ts",
+    "packages/app/src/main/preview/preview-types.ts",
+    "packages/app/src/main/preview/preview-ipc.ts",
+    "packages/app/src/main/artifacts/artifact-store.ts",
+    "packages/app/src/main/artifacts/artifact-ipc.ts",
+    "packages/app/src/main/ipc-registry.ts",
+    "packages/app/src/preload/api/preview.ts",
+    "packages/app/src/preload/api/artifacts.ts",
+    "packages/app/src/preload/api/index.ts",
+    "packages/app/src/renderer/src/stores/artifacts.ts",
+    "packages/app/src/renderer/src/components/PreviewPane.vue",
+    "packages/app/src/renderer/src/components/ArtifactLibrary.vue",
+    "packages/app/src/renderer/src/components/ArtifactLink.vue",
+    "packages/app/src/renderer/src/components/AppShell.vue",
+    "packages/app/electron-builder.yml（TASK-003 已改为 asar: true + extraResources 投递 pi-runtime，本任务只追加 asarUnpack，不得改回 false）",
+    "packages/app/package.json（TASK-011 已确立的精确版本纪律，本任务六个解析库同样精确写入）"
+  ],
+  "depends_on": [
+    "TASK-015"
+  ],
+  "wave": 13,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "packages/app/src/main/preview/preview-window.ts 同时含 `sandbox: true`、`nodeIntegration: false`、`contextIsolation: true`、`partition: 'sandbox:preview'` 与 `script-src 'none'`；`test -e packages/app/src/main/preview/preview-window.ts && [ \"$(rg -n 'preload:' packages/app/src/main/preview/preview-window.ts | rg -vc 'preload: undefined')\" -eq 0 ]`（预览窗口不得加载主 preload：要么完全不出现 preload:，要么只出现 `preload: undefined`；用管道而非 look-around 表达「匹配 A 但不匹配 B」）",
+      "[可观察副作用明定] 集成断言：向预览窗口注入含 `<img src=\"https://example.com/x.png\">`、`<script src=\"https://example.com/y.js\">` 与 `<script>document.title='PWNED'</script>` 的 HTML；断言 (a) webRequest onBeforeRequest 的 spy 对上述两个 https 请求各被调用 1 次且两次 callback 的入参均为 `{ cancel: true }`；(b) `await win.webContents.executeJavaScript('document.title')` !== 'PWNED'（内联脚本未执行）；(c) `await win.webContents.executeJavaScript('performance.getEntriesByType(\"resource\").length')` === 0（无任何资源真的加载）。原文「用可观察副作用检查，如 DOM 未被修改」只给举例未给断言",
+      "packages/app/src/main/preview/convert-host.ts contains 'maxInputBytes: 50 * 1024 * 1024' 且 contains 'maxOutputBytes: 100 * 1024 * 1024' 且 contains 'timeoutMs: 30_000' 且 contains 'maxRssBytes: 512 * 1024 * 1024'；convert-host.test.ts 断言 (a) 超过 timeoutMs 的转换被 kill 并返回 code='timeout'；(b) 输入超过 maxInputBytes 直接拒绝且未 fork 子进程；(c) 子进程 env 中不含任何以 `PIBUDDY_` 开头或以 `_API_KEY` 结尾的变量",
+      "宏与外部内容默认禁用：转换 worker 对 Office 文档的解析选项显式关闭宏、远程模板、外部链接与自动数据连接，且 office-safety.test.ts 用一个含 VBA 宏与远程模板引用的 fixture 断言转换输出中不含宏内容、不含 `http://` / `https://` 外链目标",
+      "错误可行动：损坏文件、密码保护文件、超大文件、不支持类型四类 fixture 各自返回确定的 code（'corrupt' | 'password-protected' | 'too-large' | 'unsupported'），且 convert-worker 导出常量表 `SUGGESTION: Record<PreviewErrorCode, string>`，单测断言四个 code 在该表中的取值均为长度 >= 10 的非空字符串且互不相同（替代不可测的「用户可读建议」）；并断言原文件在转换失败后仍存在且 sha256 与转换前相同",
+      "artifact 表字段完整：packages/app/src/main/artifacts/artifact-store.ts 建表含 `id, kind, source_session_id, source_turn_id, source_tool_call_id, workspace_id, version, sha256, created_at, updated_at, preview_path, export_path, status, deleted_at`，status 取值受 `'generating'|'ready'|'failed'|'conflicted'` 约束；单测断言同一逻辑产物二次生成会 version+1 而不是覆盖前一版本",
+      "消息链接确定版本：MessageItem 渲染的 artifact 链接携带 `artifactId + version` 而非文件路径；单测断言把 artifact 的文件移动到别处后，历史消息中的链接仍能解析到该版本（通过 artifact 表而非路径）",
+      "[UI-observable] 用户点击一个 Word / Excel / PPT / PDF / CSV / 图片文件，预览区渲染出的文本节点总长度 > 0（六类各测一次，任一为 0 判 FAIL）；打开一个带宏的恶意 Office 样本时：预览区文本长度 > 0、`performance.getEntriesByType('resource').length` === 0、且 webRequest 拦截计数 >= 1（三项同时成立才判通过）；打开损坏文件与有密码文件时，界面显示的文案 === `SUGGESTION[code]` 的取值（与 c[4] 的常量表逐字相等），而非空白或崩溃（断言预览区非空且未抛未捕获异常）",
+      "[UI-observable] 用户在「产物」库看到 Agent 生成的文件，可搜索筛选、对比两个版本、重命名、复制一份、导出、在文件夹中显示、移入回收站并恢复；Agent 正在生成时该条目显示 generating 状态，生成失败显示 failed 且原始文件仍可下载",
+      "`pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/preview src/main/artifacts` 退出码 0",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1",
+      "[选型定死] packages/app/package.json 的 dependencies 含且仅含以下精确版本（均无 `^` / `~`）：mammoth 1.12.0、exceljs 4.4.0、unpdf 1.8.0、papaparse 5.5.4、jszip 3.10.1、fast-xml-parser 4.5.3；`test -e packages/app/package.json && [ \"$(rg -c '@napi-rs/canvas|pdfjs-dist|pdf-parse|\"xlsx\"' packages/app/package.json | wc -l)\" -eq 0 ]`",
+      "[无原生依赖闸门] `node packages/app/scripts/check-pure-js-deps.mjs` 退出码 0。该脚本由 TASK-013（wave 10）创建并已接入 .github/workflows/ci.yml，本任务不再创建它，只需在引入 mammoth / exceljs / unpdf / papaparse / jszip / fast-xml-parser 六个解析库后仍使该闸门退出码为 0：闸门遍历 packages/app 已安装依赖闭包，命中 binding.gyp / `gypfile: true` / install 类脚本含 node-gyp|prebuild-install|node-pre-gyp|cmake-js / 任何 .node 文件即退出码 1。这条是 electron-builder.yml 保持 `npmRebuild: false` 的前提，缺了它选型漂移不会有任何构建报错",
+      "[不走 canvas 渲染路径] `test -e packages/app/src/main/preview/convert-worker.ts && [ \"$(rg -c 'renderPageAsImage|@napi-rs/canvas' packages/app/src/main/preview/convert-worker.ts | wc -l)\" -eq 0 ]`；PDF 只用 unpdf 的 extractText 做结构化文本抽取，convert-worker.ts 含字符串 `extractText`",
+      "[asar 取值与 TASK-003 一致] `test -e packages/app/electron-builder.yml && [ \"$(rg -c 'asar: false' packages/app/electron-builder.yml | wc -l)\" -eq 0 ]` 且该文件 contains `asar: true`；同时 contains `asarUnpack` 且其列表含 `out/main/convert-worker.js`；`[ \"$(rg -c --no-filename 'npmRebuild: false' packages/app/electron-builder.yml | awk '{s+=$1} END{print s+0}')\" -eq 1 ]`（CT-12 已由 TASK-001 的 node:sqlite 探针实测定稿：electron 43.2.0 内 require('node:sqlite') 成功，故 npmRebuild 无需改为 true）（本任务不得为迁就解析库而改动这三个键中的任何一个）",
+      "[packaged worker 路径解析] convert-host.ts 导出 `resolveWorkerPath(): string` 且含字符串 `app.asar.unpacked`；convert-host.test.ts 断言 (a) `__dirname` 含 `app.asar` 时返回值含 `app.asar.unpacked` 且不含裸 `app.asar/`；(b) dev 下（`__dirname` 不含 app.asar）返回值原样不变（路径重写漏掉时 dev 全绿、packaged 下预览功能整体不可用）",
+      "[临时目录必被清理] 每次转换的专属临时目录在成功与失败（含 timeout / oom / too-large）两条路径上都被递归删除：convert-host.test.ts 跑 50 次转换（其中 20 次故意失败）后断言 `fs.readdirSync(path.join(app.getPath('temp'),'pibuddy-convert')).length === 0`（残留目录只会表现为磁盘缓慢占满，没有任何报错）",
+      "[覆盖度如实降级 · 正向十类在先] PreviewKind 十类（markdown/text/json/csv/image/media-metadata/pdf/word/excel/ppt）各有一个正向 fixture，逐类断言 `result.kind === <该类>` 且 `result.code === 'ok'` 且 `result.text.length > 0`（十条正向断言使「对所有输入都返回 unsupported」的桩必然失败 —— 这正是原文 `grep -c \"'unsupported'\" >= 1` 无法防住的空白冒充）；另三个负向 fixture：PPTX 中的 SmartArt 断言 `result.code === 'unsupported'` 且 `result.text.length > 0`（正文仍抽出）、嵌入 OLE 对象断言 `result.code === 'unsupported'`、加密 XLSX 断言 `result.code === 'password-protected'`，三者的用户提示均 === c[4] 常量表中对应取值",
+      "[artifact 软删不动磁盘文件] `setStatus(id,'trashed')` 只写 status 与 deleted_at；单测断言目标文件仍存在且 sha256 与操作前相同；`test -e packages/app/src/main/artifacts/ && [ \"$(rg -c 'unlinkSync|fs\\.rm\\(' packages/app/src/main/artifacts/ | wc -l)\" -eq 0 ]`（SYS-1 守卫）",
+      "[preview 输入必过 root containment] [CT-18 · 复用唯一收容原语] preview-ipc.ts 的每个 handler 在使用入参标识前都调用 TASK-007 的 `resolveInWorkspace`（不是已被删除的 assertInsideRoot）：`[ \"$(rg -c --no-filename 'resolveInWorkspace' packages/app/src/main/preview/preview-ipc.ts | awk '{s+=$1} END{print s+0}')\" -ge 3 ]`（三个 handler 各一次），且 `rg --no-filename -c 'assertInsideRoot' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0；单测断言以 `../../../etc/passwd` 与指向工作区外的 symlink 调用 preview:open 均被拒绝",
+      "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 6 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 6 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 6。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 6` 恒假）",
+      "[外链出口唯一 · 结构断言] `rg --no-filename -c 'shell\\.openExternal' packages/app/src -g '*.ts' -g '*.vue' -g '!**/security/window-policy.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（本任务新增的外链入口一律走 TASK-004 的 openExternalSafely）",
+      "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+      "[near-miss · 预览分区同样收敛权限] 'sandbox:preview' 分区的 session 也注册 setPermissionRequestHandler 与 setPermissionCheckHandler，且对全部 permission 一律返回 false：`rg -c 'setPermissionRequestHandler|setPermissionCheckHandler' packages/app/src/main/preview/preview-window.ts` 输出 >= 2；单测遍历 ['media','geolocation','notifications','clipboard-read','openExternal'] 五种 permission，断言两个 handler 的返回值全部为 false（TASK-004 c[10] 只覆盖 defaultSession，新分区默认继承的是 Electron 默认策略而非 defaultSession 的策略）",
+      "[CT-17 · preview 只收 attachment token] preview 相关 handler 的入参标识字段名为 `token`：`rg --no-filename -c 'attachmentId' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0，且 preview:open 的 zod schema 的 `.shape` 键集合含 'token'（单测断言）；刚由 TASK-015 的 createAttachment 签发的 token 直接传给 preview:open 能成功解析（与 TASK-015 的同名断言互为对向验证）",
+      "[near-miss · AppShell 插槽契约不变] `rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4"
+    ],
+    "verification": "pnpm --filter @pibuddy/app test -- src/main/preview src/main/artifacts && pnpm --filter @pibuddy/app dev 用 fixtures/office 下的正常与恶意样本各跑一遍预览，并在 packaged 构建里复测 Word/Excel/PPT/PDF/CSV/图片六类",
+    "definition_of_done": "用户可以在 PiBuddy 里安全地看 Word、Excel、PPT、PDF、CSV 和图片，带宏的恶意文档打不开宏也连不上外网；Agent 做出来的文件进入「产物」库，能找到、能比版本、能导出、误删能恢复，聊天记录里的链接永远指向当时那一版。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/preview/convert-host.ts",
+      "action": "create",
+      "target": "ConvertHost",
+      "change": "utilityProcess 转换宿主，四项硬上限、专属临时输出目录、env 净化、超时 kill"
+    },
+    {
+      "path": "packages/app/src/main/preview/convert-worker.ts",
+      "action": "create",
+      "target": "转换 worker 入口",
+      "change": "按 MIME 分派 Office/PDF/CSV 解析，显式关闭宏、远程模板、外部链接与自动数据连接"
+    },
+    {
+      "path": "packages/app/src/main/preview/preview-window.ts",
+      "action": "create",
+      "target": "沙箱预览窗口",
+      "change": "独立 partition、sandbox:true、无 preload、javascript:false、CSP 头注入、webRequest 全量拦截非本地请求"
+    },
+    {
+      "path": "packages/app/src/main/preview/preview-types.ts",
+      "action": "create",
+      "target": "PreviewKind / PreviewError",
+      "change": "markdown/text/json/csv/image/media-metadata/pdf/word/excel/ppt 十类与 corrupt/password-protected/too-large/unsupported/timeout/oom 六类错误码"
+    },
+    {
+      "path": "packages/app/src/main/preview/preview-ipc.ts",
+      "action": "create",
+      "target": "registerPreviewIpc()",
+      "change": "preview:open / preview:convert / preview:close，输入必须先过 resolveInWorkspace（TASK-007 的唯一收容原语，CT-18）"
+    },
+    {
+      "path": "packages/app/src/main/artifacts/artifact-store.ts",
+      "action": "create",
+      "target": "ArtifactStore",
+      "change": "artifact 表与版本链（同一逻辑产物 version 递增）、状态机、回收站、搜索筛选"
+    },
+    {
+      "path": "packages/app/src/main/artifacts/artifact-ipc.ts",
+      "action": "create",
+      "target": "registerArtifactIpc()",
+      "change": "artifacts:query / rename / duplicate / export / show-in-folder / trash / restore / compare-versions"
+    },
+    {
+      "path": "packages/app/src/main/ipc-registry.ts",
+      "action": "modify",
+      "target": "registerAllIpc()",
+      "change": "追加 registerPreviewIpc() 与 registerArtifactIpc()"
+    },
+    {
+      "path": "packages/app/src/preload/api/preview.ts",
+      "action": "create",
+      "target": "preview 命名空间",
+      "change": "open/convert/close，只传 A07 attachment-registry 签发的一次性 attachment token（ATTACHMENT_TTL_MS = 1800000，30 分钟滑动过期）或 workspaceId + relativePath，不传绝对路径；全计划统一标识为 attachment token，不存在 attachmentId 这一称谓（CT-17）"
+    },
+    {
+      "path": "packages/app/src/preload/api/artifacts.ts",
+      "action": "create",
+      "target": "artifacts 命名空间",
+      "change": "查询、重命名、复制、导出、回收站、版本比较"
+    },
+    {
+      "path": "packages/app/src/preload/api/index.ts",
+      "action": "modify",
+      "target": "api 聚合",
+      "change": "加入 preview 与 artifacts 命名空间"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/artifacts.ts",
+      "action": "create",
+      "target": "useArtifactsStore",
+      "change": "产物列表、筛选、版本比较、状态（generating/ready/failed/conflicted）"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/PreviewPane.vue",
+      "action": "create",
+      "target": "预览面板",
+      "change": "按 PreviewKind 分派渲染；HTML/文档类嵌入沙箱窗口；错误态显示原因与建议动作"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ArtifactLibrary.vue",
+      "action": "create",
+      "target": "产物库",
+      "change": "搜索筛选、版本比较、rename/duplicate/export/show in folder、回收站与恢复"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ArtifactLink.vue",
+      "action": "create",
+      "target": "消息内产物链接",
+      "change": "按 artifactId + version 解析，点击打开预览；产物被删除时显示可恢复提示"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/MessageItem.vue",
+      "action": "modify",
+      "target": "工具产物渲染",
+      "change": "工具生成文件时渲染 ArtifactLink 而非路径文本"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/AppShell.vue",
+      "action": "modify",
+      "target": "布局",
+      "change": "新增「产物」侧栏入口与 PreviewPane 容器"
+    },
+    {
+      "path": "packages/app/package.json",
+      "action": "modify",
+      "target": "dependencies / scripts",
+      "change": "精确写入 mammoth 1.12.0、exceljs 4.4.0、unpdf 1.8.0、papaparse 5.5.4、jszip 3.10.1、fast-xml-parser 4.5.3（无 ^ ~）；scripts 加 check-pure-js-deps"
+    },
+    {
+      "path": "packages/app/electron-builder.yml",
+      "action": "modify",
+      "target": "asarUnpack",
+      "change": "保持 asar: true（TASK-003 已恢复），新增 asarUnpack 列表并加入 out/main/convert-worker.js；不改动 npmRebuild: false"
+    },
+    {
+      "path": "packages/app/src/main/preview/convert-host.test.ts",
+      "action": "create",
+      "target": "转换宿主单测",
+      "change": "[errata-2 补录] test.unit[0] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/preview/office-safety.test.ts",
+      "action": "create",
+      "target": "Office 安全单测",
+      "change": "[errata-2 补录] test.unit[1] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/preview/preview-window.test.ts",
+      "action": "create",
+      "target": "预览窗口单测",
+      "change": "[errata-2 补录] test.unit[2] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/preview/convert-path.test.ts",
+      "action": "create",
+      "target": "转换路径单测",
+      "change": "[errata-2 补录] test.unit[4] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/artifacts/artifact-store.test.ts",
+      "action": "create",
+      "target": "制品存储单测",
+      "change": "[errata-2 补录] test.unit[3] 引用，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "第一步是选型验证闸门（不通过则停下来报告，不得自行换库）：`pnpm --filter @pibuddy/app add mammoth@1.12.0 exceljs@4.4.0 unpdf@1.8.0 papaparse@5.5.4 jszip@3.10.1 fast-xml-parser@4.5.3` 后运行 `node packages/app/scripts/check-pure-js-deps.mjs`：该脚本遍历这六个包的完整安装闭包，命中任一即退出码 1 —— (a) 包内存在 binding.gyp；(b) package.json 含 `gypfile: true`；(c) install/preinstall/postinstall 脚本中出现 node-gyp / prebuild-install / node-pre-gyp / cmake-js；(d) 包内存在任何 .node 文件。判据：退出码 0 才允许继续，这是 electron-builder.yml 保持 `npmRebuild: false` 的前提。备选清单（仅当闸门失败时按序启用，并在 rationale 中记录实际结论）：XLSX 改用 jszip + fast-xml-parser 直读 xl/worksheets/sheetN.xml；PDF 改为「不内置解析，返回 code='unsupported' 并提供系统默认程序打开」；DOCX 改用 jszip + fast-xml-parser 直读 word/document.xml。任何情况下都不得改动 npmRebuild 或 asar 设置来迁就选型",
+    "先搭 preview-window 与 webRequest 拦截，并用一个含外链与 script 的 HTML fixture 写拦截断言——这是 M5 出口门禁「恶意文档不能执行宏脚本或访问主 renderer」的直接证据",
+    "convert-host：fork 前校验输入大小与 MIME；env 只透传最小集合（PATH、TEMP），显式删除所有 *_API_KEY 与 PIBUDDY_* 变量；超时用 `AbortController` + `child.kill('SIGKILL')`",
+    "convert-worker：Office 解析库选型时优先选择纯 JS 且默认不执行宏的库，解析选项显式关闭远程模板与外部链接；PDF 走渲染为图片或结构化文本，不在预览窗口内启用 JS",
+    "十类 PreviewKind 各写一个最小 fixture 与断言；音视频只读 metadata 不解码",
+    "错误四类（corrupt / password-protected / too-large / unsupported）各配一个 fixture，断言原文件 sha256 转换前后不变",
+    "artifact-store：复用 B01 的 SQLite 连接新增 artifacts 表与 user_version 迁移；同一 (workspace_id, logical_key) 二次生成 version+1，preview_path 指向转换缓存",
+    "状态机：tool_execution_start 时插入 generating，tool_execution_end 成功置 ready、失败置 failed；外部文件被改动且 hash 与记录不符时置 conflicted",
+    "ArtifactLink：解析 artifactId+version → artifact 表 → 实际路径；产物被移入回收站时链接显示「已移入回收站，点击恢复」",
+    "打包验证按 TASK-003 恢复后的 `asar: true` 进行：在 packages/app/electron-builder.yml 增加 `asarUnpack:` 列表并加入 `\"out/main/convert-worker.js\"`（utilityProcess.fork 无法从 asar 内加载脚本）；convert-host.ts 的 worker 路径解析写为 `const p = path.join(__dirname, 'convert-worker.js'); return p.includes(`app.asar${path.sep}`) ? p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : p;`。预览用的转换输出仍写在 `app.getPath('temp')` 下的专属目录，不需要外置任何资源到 extraResources。在 packaged 构建（asar: true）与 dev 两种模式下各复测六类文件预览，确认 worker 路径在两种模式下都可解析",
+    "把 M5 出口门禁场景逐条过一遍并记录结果：中文空格路径、symlink、深目录、超多文件、外部修改、磁盘满、只读目录、并发编辑、恶意文档"
+  ],
+  "test": {
+    "commands": [
+      "node packages/app/scripts/check-pure-js-deps.mjs",
+      "pnpm --filter @pibuddy/app test -- src/main/preview src/main/artifacts",
+      "pnpm --filter @pibuddy/app typecheck"
+    ],
+    "unit": [
+      "packages/app/src/main/preview/convert-host.test.ts",
+      "packages/app/src/main/preview/office-safety.test.ts",
+      "packages/app/src/main/preview/preview-window.test.ts",
+      "packages/app/src/main/artifacts/artifact-store.test.ts",
+      "packages/app/src/main/preview/convert-path.test.ts"
+    ],
+    "integration": [
+      "packaged 构建（asar: true + asarUnpack）与 dev 两种模式下的六类文件预览人工验收"
+    ],
+    "success_metrics": [
+      "check-pure-js-deps.mjs 退出码 0（六个解析库闭包内零原生依赖）",
+      "恶意样本零外部请求、零脚本执行",
+      "转换失败原文件 sha256 不变",
+      "同一产物二次生成 version 递增而非覆盖"
+    ]
+  },
+  "reference": {
+    "pattern": "Electron 独立 partition + sandbox BrowserWindow + webRequest 拦截；转换重活走 utilityProcess，与 B07 的 search-worker 同构",
+    "files": [
+      "packages/app/src/main/index.ts",
+      "packages/app/src/main/workspace/search-worker.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "预览与 artifact 是同一条链路（转换产物即 artifact 的 preview 版本），拆开会导致转换缓存与产物版本各存一份；沙箱窗口与转换进程双层隔离，是让「恶意文档不能执行宏脚本或访问主 renderer」这条门禁可被证据化验证的最小结构。",
+    "decision_factors": [
+      "主窗口当前 sandbox: true（TASK-004 c[0] 已在 wave 3 修正，本任务不得沿用旧前提），预览绝不能复用主 session 与主 preload",
+      "asar: true（TASK-003 恢复）下 utilityProcess.fork 无法直接加载 asar 内脚本，convert-worker.js 必须经 electron-builder 的 asarUnpack 外置并在运行期把路径中的 app.asar 重写为 app.asar.unpacked"
+    ],
+    "tradeoffs": "PDF 采用渲染为图片/结构化文本而非富交互阅读器，牺牲部分体验换取零 JS 执行；PPTX 无成熟纯 JS 库，采用 jszip + fast-xml-parser 直读 slideN.xml 抽文本的最小实现，SmartArt / OLE 等子结构如实返回 unsupported"
+  },
+  "risks": [
+    "解析库已定死为 mammoth 1.12.0 / exceljs 4.4.0 / unpdf 1.8.0 / papaparse 5.5.4 / jszip 3.10.1 / fast-xml-parser 4.5.3（均为纯 JS、依赖闭包内无 node-gyp 构建与 .node 文件），与 `npmRebuild: false` 相容；执行前必须先跑 packages/app/scripts/check-pure-js-deps.mjs 复核 —— 若闸门失败，按 implementation[0] 的备选清单降级，不得引入原生依赖，也不得改动 npmRebuild 或 asar 设置",
+    "asar: true 下 utilityProcess.fork 的 worker 路径在 packaged 与 dev 下不同（packaged 需重写为 app.asar.unpacked），必须两种模式都测，只跑 dev 会漏；禁止通过把 asar 改回 false 来规避，这会推翻 TASK-003 的收敛条件",
+    "音视频 metadata、PPT 等格式覆盖度取决于所选库；未覆盖的子格式必须返回 'unsupported' 并给出可行动提示，不得渲染成空白冒充成功"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "安全预览",
+      "Office/PDF 转换",
+      "Artifact 仓库"
+    ],
+    "affected_components": [
+      "main/preview",
+      "main/artifacts",
+      "renderer/preview",
+      "renderer/artifacts"
+    ],
+    "affected_requirements": [
+      "ART-101",
+      "ART-102"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "16h",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": true,
+    "wave": 13
+  },
+  "origin_shard": "B",
+  "origin_id": "TASK-B08"
+}

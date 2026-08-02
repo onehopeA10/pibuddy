@@ -1,0 +1,986 @@
+{
+  "report_type": "synthesis (2+1 planner merge)",
+  "generated_at": "2026-08-02T06:35:34Z",
+  "inputs": {
+    "shard_a": "tasks-partA.json — 8 tasks TASK-A01..TASK-A08, 自有 wave 1-7 (M0-M2 基础层)",
+    "shard_b": "tasks-partB.json — 8 tasks TASK-B01..TASK-B08, 自有 wave 1-6 (M3-M5 产品层), depends_on 含 PARTA:M0 / PARTA:M1 / PARTA:M2 占位符",
+    "evidence": [
+      "exploration-architecture.json",
+      "exploration-implementation.json",
+      "exploration-risk.json"
+    ],
+    "spec": "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md"
+  },
+  "outputs": {
+    "tasks": [
+      "tasks/TASK-001.json",
+      "tasks/TASK-002.json",
+      "tasks/TASK-003.json",
+      "tasks/TASK-004.json",
+      "tasks/TASK-005.json",
+      "tasks/TASK-006.json",
+      "tasks/TASK-007.json",
+      "tasks/TASK-008.json",
+      "tasks/TASK-009.json",
+      "tasks/TASK-010.json",
+      "tasks/TASK-011.json",
+      "tasks/TASK-012.json",
+      "tasks/TASK-013.json",
+      "tasks/TASK-014.json",
+      "tasks/TASK-015.json",
+      "tasks/TASK-016.json"
+    ],
+    "plan": "plan.json",
+    "waves": "waves.json",
+    "dependency_graph": "dependency-graph.json",
+    "report": "synthesis-report.json"
+  },
+  "id_remap": [
+    {
+      "new_id": "TASK-001",
+      "origin_id": "TASK-A01",
+      "origin_shard": "A",
+      "global_wave": 1,
+      "milestone": "M0",
+      "title": "M0 工程基线：git 快照 + vitest + fake Pi RPC fixture + 最小 CI",
+      "origin_shard_wave": 1
+    },
+    {
+      "new_id": "TASK-002",
+      "origin_id": "TASK-A02",
+      "origin_shard": "A",
+      "global_wave": 2,
+      "milestone": "M0",
+      "title": "M0 架构护栏：@pibuddy/contract 共享契约 + 事件 envelope + 端口接口 + 脱敏日志",
+      "origin_shard_wave": 2
+    },
+    {
+      "new_id": "TASK-003",
+      "origin_id": "TASK-A03",
+      "origin_shard": "A",
+      "global_wave": 3,
+      "milestone": "M1",
+      "title": "RUN-001 可靠内置 Pi runtime：ESM 解析 + 构建期自包含目录 + manifest 定位 + 环境变量白名单",
+      "origin_shard_wave": 3
+    },
+    {
+      "new_id": "TASK-004",
+      "origin_id": "TASK-A06",
+      "origin_shard": "A",
+      "global_wave": 3,
+      "milestone": "M2",
+      "title": "SEC-001 + SEC-005 窗口与内容安全：sandbox / CSP / 导航拦截 / 权限收敛 / 渲染侧限额",
+      "origin_shard_wave": 3
+    },
+    {
+      "new_id": "TASK-005",
+      "origin_id": "TASK-A04",
+      "origin_shard": "A",
+      "global_wave": 4,
+      "milestone": "M1",
+      "title": "RUN-002 + RUN-003 运行时代际状态机与 SDK 可靠性垂直切片",
+      "origin_shard_wave": 4
+    },
+    {
+      "new_id": "TASK-006",
+      "origin_id": "TASK-A05",
+      "origin_shard": "A",
+      "global_wave": 5,
+      "milestone": "M1",
+      "title": "SES-001 + SES-002 会话解析统一与交互一致性垂直切片",
+      "origin_shard_wave": 5
+    },
+    {
+      "new_id": "TASK-007",
+      "origin_id": "TASK-A07",
+      "origin_shard": "A",
+      "global_wave": 6,
+      "milestone": "M2",
+      "title": "SEC-002 + SEC-003 收窄 IPC 接口面与 workspace capability 化",
+      "origin_shard_wave": 6
+    },
+    {
+      "new_id": "TASK-008",
+      "origin_id": "TASK-A08",
+      "origin_shard": "A",
+      "global_wave": 7,
+      "milestone": "M2",
+      "title": "SEC-004 凭据安全存储、出站请求 SSRF 防护与设置原子写",
+      "origin_shard_wave": 7
+    },
+    {
+      "new_id": "TASK-009",
+      "origin_id": "TASK-B01",
+      "origin_shard": "B",
+      "global_wave": 8,
+      "milestone": "M3",
+      "title": "SES-101 会话中心：SQLite 增量索引 + 会话管理 UI + preload 命名空间分层",
+      "origin_shard_wave": 1
+    },
+    {
+      "new_id": "TASK-010",
+      "origin_id": "TASK-B02",
+      "origin_shard": "B",
+      "global_wave": 9,
+      "milestone": "M3",
+      "title": "SES-102 长对话与输入队列：delta 流式、分段消息源、prompt/steer/follow-up 分流与草稿恢复",
+      "origin_shard_wave": 2
+    },
+    {
+      "new_id": "TASK-011",
+      "origin_id": "TASK-B05",
+      "origin_shard": "B",
+      "global_wave": 9,
+      "milestone": "M4",
+      "title": "UPD-001~004 main-only UpdateService：依赖锁定、十态状态机、检测策略与更新 UI",
+      "origin_shard_wave": 2
+    },
+    {
+      "new_id": "TASK-012",
+      "origin_id": "TASK-B03",
+      "origin_shard": "B",
+      "global_wave": 10,
+      "milestone": "M3",
+      "title": "EXT-101/EXT-102 Extension UI 全方法覆盖、dialog timeout 与 Pi 资源中心（含 project trust）",
+      "origin_shard_wave": 3
+    },
+    {
+      "new_id": "TASK-013",
+      "origin_id": "TASK-B06",
+      "origin_shard": "B",
+      "global_wave": 10,
+      "milestone": "M4",
+      "title": "UPD-005~007 + OBS-101 三平台产物与签名 CI、结构化日志诊断、更新后 health check 与 safe mode",
+      "origin_shard_wave": 3
+    },
+    {
+      "new_id": "TASK-014",
+      "origin_id": "TASK-B04",
+      "origin_shard": "B",
+      "global_wave": 11,
+      "milestone": "M3",
+      "title": "PROV-101 + UX-101 Provider 与模型中心、用量页与首次启动向导",
+      "origin_shard_wave": 4
+    },
+    {
+      "new_id": "TASK-015",
+      "origin_id": "TASK-B07",
+      "origin_shard": "B",
+      "global_wave": 12,
+      "milestone": "M5",
+      "title": "FS-101 + FS-102 Workspace 文件服务、结构化附件、编辑器冲突检测与 Agent changeset diff",
+      "origin_shard_wave": 5
+    },
+    {
+      "new_id": "TASK-016",
+      "origin_id": "TASK-B08",
+      "origin_shard": "B",
+      "global_wave": 13,
+      "milestone": "M5",
+      "title": "ART-101 + ART-102 受限沙箱预览、Office/PDF 转换与 Artifact 仓库",
+      "origin_shard_wave": 6
+    }
+  ],
+  "cross_shard_placeholder_resolution": {
+    "method": "先按 partA 每个 task 的 doc_context.affected_requirements 判定其所属里程碑（QA-*/OBS-* 且建契约 → M0；RUN-*/SES-00* → M1；SEC-* → M2），得到 PARTA:M0={A01,A02}、PARTA:M1={A03,A04,A05}、PARTA:M2={A06,A07,A08}；再逐个检查 partB task 的 description / action / read_first 实际需要 A 的哪个具体产出，只保留真实锚点，其余降级为「写冲突排序边」。",
+    "milestone_membership": {
+      "PARTA:M0": [
+        "TASK-A01 (QA-001/002/003：git+vitest+fake Pi fixture+CI)",
+        "TASK-A02 (OBS-001/002+QA-004：@pibuddy/contract+PiEnvelope+ports+脱敏日志)"
+      ],
+      "PARTA:M1": [
+        "TASK-A03 (RUN-001)",
+        "TASK-A04 (RUN-002/003)",
+        "TASK-A05 (SES-001/002+EXT-001)"
+      ],
+      "PARTA:M2": [
+        "TASK-A06 (SEC-001/005)",
+        "TASK-A07 (SEC-002/003/005+EXT-001)",
+        "TASK-A08 (SEC-004+OBS-002)"
+      ]
+    },
+    "resolved": [
+      {
+        "task": "TASK-009 (B01)",
+        "placeholders": [
+          "PARTA:M0",
+          "PARTA:M1",
+          "PARTA:M2"
+        ],
+        "resolved_to": [
+          "TASK-001 (A01)",
+          "TASK-002 (A02)",
+          "TASK-006 (A05)",
+          "TASK-007 (A07)",
+          "TASK-008 (A08)"
+        ],
+        "dropped": [
+          "TASK-003 (A03)",
+          "TASK-004 (A06)",
+          "TASK-005 (A04)"
+        ],
+        "rationale": "B01 只需要 M1 中 A05 的 SessionRepository/resolveSessionDir 口径（它取代 A05 的全量扫描），不需要 A03 的 pi 定位与 A04 的代际状态机；M2 中只需要 A07 的窄 channel + workspaceId，A06 的窗口安全与它无交集。A08 是纯写冲突边（同改 ipc.ts / preload/index.ts / preload/index.d.ts）而非语义依赖。"
+      },
+      {
+        "task": "TASK-010 (B02)",
+        "placeholders": [
+          "PARTA:M1"
+        ],
+        "resolved_to": [
+          "TASK-005 (A04)"
+        ],
+        "dropped": [
+          "TASK-003 (A03)",
+          "TASK-006 (A05)"
+        ],
+        "rationale": "delta 拼帧必须挂在 A04 的 generation 过滤与信封注入之后（否则跨代 delta 拼进新会话）；与 A03 的 runtime 定位、A05 的会话目录解析无关。A05 已由 TASK-009 传递覆盖。"
+      },
+      {
+        "task": "TASK-011 (B05)",
+        "placeholders": [
+          "PARTA:M0",
+          "PARTA:M2"
+        ],
+        "resolved_to": [
+          "TASK-001 (A01)",
+          "TASK-002 (A02)",
+          "TASK-004 (A06)",
+          "TASK-007 (A07)"
+        ],
+        "dropped": [
+          "TASK-008 (A08)"
+        ],
+        "rationale": "UpdateService 不碰密钥库，无需等 A08 的 secret-store；需要 A06 是因为同改 packages/app/src/main/index.ts 且 UpdateBanner 受 CSP 约束，需要 A07 是因为 update-ipc 必须注册进 ipc-guard 白名单以保证 renderer 不触达 feed URL/token。"
+      },
+      {
+        "task": "TASK-012 (B03)",
+        "placeholders": [
+          "PARTA:M1"
+        ],
+        "resolved_to": [
+          "TASK-003 (A03)",
+          "TASK-005 (A04)"
+        ],
+        "dropped": [
+          "TASK-006 (A05)"
+        ],
+        "rationale": "project trust 的 -a/-na 单次覆盖参数要接进 A03 的 buildPiSpawn 参数装配；按 generation 清理僵尸 uiRequests 依赖 A04 的代际状态机。与 A05 的会话目录解析无关。"
+      },
+      {
+        "task": "TASK-014 (B04)",
+        "placeholders": [
+          "PARTA:M2"
+        ],
+        "resolved_to": [
+          "TASK-008 (A08)"
+        ],
+        "dropped": [
+          "TASK-004 (A06)",
+          "TASK-007 (A07)"
+        ],
+        "rationale": "题设给定的硬依赖锚点：Provider API key 与 sttApiKey 共用 A08 的 safeStorage secret-store。A07 已由 TASK-009 传递覆盖。"
+      },
+      {
+        "task": "TASK-015 (B07)",
+        "placeholders": [
+          "PARTA:M2"
+        ],
+        "resolved_to": [
+          "TASK-007 (A07)"
+        ],
+        "dropped": [
+          "TASK-004 (A06)",
+          "TASK-008 (A08)"
+        ],
+        "rationale": "read_first 中的「PARTA:M2 产出的 PermissionEngine 实现文件」即 A07 的 packages/app/src/main/ipc-guard.ts；workspaceId 与 attachment token 语义同样出自 A07。A08 无关。"
+      }
+    ],
+    "wave_offset_analysis": {
+      "shard_a_critical_path_length": 7,
+      "earliest_possible_b_wave": 8,
+      "why_b_cannot_start_earlier": "TASK-009（B01）是 B 分片全部 8 个任务的传递前置（B02/B03/B05 直接依赖，B04/B06/B07/B08 传递依赖），而 TASK-009 与 A 分片最后一个任务 TASK-008（A08，A 自有 wave 7）在 packages/app/src/main/ipc.ts、packages/app/src/preload/index.ts、packages/app/src/preload/index.d.ts 三个文件上存在写交集，按「同波次文件交集必须为空」的硬约束必须后移一波。因此 B 的最早可能波次为 8，这是真实约束而非保守估计。",
+      "attempted_shortcuts_and_why_rejected": [
+        "把 TASK-011（B05，只依赖 M0 contract 与 M2 的 ipc-guard）提前到波次 8 与 TASK-009 并行 —— 被拒：B05 的 update-ipc 必须注册进 B01 产出的 packages/app/src/main/ipc/registry.ts，preload/api/update.ts 必须挂在 B01 产出的 api 聚合对象上（B05 read_first 已显式列出这两个「B01 产出」文件），且两者同改 preload/api/index.ts。",
+        "把 TASK-009 提前到波次 7 与 TASK-008 并行 —— 被拒：三个文件写冲突（见上）。",
+        "把 TASK-013（B06）提前 —— 被拒：B06 唯一依赖 B05 的 update-service.ts 状态机与 marker 写入点，且同改 SettingsModal.vue / ipc registry / preload/api/index.ts。"
+      ],
+      "realized_parallelism": "13 个波次中有 3 个是并行波次（波次 3、9、10），跨里程碑并行：M1×M2（波次 3）、M3×M4（波次 9、10）。若严格按里程碑串行执行则需要 16 个波次，本方案缩短 3 个波次。",
+      "further_shortening_option": "若允许拆分 TASK-009，把其中「preload 拆 api/<namespace>.ts + 建 ipc/registry.ts」的纯结构部分并入 TASK-007，则 SQLite 索引部分可与 TASK-008 并行，关键路径可再缩短 1 个波次。本次因硬约束「16 个 task 全部保留、不得合并删除」未执行。"
+    }
+  },
+  "validations": {
+    "1_cycle_detection": {
+      "status": "pass",
+      "cycles_found": [],
+      "method": "对 16 节点 33 条边做三色 DFS，检测回边。",
+      "note": "DAG 无环，无需打破任何边。"
+    },
+    "2_same_wave_file_write_conflicts": {
+      "status": "pass",
+      "conflicts_after_fix": [],
+      "method": "按合并后的 13 个波次分组，对同波次任意两 task 求 files[].path 交集。",
+      "conflicts_found_before_fix_and_how_resolved": [
+        {
+          "pair": "TASK-008 (A08) × TASK-009 (B01)",
+          "paths": [
+            "packages/app/src/main/ipc.ts",
+            "packages/app/src/preload/index.ts",
+            "packages/app/src/preload/index.d.ts"
+          ],
+          "resolution": "TASK-009 后移至波次 8（TASK-008 在波次 7），并在 depends_on 中显式加入 TASK-008，dependency-graph 中该边标注 reason 为「写冲突排序边（非语义依赖）」。"
+        },
+        {
+          "pair": "TASK-010 (B02) × TASK-012 (B03)",
+          "paths": [
+            "packages/app/src/main/ipc/pi-ipc.ts"
+          ],
+          "resolution": "原分片 B 已把两者排在不同波次但未在 depends_on 中体现。合并时显式加边 TASK-010 → TASK-012（B03 在波次 10，B02 在波次 9），避免后续重排波次时丢失该约束。"
+        }
+      ],
+      "checked_wave_pairs": {
+        "3": [
+          "TASK-003",
+          "TASK-004"
+        ],
+        "9": [
+          "TASK-010",
+          "TASK-011"
+        ],
+        "10": [
+          "TASK-012",
+          "TASK-013"
+        ]
+      }
+    },
+    "3_dependency_wave_order": {
+      "status": "pass",
+      "violations": [],
+      "method": "对 33 条边逐条断言 T[from].wave < T[to].wave。"
+    },
+    "4_convergence_subjective_language_scan": {
+      "status": "pass",
+      "hits_after_fix": 0,
+      "scanned_words": [
+        "正确",
+        "合理",
+        "一致",
+        "适当",
+        "良好",
+        "properly",
+        "correctly",
+        "appropriate",
+        "consistent with",
+        "align"
+      ],
+      "scanned_criteria_count": 228,
+      "rewritten": [
+        {
+          "task": "TASK-003 (A03)",
+          "index": 15,
+          "word": "一致",
+          "before": "packages/app/src/main/pi-launcher.ts contains 'assertRuntimeHandshake'，对 get_state 返回的版本与 manifest.version 及 protocolVersion 做比对，不一致时抛出含双方版本号的错误",
+          "after": "改写为具体调用与断言：assertRuntimeHandshake({runtimeVersion:'0.83.0',protocolVersion:1},{version:'0.99.0',protocolVersion:1}) 抛出的 Error.message 同时 contains '0.83.0' 与 '0.99.0'；同版本入参不抛错"
+        },
+        {
+          "task": "TASK-008 (A08)",
+          "index": 12,
+          "word": "一致",
+          "before": "……可用时 saveSecret → loadSecret 往返一致且磁盘文件 not contains 明文密钥",
+          "after": "改写为具体值断言：saveSecret('stt.apiKey','sk-live-XYZ') 后 loadSecret('stt.apiKey') === 'sk-live-XYZ'，且 secrets 落盘文件 not contains 'sk-live-XYZ'"
+        },
+        {
+          "task": "TASK-009 (B01)",
+          "index": 3,
+          "word": "一致",
+          "before": "(c) 追加后原文件 byte 内容前缀与追加前完全一致（fs.readFileSync 前 N 字节比对）",
+          "after": "(c) 追加后 fs.readFileSync(file).subarray(0, N).equals(追加前的前 N 字节快照) === true"
+        },
+        {
+          "task": "TASK-015 (B07)",
+          "index": 4,
+          "word": "正确",
+          "before": "单测断言 UTF-8 BOM、UTF-8 无 BOM、GBK 三种样本被正确识别，且保存时保留原有换行风格（CRLF 文件保存后仍为 CRLF）",
+          "after": "断言 detectEncoding() 分别返回 'utf8-bom' / 'utf8' / 'gbk'；CRLF 样本 readFile→saveFile 后 fs.readFileSync(p,'utf8').match(/(?<!\\r)\\n/g) === null"
+        },
+        {
+          "task": "TASK-015 (B07)",
+          "index": 7,
+          "word": "一致",
+          "before": "……选择任一动作后结果与预期一致",
+          "after": "拆为三条可观测结果：点「查看差异」磁盘文件字节未变；点「重新载入」编辑器缓冲区 === 外部写入内容；点「覆盖」磁盘文件 === 编辑器缓冲区"
+        },
+        {
+          "task": "TASK-016 (B08)",
+          "index": 2,
+          "word": "一致",
+          "before": "convert-host.ts 含 `CONVERT_LIMITS` 且四个上限值与 action 中一致",
+          "after": "逐值 contains：'maxInputBytes: 50 * 1024 * 1024'、'maxOutputBytes: 100 * 1024 * 1024'、'timeoutMs: 30_000'、'maxRssBytes: 512 * 1024 * 1024'"
+        }
+      ]
+    },
+    "5_read_first_completeness": {
+      "status": "pass",
+      "gaps_after_fix": [],
+      "method": "对每个 task 断言 files[].path 的每一项都能在 read_first 中被字符串包含匹配到。",
+      "added_entries_total": 152,
+      "added_by_task": [
+        {
+          "task": "TASK-A01",
+          "added": [
+            "vitest.workspace.ts",
+            "tools/fake-pi/fake-pi.mjs",
+            "tools/fake-pi/scenarios.mjs",
+            "packages/pi-sdk/test/client.spec.ts",
+            ".github/workflows/ci.yml",
+            "doc/baseline-2026-08-02.md"
+          ]
+        },
+        {
+          "task": "TASK-A02",
+          "added": [
+            "packages/contract/package.json",
+            "packages/contract/tsconfig.json",
+            "packages/contract/src/envelope.ts",
+            "packages/contract/src/ipc-contract.ts",
+            "packages/contract/src/ports.ts",
+            "packages/contract/src/settings.ts",
+            "packages/contract/src/session.ts",
+            "packages/contract/src/index.ts",
+            "packages/contract/test/envelope.spec.ts",
+            "packages/app/package.json",
+            "packages/app/src/renderer/src/components/InputBar.vue",
+            "packages/app/src/main/logger.ts",
+            "packages/app/test/logger.spec.ts",
+            "doc/architecture.md",
+            "doc/threat-model.md",
+            "doc/traceability.md"
+          ]
+        },
+        {
+          "task": "TASK-A03",
+          "added": [
+            "packages/app/src/main/pi-runtime-manifest.ts",
+            "packages/app/scripts/prepare-pi-runtime.mjs",
+            "packages/app/test/pi-launcher.spec.ts"
+          ]
+        },
+        {
+          "task": "TASK-A04",
+          "added": [
+            "packages/pi-sdk/src/index.ts",
+            "packages/app/src/main/pi-supervisor.ts",
+            "packages/app/src/preload/index.d.ts",
+            "packages/pi-sdk/test/lifecycle.spec.ts",
+            "packages/app/test/generation.spec.ts"
+          ]
+        },
+        {
+          "task": "TASK-A05",
+          "added": [
+            "packages/app/src/main/session-repository.ts",
+            "packages/app/test/session-dir.spec.ts",
+            "packages/app/test/session-interaction.spec.ts"
+          ]
+        },
+        {
+          "task": "TASK-A06",
+          "added": [
+            "packages/app/src/main/security/window-policy.ts",
+            "packages/app/test/window-policy.spec.ts"
+          ]
+        },
+        {
+          "task": "TASK-A07",
+          "added": [
+            "packages/app/src/main/ipc-guard.ts",
+            "packages/app/src/main/workspace-registry.ts",
+            "packages/app/src/main/attachment-registry.ts",
+            "packages/app/test/workspace-capability.spec.ts",
+            "packages/app/test/ipc-guard.spec.ts"
+          ]
+        },
+        {
+          "task": "TASK-A08",
+          "added": [
+            "packages/app/src/main/secret-store.ts",
+            "packages/app/src/main/endpoints.ts",
+            "packages/app/src/main/net/outbound-guard.ts",
+            "packages/contract/src/ipc-contract.ts",
+            "packages/app/test/ssrf.spec.ts",
+            "packages/app/test/settings-atomic.spec.ts",
+            "packages/app/test/secret-store.spec.ts"
+          ]
+        },
+        {
+          "task": "TASK-B01",
+          "added": [
+            "packages/app/src/main/sessions/session-index.ts",
+            "packages/app/src/main/sessions/session-index.test.ts",
+            "packages/app/src/main/sessions/session-rename.ts",
+            "packages/app/src/main/ipc/sessions-ipc.ts",
+            "packages/app/src/main/ipc/registry.ts",
+            "packages/app/src/preload/api/index.ts",
+            "packages/app/src/preload/api/sessions.ts",
+            "packages/app/src/renderer/src/stores/sessions.ts",
+            "packages/app/src/renderer/src/components/SessionListPanel.vue"
+          ]
+        },
+        {
+          "task": "TASK-B02",
+          "added": [
+            "packages/app/src/main/pi/event-forwarder.ts",
+            "packages/app/src/main/pi/event-forwarder.test.ts",
+            "packages/app/src/main/ipc/pi-ipc.ts",
+            "packages/app/src/renderer/src/stores/chat-window.ts",
+            "packages/app/src/renderer/src/components/QueuePanel.vue"
+          ]
+        },
+        {
+          "task": "TASK-B03",
+          "added": [
+            "packages/app/src/main/extension-ui/ext-ui-service.ts",
+            "packages/app/src/main/extension-ui/ext-ui-contract.test.ts",
+            "packages/app/src/main/ipc/pi-ipc.ts",
+            "packages/app/src/main/pi-resources/resource-scanner.ts",
+            "packages/app/src/main/pi-resources/package-install.ts",
+            "packages/app/src/main/pi-resources/trust-store.ts",
+            "packages/app/src/renderer/src/stores/extensionUi.ts",
+            "packages/app/src/renderer/src/components/ExtensionWidgetHost.vue",
+            "packages/app/src/renderer/src/components/PiResourcesPanel.vue",
+            "packages/app/src/renderer/src/components/ProjectTrustDialog.vue",
+            "packages/app/src/renderer/src/components/AppShell.vue",
+            "packages/app/src/renderer/src/components/TopBar.vue"
+          ]
+        },
+        {
+          "task": "TASK-B04",
+          "added": [
+            "packages/app/src/main/providers/auth-store.ts",
+            "packages/app/src/main/providers/models-store.ts",
+            "packages/app/src/main/providers/connectivity.ts",
+            "packages/app/src/main/providers/model-scope.ts",
+            "packages/app/src/main/providers/providers-ipc.ts",
+            "packages/app/src/main/usage/usage-store.ts",
+            "packages/app/src/main/ipc/misc-ipc.ts",
+            "packages/app/src/main/ipc/registry.ts",
+            "packages/app/src/preload/api/providers.ts",
+            "packages/app/src/preload/api/index.ts",
+            "packages/app/src/renderer/src/stores/providers.ts",
+            "packages/app/src/renderer/src/components/OnboardingWizard.vue",
+            "packages/app/src/renderer/src/components/ProviderCenter.vue",
+            "packages/app/src/renderer/src/components/UsagePanel.vue",
+            "packages/app/src/renderer/src/components/StatusCenter.vue",
+            "packages/app/src/renderer/src/components/AppShell.vue"
+          ]
+        },
+        {
+          "task": "TASK-B05",
+          "added": [
+            "packages/app/src/main/update/update-types.ts",
+            "packages/app/src/main/update/update-errors.ts",
+            "packages/app/src/main/update/update-service.ts",
+            "packages/app/src/main/update/update-ipc.ts",
+            "packages/app/src/main/update/release-integrity.ts",
+            "packages/app/src/main/lifecycle/graceful-shutdown.ts",
+            "packages/app/src/preload/api/update.ts",
+            "packages/app/src/renderer/src/stores/update.ts",
+            "packages/app/src/renderer/src/components/UpdateBanner.vue",
+            "packages/app/src/renderer/src/components/UpdateSettingsPanel.vue",
+            "packages/app/src/renderer/src/components/InstallBlockerDialog.vue",
+            "packages/app/scripts/check-update-deps.mjs"
+          ]
+        },
+        {
+          "task": "TASK-B06",
+          "added": [
+            "packages/app/build/entitlements.mac.plist",
+            "packages/app/scripts/build-config.mjs",
+            "packages/app/scripts/verify-release-artifacts.mjs",
+            ".github/workflows/release.yml",
+            ".github/workflows/ci.yml",
+            "scripts/check-workflow-pins.mjs",
+            "packages/app/src/main/logging/logger.ts",
+            "packages/app/src/main/logging/redact.ts",
+            "packages/app/src/main/diagnostics/support-bundle.ts",
+            "packages/app/src/main/health/health-check.ts",
+            "packages/app/src/main/health/safe-mode.ts",
+            "packages/app/src/main/ipc/registry.ts",
+            "packages/app/src/preload/api/diagnostics.ts",
+            "packages/app/src/preload/api/index.ts",
+            "packages/app/src/renderer/src/components/DiagnosticsPanel.vue",
+            "packages/app/src/renderer/src/components/SafeModeBanner.vue",
+            "docs/product/RELEASE_SETUP.md",
+            "docs/product/ADR-0001-update-feed.md"
+          ]
+        },
+        {
+          "task": "TASK-B07",
+          "added": [
+            "packages/app/src/main/workspace/workspace-store.ts",
+            "packages/app/src/main/workspace/path-guard.ts",
+            "packages/app/src/main/workspace/file-tree.ts",
+            "packages/app/src/main/workspace/search-worker.ts",
+            "packages/app/src/main/workspace/file-editor.ts",
+            "packages/app/src/main/workspace/attachment-store.ts",
+            "packages/app/src/main/workspace/workspace-ipc.ts",
+            "packages/app/src/main/changeset/changeset-store.ts",
+            "packages/app/src/main/changeset/apply.ts",
+            "packages/app/src/main/ipc/registry.ts",
+            "packages/app/src/preload/api/workspace.ts",
+            "packages/app/src/preload/api/index.ts",
+            "packages/app/src/renderer/src/stores/workspace.ts",
+            "packages/app/src/renderer/src/components/FileTreePanel.vue",
+            "packages/app/src/renderer/src/components/FileEditorPane.vue",
+            "packages/app/src/renderer/src/components/ChangesetPanel.vue",
+            "packages/app/src/renderer/src/components/AppShell.vue"
+          ]
+        },
+        {
+          "task": "TASK-B08",
+          "added": [
+            "packages/app/src/main/preview/convert-host.ts",
+            "packages/app/src/main/preview/convert-worker.ts",
+            "packages/app/src/main/preview/preview-window.ts",
+            "packages/app/src/main/preview/preview-types.ts",
+            "packages/app/src/main/preview/preview-ipc.ts",
+            "packages/app/src/main/artifacts/artifact-store.ts",
+            "packages/app/src/main/artifacts/artifact-ipc.ts",
+            "packages/app/src/main/ipc/registry.ts",
+            "packages/app/src/preload/api/preview.ts",
+            "packages/app/src/preload/api/artifacts.ts",
+            "packages/app/src/preload/api/index.ts",
+            "packages/app/src/renderer/src/stores/artifacts.ts",
+            "packages/app/src/renderer/src/components/PreviewPane.vue",
+            "packages/app/src/renderer/src/components/ArtifactLibrary.vue",
+            "packages/app/src/renderer/src/components/ArtifactLink.vue",
+            "packages/app/src/renderer/src/components/AppShell.vue"
+          ]
+        }
+      ],
+      "note": "包含 action=create 的新建文件路径——若该路径在执行时已存在（例如上一波次已建同名文件），执行者必须先读现有内容再决定覆盖。"
+    },
+    "6_ui_observable_coverage": {
+      "status": "pass",
+      "waves_without_ui_observable": [],
+      "by_wave": {
+        "1": [
+          "TASK-001"
+        ],
+        "2": [
+          "TASK-002"
+        ],
+        "3": [
+          "TASK-003",
+          "TASK-004"
+        ],
+        "4": [
+          "TASK-005"
+        ],
+        "5": [
+          "TASK-006"
+        ],
+        "6": [
+          "TASK-007"
+        ],
+        "7": [
+          "TASK-008"
+        ],
+        "8": [
+          "TASK-009"
+        ],
+        "9": [
+          "TASK-010",
+          "TASK-011"
+        ],
+        "10": [
+          "TASK-012",
+          "TASK-013"
+        ],
+        "11": [
+          "TASK-014"
+        ],
+        "12": [
+          "TASK-015"
+        ],
+        "13": [
+          "TASK-016"
+        ]
+      },
+      "note": "16 个 task 全部至少含 1 条 [UI-observable] 收敛条件，13 个波次全部覆盖。ralph 的 frontend-verify 门禁可直接消费。"
+    },
+    "7_terminology_consistency": {
+      "status": "fixed",
+      "rule": "不一致以分片 A 的命名为准",
+      "findings_and_fixes": [
+        {
+          "concept": "contract 包名",
+          "shard_a": "@pibuddy/contract（22 处）",
+          "shard_b": "零处引用",
+          "severity": "high",
+          "fix": "为 TASK-009..TASK-016 全部 8 个 B 任务补 read_first（packages/contract/src/index.ts、ipc-contract.ts、envelope.ts），并追加统一收敛条件：新增的 preload/api 与 main 文件必须 from '@pibuddy/contract' 导入，禁止新建第二套契约包。"
+        },
+        {
+          "concept": "envelope 字段 sequence",
+          "shard_a": "PiEnvelope.sequence（跨进程事件单调序号）",
+          "shard_b": "UpdateState.sequence（更新服务内部状态序号）",
+          "severity": "medium",
+          "fix": "A 优先：TASK-011 内 9 处 `sequence` 全部重命名为 `stateSequence`（正则 (?<![A-Za-z])sequence(?![A-Za-z])），避免同一事件链上两套单调序号同名异义。"
+        },
+        {
+          "concept": "密钥库",
+          "shard_a": "packages/app/src/main/secret-store.ts（safeStorage）",
+          "shard_b": "\"vault\"（4 处，指代同一物）",
+          "severity": "medium",
+          "fix": "TASK-014 内 4 处 vault 全部改写为「TASK-008（A08）产出的 packages/app/src/main/secret-store.ts（safeStorage 密钥库）」，校验后 vault 残留 0 处。"
+        },
+        {
+          "concept": "PermissionEngine 实现落点",
+          "shard_a": "packages/contract/src/ports.ts 声明接口（checkFrame/checkPayload/checkRate），packages/app/src/main/ipc-guard.ts 实现",
+          "shard_b": "read_first 写「PARTA:M2 产出的 PermissionEngine 实现文件（以其实际导出为准）」",
+          "severity": "medium",
+          "fix": "TASK-015 的该条 read_first 替换为具体路径 packages/app/src/main/ipc-guard.ts 并注明接口声明位置。"
+        },
+        {
+          "concept": "workspace 标识",
+          "shard_a": "不透明 workspaceId（workspace-registry.registerWorkspace 返回 randomUUID），renderer 只见 workspaceId + displayPath",
+          "shard_b": "TASK-009 的 SQLite sessions 表以 workspace_root（绝对路径）为列",
+          "severity": "high",
+          "fix": "追加 TASK-009 收敛条件：sessions 表新增 workspace_id TEXT NOT NULL 列取 A07 的 workspaceId；且 grep -rc 'workspace_root' packages/app/src/preload packages/app/src/renderer/src 输出 0。"
+        },
+        {
+          "concept": "附件标识",
+          "shard_a": "attachment-registry 签发的一次性 token（ATTACHMENT_TTL_MS = 300000）",
+          "shard_b": "TASK-016 preload/api/preview.ts 写「只传 attachmentId 或 relativePath」",
+          "severity": "low",
+          "fix": "改写为「只传 A07 attachment-registry 签发的一次性 attachment token 或 workspaceId + relativePath，不传绝对路径与裸 attachmentId」。"
+        },
+        {
+          "concept": "SQL 列名 snake_case vs TS 标识符 camelCase",
+          "shard_a": "TS：workspaceId / runtimeId",
+          "shard_b": "SQL：workspace_id / source_path / created_at",
+          "severity": "none",
+          "fix": "不改。两者分属不同命名域且 B 分片内部（TASK-009 与 TASK-016 的建表语句）自洽；已写入 plan.shared_context.conventions 明确该约定。"
+        },
+        {
+          "concept": "runtimeId / generation / piRuntimeMode",
+          "shard_a": "runtimeId(13) / generation(33) / piRuntimeMode(6)",
+          "shard_b": "runtimeId(1，TASK-013 日志字段) / generation(6)",
+          "severity": "none",
+          "fix": "无冲突，B 用法与 A 定义一致，不改。"
+        }
+      ],
+      "post_fix_term_counts": {
+        "@pibuddy/contract": {
+          "TASK-002": 15,
+          "TASK-003": 2,
+          "TASK-005": 2,
+          "TASK-006": 1,
+          "TASK-007": 2,
+          "TASK-009": 4,
+          "TASK-010": 3,
+          "TASK-011": 3,
+          "TASK-012": 3,
+          "TASK-013": 3,
+          "TASK-014": 3,
+          "TASK-015": 3,
+          "TASK-016": 3
+        },
+        "workspaceId": {
+          "TASK-002": 2,
+          "TASK-007": 11,
+          "TASK-009": 3,
+          "TASK-016": 1
+        },
+        "runtimeId": {
+          "TASK-002": 4,
+          "TASK-005": 9,
+          "TASK-013": 1
+        },
+        "generation": {
+          "TASK-001": 5,
+          "TASK-002": 5,
+          "TASK-005": 24,
+          "TASK-012": 6
+        },
+        "protocolVersion": {
+          "TASK-002": 5,
+          "TASK-003": 9
+        },
+        "occurredAt": {
+          "TASK-002": 2
+        },
+        "attachment token": {
+          "TASK-007": 2,
+          "TASK-016": 1
+        },
+        "secret-store": {
+          "TASK-008": 16,
+          "TASK-014": 6
+        },
+        "vault": {},
+        "stateSequence": {
+          "TASK-011": 9
+        },
+        "piRuntimeMode": {
+          "TASK-003": 5,
+          "TASK-005": 1
+        },
+        "PermissionEngine": {
+          "TASK-002": 3,
+          "TASK-015": 4
+        }
+      }
+    },
+    "8_orphan_tasks": {
+      "status": "pass",
+      "orphans": [],
+      "note": "无孤儿。TASK-001 是唯一无 depends_on 的任务，但被 TASK-002/TASK-009/TASK-011 依赖；TASK-016 是唯一无下游的任务，属于 DAG 末端而非孤儿。"
+    },
+    "9_requirement_coverage": {
+      "status": "pass",
+      "doc_scope": "doc:141-497（M0-M5 章节）",
+      "doc_declared_ids_in_scope": {
+        "RUN-001": "M1",
+        "SES-001": "M1",
+        "RUN-002": "M1",
+        "RUN-003": "M1",
+        "SES-002": "M1",
+        "SEC-001": "M2",
+        "SEC-002": "M2",
+        "SEC-003": "M2",
+        "SEC-004": "M2",
+        "SEC-005": "M2",
+        "SES-101": "M3",
+        "SES-102": "M3",
+        "PROV-101": "M3",
+        "EXT-101": "M3",
+        "EXT-102": "M3",
+        "UX-101": "M3",
+        "UPD-001": "M4",
+        "UPD-002": "M4",
+        "UPD-003": "M4",
+        "UPD-004": "M4",
+        "UPD-005": "M4",
+        "UPD-006": "M4",
+        "UPD-007": "M4",
+        "OBS-101": "M4",
+        "QA-401": "M4",
+        "FS-101": "M5",
+        "FS-102": "M5",
+        "ART-101": "M5",
+        "ART-102": "M5"
+      },
+      "doc_ids_covered": [
+        "ART-101",
+        "ART-102",
+        "EXT-101",
+        "EXT-102",
+        "FS-101",
+        "FS-102",
+        "OBS-101",
+        "PROV-101",
+        "QA-401",
+        "RUN-001",
+        "RUN-002",
+        "RUN-003",
+        "SEC-001",
+        "SEC-002",
+        "SEC-003",
+        "SEC-004",
+        "SEC-005",
+        "SES-001",
+        "SES-002",
+        "SES-101",
+        "SES-102",
+        "UPD-001",
+        "UPD-002",
+        "UPD-003",
+        "UPD-004",
+        "UPD-005",
+        "UPD-006",
+        "UPD-007",
+        "UX-101"
+      ],
+      "doc_ids_uncovered": [],
+      "planner_assigned_ids_not_in_doc": [
+        "EXT-001",
+        "OBS-001",
+        "OBS-002",
+        "QA-001",
+        "QA-002",
+        "QA-003",
+        "QA-004"
+      ],
+      "planner_assigned_note": "M0 章节（doc:141-161）以「必做」条目形式书写，未给出正式需求 ID。QA-001/002/003/004、OBS-001/002 是分片 A 规划者为 M0 的 6 条必做条目指派的内部编号；EXT-001 是分片 A 为 M1 测试矩阵 doc:216「extension veto new/switch、发送失败、历史加载失败不丢用户状态」指派的内部编号。这 7 个 ID 在 spec 文档中不存在，追踪时须回到对应 doc 行号而非 ID。",
+      "out_of_scope_ids": {
+        "PTY-101": "M6",
+        "GIT-101": "M6",
+        "GIT-102": "M6",
+        "AGT-101": "M7",
+        "AGT-102": "M7",
+        "AUT-101": "M8",
+        "MEM-101": "M8",
+        "REM-101": "M9",
+        "BROWSER-101": "M9",
+        "PLG-101": "M9"
+      },
+      "deferred_declared_in_plan": [
+        "PTY-101",
+        "GIT-101",
+        "GIT-102",
+        "AGT-101",
+        "AGT-102",
+        "AUT-101",
+        "MEM-101",
+        "REM-101",
+        "BROWSER-101",
+        "PLG-101",
+        "SES-101（会话树 / 分叉可视化子项）",
+        "M4 三平台 clean VM 更新 E2E（QA-401 的验证面）",
+        "M4 签名与公证（UPD-006 的验证面）"
+      ]
+    }
+  },
+  "source_data_anomalies": [
+    {
+      "file": "exploration-implementation.json",
+      "issue": "summary.total 声明为 7（confirmed_defect 6 + partial 1），但 verifications 数组实际有 8 个条目（RUN-001, SES-001, RUN-002, RUN-003, SES-002, SEC-002, SEC-004, SEC-001），其中 confirmed_defect 7 条、partial 1 条。",
+      "handling": "按 verifications 数组的 8 条实证为准构建 requirement_traceability；summary 计数视为笔误，不影响任何证据的 file:line。"
+    },
+    {
+      "file": "tasks-partB.json TASK-B01.risks",
+      "issue": "原文声明「本任务重构 preload，与分片 A 的 contract envelope 可能撞形状；合并前必须先取 PARTA:M1 的实际导出再决定 api 模块内部用哪套类型」——这是一条悬置的架构抉择，不是风险。",
+      "handling": "合并时定案并改写为：preload/api/*.ts 的所有跨进程类型一律从 @pibuddy/contract 导入，不得在 preload 或 renderer 内重新声明第二套形状。"
+    }
+  ],
+  "conclusion": {
+    "verdict": "pass",
+    "task_count": 16,
+    "wave_count": 13,
+    "edge_count": 33,
+    "cross_shard_edge_count": 14,
+    "critical_path": [
+      "TASK-001",
+      "TASK-002",
+      "TASK-003",
+      "TASK-005",
+      "TASK-006",
+      "TASK-007",
+      "TASK-008",
+      "TASK-009",
+      "TASK-010",
+      "TASK-012",
+      "TASK-014",
+      "TASK-015",
+      "TASK-016"
+    ],
+    "critical_path_length": 13,
+    "total_estimated_minutes": 7255,
+    "all_16_tasks_preserved": true,
+    "unreachable_gates_declared": 6,
+    "protected_features_baseline": 15,
+    "residual_risks": 7,
+    "corrections_applied": 35,
+    "key_message": "16 个 task 全部保留并重编号为 TASK-001..TASK-016，13 个波次，DAG 无环、同波次零文件写冲突、依赖波次序零违规、收敛条件主观词命中 0、read_first 缺口 0、13/13 波次有 UI-observable 覆盖、零孤儿、M0-M5 的 29 个 doc 需求 ID 全覆盖。术语修正 6 类（契约包名、sequence 同名异义、vault/secret-store、PermissionEngine 落点、workspaceId、attachment 标识），收敛条件客观化改写 6 条，read_first 补齐 152 条。M4 的签名凭据与 clean VM 门禁按 doc:455 标为 blocked-by-credential / not-tested，未标为可达成。"
+  }
+}

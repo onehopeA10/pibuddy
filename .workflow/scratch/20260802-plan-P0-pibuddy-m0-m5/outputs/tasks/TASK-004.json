@@ -1,0 +1,192 @@
+{
+  "id": "TASK-004",
+  "title": "SEC-001 + SEC-005 窗口与内容安全：sandbox / CSP / 导航拦截 / 权限收敛 / 渲染侧限额",
+  "description": "实测：main/index.ts:18 显式 sandbox:false；CSP 在 response header 与 index.html meta 两条路径都不存在；will-navigate / setWindowOpenHandler / setPermissionRequestHandler 全项目 grep 命中均为 0；ELECTRON_RENDERER_URL 在生产二进制中若被设置仍会加载任意远程 URL。渲染侧 markdown 虽已 html:false，但链接与图片 scheme 无白名单，超长 tool output 无字节上限。本任务把主窗口的加载面、导航面、外链面与权限面全部收窄，并在渲染侧对 markdown 与 tool 输出加限额。应用确实需要麦克风（语音输入），因此权限处理器只放行主窗口发起的 audio 类 media 请求。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "security",
+  "priority": "high",
+  "effort": "medium",
+  "action": "packages/app/src/main/index.ts 把 webPreferences.sandbox 由 false 改为 true；新建 packages/app/src/main/security/window-policy.ts 导出 applyWindowPolicy(win) 与 openExternalSafely(raw)：用 session.defaultSession.webRequest.onHeadersReceived 注入 CSP 头 \"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\"；webContents.on(\"will-navigate\") 对非应用 origin 调 event.preventDefault()；setWindowOpenHandler 恒返回 {action:\"deny\"}；openExternalSafely 只放行 new URL(raw).protocol 属于 [\"https:\",\"http:\",\"mailto:\"] 且 /[\\u0000-\\u001F\\u007F]/.test(raw) 为 false 的输入；session.defaultSession.setPermissionRequestHandler 只在 wc === mainWindow.webContents 且 permission === \"media\" 且 details.mediaTypes 含 \"audio\" 时回调 true，其余一律 false，并配套 setPermissionCheckHandler；把 index.ts:25 的 if (process.env.ELECTRON_RENDERER_URL) 改为 if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL)；renderer/index.html 增加同等 CSP 的 meta 标签；renderer/src/markdown.ts 保持 html:false 并增加 validateLink 白名单与 const MAX_TOOL_OUTPUT_BYTES = 65536 截断。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/index.ts + security/ + renderer 内容渲染",
+  "focus_paths": [
+    "packages/app/src/main/",
+    "packages/app/src/renderer/"
+  ],
+  "read_first": [
+    "packages/app/src/main/index.ts",
+    "packages/app/src/preload/index.ts",
+    "packages/app/src/renderer/index.html",
+    "packages/app/src/renderer/src/markdown.ts",
+    "packages/app/src/renderer/src/components/MessageItem.vue",
+    "packages/app/src/renderer/src/components/ToolActivity.vue",
+    "packages/app/src/renderer/src/stt.ts",
+    "doc/threat-model.md",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/security.md",
+    "packages/app/src/main/security/window-policy.ts",
+    "packages/app/test/window-policy.spec.ts"
+  ],
+  "depends_on": [
+    "TASK-002"
+  ],
+  "wave": 3,
+  "parallel_group": "w3",
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "packages/app/src/main/index.ts contains 'sandbox: true' 且 `test -e packages/app/src/main/index.ts && [ \"$(rg -c 'sandbox: false' packages/app/src/main/index.ts | wc -l)\" -eq 0 ]`（改前实测该文件为 sandbox: false，故此断言当前为假）",
+      "packages/app/src/main/security/window-policy.ts 同时 contains \"default-src 'self'\"、\"script-src 'self'\"、\"object-src 'none'\"、\"base-uri 'none'\"、\"frame-ancestors 'none'\"、\"img-src 'self' data: blob:\"",
+      "packages/app/src/main/security/window-policy.ts contains 'will-navigate' 且 contains 'setWindowOpenHandler' 且 contains \"action: \\\"deny\\\"\" 且 contains 'setPermissionRequestHandler' 且 contains 'setPermissionCheckHandler'",
+      "packages/app/src/main/security/window-policy.ts contains 'onHeadersReceived'（CSP 通过响应头下发，覆盖 dev 的 http 加载路径）",
+      "packages/app/src/main/index.ts contains '!app.isPackaged && process.env.ELECTRON_RENDERER_URL'",
+      "packages/app/src/renderer/index.html contains 'http-equiv=\"Content-Security-Policy\"' 且 contains \"object-src 'none'\"（覆盖 packaged 的 file:// 加载路径）",
+      "[外链出口唯一 · 结构断言] `rg --no-filename -c 'shell\\.openExternal' packages/app/src -g '*.ts' -g '*.vue' -g '!**/security/window-policy.ts' | awk '{s+=$1} END{print s+0}'` 输出 0，且 `rg -c 'shell\\.openExternal' packages/app/src/main/security/window-policy.ts` 输出 >= 1（本任务新增的任何外链入口必须走 openExternalSafely；该断言不随新增入口失效）",
+      "packages/app/src/renderer/src/markdown.ts contains 'html: false' 且 contains 'validateLink' 且 contains 'MAX_TOOL_OUTPUT_BYTES = 65536'",
+      "packages/app/test/window-policy.spec.ts 断言 openExternalSafely 对以下 6 个输入全部拒绝且不调用 shell.openExternal：'file:///C:/Windows/System32/calc.exe'、'javascript:alert(1)'、'data:text/html,<script>1</script>'、'vbscript:msgbox'、'search-ms:query=x'、'https://example.com/a\\u0000b'；对 'https://example.com/'、'mailto:a@b.com' 放行；该测试在 pnpm -w test 中通过",
+      "packages/app/test/window-policy.spec.ts 断言 markdown 渲染 '[x](javascript:alert(1))' 后输出 not contains 'javascript:'，渲染长度 100000 的 tool output 后输出字节数 <= 65536 + 截断标记长度",
+      "packages/app/test/window-policy.spec.ts 断言 permission handler 对 permission='media' 且 mediaTypes=['video'] 返回 false、对 'geolocation' 返回 false、对非主窗口 webContents 的 audio 请求返回 false、对主窗口 audio 请求返回 true",
+      "pnpm typecheck 退出码 0，pnpm -w test 退出码 0，pnpm --filter @pibuddy/app build 退出码 0",
+      "[UI-observable] 手动（sandbox:true 后的关键回归）：拖拽一张本地图片进输入框仍能解析出路径并作为图片附件成功发送；粘贴图片仍可用；点击语音按钮仍能弹出/获得麦克风授权并完成一次转写",
+      "[UI-observable] 手动，逐项可判定并记录在 doc/regression/TASK-004-security.md（每项一行 `- [x]`）：(a) 助手回复中的 https 链接点击后系统浏览器打开该 URL；(b) 构造一条含 `file:///C:/Windows/System32/calc.exe` 与 `[x](javascript:alert(1))` 的回复，点击后 DevTools Console 的 error 计数增量为 0 且未打开任何窗口；(c) 同一条回复中 markdown 渲染出的 `<a>` 元素的 href 属性值 not contains 'javascript:' 且 not contains 'file:'；(d) 代码块渲染出 `class=\"hljs\"` 的元素；(e) thinking 段落点击后展开高度 > 0；(f) tool 卡片点击后展开高度 > 0。以上六项在 sandbox:true 生效后仍成立"
+    ],
+    "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && pnpm --filter @pibuddy/app build && grep -rc 'shell.openExternal' packages/app/src && grep -c 'sandbox: false' packages/app/src/main/index.ts",
+    "definition_of_done": "渲染进程运行在沙箱内且受严格 CSP 约束，无法被导航到任何非应用来源、无法打开新窗口、无法通过外链触发本地文件或危险 scheme，除麦克风外的所有浏览器权限一律拒绝，且恶意或超长的模型输出无法撑爆界面。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/index.ts",
+      "action": "modify",
+      "target": "createWindow 的 webPreferences 与加载分支（第 14-29 行）",
+      "change": "sandbox: false → sandbox: true；创建窗口后调用 applyWindowPolicy(win)；第 25 行加载分支改为 !app.isPackaged && process.env.ELECTRON_RENDERER_URL"
+    },
+    {
+      "path": "packages/app/src/main/security/window-policy.ts",
+      "action": "create",
+      "target": "applyWindowPolicy / openExternalSafely / CSP 常量",
+      "change": "集中实现 CSP 响应头注入、will-navigate 拦截、setWindowOpenHandler deny、权限请求与权限检查处理器、外链 scheme 与控制字符校验；导出 CSP_POLICY 常量供 index.html meta 与测试共用"
+    },
+    {
+      "path": "packages/app/src/renderer/index.html",
+      "action": "modify",
+      "target": "head",
+      "change": "增加 <meta http-equiv=\"Content-Security-Policy\" content=\"...\">，内容与 CSP_POLICY 保持一致，覆盖 packaged 下 file:// 加载不经过 webRequest 的路径"
+    },
+    {
+      "path": "packages/app/src/renderer/src/markdown.ts",
+      "action": "modify",
+      "target": "markdown-it 实例与导出函数",
+      "change": "显式断言 html:false；覆写 md.validateLink 只放行 https:/http:/mailto:；图片 src 只放行 https:/data:image/*/blob:；新增 MAX_TOOL_OUTPUT_BYTES = 65536 与 truncateToolOutput(text) 返回带「内容过长已截断」标记的字符串"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/MessageItem.vue",
+      "action": "modify",
+      "target": "正文渲染",
+      "change": "长文本走 truncateToolOutput；保持 openThinking 的组件内 ref 语义不变"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/ToolActivity.vue",
+      "action": "modify",
+      "target": "output 渲染（第 39 行附近）",
+      "change": "本任务不改动 expanded 与 `!run` 判定，仅确认 sandbox:true 后展开交互不回归；这两处由 TASK-010 c[6]/c[7] 在 wave 9 统一重构（near-miss：两任务对同一处的要求方向相反，此处显式声明为时间先后而非并存矛盾）"
+    },
+    {
+      "path": "packages/app/test/window-policy.spec.ts",
+      "action": "create",
+      "target": "外链/权限/markdown 限额测试",
+      "change": "三组用例：外链 6 拒 2 放行、权限处理器 4 种组合、markdown scheme 白名单与字节截断"
+    },
+    {
+      "path": "doc/regression/TASK-004-security.md",
+      "action": "create",
+      "target": "窗口安全策略人工回归记录",
+      "change": "[errata-2 补录] c[13] 要求该文件存在并含勾选行，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "先确认 preload/index.ts 只 import 了 electron 的 contextBridge / ipcRenderer / webUtils，无任何 node 内建模块，因此 sandbox:true 不会破坏 preload（这是本任务可行的前提，必须实际核对后再改）",
+    "把 main/index.ts 的 sandbox 改为 true，并在 createWindow 内调用 applyWindowPolicy(win)",
+    "在 window-policy.ts 定义 CSP_POLICY 常量并用 session.defaultSession.webRequest.onHeadersReceived 注入 Content-Security-Policy 响应头；style-src 保留 'unsafe-inline' 以兼容 naive-ui 的运行时样式注入，并在文件内注释说明这是唯一放宽项、script-src 不放宽",
+    "注册 will-navigate：解析目标 URL，非应用 origin（dev 的 ELECTRON_RENDERER_URL origin 或 packaged 的 file:// 应用目录）一律 preventDefault",
+    "注册 setWindowOpenHandler 恒 deny",
+    "实现 openExternalSafely(raw)：先用正则拒绝控制字符，再 new URL 解析，protocol 不在白名单一律拒绝并记 logger；把渲染进程原本经 shell:open-path 打开外链的路径统一收敛到此函数（全项目仅保留一处 shell.openExternal 调用）",
+    "注册 setPermissionRequestHandler 与 setPermissionCheckHandler：仅主窗口 + media + mediaTypes 含 audio 放行",
+    "把 index.html 的 CSP meta 与 CSP_POLICY 对齐",
+    "改 markdown.ts 的 validateLink 与图片 scheme 白名单，新增 MAX_TOOL_OUTPUT_BYTES 与 truncateToolOutput，并在 MessageItem.vue 与 ToolActivity.vue 接入",
+    "写 packages/app/test/window-policy.spec.ts 并跑 pnpm -w test",
+    "人工回归：拖拽图片、粘贴图片、语音授权与转写、外链点击、markdown/代码高亮/thinking 折叠/tool 卡片/窗口化渲染"
+  ],
+  "test": {
+    "commands": [
+      "pnpm -w test",
+      "pnpm typecheck",
+      "pnpm --filter @pibuddy/app build"
+    ],
+    "unit": [
+      "packages/app/test/window-policy.spec.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "sandbox: false 出现次数 0",
+      "shell.openExternal 全项目仅 1 处调用",
+      "6 类危险外链全部被拒",
+      "tool output 渲染字节数受 65536 上限约束"
+    ]
+  },
+  "reference": {
+    "pattern": "Electron 安全基线：contextIsolation + sandbox + CSP + 导航拦截 + 窗口打开拒绝 + 权限最小化；preload 现有实现（只用 contextBridge/ipcRenderer/webUtils）天然兼容 sandbox",
+    "files": [
+      "packages/app/src/main/index.ts",
+      "packages/app/src/preload/index.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "先关掉运行环境层面的攻击面（sandbox / CSP / 导航 / 外链 / 权限），再由 A07 收窄 IPC 接口面。两者文件不重叠，可与 RUN-001 并行推进；CSP 同时用响应头与 meta 两条路径下发，是因为 packaged 下 file:// 加载不经过 webRequest。",
+    "decision_factors": [
+      "sandbox:false 是显式关闭的默认防线",
+      "CSP 两条路径均缺失",
+      "外链与权限完全无约束",
+      "preload 无 node 依赖使 sandbox:true 成本极低"
+    ],
+    "tradeoffs": "style-src 保留 'unsafe-inline' 以兼容 naive-ui 的运行时样式；这是经过评估的唯一放宽项，script-src 与 object-src 不放宽，风险已在 doc/threat-model.md 记录。"
+  },
+  "risks": [
+    "sandbox:true 后 webUtils.getPathForFile 必须仍可用（Electron 43 支持沙箱 preload 使用 webUtils），必须以拖拽图片的实际 UI 验证为准，不能只看 typecheck",
+    "CSP 的 connect-src 'self' 会阻断渲染进程直连任何外部端点——这是期望行为（STT 与 Provider 请求由主进程发起，见 A08），但若当前 stt.ts 中存在渲染侧直连会立刻失败，需在本任务中确认调用链",
+    "will-navigate 拦截若把 dev 的 HMR 导航一并拦下会导致热更新失效，判定 origin 时必须包含 ELECTRON_RENDERER_URL 的 origin"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "窗口安全",
+      "内容安全策略",
+      "外链打开",
+      "麦克风权限",
+      "markdown 渲染",
+      "tool 输出渲染"
+    ],
+    "affected_components": [
+      "packages/app/src/main/index.ts",
+      "packages/app/src/main/security/window-policy.ts",
+      "packages/app/src/renderer/src/markdown.ts"
+    ],
+    "affected_requirements": [
+      "SEC-001",
+      "SEC-005"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "70m",
+    "risk": "medium",
+    "autonomous": true,
+    "checkpoint": false,
+    "wave": 3
+  },
+  "origin_shard": "A",
+  "origin_id": "TASK-A06"
+}

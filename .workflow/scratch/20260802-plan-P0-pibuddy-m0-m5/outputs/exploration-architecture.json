@@ -1,0 +1,766 @@
+{
+  "angle": "architecture",
+  "goal": "PiBuddy M0 (shared contract layer + service boundaries) — inventory of current cross-process module boundaries and data flow",
+  "project_root": "D:/selftool/pi-ui",
+  "generated_at": "2026-08-02",
+  "read_only": true,
+  "scope_files_read": [
+    "packages/app/src/main/index.ts",
+    "packages/app/src/main/ipc.ts",
+    "packages/app/src/main/pi-launcher.ts",
+    "packages/app/src/main/settings.ts",
+    "packages/app/src/main/sessions-store.ts",
+    "packages/app/src/preload/index.ts",
+    "packages/app/src/preload/index.d.ts",
+    "packages/app/src/renderer/src/stores/app.ts",
+    "packages/app/src/renderer/src/components/*.vue",
+    "packages/app/src/renderer/src/markdown.ts",
+    "packages/app/src/renderer/src/friendly.ts",
+    "packages/app/src/renderer/src/stt.ts",
+    "packages/pi-sdk/src/client.ts",
+    "packages/pi-sdk/src/types.ts",
+    "packages/pi-sdk/src/jsonl.ts",
+    "packages/pi-sdk/src/index.ts",
+    "packages/app/electron.vite.config.ts",
+    "packages/app/electron-builder.yml",
+    "package.json",
+    "packages/app/package.json",
+    "packages/pi-sdk/package.json",
+    "pnpm-workspace.yaml",
+    "tsconfig.base.json",
+    "packages/app/tsconfig.json",
+    "packages/app/tsconfig.node.json",
+    "packages/app/tsconfig.web.json",
+    "packages/pi-sdk/tsconfig.json"
+  ],
+
+  "section_1_ipc_channel_inventory": {
+    "summary": "16 channels total: 13 invoke/handle (renderer -> main, request/response) + 3 push (main -> renderer, wc.send). Zero runtime schema validation on any channel — payload shapes exist only as TypeScript annotations on handler parameters, erased at compile time.",
+    "runtime_validation_verdict": "absent",
+    "runtime_validation_evidence": [
+      {
+        "fact": "No schema/validation library is a direct dependency of any workspace package",
+        "evidence": "packages/app/package.json:16-38 (dependencies + devDependencies list: @earendil-works/pi-coding-agent, @pibuddy/pi-sdk, highlight.js, markdown-it, naive-ui, pinia, vue; no zod/ajv/typebox/yup/valibot); packages/pi-sdk/package.json:11-14 (devDependencies: @types/node, typescript only)"
+      },
+      {
+        "fact": "zod 4.4.3 and typebox 1.3.7 exist in the lockfile only as transitive deps of @earendil-works/pi-coding-agent (the pi CLI itself), not reachable as validators in PiBuddy code",
+        "evidence": "pnpm-lock.yaml:2507 (zod@4.4.3), pnpm-lock.yaml:2302 (typebox@1.3.7), pnpm-lock.yaml:2849-2862 (@earendil-works/pi-agent-core dependency block)"
+      },
+      {
+        "fact": "Every ipcMain.handle callback types its payload parameter with a TS annotation and immediately uses it — no parse/guard step",
+        "evidence": "packages/app/src/main/ipc.ts:91 (opts: {workspace:string; session?:string}), ipc.ts:115 (command: RpcCommandBase), ipc.ts:119 (response: ExtensionUiResponse), ipc.ts:127 (workspace: string), ipc.ts:132 (patch: Partial<AppSettings>), ipc.ts:157 (filePath: string), ipc.ts:164 (target: string), ipc.ts:168 (target: string), ipc.ts:176-184 (req: {baseUrl,apiKey,model,audio,mimeType})"
+      },
+      {
+        "fact": "The only runtime input check in any handler is a file-extension lookup against IMAGE_MIME, not a schema validation",
+        "evidence": "packages/app/src/main/ipc.ts:158-159 — const mimeType = IMAGE_MIME[path.extname(filePath).toLowerCase()]; if (!mimeType) throw new Error(\"不支持的图片格式\")"
+      },
+      {
+        "fact": "PiRpcClient casts parsed JSONL lines directly to protocol types with no validation",
+        "evidence": "packages/pi-sdk/src/client.ts:123 (obj as unknown as RpcResponse), client.ts:131 (obj as AgentEvent), client.ts:135 (obj as unknown as ExtensionUiRequest), client.ts:138 (obj as AgentEvent)"
+      },
+      {
+        "fact": "preload has no channel allowlist constant; invoke()/subscribe() accept an arbitrary channel string, though only the fixed api object is exposed via contextBridge",
+        "evidence": "packages/app/src/preload/index.ts:3-11 (generic invoke/subscribe with channel: string), preload/index.ts:54 (contextBridge.exposeInMainWorld(\"piBuddy\", api) — raw invoke not exposed)"
+      },
+      {
+        "fact": "No sender/frame origin verification in any main-process handler (no event.senderFrame checks)",
+        "evidence": "packages/app/src/main/ipc.ts:88-213 — all handlers use only event.sender.id as a client key (ipc.ts:93, 116, 120, 124)"
+      }
+    ],
+    "channels": [
+      {
+        "channel": "pi:start",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "{ workspace: string; session?: string }",
+        "response_payload": "{ state: AgentState; models: Model[]; messages: AgentMessage[] } (anonymous inline object; mirrored by preload StartResult interface but not a shared type)",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:89-113 (handler; return at ipc.ts:111)",
+        "evidence_preload": "packages/app/src/preload/index.ts:15",
+        "evidence_renderer": "packages/app/src/renderer/src/stores/app.ts:323-326",
+        "side_effects": "disposes prior client (ipc.ts:93), constructs PiRpcClient (ipc.ts:95-99), registers 3 listeners (ipc.ts:100-102), spawns pi child process (ipc.ts:103 -> client.ts:75-113), stores in clients Map (ipc.ts:104), then issues 3 RPC round-trips get_state/get_available_models/get_messages (ipc.ts:106-110)"
+      },
+      {
+        "channel": "pi:command",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "RpcCommandBase = { id?: string; type: string; [key: string]: unknown } — open index signature, any extra key passes through untouched",
+        "response_payload": "RpcResponse<T> = { id?: string; type: \"response\"; command: string; success: boolean; data?: T; error?: string }",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:115-117",
+        "evidence_types": "packages/pi-sdk/src/types.ts:129-142",
+        "evidence_preload": "packages/app/src/preload/index.ts:16 (typed as Record<string, unknown> in implementation, RpcCommandBase in the .d.ts at preload/index.d.ts:48)",
+        "renderer_call_sites": [
+          "stores/app.ts:343 (set_thinking_level)",
+          "stores/app.ts:358 (get_state)",
+          "stores/app.ts:363 (get_session_stats)",
+          "stores/app.ts:373 (get_available_thinking_levels)",
+          "stores/app.ts:402 (prompt, optional images/streamingBehavior)",
+          "stores/app.ts:425 (abort)",
+          "stores/app.ts:429 (new_session)",
+          "stores/app.ts:447 (switch_session + sessionPath)",
+          "stores/app.ts:455 (get_messages)",
+          "stores/app.ts:468 (set_model + provider/modelId)",
+          "stores/app.ts:481 (set_thinking_level)"
+        ],
+        "note": "Throws \"智能体尚未启动\" if no running client for the sender (ipc.ts:24-28) — this error surfaces as a rejected invoke, not a typed RpcResponse failure"
+      },
+      {
+        "channel": "pi:ui-respond",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "ExtensionUiResponse = { type: \"extension_ui_response\"; id: string; value?: string; confirmed?: boolean; cancelled?: boolean }",
+        "response_payload": "void",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:119-121",
+        "evidence_types": "packages/pi-sdk/src/types.ts:260-266",
+        "evidence_renderer": "packages/app/src/renderer/src/stores/app.ts:272-276"
+      },
+      {
+        "channel": "pi:stop",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "none",
+        "response_payload": "void",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:123-125",
+        "evidence_preload": "packages/app/src/preload/index.ts:18",
+        "renderer_call_sites": "none — pi.stop() is exposed but never called from renderer (no window.piBuddy.pi.stop match in packages/app/src/renderer)"
+      },
+      {
+        "channel": "sessions:list",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "workspace: string",
+        "response_payload": "SessionMeta[] = { path, id, name?, firstMessage, messageCount, modified }[]",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:127-129",
+        "evidence_impl": "packages/app/src/main/sessions-store.ts:24-47",
+        "evidence_renderer": "packages/app/src/renderer/src/stores/app.ts:369"
+      },
+      {
+        "channel": "settings:get",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "none",
+        "response_payload": "AppSettings = { workspace?, provider?, modelId?, thinkingLevel?, sttBaseUrl?, sttApiKey?, sttModel? } (all optional string)",
+        "runtime_validation": "absent — JSON.parse of settings.json result is cast, corrupt file falls back to {}",
+        "evidence_main": "packages/app/src/main/ipc.ts:131",
+        "evidence_impl": "packages/app/src/main/settings.ts:19-25 (JSON.parse(...) as AppSettings inside try/catch)",
+        "evidence_renderer": "packages/app/src/renderer/src/stores/app.ts:298"
+      },
+      {
+        "channel": "settings:set",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "Partial<AppSettings>",
+        "response_payload": "AppSettings (full merged object)",
+        "runtime_validation": "absent — shallow spread merge, unknown keys are persisted verbatim",
+        "evidence_main": "packages/app/src/main/ipc.ts:132-134",
+        "evidence_impl": "packages/app/src/main/settings.ts:27-32",
+        "renderer_call_sites": [
+          "stores/app.ts:384 (workspace)",
+          "stores/app.ts:474 (provider + modelId)",
+          "stores/app.ts:483 (thinkingLevel)",
+          "stores/app.ts:489 (arbitrary patch via saveSettings)"
+        ]
+      },
+      {
+        "channel": "dialog:choose-folder",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "none",
+        "response_payload": "string | null",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:136-144",
+        "evidence_renderer": "packages/app/src/renderer/src/stores/app.ts:382"
+      },
+      {
+        "channel": "dialog:choose-files",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "none",
+        "response_payload": "{ path: string; name: string; size: number; kind: \"image\"|\"video\"|\"other\" }[] (produced by describeFile; declared separately as PickedFile in preload)",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:146-154",
+        "evidence_impl": "packages/app/src/main/ipc.ts:215-234 (describeFile)",
+        "evidence_renderer": "packages/app/src/renderer/src/components/InputBar.vue:71"
+      },
+      {
+        "channel": "file:read-image",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "filePath: string",
+        "response_payload": "{ data: string (base64); mimeType: string }",
+        "runtime_validation": "partial — extension whitelist lookup only, not schema validation; no path containment check against workspace",
+        "evidence_main": "packages/app/src/main/ipc.ts:157-162",
+        "evidence_whitelist": "packages/app/src/main/ipc.ts:79-86 (IMAGE_MIME)",
+        "evidence_renderer": "packages/app/src/renderer/src/components/InputBar.vue:74"
+      },
+      {
+        "channel": "shell:open-path",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "target: string",
+        "response_payload": "string (shell.openPath error string, empty on success)",
+        "runtime_validation": "absent — arbitrary path opened with OS default handler, no allowlist",
+        "evidence_main": "packages/app/src/main/ipc.ts:164-166",
+        "renderer_call_sites": "none found in packages/app/src/renderer (exposed at preload/index.ts:40 but unreferenced)"
+      },
+      {
+        "channel": "shell:show-in-folder",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "target: string",
+        "response_payload": "void",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:168-170",
+        "renderer_call_sites": "none found in packages/app/src/renderer (exposed at preload/index.ts:41 but unreferenced)"
+      },
+      {
+        "channel": "stt:transcribe",
+        "direction": "renderer->main",
+        "mechanism": "ipcRenderer.invoke / ipcMain.handle",
+        "request_payload": "{ baseUrl: string; apiKey: string; model: string; audio: ArrayBuffer; mimeType: string } — apiKey crosses the IPC boundary from renderer on every call",
+        "response_payload": "{ text: string }",
+        "runtime_validation": "absent — mimeType is only substring-matched to pick a filename extension (ipc.ts:186-192); network failure throws",
+        "evidence_main": "packages/app/src/main/ipc.ts:173-212",
+        "evidence_renderer": "packages/app/src/renderer/src/components/InputBar.vue:110-116 (reads sttBaseUrl/sttApiKey/sttModel out of the renderer settings mirror at InputBar.vue:109)",
+        "note": "Secrets live in the renderer-side settings mirror (stores/app.ts:58) and are re-sent per request rather than resolved in main"
+      },
+      {
+        "channel": "pi:event",
+        "direction": "main->renderer",
+        "mechanism": "webContents.send / ipcRenderer.on",
+        "request_payload": "AgentEvent (discriminated union with open fallback member { type: string; [key: string]: unknown })",
+        "response_payload": "n/a (fire and forget)",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:70 (wc.send inside flush)",
+        "evidence_types": "packages/pi-sdk/src/types.ts:209-228",
+        "evidence_preload": "packages/app/src/preload/index.ts:19 (typed as (e: unknown) => void)",
+        "evidence_renderer": "packages/app/src/renderer/src/stores/app.ts:285"
+      },
+      {
+        "channel": "pi:ui-request",
+        "direction": "main->renderer",
+        "mechanism": "webContents.send / ipcRenderer.on",
+        "request_payload": "ExtensionUiRequest = { type: \"extension_ui_request\"; id: string; method: select|confirm|input|editor|notify|setStatus|setWidget|setTitle|set_editor_text; ...optional fields }",
+        "response_payload": "n/a — reply travels back over pi:ui-respond",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:101 (not batched, forwarded immediately)",
+        "evidence_types": "packages/pi-sdk/src/types.ts:232-258",
+        "evidence_renderer": "packages/app/src/renderer/src/stores/app.ts:286 -> handleUiRequest at stores/app.ts:242-265"
+      },
+      {
+        "channel": "pi:exit",
+        "direction": "main->renderer",
+        "mechanism": "webContents.send / ipcRenderer.on",
+        "request_payload": "number | null (child process exit code)",
+        "response_payload": "n/a",
+        "runtime_validation": "absent",
+        "evidence_main": "packages/app/src/main/ipc.ts:102",
+        "evidence_source": "packages/pi-sdk/src/client.ts:111 (this.emit(\"exit\", code))",
+        "evidence_renderer": "packages/app/src/renderer/src/stores/app.ts:287-293",
+        "note": "Payload carries no identifier — the renderer cannot tell which runtime instance exited; handler blindly flips started=false when started is true (stores/app.ts:288-292)"
+      }
+    ]
+  },
+
+  "section_2_cross_process_event_flow": {
+    "summary": "5 hops from pi child process stdout to the Pinia store. No hop adds any envelope, identifier, or version field. Events reach the renderer as the raw pi payload object only.",
+    "hops": [
+      {
+        "hop": 1,
+        "name": "pi child process stdout -> JSONL framer",
+        "location": "packages/pi-sdk/src/jsonl.ts:9-36 (attachJsonlReader), attached at packages/pi-sdk/src/client.ts:95",
+        "process": "main (child stdout piped into main process)",
+        "data_structure": "raw UTF-8 byte chunks -> LF-delimited string lines (trailing \\r tolerated, empty lines dropped: jsonl.ts:20-26)",
+        "identifiers_carried": "none",
+        "transformations": "StringDecoder buffering (jsonl.ts:13-17); deliberately not Node readline to avoid U+2028/U+2029 splitting (jsonl.ts:4-8)",
+        "loss_or_reorder_risk": "unparseable lines are silently dropped one hop later (client.ts:118-121)"
+      },
+      {
+        "hop": 2,
+        "name": "PiRpcClient.handleLine -> EventEmitter",
+        "location": "packages/pi-sdk/src/client.ts:115-139",
+        "process": "main",
+        "data_structure": "JSON.parse -> Record<string, unknown>, dispatched by obj.type into three lanes",
+        "dispatch_rules": [
+          "type === \"response\" AND resp.id in pending -> resolve the awaiting Promise (client.ts:122-129)",
+          "type === \"response\" without matching id -> re-emitted on the \"event\" lane (client.ts:131)",
+          "type === \"extension_ui_request\" -> \"ui_request\" lane (client.ts:134-137)",
+          "everything else -> \"event\" lane as AgentEvent (client.ts:138)"
+        ],
+        "identifiers_carried": "only the RPC correlation id for responses; it is generated client-side as `c${++this.seq}` (client.ts:155) and exists solely for request/response pairing. Events carry no id from this mechanism.",
+        "transformations": "unchecked type assertions (client.ts:123, 131, 135, 138) — no validation",
+        "loss_or_reorder_risk": "malformed JSON lines returned silently (client.ts:120)"
+      },
+      {
+        "hop": 3,
+        "name": "main-process merge/batch forwarder",
+        "location": "packages/app/src/main/ipc.ts:36-77 (makeEventForwarder), wired at packages/app/src/main/ipc.ts:100",
+        "process": "main",
+        "data_structure": "AgentEvent[] queue -> collapsed AgentEvent[] -> individual wc.send(\"pi:event\", e) calls (ipc.ts:70)",
+        "batching": "33ms setTimeout tick (ipc.ts:75); queue drained and cleared on flush (ipc.ts:69)",
+        "collapse_rules": [
+          "consecutive message_update events collapse to the last one (ipc.ts:49-56) — justified because each carries the full partial message",
+          "consecutive tool_execution_update events with the same toolCallId collapse to the last one (ipc.ts:57-66)"
+        ],
+        "identifiers_carried": "none added. Collapsing uses the event-intrinsic toolCallId only, read via an inline structural cast (ipc.ts:61-62).",
+        "loss_or_reorder_risk": "intermediate events are dropped by design; because no sequence number exists on the wire, the renderer has no way to detect a drop or a gap. Events queued before a client swap are still flushed to the same webContents (queue is per-forwarder closure, and a new pi:start creates a new forwarder while the old timer may still fire: ipc.ts:93-100)",
+        "delivery_guard": "wc.isDestroyed() check before send (ipc.ts:42) and before ui-request/exit sends (ipc.ts:101-102)"
+      },
+      {
+        "hop": 4,
+        "name": "preload contextBridge relay",
+        "location": "packages/app/src/preload/index.ts:7-11 (subscribe), exposed at preload/index.ts:19-21",
+        "process": "preload (isolated world)",
+        "data_structure": "ipcRenderer.on listener strips the IpcRendererEvent and passes only payload: unknown to the callback (preload/index.ts:8)",
+        "identifiers_carried": "none added; the sender identity available on the IpcRendererEvent is discarded",
+        "transformations": "structured-clone across the context bridge; returns an unsubscribe closure (preload/index.ts:10)",
+        "typing": "implementation is fully untyped (unknown); the AgentEvent type reappears only in the ambient declaration at packages/app/src/preload/index.d.ts:51-53"
+      },
+      {
+        "hop": 5,
+        "name": "renderer Pinia store reducer",
+        "location": "packages/app/src/renderer/src/stores/app.ts:285 (subscription) -> stores/app.ts:124-240 (handleEvent)",
+        "process": "renderer",
+        "data_structure": "switch on e.type mutating flat store refs; per-branch inline Extract<AgentEvent, {type: ...}> casts (stores/app.ts:183, 195, 201, 213, 224, 229)",
+        "identifiers_carried": "none — no session/runtime scoping. toolRuns is keyed by the event-intrinsic toolCallId only (stores/app.ts:184, 196, 202)",
+        "handled_event_types": [
+          "agent_start -> streaming=true (stores/app.ts:136-138)",
+          "agent_settled -> streaming=false, liveAssistant=null, then fires refreshStats/refreshSessions/refreshState (stores/app.ts:139-145)",
+          "message_start / message_update / message_end (stores/app.ts:146-181)",
+          "tool_execution_start / _update / _end (stores/app.ts:182-211)",
+          "queue_update (stores/app.ts:212-216)",
+          "compaction_start / compaction_end (stores/app.ts:217-222)",
+          "auto_retry_start / auto_retry_end (stores/app.ts:223-233)",
+          "extension_error (stores/app.ts:234-236)",
+          "all others -> default no-op (stores/app.ts:237-238)"
+        ],
+        "side_effect_note": "activityTick is incremented for 6 event types before the switch (stores/app.ts:124-134) as a scroll trigger",
+        "dedup_hack": "user message_end is deduped by comparing text against the last user item in the list, because renderer optimistically inserts sent messages (stores/app.ts:163-179, insertion at stores/app.ts:417-421) — a content-equality heuristic standing in for a missing message identifier"
+      }
+    ],
+    "identifier_presence": {
+      "protocolVersion": "absent — zero occurrences across packages/app/src and packages/pi-sdk/src",
+      "workspaceId": "absent — workspace is only a raw filesystem path string, passed per-call (ipc.ts:91, ipc.ts:127) and stored as AppSettings.workspace (settings.ts:6)",
+      "sessionId": "absent on the event wire. Exists only as a pull-model field inside AgentState.sessionId (packages/pi-sdk/src/types.ts:151) and SessionStats.sessionId (types.ts:161), plus SessionMeta.id derived from the jsonl file (sessions-store.ts:67-68). No pi:event payload carries it.",
+      "runtimeId": "absent — the runtime is identified only by the Electron webContents id used as the clients Map key (ipc.ts:14, 24, 93, 104), which never crosses the IPC boundary",
+      "generation": "absent — a pi:start after a prior start silently replaces the client (ipc.ts:93) with no generation counter, so stale in-flight events are indistinguishable from current ones",
+      "sequence": "absent — no monotonic counter on events. The only counter is PiRpcClient.seq (client.ts:62, 155), used for RPC request ids, never attached to events.",
+      "occurredAt": "absent — no emit-time timestamp. Some message payloads carry an optional producer-side timestamp?: number (types.ts:57, 69, 80, 91), and the renderer synthesizes Date.now() for locally inserted user messages (stores/app.ts:420), but no event envelope has a time field."
+    },
+    "identifiers_that_do_exist": [
+      { "field": "toolCallId", "on": "tool_execution_start / tool_execution_update / tool_execution_end", "evidence": "packages/pi-sdk/src/types.ts:219-221" },
+      { "field": "toolCallId", "on": "ToolResultMessage", "evidence": "packages/pi-sdk/src/types.ts:74" },
+      { "field": "id (optional)", "on": "bash_execution_update", "evidence": "packages/pi-sdk/src/types.ts:218" },
+      { "field": "id (required)", "on": "ExtensionUiRequest / ExtensionUiResponse", "evidence": "packages/pi-sdk/src/types.ts:234, 263" },
+      { "field": "contentIndex (optional)", "on": "AssistantMessageEvent inside message_update", "evidence": "packages/pi-sdk/src/types.ts:196" },
+      { "field": "id (optional)", "on": "RpcCommandBase / RpcResponse", "evidence": "packages/pi-sdk/src/types.ts:130, 136" }
+    ],
+    "command_direction_flow": {
+      "summary": "Renderer command path is a straight pass-through with no intermediate model.",
+      "hops": [
+        "renderer builds a bare object literal (stores/app.ts:402-407, 447-450, 468) — no builder/factory",
+        "preload invoke passthrough (preload/index.ts:16)",
+        "main resolves client by event.sender.id then forwards verbatim (ipc.ts:115-117 -> client.ts:154-165)",
+        "PiRpcClient injects an id and writes JSON + \\n to child stdin (client.ts:155, 159, 150)",
+        "response resolved by id lookup in the pending Map (client.ts:122-129), returned through the same chain"
+      ],
+      "note": "PiRpcClient exposes typed command wrappers (prompt/steer/followUp/abort/newSession/switchSession/setModel/... at client.ts:182-255) but the renderer bypasses all of them, sending raw literals through the generic pi:command channel. Only getState/getAvailableModels/getMessages are used via wrappers, and only inside the pi:start handler (ipc.ts:106-110)."
+    }
+  },
+
+  "section_3_type_definition_dispersion": {
+    "canonical_source": {
+      "file": "packages/pi-sdk/src/types.ts",
+      "lines": 266,
+      "contents": "protocol types only — content blocks (types.ts:6-32), messages (types.ts:36-99), models (types.ts:103-123), commands/responses (types.ts:127-142), AgentState (types.ts:144-157), SessionStats (types.ts:159-170), CommandInfo (types.ts:172-178), events (types.ts:182-228), extension UI subprotocol (types.ts:232-266)",
+      "barrel": "packages/pi-sdk/src/index.ts:1-4 (re-exports types + attachJsonlReader + PiRpcClient + PiClientOptions/PiSpawn)"
+    },
+    "resolution_paths": [
+      {
+        "consumer": "main process",
+        "specifier": "@pibuddy/pi-sdk",
+        "resolves_to": "packages/pi-sdk/src/index.ts (via package.json main/types fields)",
+        "evidence": "packages/app/src/main/ipc.ts:4-9 (PiRpcClient, AgentEvent, ExtensionUiResponse, RpcCommandBase); packages/app/src/main/pi-launcher.ts:4 (PiSpawn); packages/pi-sdk/package.json:8-9 (main/types both ./src/index.ts); packages/app/package.json:18 (workspace:* dependency)"
+      },
+      {
+        "consumer": "preload ambient declaration",
+        "specifier": "@sdk",
+        "resolves_to": "packages/pi-sdk/src/types.ts (types.ts only, NOT index.ts — PiRpcClient/attachJsonlReader are unreachable through this alias)",
+        "evidence": "packages/app/src/preload/index.d.ts:2-11 (AgentEvent, AgentMessage, AgentState, ExtensionUiRequest, ExtensionUiResponse, Model, RpcCommandBase, RpcResponse)"
+      },
+      {
+        "consumer": "renderer",
+        "specifier": "@sdk",
+        "resolves_to": "packages/pi-sdk/src/types.ts",
+        "evidence": [
+          "packages/app/src/renderer/src/stores/app.ts:3-16 (12 types)",
+          "packages/app/src/renderer/src/components/MessageItem.vue:4-11 (AgentMessage, AssistantContent, AssistantMessage, ImageContent, TextContent, UserMessage)",
+          "packages/app/src/renderer/src/components/InputBar.vue:4 (ImageContent)",
+          "packages/app/src/renderer/src/components/ToolActivity.vue:4 (ToolCallContent)",
+          "packages/app/src/renderer/src/components/TopBar.vue:6 (ThinkingLevel)"
+        ]
+      },
+      {
+        "consumer": "renderer (app-layer types)",
+        "specifier": "\"../../../preload/index.d\" (relative path reaching across the renderer/preload layer boundary)",
+        "resolves_to": "packages/app/src/preload/index.d.ts",
+        "evidence": [
+          "packages/app/src/renderer/src/stores/app.ts:17 (AppSettings, PickedFile, SessionMeta)",
+          "packages/app/src/renderer/src/components/InputBar.vue:5 (PickedFile)"
+        ],
+        "note": "no alias exists for this path; it is a hard-coded three-level relative traversal in two files"
+      }
+    ],
+    "duplicated_declarations": [
+      {
+        "type_name": "AppSettings",
+        "declaration_sites": [
+          "packages/app/src/main/settings.ts:5-13",
+          "packages/app/src/preload/index.d.ts:28-36"
+        ],
+        "relationship": "structurally identical (7 optional string fields: workspace, provider, modelId, thinkingLevel, sttBaseUrl, sttApiKey, sttModel), independently declared, no import between them",
+        "consumers": "main via settings.ts import (ipc.ts:12); renderer via preload/index.d.ts import (stores/app.ts:17, 58)"
+      },
+      {
+        "type_name": "SessionMeta",
+        "declaration_sites": [
+          "packages/app/src/main/sessions-store.ts:5-12",
+          "packages/app/src/preload/index.d.ts:19-26"
+        ],
+        "relationship": "structurally identical (path, id, name?, firstMessage, messageCount, modified), independently declared",
+        "consumers": "main via sessions-store (ipc.ts:11); renderer via preload/index.d.ts (stores/app.ts:17, 66, 442)"
+      },
+      {
+        "type_name": "PickedFile",
+        "declaration_sites": [
+          "packages/app/src/preload/index.d.ts:38-43",
+          "packages/app/src/main/ipc.ts:215-220 (anonymous return type of describeFile)"
+        ],
+        "relationship": "structurally identical (path, name, size, kind: \"image\"|\"video\"|\"other\") but the main-side shape is an unnamed inline return annotation",
+        "consumers": "renderer stores/app.ts:17, 391; InputBar.vue:5"
+      },
+      {
+        "type_name": "StartResult",
+        "declaration_sites": [
+          "packages/app/src/preload/index.d.ts:13-17",
+          "packages/app/src/main/ipc.ts:111 (anonymous object literal return, shape inferred)"
+        ],
+        "relationship": "renderer-facing named interface vs. main-side inferred literal; no compile-time link between the two"
+      },
+      {
+        "type_name": "STT request shape { baseUrl, apiKey, model, audio, mimeType }",
+        "declaration_sites": [
+          "packages/app/src/main/ipc.ts:177-183 (inline handler param)",
+          "packages/app/src/preload/index.ts:44-50 (inline function param)",
+          "packages/app/src/preload/index.d.ts:75-81 (inline in the API interface)"
+        ],
+        "relationship": "three independent inline declarations of the same object shape"
+      },
+      {
+        "type_name": "image read result { data: string; mimeType: string }",
+        "declaration_sites": [
+          "packages/app/src/main/ipc.ts:161-162 (inferred from the return statement)",
+          "packages/app/src/preload/index.ts:35 (inline generic arg)",
+          "packages/app/src/preload/index.d.ts:67 (inline return type)"
+        ],
+        "relationship": "three independent inline declarations"
+      },
+      {
+        "type_name": "pi:start options { workspace: string; session?: string }",
+        "declaration_sites": [
+          "packages/app/src/main/ipc.ts:91",
+          "packages/app/src/preload/index.ts:15",
+          "packages/app/src/preload/index.d.ts:47"
+        ],
+        "relationship": "three independent inline declarations"
+      },
+      {
+        "type_name": "queue shape { steering: string[]; followUp: string[] }",
+        "declaration_sites": [
+          "packages/pi-sdk/src/types.ts:222 (queue_update event member)",
+          "packages/app/src/renderer/src/stores/app.ts:72 (store ref type)"
+        ],
+        "relationship": "structurally identical, redeclared inline in the store"
+      }
+    ],
+    "renderer_local_types_not_shared": [
+      { "name": "ChatItem", "site": "packages/app/src/renderer/src/stores/app.ts:19-22" },
+      { "name": "ToolRun", "site": "packages/app/src/renderer/src/stores/app.ts:24-31" },
+      { "name": "Notifier", "site": "packages/app/src/renderer/src/stores/app.ts:33-38" }
+    ],
+    "sdk_local_types_not_shared": [
+      { "name": "PiSpawn", "site": "packages/pi-sdk/src/client.ts:20-28", "consumed_by": "packages/app/src/main/pi-launcher.ts:4, 12" },
+      { "name": "PiClientOptions", "site": "packages/pi-sdk/src/client.ts:30-40" },
+      { "name": "Pending", "site": "packages/pi-sdk/src/client.ts:42-45", "exported": false }
+    ],
+    "reference_points_to_change_for_a_shared_contract_dir": {
+      "source_import_sites": [
+        "packages/app/src/main/ipc.ts:4-9 (@pibuddy/pi-sdk value+type import — PiRpcClient is a runtime value, so the contract split must keep types separable from the client class)",
+        "packages/app/src/main/ipc.ts:11-12 (local imports of SessionMeta-producing and AppSettings-producing modules)",
+        "packages/app/src/main/pi-launcher.ts:4 (@pibuddy/pi-sdk type-only)",
+        "packages/app/src/main/settings.ts:5-13 (AppSettings declaration — candidate to move)",
+        "packages/app/src/main/sessions-store.ts:5-12 (SessionMeta declaration — candidate to move)",
+        "packages/app/src/preload/index.d.ts:2-11 (@sdk type-only)",
+        "packages/app/src/preload/index.d.ts:13-43 (StartResult/SessionMeta/AppSettings/PickedFile declarations — candidates to move)",
+        "packages/app/src/preload/index.d.ts:45-89 (PiBuddyApi + the global Window augmentation — the single place binding channel names to types)",
+        "packages/app/src/renderer/src/stores/app.ts:3-16 (@sdk)",
+        "packages/app/src/renderer/src/stores/app.ts:17 (relative preload/index.d)",
+        "packages/app/src/renderer/src/components/MessageItem.vue:4-11 (@sdk)",
+        "packages/app/src/renderer/src/components/InputBar.vue:4 (@sdk)",
+        "packages/app/src/renderer/src/components/InputBar.vue:5 (relative preload/index.d)",
+        "packages/app/src/renderer/src/components/ToolActivity.vue:4 (@sdk)",
+        "packages/app/src/renderer/src/components/TopBar.vue:6 (@sdk)"
+      ],
+      "build_config_touch_points": [
+        {
+          "file": "packages/app/electron.vite.config.ts",
+          "line": 17,
+          "current": "renderer.resolve.alias maps \"@sdk\" -> resolve(__dirname, \"../pi-sdk/src/types.ts\")",
+          "fact": "this is the only alias defined anywhere in the vite config; the main and preload sections (electron.vite.config.ts:6-12) declare no resolve.alias at all, so main/preload resolve @pibuddy/pi-sdk purely through node_modules workspace linking"
+        },
+        {
+          "file": "packages/app/electron.vite.config.ts",
+          "line": 8,
+          "current": "main: externalizeDepsPlugin({ exclude: [\"@pibuddy/pi-sdk\"] })",
+          "fact": "the sdk is the sole dependency bundled into the main bundle rather than externalized; a new shared package would need the same exclusion or it will be left as an unresolvable external import at runtime"
+        },
+        {
+          "file": "packages/app/electron.vite.config.ts",
+          "line": 11,
+          "current": "preload: externalizeDepsPlugin() with no exclude",
+          "fact": "preload externalizes every dependency; a shared contract package imported as a runtime value (not type-only) from preload would break unless added to an exclude list"
+        },
+        {
+          "file": "packages/app/tsconfig.web.json",
+          "lines": "12-14",
+          "current": "compilerOptions.baseUrl \".\" + paths { \"@sdk\": [\"../pi-sdk/src/types.ts\"] }"
+        },
+        {
+          "file": "packages/app/tsconfig.web.json",
+          "lines": "16-21",
+          "current": "include: src/renderer/src/**/*.ts, src/renderer/src/**/*.vue, src/preload/index.d.ts, ../pi-sdk/src/types.ts",
+          "fact": "the renderer project explicitly reaches outside its own package to pull in a single file from pi-sdk and one file from preload"
+        },
+        {
+          "file": "packages/app/tsconfig.node.json",
+          "lines": "9-14",
+          "current": "include: electron.vite.config.ts, src/main/**/*.ts, src/preload/**/*.ts, ../pi-sdk/src/**/*.ts",
+          "fact": "same cross-package reach; both projects are composite: true (tsconfig.node.json:5, tsconfig.web.json:5) and referenced from packages/app/tsconfig.json:3-6"
+        },
+        {
+          "file": "packages/pi-sdk/tsconfig.json",
+          "lines": "1-6",
+          "current": "extends tsconfig.base.json, types: [\"node\"], include: [\"src\"]",
+          "fact": "the sdk project is NOT composite and is NOT referenced by packages/app/tsconfig.json — the app re-includes sdk sources directly instead of consuming project references"
+        },
+        {
+          "file": "tsconfig.base.json",
+          "lines": "1-14",
+          "current": "moduleResolution \"Bundler\", noEmit true, isolatedModules true, strict true",
+          "fact": "noEmit:true at the base level means no workspace package emits .d.ts; a shared package would be consumed as raw TypeScript source (same as pi-sdk today, which points main/types at ./src/index.ts)"
+        },
+        {
+          "file": "packages/app/package.json",
+          "line": 18,
+          "current": "\"@pibuddy/pi-sdk\": \"workspace:*\" in dependencies"
+        },
+        {
+          "file": "packages/app/package.json",
+          "line": 12,
+          "current": "typecheck script: tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json"
+        },
+        {
+          "file": "package.json",
+          "line": 11,
+          "current": "root typecheck: pnpm -r typecheck — a new package needs its own typecheck script to be covered"
+        },
+        {
+          "file": "pnpm-workspace.yaml",
+          "lines": "1-2",
+          "current": "packages: - packages/*",
+          "fact": "a new packages/<name> directory is auto-included in the workspace; no manifest edit required"
+        },
+        {
+          "file": "packages/app/electron-builder.yml",
+          "lines": "6-8",
+          "current": "files: out/** and package.json; asar: false (electron-builder.yml:12)",
+          "fact": "only the electron-vite output is shipped, so a source-only shared workspace package is fine as long as it is bundled (i.e. excluded from externalizeDepsPlugin), exactly as pi-sdk is today"
+        }
+      ]
+    }
+  },
+
+  "section_4_pinia_store_state_inventory": {
+    "file": "packages/app/src/renderer/src/stores/app.ts",
+    "store_id": "app",
+    "style": "setup store (defineStore with a setup function, stores/app.ts:55)",
+    "normalization": "absent — every field is a single flat instance. No field is keyed by sessionId, workspaceId, or runtimeId. Switching sessions mutates the same refs in place.",
+    "runtime_lifecycle_related": [
+      { "name": "started", "declaration": "stores/app.ts:59", "kind": "ref<boolean>", "initial": "false", "meaning": "pi runtime has completed startup handshake", "mutated_at": ["stores/app.ts:289 (pi:exit)", "stores/app.ts:319 (start begin)", "stores/app.ts:330 (start success)"] },
+      { "name": "startError", "declaration": "stores/app.ts:60", "kind": "ref<string>", "initial": "\"\"", "meaning": "last startup failure message", "mutated_at": ["stores/app.ts:318", "stores/app.ts:353"] },
+      { "name": "agentState", "declaration": "stores/app.ts:62", "kind": "shallowRef<AgentState | null>", "meaning": "mirror of pi get_state (model, thinkingLevel, isStreaming, isCompacting, steeringMode, followUpMode, sessionFile, sessionId, sessionName, autoCompactionEnabled, messageCount, pendingMessageCount — types.ts:144-157)", "mutated_at": ["stores/app.ts:327", "stores/app.ts:359"], "note": "the only place a sessionId is visible in the renderer, and it is a single scalar, not a key" },
+      { "name": "models", "declaration": "stores/app.ts:63", "kind": "shallowRef<Model[]>", "meaning": "available models from the running runtime", "mutated_at": ["stores/app.ts:328"] },
+      { "name": "thinkingLevels", "declaration": "stores/app.ts:64", "kind": "shallowRef<ThinkingLevel[]>", "initial": "[\"off\"]", "mutated_at": ["stores/app.ts:376"] },
+      { "name": "stats", "declaration": "stores/app.ts:65", "kind": "shallowRef<SessionStats | null>", "meaning": "per-session token/cost stats", "mutated_at": ["stores/app.ts:364", "stores/app.ts:436 (cleared on newTask)"] },
+      { "name": "sessions", "declaration": "stores/app.ts:66", "kind": "shallowRef<SessionMeta[]>", "meaning": "history list for the current workspace", "mutated_at": ["stores/app.ts:369"] },
+      { "name": "items", "declaration": "stores/app.ts:68", "kind": "ref<ChatItem[]>", "meaning": "committed chat transcript; key is a module-global counter, not a message id", "mutated_at": ["stores/app.ts:109 (pushMessage)", "stores/app.ts:306 (loadMessages clear)", "stores/app.ts:434 (newTask clear)"] },
+      { "name": "liveAssistant", "declaration": "stores/app.ts:69", "kind": "shallowRef<AssistantMessage | null>", "meaning": "in-flight streaming assistant message", "mutated_at": ["stores/app.ts:141", "stores/app.ts:148", "stores/app.ts:153", "stores/app.ts:159", "stores/app.ts:321", "stores/app.ts:436"] },
+      { "name": "toolRuns", "declaration": "stores/app.ts:70", "kind": "reactive<Record<string, ToolRun>>", "meaning": "tool invocations keyed by toolCallId (not session-scoped)", "mutated_at": ["stores/app.ts:114", "stores/app.ts:184", "stores/app.ts:197", "stores/app.ts:202", "stores/app.ts:307 (delete-all loop)", "stores/app.ts:435 (delete-all loop)"] },
+      { "name": "streaming", "declaration": "stores/app.ts:71", "kind": "ref<boolean>", "meaning": "runtime is producing output", "mutated_at": ["stores/app.ts:137", "stores/app.ts:140", "stores/app.ts:290", "stores/app.ts:320"] },
+      { "name": "queue", "declaration": "stores/app.ts:72", "kind": "ref<{ steering: string[]; followUp: string[] }>", "meaning": "pending steering / follow-up messages inside the runtime", "mutated_at": ["stores/app.ts:214"] },
+      { "name": "statusTexts", "declaration": "stores/app.ts:73", "kind": "reactive<Record<string, string>>", "meaning": "transient runtime status strings; keys are 'compaction', 'retry', and 'ext:<statusKey>' for extension-reported status", "mutated_at": ["stores/app.ts:218", "stores/app.ts:221", "stores/app.ts:225", "stores/app.ts:230", "stores/app.ts:257"], "note": "two semantically different concerns share one map, split downstream by an 'ext:' string prefix (stores/app.ts:94, 101)" },
+      { "name": "uiRequests", "declaration": "stores/app.ts:75", "kind": "ref<ExtensionUiRequest[]>", "meaning": "queue of pending extension UI prompts", "mutated_at": ["stores/app.ts:248", "stores/app.ts:271"] },
+      { "name": "editorText", "declaration": "stores/app.ts:76", "kind": "ref<string>", "meaning": "input composer text; runtime-writable via the set_editor_text UI request", "mutated_at": ["stores/app.ts:260", "renderer/src/components/InputBar.vue:118-120"] },
+      { "name": "keySeq", "declaration": "stores/app.ts:53", "kind": "module-level let (outside the store)", "meaning": "monotonic chat item key; shared across every session and never reset", "mutated_at": ["stores/app.ts:109"] },
+      { "name": "subscribed", "declaration": "stores/app.ts:281", "kind": "module-level let (closure guard)", "meaning": "one-shot IPC subscription guard; listeners are never unsubscribed", "mutated_at": ["stores/app.ts:284"], "note": "the unsubscribe closures returned by preload subscribe (preload/index.ts:10) are discarded at stores/app.ts:285-287" },
+      { "name": "notifier", "declaration": "stores/app.ts:81", "kind": "module-level let<Notifier | null>", "meaning": "injected toast sink used by runtime error paths", "mutated_at": ["stores/app.ts:83"] }
+    ],
+    "other": [
+      { "name": "booting", "declaration": "stores/app.ts:57", "kind": "ref<boolean>", "initial": "true", "meaning": "app shell bootstrap, distinct from runtime start", "mutated_at": ["stores/app.ts:299"] },
+      { "name": "settings", "declaration": "stores/app.ts:58", "kind": "ref<AppSettings>", "initial": "{}", "meaning": "renderer mirror of the persisted settings file, including sttApiKey", "mutated_at": ["stores/app.ts:298", "stores/app.ts:384", "stores/app.ts:474", "stores/app.ts:483", "stores/app.ts:489"] },
+      { "name": "settingsOpen", "declaration": "stores/app.ts:77", "kind": "ref<boolean>", "meaning": "settings modal visibility (pure UI)" },
+      { "name": "activityTick", "declaration": "stores/app.ts:79", "kind": "ref<number>", "meaning": "scroll-trigger counter incremented on 6 chat-height-affecting event types, to avoid a deep watch", "mutated_at": ["stores/app.ts:133"] },
+      { "name": "workspace", "declaration": "stores/app.ts:89", "kind": "computed<string>", "derivation": "settings.workspace ?? \"\"" },
+      { "name": "currentModel", "declaration": "stores/app.ts:90", "kind": "computed<Model | null>", "derivation": "agentState?.model ?? null", "classification_note": "derived from runtime state but is a presentation shortcut" },
+      { "name": "busyStatus", "declaration": "stores/app.ts:92-97", "kind": "computed<string>", "derivation": "statusTexts entries NOT prefixed 'ext:' joined by ' · '" },
+      { "name": "extStatus", "declaration": "stores/app.ts:99-104", "kind": "computed<string>", "derivation": "statusTexts entries prefixed 'ext:' joined by ' · '" }
+    ],
+    "exported_surface": "stores/app.ts:492-529 — 20 state/computed fields plus 14 actions (setNotifier, init, start, chooseWorkspace, send, abortRun, newTask, openSession, setModel, setThinkingLevel, saveSettings, respondUi, refreshSessions)",
+    "session_switching_behavior": {
+      "fact": "openSession (stores/app.ts:442-461) sends a raw switch_session command, then re-fetches all messages and replaces items wholesale via loadMessages (stores/app.ts:305-315); toolRuns is cleared by key-by-key delete (stores/app.ts:307). No per-session state is retained.",
+      "fact_2": "newTask (stores/app.ts:428-440) manually clears items, toolRuns, liveAssistant and stats — a hand-rolled reset enumerating fields, which drifts as fields are added",
+      "fact_3": "start() (stores/app.ts:317-355) resets started/streaming/liveAssistant but does NOT clear items, toolRuns, queue, statusTexts, or uiRequests before loadMessages runs"
+    }
+  },
+
+  "section_5_target_module_mapping": [
+    {
+      "target_module": "PiRuntimeSupervisor",
+      "implementation_status": "partial — behaviour exists but is scattered across 4 files with no owning module, class, or file name",
+      "current_locations": [
+        { "file": "packages/app/src/main/ipc.ts", "lines": "14", "responsibility": "clients registry — Map<number, PiRpcClient> keyed by webContents id, module-level mutable singleton" },
+        { "file": "packages/app/src/main/ipc.ts", "lines": "16-22", "responsibility": "disposeClientFor — teardown by webContents id" },
+        { "file": "packages/app/src/main/ipc.ts", "lines": "24-28", "responsibility": "clientFor — lookup + liveness assertion, throws '智能体尚未启动'" },
+        { "file": "packages/app/src/main/ipc.ts", "lines": "36-77", "responsibility": "makeEventForwarder — 33ms batching + accumulative-event collapsing, the only backpressure mechanism in the system" },
+        { "file": "packages/app/src/main/ipc.ts", "lines": "89-113", "responsibility": "pi:start handler — dispose-then-construct-then-wire-then-spawn-then-3-round-trips, all inline in the IPC handler body" },
+        { "file": "packages/app/src/main/pi-launcher.ts", "lines": "12-29", "responsibility": "buildPiSpawn — resolves the pi CLI entry (bundled @earendil-works/pi-coding-agent dist/cli.js run via ELECTRON_RUN_AS_NODE, falling back to a global pi/pi.cmd)" },
+        { "file": "packages/pi-sdk/src/client.ts", "lines": "75-113", "responsibility": "PiRpcClient.start — child_process.spawn, stdio wiring, stderr ring buffer (50 chunks, client.ts:96-101), error/exit handlers" },
+        { "file": "packages/pi-sdk/src/client.ts", "lines": "257-280", "responsibility": "PiRpcClient.stop — stdin.end, SIGTERM, 3000ms SIGKILL escalation" },
+        { "file": "packages/pi-sdk/src/client.ts", "lines": "141-144", "responsibility": "failAll — rejects all pending RPCs on process death" },
+        { "file": "packages/app/src/main/index.ts", "lines": "22-23", "responsibility": "window 'closed' -> disposeClientFor(wcId)" }
+      ],
+      "absent_capabilities": [
+        "no supervisor class or dedicated file",
+        "no restart / backoff / crash-recovery policy — pi:exit merely notifies the renderer (ipc.ts:102, stores/app.ts:287-293)",
+        "no runtime generation counter, so a restarted runtime's events are indistinguishable from a dead one's (ipc.ts:93 replaces the Map entry with no epoch)",
+        "no health check or readiness probe beyond the implicit get_state round-trip (ipc.ts:106)",
+        "no per-workspace runtime keying — the key is the Electron webContents id (ipc.ts:14), so runtime identity is bound to a window rather than a workspace or session"
+      ]
+    },
+    {
+      "target_module": "SessionRepository",
+      "implementation_status": "partial — a read-only filesystem lister exists; there is no repository abstraction and no write path",
+      "current_locations": [
+        { "file": "packages/app/src/main/sessions-store.ts", "lines": "5-12", "responsibility": "SessionMeta interface (duplicated in preload/index.d.ts:19-26)" },
+        { "file": "packages/app/src/main/sessions-store.ts", "lines": "19-22", "responsibility": "sessionDirFor — derives ~/.pi/agent/sessions/--<escaped workspace path>--/ by replacing [\\\\/:] with '-' ; hard-codes the pi on-disk layout" },
+        { "file": "packages/app/src/main/sessions-store.ts", "lines": "24-47", "responsibility": "listSessions — synchronous readdirSync + statSync per file, parses every .jsonl fully, sorts by mtime desc; corrupt files silently skipped (sessions-store.ts:41-43)" },
+        { "file": "packages/app/src/main/sessions-store.ts", "lines": "49-82", "responsibility": "parseSessionFile — reads the whole file into memory, scans for type 'session' / 'session_info' / 'message' records, extracts id/name/firstMessage(120 chars)/messageCount" },
+        { "file": "packages/app/src/main/sessions-store.ts", "lines": "84-94", "responsibility": "extractText — content-block text extraction helper" },
+        { "file": "packages/app/src/main/ipc.ts", "lines": "127-129", "responsibility": "sessions:list channel binding — a direct pass-through, no caching or invalidation" }
+      ],
+      "responsibilities_living_elsewhere": [
+        { "what": "session switching", "where": "packages/app/src/renderer/src/stores/app.ts:442-461 — the renderer issues a raw switch_session RPC and then re-fetches messages itself; main has no session-switch code path" },
+        { "what": "new session creation", "where": "packages/app/src/renderer/src/stores/app.ts:428-440 — raw new_session RPC from the renderer" },
+        { "what": "session resume on start", "where": "packages/app/src/main/ipc.ts:98 (opts.session -> PiClientOptions.session) -> packages/pi-sdk/src/client.ts:79 (--session arg)" },
+        { "what": "session list refresh triggers", "where": "packages/app/src/renderer/src/stores/app.ts:143 (on agent_settled), :351 (after start), :439 (after newTask)" }
+      ],
+      "absent_capabilities": [
+        "no write path — session .jsonl files are written solely by the pi CLI",
+        "no caching, incremental read, or file watching; every list call re-reads and re-parses every session file synchronously on the main thread",
+        "no repository interface or in-memory index keyed by session id"
+      ]
+    },
+    {
+      "target_module": "SettingsStore",
+      "implementation_status": "exists — minimal, 32 lines, module-level functions rather than a store object",
+      "current_locations": [
+        { "file": "packages/app/src/main/settings.ts", "lines": "5-13", "responsibility": "AppSettings interface (duplicated in preload/index.d.ts:28-36)" },
+        { "file": "packages/app/src/main/settings.ts", "lines": "15-17", "responsibility": "settingsPath — app.getPath('userData')/settings.json" },
+        { "file": "packages/app/src/main/settings.ts", "lines": "19-25", "responsibility": "loadSettings — synchronous readFileSync + JSON.parse, any failure returns {} (silently swallows corrupt files)" },
+        { "file": "packages/app/src/main/settings.ts", "lines": "27-32", "responsibility": "saveSettings — load, shallow-spread the patch, mkdirSync, writeFileSync, return the merged object" },
+        { "file": "packages/app/src/main/ipc.ts", "lines": "131-134", "responsibility": "settings:get / settings:set channel bindings" },
+        { "file": "packages/app/src/renderer/src/stores/app.ts", "lines": "58, 298, 384, 474, 483, 489", "responsibility": "renderer-side mirror ref; every write round-trips to main and replaces the whole mirror with the merged result" },
+        { "file": "packages/app/src/renderer/src/components/SettingsModal.vue", "lines": "1-89", "responsibility": "settings editing UI" }
+      ],
+      "absent_capabilities": [
+        "no schema version field and no migration path",
+        "no atomic write (writeFileSync directly to the target path, settings.ts:30) and no debouncing — every setModel/setThinkingLevel triggers a full re-read + re-write (stores/app.ts:474, 483)",
+        "no change notification to other windows — the renderer mirror is only updated by the caller that performed the write",
+        "no secret handling — sttApiKey is stored in plaintext JSON (settings.ts:11) and read into the renderer mirror (stores/app.ts:298), then re-sent over IPC per transcription (InputBar.vue:112)",
+        "no defaults table — fallbacks are inlined at call sites (InputBar.vue:111 'https://api.openai.com/v1', InputBar.vue:113 'whisper-1')"
+      ]
+    },
+    {
+      "target_module": "PermissionEngine",
+      "implementation_status": "absent",
+      "evidence_of_absence": [
+        "grep for permission|approval|approve|autoApprove|yolo|allowlist|denylist across packages/app/src and packages/pi-sdk/src returns exactly one hit, and it is a comment: packages/app/src/renderer/src/stores/app.ts:98 ('扩展上报的常驻状态（如 AUTO/YOLO 模式）')",
+        "no IPC handler performs any authorization check — packages/app/src/main/ipc.ts:88-213, every handler executes its effect unconditionally",
+        "no path containment check on file:read-image (ipc.ts:157-162) or shell:open-path (ipc.ts:164-166); arbitrary absolute paths from the renderer are honored",
+        "no tool-call gating in the event pipeline — tool_execution_start is forwarded and rendered, never intercepted (ipc.ts:36-77, stores/app.ts:182-193)"
+      ],
+      "nearest_existing_surface": {
+        "what": "the pi extension UI subprotocol, which the pi runtime uses to ask the user questions",
+        "locations": [
+          "packages/pi-sdk/src/types.ts:232-266 (ExtensionUiRequest / ExtensionUiResponse)",
+          "packages/pi-sdk/src/client.ts:134-137 (ui_request emission), client.ts:176-178 (respondUi writes straight to child stdin, bypassing the pending/id correlation used for commands)",
+          "packages/app/src/main/ipc.ts:101, 119-121 (unbatched forward + response passthrough)",
+          "packages/app/src/renderer/src/stores/app.ts:242-265 (handleUiRequest — routes select/confirm/input/editor to a modal queue, notify to a toast, setStatus to statusTexts, set_editor_text to the composer; setWidget and setTitle fall through to the default no-op at stores/app.ts:262-263)",
+          "packages/app/src/renderer/src/components/ExtensionUiHost.vue:19-73 (modal rendering; confirm branch at ExtensionUiHost.vue:46-54)"
+        ],
+        "characterization": "a display/relay path for runtime-initiated prompts. It carries no policy, no rule store, no decision persistence, and no notion of a permission scope."
+      }
+    },
+    {
+      "target_module": "UpdateService",
+      "implementation_status": "absent",
+      "evidence_of_absence": [
+        "no electron-updater dependency — packages/app/package.json:16-38 lists no updater package",
+        "grep for autoUpdater|electron-updater|checkForUpdates across packages/app/src and packages/pi-sdk/src returns zero hits",
+        "packages/app/electron-builder.yml:1-46 contains no `publish` block, so no update feed is configured for nsis (electron-builder.yml:33-41), dmg (electron-builder.yml:42-45) or AppImage (electron-builder.yml:46+)",
+        "packages/app/src/main/index.ts:1-55 (the whole main entry) contains no update wiring",
+        "no version-check IPC channel exists in the 16-channel inventory"
+      ],
+      "adjacent_facts": [
+        "packages/app/electron-builder.yml:12 sets asar: false deliberately, because the pi agent executes node_modules/.../cli.js and loads extension/skill files by path at runtime — this constrains any future differential-update strategy",
+        "packages/app/package.json:2-3 pins version 0.1.0 and private: true",
+        "the bundled agent version is pinned by packages/app/package.json:17 (@earendil-works/pi-coding-agent ^0.83.0), so agent updates today ship only via a full app rebuild"
+      ]
+    }
+  ],
+
+  "absent_summary": {
+    "runtime_schema_validation_on_ipc": "absent",
+    "ipc_channel_allowlist_constant": "absent",
+    "ipc_sender_origin_verification": "absent",
+    "protocolVersion": "absent",
+    "workspaceId": "absent",
+    "sessionId_on_events": "absent",
+    "runtimeId": "absent",
+    "generation_epoch": "absent",
+    "sequence_number": "absent",
+    "occurredAt_envelope_timestamp": "absent",
+    "shared_contract_package": "absent — pi-sdk holds protocol types only; app-layer contract types (AppSettings, SessionMeta, PickedFile, StartResult) are duplicated between main and preload",
+    "session_normalized_store_state": "absent — the Pinia store is a single flat instance",
+    "PermissionEngine": "absent",
+    "UpdateService": "absent",
+    "PiRuntimeSupervisor_as_a_module": "absent (behaviour scattered across ipc.ts, pi-launcher.ts, client.ts, index.ts)",
+    "SessionRepository_write_path": "absent",
+    "settings_schema_version_and_migration": "absent",
+    "ipc_listener_teardown_in_renderer": "absent — unsubscribe closures discarded at stores/app.ts:285-287"
+  }
+}

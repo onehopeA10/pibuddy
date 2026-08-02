@@ -1,0 +1,303 @@
+{
+  "id": "TASK-009",
+  "title": "SES-101 会话中心：SQLite 增量索引 + 会话管理 UI + preload 命名空间分层",
+  "description": "用 SQLite 增量索引替换 sessions-store.ts 的全量同步扫描（readdirSync + statSync + readFileSync + 全文件 split 逐行 parse），JSONL 仍为唯一真相源、只读不改写。索引提供搜索/rename/pin/archive/restore/回收站/按 workspace-date-model-status 筛选与未读标识，rename 同时经 pi RPC set_session_name 落到会话文件。同时把 preload 拆成 src/preload/api/<namespace>.ts 分层，index.d.ts 改为从 api 聚合对象推导类型，后续里程碑新增命名空间只需新增文件 + 在 api/index.ts 加一行，不再全员抢改 index.d.ts。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "feature",
+  "priority": "high",
+  "effort": "large",
+  "action": "新建 packages/app/src/main/sessions/session-index.ts，导出 `export const SESSION_INDEX_SCHEMA_VERSION = 1` 与 `export class SessionIndex`，内部使用 `import { DatabaseSync } from 'node:sqlite'` 打开 `path.join(app.getPath('userData'), 'session-index.db')`；建表 `CREATE TABLE IF NOT EXISTS sessions (source_path TEXT PRIMARY KEY, workspace_root TEXT NOT NULL, session_id TEXT NOT NULL, scan_offset INTEGER NOT NULL DEFAULT 0, mtime_ms INTEGER NOT NULL, size_bytes INTEGER NOT NULL, content_hash TEXT NOT NULL, name TEXT, preview TEXT, search_blob TEXT, message_count INTEGER NOT NULL DEFAULT 0, token_total INTEGER NOT NULL DEFAULT 0, cost_total REAL NOT NULL DEFAULT 0, model_id TEXT, status TEXT NOT NULL DEFAULT 'active', pinned INTEGER NOT NULL DEFAULT 0, unread INTEGER NOT NULL DEFAULT 0, running INTEGER NOT NULL DEFAULT 0, draft_text TEXT, draft_json TEXT, deleted_at INTEGER, last_indexed_at INTEGER NOT NULL, schema_version INTEGER NOT NULL)`，用 `PRAGMA user_version` 做迁移；导出方法 `syncWorkspace(workspaceRoot: string): { scanned: number; reparsed: number }`、`query(filter: SessionQuery): SessionRow[]`、`rename(sourcePath: string, name: string): void`、`setPinned`、`setStatus(sourcePath, status: 'active'|'archived'|'trashed')`、`purge(sourcePath: string)`、`getDraft(sourcePath): DraftRecord | null`、`saveDraft(sourcePath, draft: DraftRecord)`。增量规则：`if (row && row.mtime_ms === stat.mtimeMs && row.size_bytes === stat.size) continue;` 命中则跳过整文件；未命中时用 `fs.createReadStream(filePath, { start: row?.scan_offset ?? 0, encoding: 'utf8' })` 只解析新增字节并把 `scan_offset` 更新为 `stat.size`。此外导出反向分页读取入口 `readEntriesBefore(args: { sourcePath: string; beforeOffset: number; limit: number }): { entries: SessionEntry[]; nextBeforeOffset: number | null; stale: boolean; skippedPartial: number }`（实现在同目录 session-history.ts，由 SessionIndex 提供 scan_offset / mtime_ms / size_bytes / content_hash 四列作为定位与一致性依据）：以 beforeOffset 为上界用 `fs.createReadStream(filePath, { start, end: beforeOffset - 1 })` 按块反向回溯到 limit 个完整行首，被 beforeOffset 截断的半行原样丢弃并计入 skippedPartial；读取前用 `fs.statSync(filePath)` 重新比对索引行的 mtime_ms / size_bytes，不一致则返回 `stale: true`、触发一次 syncWorkspace 后由调用方重试一次。JSONL 是唯一真相源，SQLite 只是索引；一致性判据固定为 mtime_ms + size_bytes 短路 + content_hash（文件前 64KB 的 sha256 前 32 位）检测外部截断/重写。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/app/src/main/sessions, packages/app/src/preload, packages/app/src/renderer/src/stores/sessions.ts",
+  "focus_paths": [
+    "packages/app/src/main/sessions/",
+    "packages/app/src/main/",
+    "packages/app/src/preload/",
+    "packages/app/src/renderer/src/stores/",
+    "packages/app/src/renderer/src/components/"
+  ],
+  "read_first": [
+    "packages/app/src/main/sessions-store.ts",
+    "packages/app/src/main/ipc.ts",
+    "packages/app/src/preload/index.ts",
+    "packages/app/src/preload/index.d.ts",
+    "packages/app/src/renderer/src/stores/app.ts",
+    "packages/app/src/renderer/src/components/Sidebar.vue",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 531-600 行（get_session_stats / export_html / switch_session）与第 772-790 行（set_session_name）",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/session-format.md",
+    "D:/selftool/pi-ui/doc/PiBuddy-product-grade-coding-agent-prompt.md 中 SES-101 小节",
+    "packages/contract/src/index.ts",
+    "packages/contract/src/ipc-contract.ts",
+    "packages/contract/src/envelope.ts",
+    "D:/selftool/pi-ui/node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 第 694-723 行（get_entries 与 since 游标）——原文 696 行明确 since 是 \"get only entries strictly after it\"，且全协议无 before / limit / 反向分页参数，因此向前（更早历史）翻页在 pi RPC 层不存在，只能由主进程按 JSONL 字节 offset 本地反向读取",
+    "packages/app/src/main/sessions/session-index.ts",
+    "packages/app/src/main/sessions/session-index.test.ts",
+    "packages/app/src/main/sessions/session-history.ts",
+    "packages/app/src/main/sessions/session-history.test.ts",
+    "packages/app/src/main/sessions/session-rename.ts",
+    "packages/app/src/main/sessions/sessions-ipc.ts",
+    "packages/app/src/main/ipc-registry.ts",
+    "packages/app/src/preload/api/index.ts",
+    "packages/app/src/preload/api/sessions.ts",
+    "packages/app/src/renderer/src/stores/sessions.ts",
+    "packages/app/src/renderer/src/components/SessionListPanel.vue"
+  ],
+  "depends_on": [
+    "TASK-001",
+    "TASK-002",
+    "TASK-006",
+    "TASK-007",
+    "TASK-008"
+  ],
+  "wave": 8,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "packages/app/src/main/sessions/session-index.ts 含 `SESSION_INDEX_SCHEMA_VERSION = 1`、`PRAGMA user_version`、`scan_offset` 三个字符串；`test -e packages/app/src/main/sessions/session-index.ts && [ \"$(rg -c 'readFileSync' packages/app/src/main/sessions/session-index.ts | wc -l)\" -eq 0 ]`（禁止整文件读入；SYS-1：原写法对尚不存在的文件退出码 2，会被「任务没做」满足）",
+      "[裁定5 + CT-01 · 旧同步枚举路径整体消失] `test ! -e packages/app/src/main/sessions-store.ts`（TASK-006 已删除该文件；原断言要求它存活并仅保留 sessionDirFor 导出，与 TASK-006 files[1] 的 action=delete 直接互斥，且其 grep 在文件缺失时空洞通过）；会话目录 resolver 由 TASK-006 的 packages/app/src/main/sessions/session-dir.ts 提供，本任务 import 之而不重写：`rg -c \"from './session-dir\" packages/app/src/main/sessions/session-index.ts` 输出 >= 1；且 `rg --no-filename -c 'export function encodeSessionDirSegment' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1",
+      "`test -e packages/app/src/main/sessions/ && [ \"$(rg -c 'writeFileSync|appendFileSync|createWriteStream' packages/app/src/main/sessions/ | wc -l)\" -eq 0 ]`，证明 JSONL 真相源只读不改写（SYS-1：原写法 `rg -n ... 无输出` 在目录尚不存在时以退出码 2 结束，会被「任务没做」满足；改用 test -e 前置守卫）",
+      "单测 packages/app/src/main/sessions/session-index.test.ts 覆盖：(a) 同一 fixture 目录连续 syncWorkspace 两次，第二次返回 `reparsed === 0`；(b) 向 fixture .jsonl 追加一条 message 行后 syncWorkspace 返回 `reparsed === 1` 且 messageCount+1；(c) 追加后 fs.readFileSync(file).subarray(0, N).equals(追加前的前 N 字节快照) === true（JSONL 只读不改写）；`pnpm --filter @pibuddy/app test -- src/main/sessions/session-index.test.ts` 退出码 0",
+      "[裁定5 · 唯一枚举实现与唯一 channel 集合] packages/app/src/main/sessions/sessions-ipc.ts 经 registerHandler 注册且仅注册以下 9 个 channel 常量：'sessions:query'、'sessions:rename'、'sessions:set-pinned'、'sessions:set-status'、'sessions:purge'、'sessions:get-draft'、'sessions:save-draft'、'sessions:export-html'、'sessions:read-history'（单测断言 channel 常量数组长度 === 9 且排序后逐项相等）；`rg --no-filename -c 'sessions:list' packages/app/src | awk '{s+=$1} END{print s+0}'` 输出 0；枚举实现唯一：`rg --no-filename -c 'export async function listSessionsForWorkspace' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 1 且该实现位于 packages/app/src/main/sessions/session-index.ts，同时 `test ! -e packages/app/src/main/sessions/session-repository.ts` 且 `rg --no-filename -c 'MAX_SESSIONS_SCANNED' packages/app/src/main | awk '{s+=$1} END{print s+0}'` 输出 0（TASK-006 的 wave 5 过渡实现与其 200 条上限在本任务被原地替换，不与 500 会话基准并存 —— 见 near-miss「MAX_SESSIONS_SCANNED=200 与 500 会话基准」与 CT-02「两套枚举器并存」）",
+      "rename 路径在会话为当前活动会话时发送 `{ type: 'set_session_name', name }` 并对 `resp.success === false` 抛错；单测 session-rename.test.ts 用 fake client 断言该命令被发出且索引 name 列被更新",
+      "packages/app/src/preload/api/index.ts 存在并导出 `export const api = { pi, sessions, settings, dialog, file, shell, stt }`；packages/app/src/preload/index.ts 仅剩 `contextBridge.exposeInMainWorld(\"piBuddy\", api)`；packages/app/src/preload/index.d.ts 含 `export type PiBuddyApi = typeof api`（不再逐字段手写签名）",
+      "[UI-observable] 用户在侧边栏输入关键字可搜索到历史会话；右键/更多菜单可 重命名、置顶、归档、移到回收站；切到「回收站」页可恢复或彻底删除；被置顶会话固定在列表顶部；对 500 个 fixture 会话首屏 query 耗时 < 200ms（在 session-index.bench.test.ts 中断言）",
+      "`pnpm --filter @pibuddy/app typecheck` 退出码 0，且 `pnpm -w test` 退出码 0；既有闭环功能的人工回归记录写入 doc/regression/TASK-009-session-center.md，该文件存在且含恰 4 行以 `- [x]` 开头的条目，逐一对应 会话列表与切换 / 流式文本 / 模型切换 / 费用显示，每行含 ISO 时间戳（原文「人工回归通过并记录在任务说明里」未定记录载体，无法判定）",
+      "[裁定6 · 契约唯一性 · 机器判据] `node scripts/check-contract-uniqueness.mjs` 退出码 0。该脚本由 TASK-002 创建，做三件事并在任一命中时以退出码 1 打印 name:file:line：(a) 取 packages/contract/src/**/*.ts 中全部 `export interface X` / `export type X` 的名字集合 S，在 packages/app/src 与 packages/pi-sdk/src 中查找同名的 `export interface X` / `export type X`，命中即失败；(b) 断言 packages/*/package.json 中 name 匹配 /contract/ 的包恰为 1 个且为 @pibuddy/contract（禁止第二套契约包）；(c) 断言 packages/app/src/preload 与 packages/app/src/renderer/src/stores 下不存在对 '../../../preload/index.d' 形式的跨层 type import。另断言本任务在 packages/app/src/preload/api/ 与 packages/app/src/main/ 下新增的每个 .ts 文件 `rg -c \"from '@pibuddy/contract'\" <file>` 输出 >= 1",
+      "[裁定3 · workspace_id 跨重启稳定] packages/app/src/main/sessions/session-index.ts 的 sessions 表含 `workspace_id TEXT NOT NULL` 列，取值为 TASK-007 的 workspace-registry.ts registerWorkspace() 返回的持久化 workspaceId（由 canonical realpath 的 sha256 派生，见裁定3）；单测断言跨重启一致性：对同一 fixture 目录 syncWorkspace 后关闭并重开索引 DB，再次 registerWorkspace 得到的 id 与表中已存行的 workspace_id 相等，且按该 id 查询能返回上次写入的全部会话行（原设计用进程级 randomUUID，重启后该 NOT NULL 列的取值全部对不上，历史会话表现为「全部消失」且不报任何错）；渲染侧不见绝对路径：`test -e packages/app/src/preload && test -e packages/app/src/renderer/src && [ \"$(rg -c 'workspace_root' packages/app/src/preload packages/app/src/renderer/src | wc -l)\" -eq 0 ]`，且 `rg -c 'workspaceId' packages/app/src/preload/api/sessions.ts` 输出 >= 1",
+      "[CRITICAL-1 反向分页 · 正向断言在先] packages/app/src/main/sessions/session-history.ts 导出 `readEntriesBefore(args: { sourcePath: string; beforeOffset: number; limit: number })`（`rg -c 'export function readEntriesBefore|export async function readEntriesBefore' packages/app/src/main/sessions/session-history.ts` 输出 1，此为正向断言，空实现无法满足）；且 `test -e packages/app/src/main/sessions/session-history.ts && [ \"$(rg -c 'get_entries' packages/app/src/main/sessions/session-history.ts | wc -l)\" -eq 0 ]` —— 反向分页不经 pi RPC（rpc.md:696 规定 since 只返回 strictly after 的条目，全协议无 before / limit 参数）。注：get_entries 在改前的全仓命中数实测为 0，故单独的否定断言是恒真的，必须与上面的正向断言成对使用",
+      "反向分页顺序与完整性单测 session-history.test.ts：用 1000 行 fixture 从文件末尾以 limit=60 连续反向翻页至 nextBeforeOffset===null，断言 (a) 每次返回条数 <= 60；(b) 所有页拼接并反转后的 entryId 序列与 `fs.readFileSync(f,'utf8').trim().split('\\n').map(JSON.parse).map(e=>e.id)` 完全相等；(c) 单次调用经 fs.createReadStream 读取的字节数 < 文件总字节数 * 0.2（证明不是整文件读入）",
+      "半行边界与一致性单测 session-history.test.ts：(a) beforeOffset 落在某行中间时不抛 JSON.parse 异常，被截断的半行丢弃且 skippedPartial === 1；(b) 两次调用之间向 fixture 追加一行后第二次调用返回 stale===true，调用方触发 syncWorkspace 重试后 entries 完整且不含半行",
+      "索引 DB 落在可写目录：`[ \"$(rg -c --no-filename \"app.getPath\\\\('userData'\\\\)\" packages/app/src/main/sessions/session-index.ts | awk '{s+=$1} END{print s+0}')\" -ge 1 ]` 且 `test -e packages/app/src/main/sessions/session-index.ts && [ \"$(rg -c 'process.cwd\\(\\)|__dirname' packages/app/src/main/sessions/session-index.ts | wc -l)\" -eq 0 ]`（打包后 asar 内目录只读，写在 __dirname 下会在 packaged 构建静默失败，而 dev 下不报任何错）",
+      "[SYS-2 · 断言行为而非字面量] 索引写入事务化：单测断言 syncWorkspace 在解析到第 N 个文件时抛错后，该次 sync 的所有行被回滚 —— DB 中该 workspace 的 sessions 行数 === 本次 sync 前的行数，且 `PRAGMA user_version` 未变；另断言并发两次 syncWorkspace 不产生重复行（同一 sourcePath 的行数 === 1）。原文要求源码含 `BEGIN` 与 `COMMIT` 两个字面量，node:sqlite 的 `db.exec('BEGIN')` 与更常见的事务包装写法可能都不含这两个裸词，会把正确实现判为失败",
+      "[preload 分层不留悬空调用] packages/app/src/preload/api/index.ts 的 api 聚合对象恰含 pi / sessions / settings / dialog / file / shell / stt 七个键：单测断言 `Object.keys(api).sort()` 与该七元数组逐项相等（长度 === 7，多挂或漏挂均 FAIL；原文只断言「至少含七个键」，漏挂只在运行时点到该功能才暴露，多挂则完全不被发现）。原 c[4] 已覆盖 `sessions:list` 命中为 0，此处不重复该否定断言",
+      "saveDraft 不静默吞失败：对不存在的 sourcePath 调用 saveDraft 返回 false 且不插入新行（单测断言返回值与 `SELECT COUNT(*)` 不变）；getDraft 对无草稿会话返回 null 而不是 `{}`",
+      "回收站不动真相源：setStatus(path,'trashed') 后目标 .jsonl 仍存在且 sha256 与操作前相同（单测断言）；只有 purge(path) 才调用 `shell.trashItem`，`test -e packages/app/src/main/sessions/ && [ \"$(rg -c 'unlinkSync|rmSync|fs\\.rm\\(' packages/app/src/main/sessions/ | wc -l)\" -eq 0 ]`",
+      "[裁定1 · IPC 守卫结构断言] 全仓 ipcMain 直接注册点为 0：`rg --no-filename -c 'ipcMain\\.(handle|on)\\(' packages/app/src/main -g '*.ts' -g '!ipc-guard.ts' | awk '{s+=$1} END{print s+0}'` 输出 0（改前实测为 13，全部位于 packages/app/src/main/ipc.ts:89-173；该断言不钉死任何 handler 文件，本任务把 handler 迁到新目录后依然成立，这正是 CT-05 中 assertMainFrame 钉死在 ipc.ts 导致 SEC-002 静默失效的修复）；且本任务新增/改写的 9 个 channel 全部经 TASK-007 的 ipc-guard.ts 包装器注册且在契约中有 schema：单测在 registerAllIpc() 执行后遍历 ipc-guard 记录的已注册 channel 表，断言 (a) 本任务的 9 个 channel 逐一出现在该表中；(b) 该表中每个 channel 在 packages/contract/src/ipc-contract.ts 的 schema 表中有对应条目；(c) 该表长度 >= 9。本条不引用任何 handler 文件路径，与本裁定「不钉死任何 handler 文件」的设计意图一致（原文把断言重新钉死到 8 个无人 create 的 各域 *-ipc.ts，rg 对不存在文件退出 2、awk 求和得 0，`0 >= 9` 恒假）",
+      "[CT-21 · 不得新建第二个 vitest 配置] `find . \\( -name 'vitest.config.*' -o -name 'vitest.workspace.*' \\) -not -path './node_modules/*' -not -path './source/*' | sort` 输出恰为 `./vitest.config.ts` 与 `./vitest.workspace.ts` 两行（行数 != 2 即 FAIL） 且两者均位于仓库根；`node scripts/check-test-discovery.mjs` 退出码 0 且其 discovered 与 onDisk 两数相等 —— 本任务新增的 spec 必须出现在 discovered 集合内。（原 implementation 中「必要时新建 packages/app/vitest.config.ts 且 include=['src/**/*.test.ts']」的条件分支已删除：一旦触发，packages/app/test/*.spec.ts 共 11 个 A 分片 spec 全部脱离发现范围，而 `pnpm -w test` 仍退出 0）",
+      "[CT-15 · 渲染进程不持有绝对路径] `test -e packages/app/src/preload && test -e packages/app/src/renderer/src && [ \"$(rg -c 'sourcePath' packages/app/src/preload packages/app/src/renderer/src | wc -l)\" -eq 0 ]`。sourcePath 是 main 内部标识（JSONL 文件绝对路径），跨进程一律换成不透明 `sessionId`；session-history 的反向分页入参在 preload 层为 `{ sessionId, beforeOffset, limit }`，由 main 经索引表把 sessionId 解析为 sourcePath。单测断言 `sessions:read-history` 的 zod schema 的 `.shape` 键集合排序后 === ['beforeOffset','limit','sessionId']",
+      "[near-miss · REFRESH_SESSIONS_DEBOUNCE_MS 归属唯一] `rg --no-filename -c 'REFRESH_SESSIONS_DEBOUNCE_MS =' packages/app/src/renderer | awk '{s+=$1} END{print s+0}'` 输出 1（本任务新建 sessions store 时不得复制该常量）",
+      "[near-miss · AppShell 布局契约由本任务定义] packages/app/src/renderer/src/components/AppShell.vue 含具名插槽 banner / sidebar / main / overlay 四个（`rg -c '<slot name=\"(banner|sidebar|main|overlay)\"' packages/app/src/renderer/src/components/AppShell.vue` 输出 4）；TASK-011/012/014/015/016 只允许向这四个插槽内注入内容，不得改动插槽名集合 —— 后续五个任务各带一条「AppShell.vue 的 slot name 集合排序后仍恰为 ['banner','main','overlay','sidebar']」的断言"
+    ],
+    "verification": "pnpm --filter @pibuddy/app typecheck && pnpm --filter @pibuddy/app test -- src/main/sessions && rg -n \"sessions:list|readdirSync\" packages/app/src && pnpm --filter @pibuddy/app dev 手工回归会话搜索/重命名/置顶/归档/回收站",
+    "definition_of_done": "用户可以在 PiBuddy 里搜索、重命名、置顶、归档和恢复历史会话，几百个会话时列表秒开，且这些操作不会改写 pi 的会话文件本身。"
+  },
+  "files": [
+    {
+      "path": "packages/app/src/main/sessions/session-index.ts",
+      "action": "create",
+      "target": "SessionIndex class",
+      "change": "node:sqlite DatabaseSync 索引，含上表 DDL、PRAGMA user_version 迁移、基于 mtime_ms/size_bytes 短路与 scan_offset 增量解析"
+    },
+    {
+      "path": "packages/app/src/main/sessions/session-index.test.ts",
+      "action": "create",
+      "target": "增量索引单测",
+      "change": "fixture 目录 + 两次 sync 断言 reparsed 计数、追加后前缀字节不变"
+    },
+    {
+      "path": "packages/app/src/main/sessions/session-history.ts",
+      "action": "create",
+      "target": "readEntriesBefore()",
+      "change": "按 JSONL 字节 offset 反向分页读取更早历史（不经 pi RPC），半行截断丢弃并计数，读前用 mtime_ms+size_bytes 校验索引新鲜度并在失配时返回 stale"
+    },
+    {
+      "path": "packages/app/src/main/sessions/session-history.test.ts",
+      "action": "create",
+      "target": "反向分页单测",
+      "change": "1000 行 fixture 连续反向翻页顺序/去重一致性、半行边界、stale 重试、单次读取字节数远小于文件总字节数"
+    },
+    {
+      "path": "packages/app/src/main/sessions/session-rename.ts",
+      "action": "create",
+      "target": "renameSession()",
+      "change": "活动会话走 set_session_name RPC，非活动会话只写索引 name 列；成功后回写 SessionIndex"
+    },
+    {
+      "path": "packages/app/src/main/sessions/sessions-ipc.ts",
+      "action": "create",
+      "target": "registerSessionsIpc()",
+      "change": "注册 sessions:query / rename / set-pinned / set-status / purge / get-draft / save-draft / export-html / read-history 九个 channel"
+    },
+    {
+      "path": "packages/app/src/main/pi/pi-ipc.ts",
+      "action": "create",
+      "target": "registerPiIpc()",
+      "change": "承接从 ipc.ts 迁出的 pi:* handler（pi:start / pi:command / pi:ui-respond / pi:stop），全部经 ipc-guard.ts 的 registerHandler 注册"
+    },
+    {
+      "path": "packages/app/src/main/misc-ipc.ts",
+      "action": "create",
+      "target": "registerMiscIpc()",
+      "change": "承接从 ipc.ts 迁出的 settings / dialog / shell / file / stt handler，全部经 ipc-guard.ts 的 registerHandler 注册"
+    },
+    {
+      "path": "packages/app/src/main/ipc-registry.ts",
+      "action": "create",
+      "target": "registerAllIpc()",
+      "change": "集中调用各 feature 的 register*Ipc()，为 M4/M5 新增能力预留扩展点；由 ipc.ts 调用"
+    },
+    {
+      "path": "packages/app/src/main/sessions-store.ts",
+      "action": "modify",
+      "target": "listSessions / parseSessionFile",
+      "change": "删除 listSessions、parseSessionFile、extractText，仅保留 sessionDirFor"
+    },
+    {
+      "path": "packages/app/src/main/ipc.ts",
+      "action": "modify",
+      "target": "registerIpc()",
+      "change": "移除 sessions:list handler，改为调用 registerAllIpc()；其余 pi/settings/dialog handler 迁到 src/main/pi/pi-ipc.ts 与 misc-ipc.ts"
+    },
+    {
+      "path": "packages/app/src/preload/api/index.ts",
+      "action": "create",
+      "target": "api 聚合对象",
+      "change": "聚合 pi/sessions/settings/dialog/file/shell/stt 命名空间模块"
+    },
+    {
+      "path": "packages/app/src/preload/api/sessions.ts",
+      "action": "create",
+      "target": "sessions 命名空间",
+      "change": "query/rename/setPinned/setStatus/purge/getDraft/saveDraft/exportHtml/readHistoryBefore 方法，含 DraftRecord 类型导出"
+    },
+    {
+      "path": "packages/app/src/preload/index.ts",
+      "action": "modify",
+      "target": "contextBridge 暴露",
+      "change": "改为从 ./api/index.js 导入 api 并 exposeInMainWorld"
+    },
+    {
+      "path": "packages/app/src/preload/index.d.ts",
+      "action": "modify",
+      "target": "PiBuddyApi",
+      "change": "改为 `export type PiBuddyApi = typeof api` 并保留 SessionRow/DraftRecord 等结构类型"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/sessions.ts",
+      "action": "create",
+      "target": "useSessionsStore",
+      "change": "查询条件（search/status/modelId/日期区间）、结果列表、pin/archive/trash/restore/purge 动作、未读与后台运行标识"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/SessionListPanel.vue",
+      "action": "create",
+      "target": "会话列表面板",
+      "change": "搜索框、筛选器、状态分页（进行中/已归档/回收站）、条目操作菜单、空状态"
+    },
+    {
+      "path": "packages/app/src/renderer/src/components/Sidebar.vue",
+      "action": "modify",
+      "target": "session-list 区块",
+      "change": "替换为 SessionListPanel，openSession 改为传 row.sourcePath"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/app.ts",
+      "action": "modify",
+      "target": "refreshSessions / openSession",
+      "change": "refreshSessions 委托给 useSessionsStore().refresh()；openSession 入参改为 { sourcePath: string }"
+    },
+    {
+      "path": "packages/app/src/main/sessions/session-rename.test.ts",
+      "action": "create",
+      "target": "rename RPC 单测",
+      "change": "[errata-2 补录] c[5] 与 test.unit[2] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "packages/app/src/main/sessions/session-index.bench.test.ts",
+      "action": "create",
+      "target": "500 会话首屏 query 基准",
+      "change": "[errata-2 补录] c[7] 与 test.unit[3] 引用，原无 files[] 条目"
+    },
+    {
+      "path": "doc/regression/TASK-009-session-center.md",
+      "action": "create",
+      "target": "会话中心人工回归记录",
+      "change": "[errata-2 补录] c[8] 要求该文件存在并含恰 4 行 `- [x]`，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "存储层用 node:sqlite（TASK-001 的 scripts/probe-node-sqlite.mjs 已在 wave 1 定稿：electron 43.2.0 内 process.versions.node = 24.18.0，require('node:sqlite') 成功）；electron-builder.yml 的 npmRebuild 保持 false 不动。若探针在未来的 electron 升级后转为 FAIL，回退方案是纯 JS/WASM 的 sql.js，仍不得把 npmRebuild 改为 true，也不得引入 better-sqlite3（CT-12：改 true 会与 TASK-016 c[14] 及其 check-pure-js-deps 闸门直接互斥）",
+    "测试沿用 TASK-001 在仓库根建立的唯一 vitest.config.ts，其 include 已覆盖 packages/*/src/**/*.{test,spec}.ts 与 packages/*/test/**/*.{test,spec}.ts；严禁新建 packages/app/vitest.config.ts（CT-21：include=['src/**/*.test.ts'] 会让 packages/app/test/ 下 11 个 A 分片 spec 全部脱离发现范围，而 pnpm -w test 仍退出 0）",
+    "实现 SessionIndex：DDL 与列名严格按 action 字段；content_hash 用 createHash('sha256').update(head).digest('hex').slice(0,32)，head 取文件前 64KB，用于检测被外部截断/重写时强制全量重扫（此时 scan_offset 归零）",
+    "解析 entry 时只识别 type='session'（取 id）、'session_info'（取 name）、'message'（累计 messageCount、抽首条 user 文本做 preview、拼 search_blob 上限 4000 字符、从 assistant.usage 累加 token_total/cost_total、记 model_id）；未知 type 原样跳过，不做任何解释",
+    "query(filter) 生成 SQL：`WHERE workspace_root = ?` + 可选 `AND status = ?` + `AND (name LIKE ?1 OR preview LIKE ?1 OR search_blob LIKE ?1)` + `AND model_id = ?` + `AND mtime_ms BETWEEN ? AND ?`，`ORDER BY pinned DESC, mtime_ms DESC LIMIT ? OFFSET ?`",
+    "回收站语义：setStatus(path,'trashed') 只写 status 与 deleted_at，不删 .jsonl；purge(path) 才调用 shell.trashItem(filePath) 把会话文件移入系统回收站并删除索引行",
+    "实现 session-history.readEntriesBefore：以 beforeOffset 为上界按 64KB 块反向回溯，定位到第 limit 个完整行首为止；读前 statSync 比对索引行的 mtime_ms/size_bytes，失配返回 stale 让调用方先 syncWorkspace；该函数是 TASK-010 向前翻页的唯一数据源，禁止在其中调用任何 pi RPC",
+    "sessions:export-html 调用 `{ type: 'export_html', outputPath }`（rpc.md 第 574-596 行），成功后返回 data.path 并由 renderer 调 shell.showInFolder",
+    "拆 preload：新建 src/preload/api/{pi,sessions,settings,dialog,file,shell,stt}.ts，各自导出一个对象；api/index.ts 聚合；index.ts 只留 exposeInMainWorld；index.d.ts 用 typeof 推导",
+    "渲染层：新建 stores/sessions.ts 与 SessionListPanel.vue，Sidebar.vue 换成新面板；保持 store.openSession 调用链不变以免破坏会话切换闭环",
+    "把 draft_text/draft_json 的 get/save API 一并做出来（B02 会消费），DraftRecord 形如 { text: string; attachments: unknown[]; queue: { steering: string[]; followUp: string[] }; updatedAt: number }",
+    "跑 typecheck + 单测 + dev 手工回归清单（流式文本增量、thinking 折叠、tool 卡片展开、图片附件、steer 插话、abort、模型切换、thinking 切换、费用与 context、语音输入、Extension UI 五方法、会话列表与切换）"
+  ],
+  "test": {
+    "commands": [
+      "pnpm --filter @pibuddy/app typecheck",
+      "pnpm --filter @pibuddy/app test -- src/main/sessions",
+      "rg -n \"sessions:list|readdirSync\" packages/app/src"
+    ],
+    "unit": [
+      "packages/app/src/main/sessions/session-index.test.ts",
+      "packages/app/src/main/sessions/session-history.test.ts",
+      "packages/app/src/main/sessions/session-rename.test.ts",
+      "packages/app/src/main/sessions/session-index.bench.test.ts"
+    ],
+    "integration": [],
+    "success_metrics": [
+      "两次 sync 第二次 reparsed=0",
+      "500 会话 query < 200ms",
+      "JSONL 文件字节前缀不被改写"
+    ]
+  },
+  "reference": {
+    "pattern": "沿用现有 ipcMain.handle + contextBridge 模式，只做分层不换机制",
+    "files": [
+      "packages/app/src/main/ipc.ts",
+      "packages/app/src/preload/index.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "SES-101 是 M3 出口门禁「恢复/搜索/重命名会话」的载体，且 sessions-store.ts 的全量同步扫描在 agent_settled 每次触发，是当前最确定的性能债；顺手做 preload 分层可以让 B03-B08 六个任务不再争抢 index.d.ts。",
+    "decision_factors": [
+      "本 wave 只有本任务，独占 ipc.ts / preload/index.ts / index.d.ts / stores/app.ts 四个热点文件",
+      "JSONL 只读是 pi 生态兼容的硬约束"
+    ],
+    "tradeoffs": "node:sqlite 在 Electron 43 的可用性需实测；不可用时回退 better-sqlite3 会引入 native rebuild 成本"
+  },
+  "risks": [
+    "node:sqlite 的可用性已在 wave 1 由 scripts/probe-node-sqlite.mjs 实测定稿（electron 43.2.0 / node 24.18.0 / require 成功），本任务据此选型。残余风险是未来 electron 升级导致探针转 FAIL —— 届时回退到纯 JS/WASM 的 sql.js，绝不改 npmRebuild 也不引入原生依赖（CT-12）",
+    "会话树定位（current leaf / 分支点 / compaction / 模型变化）与 fork/clone/rewind 不静默删分支，本任务只落 get_tree/get_fork_messages 的 IPC 通道与类型，可视化会话树 UI 延期到 B02 之后的独立迭代，需在验收说明中明确标注未完成。【裁决B · 用户已于 2026-08-02 确认批准该裁剪】可视化会话树 UI 明确不在本计划交付范围内，M3 出口门禁 doc:329 的「分叉」能力本轮只达成数据面；fork/clone/rewind 与 get_session_tree / get_fork_messages 的 RPC 与 IPC 能力仍必须完整接入，验收说明须标注「分叉可视化未完成」，任何声称 M3 出口门禁完整达成的表述都是错误的",
+    "已由 synthesis 定案：preload/api/*.ts 的所有跨进程类型一律从 @pibuddy/contract 导入（A02 产出 envelope.ts / ipc-contract.ts / session.ts / settings.ts / ports.ts），不得在 preload 或 renderer 内重新声明第二套形状",
+    "pi 0.83.0 的 get_entries 只支持 since（strictly after）游标，没有 before/limit，反向分页在 RPC 层不存在；本任务的 readEntriesBefore 是 TASK-010 历史加载的唯一实现路径，若被改回 RPC 会直接功能不可达"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "会话中心",
+      "会话搜索与整理"
+    ],
+    "affected_components": [
+      "main/sessions",
+      "preload",
+      "renderer/Sidebar"
+    ],
+    "affected_requirements": [
+      "SES-101"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "10h",
+    "risk": "medium",
+    "autonomous": true,
+    "checkpoint": false,
+    "wave": 8
+  },
+  "origin_shard": "B",
+  "origin_id": "TASK-B01"
+}

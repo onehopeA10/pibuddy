@@ -1,0 +1,238 @@
+{
+  "id": "TASK-005",
+  "title": "RUN-002 + RUN-003 运行时代际状态机与 SDK 可靠性垂直切片",
+  "description": "实测：clients Map 只按 webContentsId 索引，无 runtimeId/generation；makeEventForwarder(ipc.ts:36-77) 只返回函数不返回 dispose 句柄，client 被替换时 33ms timer 无人可清；client.ts:104-111 旧进程延迟退出仍 emit('exit')，经 ipc.ts:102 发给 renderer，stores/app.ts:287 无从辨别代际，导致刚启动成功的新会话被置 started=false 并弹「智能体进程意外退出」。SDK 侧 timeout / AbortSignal / stdin error / drain 背压 / JSONL buffer 上限全部缺失；ENOENT 实测序列为 error → close 且 exit 事件从不触发，导致 proc 永不置 null、pi:exit 永不发出、死 client 滞留在 clients map（ipc.ts:104 的 clients.set 位于 await 之前），clientFor 只抛泛化「智能体尚未启动」吞掉真因。rpc.md 全文无 sequence 概念，序号必须由 PiBuddy 自行注入。本任务作为一个垂直切片同时改造 SDK、主进程 supervisor、preload 与渲染进程 store。",
+  "issue_id": null,
+  "issue_refs": [],
+  "type": "fix",
+  "priority": "high",
+  "effort": "large",
+  "action": "在 packages/pi-sdk/src/client.ts 增加 readonly runtimeId = randomUUID()、readonly generation、type RuntimePhase = \"idle\"|\"starting\"|\"running\"|\"stopping\"|\"stopped\"|\"crashed\"|\"recovering\" 与 const ALLOWED_TRANSITIONS 表（非法转换在 process.env.NODE_ENV !== \"production\" 时抛错）；send(command, opts?: {timeoutMs?: number; signal?: AbortSignal}) 默认 DEFAULT_RPC_TIMEOUT_MS = 30_000，超时或 abort 后必须 this.pending.delete(id)；注册 proc.on(\"close\") 与 proc.stdin.on(\"error\")、检查 stdin.write 返回值并在 false 时 await once(stdin,\"drain\")；jsonl.ts 增加 MAX_LINE_BYTES = 8*1024*1024 与 MAX_BUFFER_BYTES = 16*1024*1024 超限即报错并重置 buffer；stop() 实现四级阶梯 abort(1500ms) → stdin.end()(1000ms) → SIGTERM(3000ms) → Windows 用 taskkill /pid <pid> /T /F、其它平台 process.kill(-pid,'SIGKILL')；新建 packages/app/src/main/pi-supervisor.ts 实现 @pibuddy/contract 的 PiRuntimeSupervisor，为每次 start 分配不可复用的 runtimeId 与自增 generation、维护单调 sequence，并把 pi:event / pi:ui-request / pi:exit 三条 push 通道全部包进 PiEnvelope；把 ipc.ts:104 的 clients.set(wc.id, client) 移到 client.start() 之后、任何 await 之前；渲染进程 stores/app.ts 在 handleEvent 入口丢弃 generation 小于当前值或 sequence 未递增的信封，并接住 app.ts:285-287 被丢弃的三个 unsubscribe 闭包。",
+  "status": "pending",
+  "completed_at": null,
+  "actual_duration": null,
+  "scope": "packages/pi-sdk + packages/app/src/main + preload + renderer store",
+  "focus_paths": [
+    "packages/pi-sdk/src/",
+    "packages/app/src/main/",
+    "packages/app/src/renderer/src/stores/"
+  ],
+  "read_first": [
+    "packages/pi-sdk/src/client.ts",
+    "packages/pi-sdk/src/jsonl.ts",
+    "packages/app/src/main/ipc.ts",
+    "packages/app/src/preload/index.ts",
+    "packages/app/src/renderer/src/stores/app.ts",
+    "packages/contract/src/envelope.ts",
+    "packages/contract/src/ports.ts",
+    "tools/fake-pi/fake-pi.mjs",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Protocol Overview' 与 'Framing'（第 20-38 行，确认协议不提供 sequence，需自行注入）",
+    "node_modules/.pnpm/@earendil-works+pi-coding-agent@0.83.0_ws@8.21.1_zod@4.4.3/node_modules/@earendil-works/pi-coding-agent/docs/rpc.md 的 'Events' 章节（第 832-1080 行）",
+    "packages/pi-sdk/src/index.ts",
+    "packages/app/src/main/pi-supervisor.ts",
+    "packages/app/src/preload/index.d.ts",
+    "packages/pi-sdk/test/lifecycle.spec.ts",
+    "packages/app/test/generation.spec.ts"
+  ],
+  "depends_on": [
+    "TASK-002",
+    "TASK-003"
+  ],
+  "wave": 4,
+  "parallel_group": null,
+  "execution_group": null,
+  "executor": "agent",
+  "convergence": {
+    "criteria": [
+      "packages/pi-sdk/src/client.ts contains 'DEFAULT_RPC_TIMEOUT_MS = 30_000' 且 contains 'signal?: AbortSignal'",
+      "packages/pi-sdk/src/client.ts contains 'ALLOWED_TRANSITIONS' 且同时 contains 全部 7 个相位字面量 'idle'、'starting'、'running'、'stopping'、'stopped'、'crashed'、'recovering'",
+      "packages/pi-sdk/src/client.ts contains 'proc.on(\"close\"' 且 contains 'proc.stdin.on(\"error\"' 且 contains 'once(proc.stdin, \"drain\")'",
+      "packages/pi-sdk/src/client.ts contains 'taskkill' 且 contains '/T' 且 contains '/F'",
+      "packages/pi-sdk/src/client.ts contains 'randomUUID()' 且 contains 'readonly runtimeId'",
+      "packages/pi-sdk/src/jsonl.ts contains 'MAX_LINE_BYTES' 且 contains 'MAX_BUFFER_BYTES'",
+      "[CT-03/CT-04 · 信封在上游、折叠在下游] packages/app/src/main/pi-supervisor.ts contains 'implements PiRuntimeSupervisor' 且 contains 'generation' 且 contains 'sequence' 且 contains 'PROTOCOL_VERSION' 且 contains 'wrapEnvelope('，其对外发出的每个事件都是 `PiEnvelope<AgentEvent>`；33ms 批处理与折叠不在本文件内，而在本任务新建的 packages/app/src/main/pi/event-forwarder.ts（全计划唯一转发器位置，TASK-010 在此文件上继续升级折叠算法）。结构断言：`rg --no-filename -c 'setTimeout\\(.*33|BATCH_INTERVAL_MS' packages/app/src/main/pi-supervisor.ts | awk '{s+=$1} END{print s+0}'` 输出 0",
+      "packages/app/src/main/pi/event-forwarder.ts 导出 `export function collapseEnvelopes(input: PiEnvelope<AgentEvent>[]): PiEnvelope<AgentEvent>[]`（本任务先实现按 sequence 保序的直通版本，TASK-010 升级为 delta 累加版本）与 `export function createForwarder(...)`，contains 'BATCH_INTERVAL_MS = 33'；其 dispose 函数体同时 contains 'clearTimeout'、'removeAllListeners'、'queue = []'（RUN-002 要求 dispose 取消 batch timer、清队列、移除 listener、拒绝 pending）；packages/app/test/event-forwarder.spec.ts 断言 dispose 后再投递事件时 wc.send 调用次数为 0",
+      "[CT-06 · 与 handler 所在文件解耦] 用 node 脚本执行：先取 `rg -l 'pi:start' packages/app/src/main -g '*.ts'` 的命中文件列表，断言其长度恰为 1（0 个或 >1 个均判 FAIL）；再在该文件中定位 pi:start handler 的回调体，断言 `clients.set(` 所在行号小于该回调体内第一个 `await ` 所在行号（修复 ipc.ts:104 的死 client 滞留）。脚本不得硬编码 packages/app/src/main/ipc.ts —— TASK-007/009 会把该 handler 迁走，硬编码路径会使本校验在 wave 6 之后静默失效",
+      "`test -e packages/app/src/main/ipc.ts && [ \"$(rg -c '智能体尚未启动' packages/app/src/main/ipc.ts | wc -l)\" -eq 0 ]`；且 packages/pi-sdk/test/lifecycle.spec.ts 断言 clientFor 在 spawn 失败后抛出的 Error.message contains lastSpawnError 的原始文本（用 ENOENT 场景断言 message contains 'ENOENT'），使 ENOENT 真因不再被吞",
+      "packages/pi-sdk/test/lifecycle.spec.ts 断言：spawn 一个不存在的可执行文件后 2000ms 内 phase 变为 'crashed'，且 'exit' 事件恰好被 emit 一次；该测试在 pnpm -w test 中通过",
+      "packages/pi-sdk/test/lifecycle.spec.ts 断言：--scenario timeout 下 send() 在 30_000ms（测试中用 timeoutMs:200 覆写）后 reject，且 client 内部 pending map 的 size 回到 0",
+      "packages/pi-sdk/test/lifecycle.spec.ts 断言：--scenario oversized-line 下 jsonl reader 抛出可捕获错误且不导致进程内存无界增长（buffer 长度在报错后归零）",
+      "packages/pi-sdk/test/lifecycle.spec.ts 断言：非法状态转换（如 stopped → running）在 NODE_ENV 非 production 时抛错",
+      "packages/app/test/generation.spec.ts 断言：先后投递 generation:2 与 generation:1 两个信封，store 处理后 started 仍为 true 且 generation:1 的 payload 未进入 items；另断言 sequence 倒退的信封被丢弃；该测试在 pnpm -w test 中通过",
+      "`[ \"$(rg -c --no-filename 'activityTick.value\\+\\+' packages/app/src/renderer/src/stores/app.ts | awk '{s+=$1} END{print s+0}')\" -ge 1 ]`（ChatView 滚动唯一驱动必须保留）",
+      "packages/app/src/renderer/src/stores/app.ts contains 'unsubscribes' 且 subscribeOnce 中三个 window.piBuddy.pi.on* 的返回值均被存入该数组（修复 app.ts:285-287 闭包被丢弃）",
+      "pnpm typecheck 退出码 0，pnpm -w test 退出码 0",
+      "[UI-observable] 手动：在流式回复进行中连续点击两次「新任务」，界面不再弹出「智能体进程意外退出，请重新开始」，输入框保持可用且能立即发送下一条；同一操作后流式期间聊天区仍自动滚动到底部、tool 卡片仍可展开",
+      "[UI-observable] 手动，记录在 doc/regression/TASK-005-runtime.md：把 settings 的 piRuntimeMode 设为 external 并指向不存在的命令，界面给出的错误文案 contains 'ENOENT' 或 contains 该缺失命令名，且 not contains '智能体尚未启动'"
+    ],
+    "verification": "cd D:/selftool/pi-ui && pnpm -w test && pnpm typecheck && node -e \"const s=require('fs').readFileSync('packages/app/src/main/ipc.ts','utf8').split('\\n');const set=s.findIndex(l=>l.includes('clients.set(wc.id, client)'));const aw=s.findIndex((l,i)=>i>s.findIndex(x=>x.includes('pi:start'))&&l.includes('await '));console.log('set',set,'firstAwait',aw);process.exit(set>=0&&set<aw?0:1)\"",
+    "definition_of_done": "任意一次运行时重启、崩溃或用户主动停止之后，界面状态与实际进程状态始终一致：旧代际的事件与退出通知不会污染新会话，进程启动失败会给出真实原因，主动停止与崩溃被明确区分，且没有任何请求会永久悬挂。"
+  },
+  "files": [
+    {
+      "path": "packages/pi-sdk/src/client.ts",
+      "action": "modify",
+      "target": "PiRpcClient 全类",
+      "change": "新增 runtimeId/generation/phase 与 ALLOWED_TRANSITIONS；send 增加 timeoutMs 与 signal 并在结束路径统一 pending.delete；start 中注册 proc.on('close') 与 proc.stdin.on('error')；write 检查返回值做 drain 背压；failAll 区分 stoppedByUser；stop 改为四级阶梯并对每级设超时；新增有界诊断环 diagnostics（上限 200 条）收集 malformed / orphan / duplicate response"
+    },
+    {
+      "path": "packages/pi-sdk/src/jsonl.ts",
+      "action": "modify",
+      "target": "attachJsonlReader",
+      "change": "新增 MAX_LINE_BYTES = 8*1024*1024 与 MAX_BUFFER_BYTES = 16*1024*1024；超限时调用新增的 onError 回调并把 buffer 重置为空字符串；保持现有仅按 \\n 分帧、剥离尾部 \\r 的语义不变（已符合 rpc.md Framing）"
+    },
+    {
+      "path": "packages/pi-sdk/src/index.ts",
+      "action": "modify",
+      "target": "导出面",
+      "change": "导出 RuntimePhase、RpcTimeoutError、RpcAbortedError、JsonlOverflowError"
+    },
+    {
+      "path": "packages/app/src/main/pi-supervisor.ts",
+      "action": "create",
+      "target": "PiRuntimeSupervisor 实现",
+      "change": "持有 clients: Map<number, {client, runtimeId, generation, sequence, forwarder}>；每次 start 生成 randomUUID() 与 ++generationCounter（永不复用）；forwarder 返回 {push, dispose}，dispose 清 33ms timer、清空 queue、removeAllListeners、reject pending；只转发 generation === 当前 generation 的事件；所有 push 通道用 @pibuddy/contract 的 PiEnvelope 包装并填满 7 个字段；33ms 批处理与折叠不放在本文件，另建 packages/app/src/main/pi/event-forwarder.ts 承载（CT-03/CT-04：TASK-010 在同一文件上升级折叠，避免两个转发器并存）"
+    },
+    {
+      "path": "packages/app/src/main/ipc.ts",
+      "action": "modify",
+      "target": "pi:start / pi:stop / clientFor / makeEventForwarder",
+      "change": "把 makeEventForwarder（第 36-77 行）整体迁入 pi-supervisor.ts；pi:start 改为委托 supervisor；clients.set 移至 client.start() 之后、await 之前；clientFor 抛出的错误携带 lastSpawnError 原文；pi:exit 携带 runtimeId + generation"
+    },
+    {
+      "path": "packages/app/src/preload/index.ts",
+      "action": "modify",
+      "target": "onEvent / onUiRequest / onExit",
+      "change": "不再剥离 event 只传 payload，改为把完整 PiEnvelope 透传给渲染进程（第 7-11 行 subscribe 调整），并在 pagehide 时清理全部监听"
+    },
+    {
+      "path": "packages/app/src/preload/index.d.ts",
+      "action": "modify",
+      "target": "回调签名",
+      "change": "三个 on* 回调参数类型改为 PiEnvelope<AgentEvent> / PiEnvelope<ExtensionUiRequest> / PiEnvelope<{code:number|null; reason:'expected-stop'|'crash'}>"
+    },
+    {
+      "path": "packages/app/src/renderer/src/stores/app.ts",
+      "action": "modify",
+      "target": "subscribeOnce / handleEvent / start",
+      "change": "新增 currentRuntimeId、currentGeneration、lastSequence；handleEvent 入口先 parseEnvelope 再比对代际与序号，不合格直接 return；onExit 只在 generation 相同时置 started=false 并按 reason 区分「已停止」与「意外退出」；把三个 on* 返回的 unsubscribe 存入 unsubscribes 数组并在 dispose 时调用"
+    },
+    {
+      "path": "packages/pi-sdk/test/lifecycle.spec.ts",
+      "action": "create",
+      "target": "SDK 可靠性测试",
+      "change": "覆盖 ENOENT→crashed、timeout 后 pending 清空、abort signal、oversized-line、非法状态转换、stop 四级阶梯全部走完六组用例"
+    },
+    {
+      "path": "packages/app/test/generation.spec.ts",
+      "action": "create",
+      "target": "代际丢弃测试",
+      "change": "覆盖旧 generation 信封被丢弃、sequence 倒退被丢弃、同代际正常事件被接收三组用例"
+    },
+    {
+      "path": "packages/app/src/main/pi/event-forwarder.ts",
+      "action": "create",
+      "target": "33ms 批处理转发器与 collapseEnvelopes 入口",
+      "change": "签名 collapseEnvelopes(input: PiEnvelope<AgentEvent>[]): PiEnvelope<AgentEvent>[]；本任务实现保序直通版，TASK-010 升级为 delta 累加版。类型层面锁死「折叠只吃信封」，使 TASK-010 的 fixture 无法投喂裸事件（CT-04）"
+    },
+    {
+      "path": "packages/app/test/event-forwarder.spec.ts",
+      "action": "create",
+      "target": "转发器基线测试",
+      "change": "dispose 后不再投递、33ms 窗口合批、窗口销毁不抛异常"
+    },
+    {
+      "path": "doc/regression/TASK-005-runtime.md",
+      "action": "create",
+      "target": "生成生命周期人工回归记录",
+      "change": "[errata-2 补录] c[19] 要求该文件存在并含勾选行，原无 files[] 条目"
+    }
+  ],
+  "implementation": [
+    "在 client.ts 顶部引入 node:crypto randomUUID 与 node:events once；构造函数接收 generation 并生成 runtimeId",
+    "定义 RuntimePhase 与 ALLOWED_TRANSITIONS 表，实现 private transition(next)，非法转换时在 NODE_ENV !== 'production' 抛错、生产环境记 diagnostics",
+    "改写 send()：生成 id 为 `${this.runtimeId}:${++this.seq}`；用 AbortSignal.timeout(timeoutMs ?? DEFAULT_RPC_TIMEOUT_MS) 与传入 signal 组合，任一触发即 pending.delete(id) 并 reject 对应错误类型",
+    "start() 中补 proc.on('close', ...)（实测 ENOENT 只走 error → close，exit 永不触发）与 proc.stdin.on('error', ...)；error 分支置 phase='crashed'、this.proc=null 并 emit('exit', null, {reason:'crash'})",
+    "改写 write()：检查 stdin.write 返回值，false 时把后续写入排入有界队列并 await once(stdin,'drain')",
+    "jsonl.ts 增加两个上限常量与 onError 回调，超限重置 buffer",
+    "改写 stop()：置 phase='stopping' 后拒绝新命令 → 发 abort RPC 等 1500ms → stdin.end() 等 1000ms → proc.kill('SIGTERM') 等 3000ms → Windows 执行 taskkill /pid <pid> /T /F，其它平台 process.kill(-pid,'SIGKILL')；每级用独立 timer 并在成功退出时清除",
+    "新建 pi-supervisor.ts，把 ipc.ts:36-77 的 makeEventForwarder 迁入并改造为返回 {push, dispose}；在 dispose 中 clearTimeout(timer)、queue=[]、client.removeAllListeners()、client.stop()",
+    "在 supervisor 中为每条外发消息填充 PiEnvelope 的 7 个字段，sequence 由每个 runtime 独立单调自增",
+    "改 ipc.ts：pi:start 委托 supervisor，clients.set 提前到 client.start() 之后且在任何 await 之前；clientFor 携带 lastSpawnError",
+    "改 preload 三个 subscribe 与 index.d.ts 签名，改渲染进程 store 的代际/序号丢弃逻辑与 unsubscribe 收集",
+    "写两个测试文件并跑 pnpm -w test；再人工做「流式中连点两次新任务」与「external 指向不存在命令」两项 UI 验证"
+  ],
+  "test": {
+    "commands": [
+      "pnpm -w test",
+      "pnpm typecheck",
+      "pnpm --filter @pibuddy/app build"
+    ],
+    "unit": [
+      "packages/pi-sdk/test/lifecycle.spec.ts",
+      "packages/app/test/generation.spec.ts"
+    ],
+    "integration": [
+      "tools/fake-pi/fake-pi.mjs --scenario stale-generation 驱动的端到端代际测试"
+    ],
+    "success_metrics": [
+      "ENOENT 后 2000ms 内 phase === 'crashed' 且 exit 恰好一次",
+      "timeout 后 pending.size === 0",
+      "旧 generation 信封 100% 被丢弃",
+      "activityTick 递增语句仍存在"
+    ]
+  },
+  "reference": {
+    "pattern": "pending map 的 id 关联现有实现（client.ts:154-165）本身正确，只需补 timeout/abort 的清理路径；33ms 批处理与累积型折叠逻辑（ipc.ts:40-71）必须原样迁移不得改变折叠语义",
+    "files": [
+      "packages/pi-sdk/src/client.ts",
+      "packages/app/src/main/ipc.ts",
+      "packages/contract/src/envelope.ts"
+    ],
+    "examples": null
+  },
+  "rationale": {
+    "chosen_approach": "RUN-002 与 RUN-003 共享同一条生命周期链路：代际标识由 SDK 生成、由 supervisor 注入信封、由渲染进程判定丢弃；dispose 阶梯同时服务于代际切换与主动停止。拆成两个任务会让 ipc.ts / preload / store 被两次改写并产生半成品中间态。",
+    "decision_factors": [
+      "旧代际 exit 误伤新会话是用户可见的最高频故障",
+      "ENOENT 下 exit 永不触发导致死 client 滞留",
+      "rpc.md 不提供 sequence，必须自行注入"
+    ],
+    "tradeoffs": "单任务改动面覆盖 4 个层级，回归风险高；用 fake-pi 的 stale-generation / crash-mid-stream / timeout 三个场景做自动化兜底，并把 activityTick 与 33ms 折叠语义写成显式验收条件。"
+  },
+  "risks": [
+    "preload 由只传 payload 改为透传完整信封，会一次性影响 stores/app.ts:124-240 的 switch reducer 入口，必须先在 handleEvent 顶部解包再进入原有 switch，避免逐 case 改写",
+    "33ms 批处理的累积型折叠（message_update 与同 toolCallId 的 tool_execution_update 只保留最后一条）迁移时若丢失，会造成流式文本闪烁或 tool 卡片不更新",
+    "stop() 阶梯中 Windows 的 taskkill /T 会杀掉整棵进程树，若 pi 子进程正在写会话 JSONL 可能损坏文件，需在 SIGTERM 级别预留 3000ms 让其正常收尾"
+  ],
+  "code_skeleton": null,
+  "doc_context": {
+    "affected_features": [
+      "运行时生命周期",
+      "事件转发",
+      "进程停止",
+      "错误提示"
+    ],
+    "affected_components": [
+      "packages/pi-sdk/src/client.ts",
+      "packages/pi-sdk/src/jsonl.ts",
+      "packages/app/src/main/pi-supervisor.ts",
+      "packages/app/src/renderer/src/stores/app.ts"
+    ],
+    "affected_requirements": [
+      "RUN-002",
+      "RUN-003",
+      "OBS-001"
+    ],
+    "adr_ids": []
+  },
+  "meta": {
+    "estimated_time": "120m",
+    "risk": "high",
+    "autonomous": true,
+    "checkpoint": true,
+    "wave": 4
+  },
+  "origin_shard": "A",
+  "origin_id": "TASK-A04"
+}

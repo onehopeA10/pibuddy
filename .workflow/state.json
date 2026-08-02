@@ -1,0 +1,88 @@
+{
+  "version": "3.1",
+  "project_name": "PiBuddy",
+  "status": "planning",
+  "current_milestone": "MS-001",
+  "current_task_id": null,
+  "milestones": [
+    {
+      "id": "MS-001",
+      "name": "PiBuddy 产品级改造 M0-M5",
+      "type": "adhoc",
+      "status": "planning",
+      "phases": [
+        "M0 基线、契约与测试骨架",
+        "M1 bundled Pi、session resolver、runtime supervisor",
+        "M2 Electron 安全边界、权限中心与敏感数据",
+        "M3 会话、Provider、Pi 生态与桌面交互",
+        "M4 更新、签名、CI/CD、诊断",
+        "M5 Workspace、Office/PDF、artifact 工作台"
+      ],
+      "phase_slugs": {
+        "M0": "baseline-contract-test",
+        "M1": "pi-runtime-session",
+        "M2": "security-permission",
+        "M3": "session-provider-ux",
+        "M4": "update-signing-ci",
+        "M5": "workspace-artifact"
+      },
+      "roadmap_ref": "doc/PiBuddy-product-grade-coding-agent-prompt.md",
+      "created_at": "2026-08-02"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "PLN-001",
+      "type": "plan",
+      "scope": "standalone",
+      "milestone": "MS-001",
+      "phase": "M0-M5",
+      "path": ".workflow/scratch/20260802-plan-P0-pibuddy-m0-m5/outputs/plan.json",
+      "depends_on": [],
+      "created_at": "2026-08-02",
+      "confidence": 0.75,
+      "confidence_label": "LOW_CONFIDENCE",
+      "confidence_note": "修订轮次超限（W002）。user_validation 因子 0.05：全程 -y，用户仅在收尾确认了 3 项裁决，未逐条确认六组架构归属。",
+      "task_count": 16,
+      "wave_count": 13,
+      "user_confirmed": true,
+      "user_decisions": [
+        "路径归一：再跑一轮定向清理（已完成，悬空引用 62→0）",
+        "M4：接受 blocked-by-credential 交付",
+        "SES-101 会话树/分叉可视化：接受裁剪，记入 deferred"
+      ],
+      "implementation_status": "not_started",
+      "note": "本轮仅产出计划，未写任何产品代码。M0-M5 出口门禁均未达成。"
+    }
+  ],
+  "last_updated": "2026-08-02",
+  "accumulated_context": {
+    "key_decisions": [
+      "DO_NOT_MIGRATE_FRAMEWORK=true：保持 Electron + Vue 3 + Pinia + Naive UI + electron-vite + electron-builder",
+      "PRIMARY_PLATFORM=Windows 11 x64；macOS arm64/x64 与 Ubuntu x64 为次要平台",
+      "pi 作为可替换 Agent runtime：默认 bundled，external 为高级设置"
+    ],
+    "blockers": [
+      "非 git 仓库：无法产生 git diff 证据，需替代变更留痕方案",
+      "M4 缺真实凭据（GitHub owner/repo、Windows signing identity、Apple Team/Developer ID/notarization），出口门禁结构性不可达，只能记 blocked-by-credential",
+      "无 clean VM：M1/M4 的 packaged E2E 无法完成，只能记 not-tested"
+    ],
+    "deferred": [
+      "M6 PTY/Git/worktree",
+      "M7 后台会话池与 child Agent",
+      "M8 durable tasks 与长期记忆",
+      "M9 Remote/PWA/IM、浏览器与插件平台",
+      "M10 GA 门禁"
+    ]
+  },
+  "transition_history": [
+    {
+      "at": "2026-08-02",
+      "from": "idle",
+      "to": "planning",
+      "by": "maestro-plan",
+      "note": "标准 standalone 解析 + current_milestone=null → 按 D-008 自动创建 adhoc milestone"
+    }
+  ],
+  "milestone_history": []
+}
