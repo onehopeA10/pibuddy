@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@pibuddy/contract": "workspace:*",
     "@pibuddy/pi-sdk": "workspace:*",
     "highlight.js": "^11.10.0",
     "markdown-it": "^14.1.0",

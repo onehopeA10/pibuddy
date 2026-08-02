@@ -4,8 +4,9 @@ import { resolve } from "node:path";
 
 export default defineConfig({
   main: {
-    // pi-sdk 随主进程一起打包；其余依赖保持 external
-    plugins: [externalizeDepsPlugin({ exclude: ["@pibuddy/pi-sdk"] })],
+    // pi-sdk / contract 是源码形式的 workspace 包，必须随主进程一起打包；
+    // 漏加会构建通过但运行时报「无法解析的 external」
+    plugins: [externalizeDepsPlugin({ exclude: ["@pibuddy/pi-sdk", "@pibuddy/contract"] })],
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
@@ -15,6 +16,7 @@ export default defineConfig({
     resolve: {
       alias: {
         "@sdk": resolve(__dirname, "../pi-sdk/src/types.ts"),
+        "@contract": resolve(__dirname, "../contract/src/index.ts"),
       },
     },
     build: {

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { attachJsonlReader } from "./jsonl.js";
+import { toAgentEvent } from "./types.js";
 import type {
   AgentEvent,
   AgentState,
@@ -128,14 +129,14 @@ export class PiRpcClient extends EventEmitter {
         return;
       }
       // 无 id 的响应也作为事件透出，便于调试
-      this.emit("event", obj as AgentEvent);
+      this.emit("event", toAgentEvent(obj));
       return;
     }
     if (obj.type === "extension_ui_request") {
       this.emit("ui_request", obj as unknown as ExtensionUiRequest);
       return;
     }
-    this.emit("event", obj as AgentEvent);
+    this.emit("event", toAgentEvent(obj));
   }
 
   private failAll(err: Error): void {

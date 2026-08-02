@@ -7,6 +7,13 @@ import {
   type ExtensionUiResponse,
   type RpcCommandBase,
 } from "@pibuddy/pi-sdk";
+import type {
+  PickedFile,
+  PiStartParams,
+  ReadImageResult,
+  SttTranscribeRequest,
+  SttTranscribeResult,
+} from "@pibuddy/contract";
 import { buildPiSpawn } from "./pi-launcher.js";
 import { listSessions } from "./sessions-store.js";
 import { loadSettings, saveSettings, type AppSettings } from "./settings.js";
@@ -88,7 +95,7 @@ const IMAGE_MIME: Record<string, string> = {
 export function registerIpc(): void {
   ipcMain.handle(
     "pi:start",
-    async (event, opts: { workspace: string; session?: string }) => {
+    async (event, opts: PiStartParams) => {
       const wc = event.sender;
       disposeClientFor(wc.id);
 
@@ -154,7 +161,7 @@ export function registerIpc(): void {
   });
 
   // 读取本地图片为 base64（供图片附件内联发送给模型）
-  ipcMain.handle("file:read-image", (_event, filePath: string) => {
+  ipcMain.handle("file:read-image", (_event, filePath: string): ReadImageResult => {
     const mimeType = IMAGE_MIME[path.extname(filePath).toLowerCase()];
     if (!mimeType) throw new Error("不支持的图片格式");
     const data = fs.readFileSync(filePath).toString("base64");
@@ -172,16 +179,7 @@ export function registerIpc(): void {
   // 语音转写：转发到 OpenAI 兼容 /audio/transcriptions 端点（主进程发请求，避免 CORS）
   ipcMain.handle(
     "stt:transcribe",
-    async (
-      _event,
-      req: {
-        baseUrl: string;
-        apiKey: string;
-        model: string;
-        audio: ArrayBuffer;
-        mimeType: string;
-      }
-    ) => {
+    async (_event, req: SttTranscribeRequest): Promise<SttTranscribeResult> => {
       const form = new FormData();
       const ext = req.mimeType.includes("ogg")
         ? "ogg"
@@ -212,12 +210,7 @@ export function registerIpc(): void {
   );
 }
 
-function describeFile(filePath: string): {
-  path: string;
-  name: string;
-  size: number;
-  kind: "image" | "video" | "other";
-} {
+function describeFile(filePath: string): PickedFile {
   const ext = path.extname(filePath).toLowerCase();
   const kind = IMAGE_MIME[ext]
     ? "image"

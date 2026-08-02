@@ -1,0 +1,19 @@
+{
+  "name": "@pibuddy/contract",
+  "version": "0.1.0",
+  "private": true,
+  "description": "main / preload / renderer / pi-sdk 四方共用的类型与运行时 schema 唯一真相源",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.0"
+  }
+}

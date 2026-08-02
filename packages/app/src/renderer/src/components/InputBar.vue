@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { NButton, NInput, NSpin, useMessage } from "naive-ui";
 import type { ImageContent } from "@sdk";
-import type { PickedFile } from "../../../preload/index.d";
+import type { PickedFile } from "@contract";
 import { useAppStore } from "../stores/app";
 import { VoiceRecorder } from "../stt";
 

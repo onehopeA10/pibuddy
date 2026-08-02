@@ -1,6 +1,16 @@
 import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { registerIpc, disposeClientFor } from "./ipc.js";
+import { createLogger, type Logger } from "./logger.js";
+
+/** 全应用唯一的 logger 实例，在 whenReady 之后才可用（依赖 userData 路径）。 */
+let logger: Logger | null = null;
+export function mainLogger(): Logger {
+  if (!logger) {
+    logger = createLogger({ dir: path.join(app.getPath("userData"), "logs") });
+  }
+  return logger;
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -42,6 +52,10 @@ if (!gotLock) {
   });
 
   void app.whenReady().then(() => {
+    mainLogger().info("app_ready", {
+      version: app.getVersion(),
+      platform: process.platform,
+    });
     registerIpc();
     createWindow();
     app.on("activate", () => {

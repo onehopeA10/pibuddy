@@ -1,4 +1,7 @@
-// 渲染进程可见的 window.piBuddy 类型（与 preload/index.ts 中实现保持一致）
+// 渲染进程可见的 window.piBuddy 类型（与 preload/index.ts 中实现保持一致）。
+//
+// 本文件不再自己声明任何跨进程数据形状 —— 全部 re-export 自
+// @pibuddy/contract，避免与 main / renderer 侧漂移。
 import type {
   AgentEvent,
   AgentMessage,
@@ -9,42 +12,33 @@ import type {
   RpcCommandBase,
   RpcResponse,
 } from "@sdk";
+import type {
+  AppSettings,
+  PickedFile,
+  PiStartParams,
+  ReadImageResult,
+  SessionMeta,
+  SttTranscribeRequest,
+  SttTranscribeResult,
+  StartResult as ContractStartResult,
+} from "@contract";
 
-export interface StartResult {
-  state: AgentState;
-  models: Model[];
-  messages: AgentMessage[];
-}
+export type {
+  AppSettings,
+  PickedFile,
+  PiStartParams,
+  ReadImageResult,
+  SessionMeta,
+  SttTranscribeRequest,
+  SttTranscribeResult,
+};
 
-export interface SessionMeta {
-  path: string;
-  id: string;
-  name?: string;
-  firstMessage: string;
-  messageCount: number;
-  modified: number;
-}
-
-export interface AppSettings {
-  workspace?: string;
-  provider?: string;
-  modelId?: string;
-  thinkingLevel?: string;
-  sttBaseUrl?: string;
-  sttApiKey?: string;
-  sttModel?: string;
-}
-
-export interface PickedFile {
-  path: string;
-  name: string;
-  size: number;
-  kind: "image" | "video" | "other";
-}
+/** pi:start 的返回，用 pi-sdk 的具体类型实例化契约里的泛型槽位。 */
+export type PiStartResult = ContractStartResult<AgentState, Model, AgentMessage>;
 
 export interface PiBuddyApi {
   pi: {
-    start: (opts: { workspace: string; session?: string }) => Promise<StartResult>;
+    start: (opts: PiStartParams) => Promise<PiStartResult>;
     command: <T = unknown>(command: RpcCommandBase) => Promise<RpcResponse<T>>;
     uiRespond: (response: ExtensionUiResponse) => Promise<void>;
     stop: () => Promise<void>;
@@ -64,7 +58,7 @@ export interface PiBuddyApi {
     chooseFiles: () => Promise<PickedFile[]>;
   };
   file: {
-    readImage: (path: string) => Promise<{ data: string; mimeType: string }>;
+    readImage: (path: string) => Promise<ReadImageResult>;
     pathFor: (file: File) => string;
   };
   shell: {
@@ -72,13 +66,7 @@ export interface PiBuddyApi {
     showInFolder: (target: string) => Promise<void>;
   };
   stt: {
-    transcribe: (req: {
-      baseUrl: string;
-      apiKey: string;
-      model: string;
-      audio: ArrayBuffer;
-      mimeType: string;
-    }) => Promise<{ text: string }>;
+    transcribe: (req: SttTranscribeRequest) => Promise<SttTranscribeResult>;
   };
 }
 

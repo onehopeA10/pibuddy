@@ -1,15 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { SessionMeta } from "@pibuddy/contract";
 
-export interface SessionMeta {
-  path: string;
-  id: string;
-  name?: string;
-  firstMessage: string;
-  messageCount: number;
-  modified: number; // Unix ms
-}
+export type { SessionMeta };
 
 /**
  * pi 会话按工作目录存储在

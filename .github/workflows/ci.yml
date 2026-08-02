@@ -51,6 +51,9 @@ jobs:
       - name: Check test discovery scope
         run: node scripts/check-test-discovery.mjs
 
+      - name: Check contract uniqueness
+        run: node scripts/check-contract-uniqueness.mjs
+
       - name: Test
         run: pnpm test
 

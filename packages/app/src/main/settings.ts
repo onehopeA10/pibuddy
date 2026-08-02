@@ -1,16 +1,9 @@
 import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { parseAppSettings, type AppSettings } from "@pibuddy/contract";
 
-export interface AppSettings {
-  workspace?: string;
-  provider?: string;
-  modelId?: string;
-  thinkingLevel?: string;
-  sttBaseUrl?: string;
-  sttApiKey?: string;
-  sttModel?: string;
-}
+export type { AppSettings };
 
 function settingsPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
@@ -18,7 +11,7 @@ function settingsPath(): string {
 
 export function loadSettings(): AppSettings {
   try {
-    return JSON.parse(fs.readFileSync(settingsPath(), "utf8")) as AppSettings;
+    return parseAppSettings(JSON.parse(fs.readFileSync(settingsPath(), "utf8")));
   } catch {
     return {};
   }

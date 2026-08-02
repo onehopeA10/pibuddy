@@ -8,8 +8,8 @@
   "priority": "high",
   "effort": "large",
   "action": "新建 packages/contract（name \"@pibuddy/contract\"，dependencies 直接引入 \"zod\": \"^4.4.3\"，当前 zod 仅作为 pi 的传递依赖存在于 lockfile，两个 workspace 包都没有直接依赖）；导出 export const PROTOCOL_VERSION = 1 与 PiEnvelope<T> {protocolVersion, workspaceId, sessionId, runtimeId, generation, sequence, occurredAt, payload}；导出 parseEnvelope(raw) 在 raw.protocolVersion !== PROTOCOL_VERSION 时返回 {ok:false, reason:\"protocol-version-mismatch\"}；导出 ports.ts 中 PiRuntimeSupervisor / SessionRepository / SettingsStore / PermissionEngine / UpdateService 五个 interface；把 packages/app/electron.vite.config.ts:8 的 externalizeDepsPlugin({exclude:[\"@pibuddy/pi-sdk\"]}) 改为 exclude:[\"@pibuddy/pi-sdk\",\"@pibuddy/contract\"]；在 tsconfig.node.json.include 与 tsconfig.web.json.include 各追加 \"../contract/src/**/*.ts\"，并在 tsconfig.web.json.paths 与 electron.vite.config.ts renderer.resolve.alias 增加 \"@contract\"；新建 packages/app/src/main/logger.ts 做键名脱敏 + 5MB 轮转保留 5 份。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed_with_deviations",
+  "completed_at": "2026-08-02T11:11:05.420Z",
   "actual_duration": null,
   "scope": "packages/contract + packages/app 构建配置与 main/logger",
   "focus_paths": [

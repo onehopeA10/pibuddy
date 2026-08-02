@@ -17,6 +17,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: ^0.83.0
         version: 0.83.0(ws@8.21.1)(zod@4.4.3)
+      '@pibuddy/contract':
+        specifier: workspace:*
+        version: link:../contract
       '@pibuddy/pi-sdk':
         specifier: workspace:*
         version: link:../pi-sdk
@@ -63,6 +66,19 @@ importers:
       vue-tsc:
         specifier: ^3.0.0
         version: 3.3.9(typescript@5.9.3)
+
+  packages/contract:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
 
   packages/pi-sdk:
     devDependencies:

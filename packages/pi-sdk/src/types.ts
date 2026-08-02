@@ -206,6 +206,43 @@ export interface ToolResultPayload {
   details?: unknown;
 }
 
+/**
+ * pi 的全部事件类型（对齐 pi-coding-agent docs/rpc.md 的 Event Types 表）。
+ *
+ * 这里刻意**枚举全集**而不是留一个 `{ type: string; [k: string]: unknown }`
+ * 兜底成员：那个兜底成员会让 `switch (e.type)` 完全失去判别式收窄能力 ——
+ * 每个 case 里的 `e` 仍是整个联合，上层只能靠 `as` 强转，类型保护形同虚设。
+ * 无法识别的事件统一归一为 `{ type: "unknown"; raw }`，它有自己的判别式，
+ * 不污染其余成员的收窄。
+ */
+export const AGENT_EVENT_TYPES = [
+  "agent_start",
+  "agent_end",
+  "agent_settled",
+  "turn_start",
+  "turn_end",
+  "message_start",
+  "message_update",
+  "message_end",
+  "bash_execution_update",
+  "tool_execution_start",
+  "tool_execution_update",
+  "tool_execution_end",
+  "queue_update",
+  "compaction_start",
+  "compaction_end",
+  "auto_retry_start",
+  "auto_retry_end",
+  "summarization_retry_scheduled",
+  "summarization_retry_attempt_start",
+  "summarization_retry_finished",
+  "extension_error",
+] as const;
+
+export type KnownAgentEventType = (typeof AGENT_EVENT_TYPES)[number];
+
+const KNOWN_EVENT_TYPES: ReadonlySet<string> = new Set(AGENT_EVENT_TYPES);
+
 export type AgentEvent =
   | { type: "agent_start" }
   | { type: "agent_end"; messages: AgentMessage[]; willRetry?: boolean }
@@ -224,8 +261,28 @@ export type AgentEvent =
   | { type: "compaction_end"; reason: string; result: unknown; aborted: boolean; willRetry?: boolean; errorMessage?: string }
   | { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
   | { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
+  | { type: "summarization_retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
+  | { type: "summarization_retry_attempt_start"; source: "compaction" | "branchSummary"; reason?: string }
+  | { type: "summarization_retry_finished" }
   | { type: "extension_error"; extensionPath: string; event: string; error: string }
-  | { type: string; [key: string]: unknown };
+  /** 上游新增或本 SDK 尚未建模的事件；原始对象保留在 raw 里，不丢信息 */
+  | { type: "unknown"; raw: unknown };
+
+export function isKnownAgentEventType(type: unknown): type is KnownAgentEventType {
+  return typeof type === "string" && KNOWN_EVENT_TYPES.has(type);
+}
+
+/**
+ * 把一行原始 JSON 归一为 AgentEvent。
+ * 识别不了的一律包成 `{ type: "unknown", raw }`，绝不硬转成某个具体成员。
+ */
+export function toAgentEvent(raw: unknown): AgentEvent {
+  if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+    const type = (raw as { type?: unknown }).type;
+    if (isKnownAgentEventType(type)) return raw as AgentEvent;
+  }
+  return { type: "unknown", raw };
+}
 
 // ---------- Extension UI 子协议 ----------
 

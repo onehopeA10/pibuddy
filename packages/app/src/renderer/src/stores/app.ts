@@ -14,7 +14,7 @@ import type {
   ToolResultMessage,
   UserMessage,
 } from "@sdk";
-import type { AppSettings, PickedFile, SessionMeta } from "../../../preload/index.d";
+import type { AppSettings, PickedFile, SessionMeta } from "@contract";
 
 export interface ChatItem {
   key: number;
@@ -28,6 +28,27 @@ export interface ToolRun {
   status: "running" | "done" | "error";
   output: string;
   images: ImageContent[];
+}
+
+/**
+ * 按 sessionId 归一化的运行时 / 生命周期状态。
+ *
+ * M0 只归一化这四项：它们是 M1 代际治理（RUN-002）的落点。items / toolRuns /
+ * queue / statusTexts 刻意保持全局 —— 一次性全改会触碰 ToolActivity.vue 的
+ * 卡片渲染闭环（查不到 run 就永久转圈），不值得。
+ */
+export interface RuntimeScope {
+  started: boolean;
+  streaming: boolean;
+  runtimeId: string;
+  generation: number;
+}
+
+/** 会话 ID 在 start 返回之前是未知的，此期间的状态先记在这个占位 key 上。 */
+const PENDING_SCOPE_KEY = "";
+
+function emptyScope(): RuntimeScope {
+  return { started: false, streaming: false, runtimeId: "", generation: 0 };
 }
 
 export type Notifier = {
@@ -56,8 +77,52 @@ export const useAppStore = defineStore("app", () => {
   // ---------- 基础状态 ----------
   const booting = ref(true);
   const settings = ref<AppSettings>({});
-  const started = ref(false);
   const startError = ref("");
+
+  // ---------- 运行时状态（按 sessionId 归一化） ----------
+  const currentSessionId = ref(PENDING_SCOPE_KEY);
+  const runtimeScope = reactive<Record<string, RuntimeScope>>({
+    [PENDING_SCOPE_KEY]: emptyScope(),
+  });
+
+  function scope(): RuntimeScope {
+    const key = currentSessionId.value;
+    let s = runtimeScope[key];
+    if (!s) {
+      s = emptyScope();
+      runtimeScope[key] = s;
+    }
+    return s;
+  }
+
+  /**
+   * 会话 ID 变化时把当前 scope 的运行状态搬到新 key 上。
+   *
+   * 不搬的话 started 会在 refreshState 之后瞬间读到一个全新的空 scope、
+   * 回落为 false，输入框被禁用且不报任何错。M0 同时只有一个 pi 进程，
+   * switch_session 不换进程，因此原样搬运就是正确语义。
+   */
+  function adoptSession(sessionId: string | undefined): void {
+    const id = sessionId || PENDING_SCOPE_KEY;
+    if (id === currentSessionId.value) return;
+    const prev = scope();
+    runtimeScope[id] = { ...prev };
+    currentSessionId.value = id;
+  }
+
+  /** 同名代理，组件调用点（store.started / store.streaming）零改动。 */
+  const started = computed({
+    get: () => scope().started,
+    set: (v: boolean) => {
+      scope().started = v;
+    },
+  });
+  const streaming = computed({
+    get: () => scope().streaming,
+    set: (v: boolean) => {
+      scope().streaming = v;
+    },
+  });
 
   const agentState = shallowRef<AgentState | null>(null);
   const models = shallowRef<Model[]>([]);
@@ -68,7 +133,6 @@ export const useAppStore = defineStore("app", () => {
   const items = ref<ChatItem[]>([]);
   const liveAssistant = shallowRef<AssistantMessage | null>(null);
   const toolRuns = reactive<Record<string, ToolRun>>({});
-  const streaming = ref(false);
   const queue = ref<{ steering: string[]; followUp: string[] }>({ steering: [], followUp: [] });
   const statusTexts = reactive<Record<string, string>>({});
 
@@ -327,6 +391,12 @@ export const useAppStore = defineStore("app", () => {
       agentState.value = result.state;
       models.value = result.models;
       loadMessages(result.messages);
+
+      // 新的一代 runtime：generation 单调递增，供 M1 丢弃上一代迟到事件
+      const sc = scope();
+      sc.generation += 1;
+      sc.runtimeId = `rt-${Date.now().toString(36)}-${sc.generation}`;
+      adoptSession(result.state.sessionId);
       started.value = true;
 
       // 恢复上次选择的模型与思考力度
@@ -356,7 +426,10 @@ export const useAppStore = defineStore("app", () => {
 
   async function refreshState(): Promise<void> {
     const resp = await window.piBuddy.pi.command<AgentState>({ type: "get_state" });
-    if (resp.success && resp.data) agentState.value = resp.data;
+    if (resp.success && resp.data) {
+      agentState.value = resp.data;
+      adoptSession(resp.data.sessionId);
+    }
   }
 
   async function refreshStats(): Promise<void> {
@@ -494,6 +567,8 @@ export const useAppStore = defineStore("app", () => {
     settings,
     started,
     startError,
+    currentSessionId,
+    runtimeScope,
     agentState,
     models,
     thinkingLevels,
