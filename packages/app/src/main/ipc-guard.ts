@@ -265,6 +265,26 @@ export type GuardedHandler<Req, Res> = (
 ) => Res | Promise<Res>;
 
 /**
+ * 已注册通道表。
+ *
+ * handler 从 ipc.ts 拆到各域的 *-ipc.ts 之后，「这个 channel 到底被注册了
+ * 没有」不再能靠读某一个文件回答。这张表是唯一的运行时答案，单测据它断言
+ * 注册面（而不是断言某个 handler 文件的存在，那种断言在文件改名后会空洞
+ * 通过）。
+ */
+const registered = new Set<InvokeChannel>();
+
+/** 已经注册进来的全部通道，按名字排序。 */
+export function registeredChannels(): InvokeChannel[] {
+  return [...registered].sort();
+}
+
+/** 仅供单测：清空注册记录（模块级 Set 会跨用例累积）。 */
+export function __resetRegisteredChannels(): void {
+  registered.clear();
+}
+
+/**
  * 注册一个受保护的 invoke handler。**这是全仓唯一允许调用 ipcMain.handle 的地方。**
  *
  * 四道闸的顺序在函数体内写死，handler 拿到的 payload 已经是校验过的类型，
@@ -275,6 +295,7 @@ export function registerHandler<Req, Res>(
   schema: RuntimeSchema<Req>,
   handler: GuardedHandler<Req, Res>
 ): void {
+  registered.add(channel);
   ipcMain.handle(channel, async (event, raw: unknown) => {
     try {
       assertMainFrame(event);

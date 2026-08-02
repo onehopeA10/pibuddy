@@ -15,6 +15,7 @@
     "src/renderer/src/**/*.ts",
     "src/renderer/src/**/*.vue",
     "src/preload/index.d.ts",
+    "src/preload/api/**/*.ts",
     "../pi-sdk/src/types.ts",
     "../contract/src/**/*.ts"
   ]

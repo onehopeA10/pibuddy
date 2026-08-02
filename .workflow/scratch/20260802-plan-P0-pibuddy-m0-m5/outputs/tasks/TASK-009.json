@@ -8,8 +8,8 @@
   "priority": "high",
   "effort": "large",
   "action": "新建 packages/app/src/main/sessions/session-index.ts，导出 `export const SESSION_INDEX_SCHEMA_VERSION = 1` 与 `export class SessionIndex`，内部使用 `import { DatabaseSync } from 'node:sqlite'` 打开 `path.join(app.getPath('userData'), 'session-index.db')`；建表 `CREATE TABLE IF NOT EXISTS sessions (source_path TEXT PRIMARY KEY, workspace_root TEXT NOT NULL, session_id TEXT NOT NULL, scan_offset INTEGER NOT NULL DEFAULT 0, mtime_ms INTEGER NOT NULL, size_bytes INTEGER NOT NULL, content_hash TEXT NOT NULL, name TEXT, preview TEXT, search_blob TEXT, message_count INTEGER NOT NULL DEFAULT 0, token_total INTEGER NOT NULL DEFAULT 0, cost_total REAL NOT NULL DEFAULT 0, model_id TEXT, status TEXT NOT NULL DEFAULT 'active', pinned INTEGER NOT NULL DEFAULT 0, unread INTEGER NOT NULL DEFAULT 0, running INTEGER NOT NULL DEFAULT 0, draft_text TEXT, draft_json TEXT, deleted_at INTEGER, last_indexed_at INTEGER NOT NULL, schema_version INTEGER NOT NULL)`，用 `PRAGMA user_version` 做迁移；导出方法 `syncWorkspace(workspaceRoot: string): { scanned: number; reparsed: number }`、`query(filter: SessionQuery): SessionRow[]`、`rename(sourcePath: string, name: string): void`、`setPinned`、`setStatus(sourcePath, status: 'active'|'archived'|'trashed')`、`purge(sourcePath: string)`、`getDraft(sourcePath): DraftRecord | null`、`saveDraft(sourcePath, draft: DraftRecord)`。增量规则：`if (row && row.mtime_ms === stat.mtimeMs && row.size_bytes === stat.size) continue;` 命中则跳过整文件；未命中时用 `fs.createReadStream(filePath, { start: row?.scan_offset ?? 0, encoding: 'utf8' })` 只解析新增字节并把 `scan_offset` 更新为 `stat.size`。此外导出反向分页读取入口 `readEntriesBefore(args: { sourcePath: string; beforeOffset: number; limit: number }): { entries: SessionEntry[]; nextBeforeOffset: number | null; stale: boolean; skippedPartial: number }`（实现在同目录 session-history.ts，由 SessionIndex 提供 scan_offset / mtime_ms / size_bytes / content_hash 四列作为定位与一致性依据）：以 beforeOffset 为上界用 `fs.createReadStream(filePath, { start, end: beforeOffset - 1 })` 按块反向回溯到 limit 个完整行首，被 beforeOffset 截断的半行原样丢弃并计入 skippedPartial；读取前用 `fs.statSync(filePath)` 重新比对索引行的 mtime_ms / size_bytes，不一致则返回 `stale: true`、触发一次 syncWorkspace 后由调用方重试一次。JSONL 是唯一真相源，SQLite 只是索引；一致性判据固定为 mtime_ms + size_bytes 短路 + content_hash（文件前 64KB 的 sha256 前 32 位）检测外部截断/重写。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed_with_deviations",
+  "completed_at": "2026-08-02T16:29:16.311Z",
   "actual_duration": null,
   "scope": "packages/app/src/main/sessions, packages/app/src/preload, packages/app/src/renderer/src/stores/sessions.ts",
   "focus_paths": [
@@ -299,5 +299,8 @@
     "wave": 8
   },
   "origin_shard": "B",
-  "origin_id": "TASK-B01"
+  "origin_id": "TASK-B01",
+  "deferred_requirements": [
+    "会话树/分叉可视化 UI（分支图）—— 用户 2026-08-02 已确认裁剪。fork/clone/get_tree/get_fork_messages/get_entries 的 RPC 与 IPC 通道本任务已完整接入（数据面），但没有任何可视化分支图。M3 出口门禁 doc:329 的「分叉」能力本轮只达成数据面，不得声称完整达成。"
+  ]
 }

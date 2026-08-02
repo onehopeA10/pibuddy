@@ -22,7 +22,14 @@ import {
   type PushChannel,
 } from "./channels.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
-import { sessionMetaSchema } from "./session.js";
+import {
+  draftRecordSchema,
+  readHistoryRequestSchema,
+  sessionHistoryPageSchema,
+  sessionQuerySchema,
+  sessionRowSchema,
+  sessionStatusSchema,
+} from "./session.js";
 
 // 通道名常量住在 channels.ts（那个文件不依赖 zod，preload 可以单独引它）。
 
@@ -52,8 +59,8 @@ export interface PermissionRule {
  */
 export const piStartParamsSchema = z.object({
   workspaceId: z.string().min(1),
-  /** 续接的历史会话；必须是主进程自己枚举出来的会话文件 */
-  sessionPath: z.string().optional(),
+  /** 续接的历史会话；不透明 id，由主进程经会话索引解成文件路径 */
+  sessionId: z.string().optional(),
 });
 export type PiStartParams = z.infer<typeof piStartParamsSchema>;
 
@@ -181,9 +188,15 @@ export const piMessageRequestSchema = z.object({
   images: z.array(imageContentSchema).optional(),
 });
 
+/**
+ * pi:switch-session 的入参。
+ *
+ * **只接受不透明 sessionId**：JSONL 的绝对路径由主进程的会话索引持有，
+ * 渲染进程从头到尾看不到它（CT-15）。handler 侧把 id 解成路径之后仍会重做
+ * 一次会话目录收容校验。
+ */
 export const piSwitchSessionRequestSchema = z.object({
-  /** 必须是主进程自己在会话目录里枚举出来的文件，handler 侧重做收容校验 */
-  sessionPath: z.string().min(1),
+  sessionId: z.string().min(1),
 });
 
 export const piSetModelRequestSchema = z.object({
@@ -201,6 +214,43 @@ export const piCompactRequestSchema = z.object({
 
 export const piSetSessionNameRequestSchema = z.object({
   name: z.string().min(1),
+});
+
+/** pi:get-entries 的入参。`since` 是**上一条已见 entry 的 id**（strictly after）。 */
+export const piGetEntriesRequestSchema = z.object({
+  since: z.string().optional(),
+});
+
+/** pi:fork 的入参：从哪条 user message 分叉。 */
+export const piForkRequestSchema = z.object({
+  entryId: z.string().min(1),
+});
+
+// ---------- 会话中心（SES-101） ----------
+
+/** sessions:rename 的入参。sessionId 是不透明标识，不是文件路径。 */
+export const sessionRenameRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  name: z.string().min(1),
+});
+
+export const sessionSetPinnedRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  pinned: z.boolean(),
+});
+
+export const sessionSetStatusRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  status: sessionStatusSchema,
+});
+
+export const sessionIdRequestSchema = z.object({
+  sessionId: z.string().min(1),
+});
+
+export const sessionSaveDraftRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  draft: draftRecordSchema,
 });
 
 export const extensionUiResponseSchema = z.object({
@@ -321,11 +371,52 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     response: rpcResponseSchema,
   },
 
-  // ---- 会话 / 设置 ----
-  [CHANNELS.sessionsList]: {
-    request: workspaceIdRequestSchema,
-    response: z.array(sessionMetaSchema),
+  // ---- 会话树 / 分叉（数据面） ----
+  [CHANNELS.piGetEntries]: {
+    request: piGetEntriesRequestSchema,
+    response: rpcResponseSchema,
   },
+  [CHANNELS.piGetTree]: NO_ARGS,
+  [CHANNELS.piGetForkMessages]: NO_ARGS,
+  [CHANNELS.piFork]: { request: piForkRequestSchema, response: rpcResponseSchema },
+  [CHANNELS.piClone]: NO_ARGS,
+
+  // ---- 会话中心（9 条） ----
+  [CHANNELS.sessionsQuery]: {
+    request: sessionQuerySchema,
+    response: z.array(sessionRowSchema),
+  },
+  [CHANNELS.sessionsRename]: {
+    request: sessionRenameRequestSchema,
+    response: z.void(),
+  },
+  [CHANNELS.sessionsSetPinned]: {
+    request: sessionSetPinnedRequestSchema,
+    response: z.void(),
+  },
+  [CHANNELS.sessionsSetStatus]: {
+    request: sessionSetStatusRequestSchema,
+    response: z.void(),
+  },
+  [CHANNELS.sessionsPurge]: { request: sessionIdRequestSchema, response: z.void() },
+  [CHANNELS.sessionsGetDraft]: {
+    request: sessionIdRequestSchema,
+    response: draftRecordSchema.nullable(),
+  },
+  [CHANNELS.sessionsSaveDraft]: {
+    request: sessionSaveDraftRequestSchema,
+    response: z.boolean(),
+  },
+  [CHANNELS.sessionsExportHtml]: {
+    request: sessionIdRequestSchema,
+    response: rpcResponseSchema,
+  },
+  [CHANNELS.sessionsReadHistory]: {
+    request: readHistoryRequestSchema,
+    response: sessionHistoryPageSchema,
+  },
+
+  // ---- 设置 ----
   [CHANNELS.settingsGet]: { request: voidRequestSchema, response: appSettingsSchema },
   [CHANNELS.settingsSet]: {
     request: rendererSettingsPatchSchema,

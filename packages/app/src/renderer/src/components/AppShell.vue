@@ -58,7 +58,12 @@ function onDrop(): void {
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <Sidebar />
+    <!-- 布局契约（TASK-009 定义，M3-M5 各任务只往这四个具名插槽里注入内容，
+         不得改动插槽名集合）：banner 顶部通条 / sidebar 侧栏 / main 主区 /
+         overlay 浮层。默认内容即当前形态，不传插槽时渲染结果与改造前一致。 -->
+    <slot name="banner"></slot>
+
+    <slot name="sidebar"><Sidebar /></slot>
     <div class="main-col">
       <TopBar />
 
@@ -77,13 +82,17 @@ function onDrop(): void {
         </div>
       </template>
       <template v-else>
-        <ChatView />
-        <InputBar />
+        <slot name="main">
+          <ChatView />
+          <InputBar />
+        </slot>
       </template>
     </div>
 
     <div v-if="dragging > 0" class="drop-mask">把图片或文件拖到这里交给我</div>
-    <ExtensionUiHost />
-    <SettingsModal />
+    <slot name="overlay">
+      <ExtensionUiHost />
+      <SettingsModal />
+    </slot>
   </div>
 </template>

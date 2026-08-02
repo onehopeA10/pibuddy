@@ -12,9 +12,9 @@
  */
 
 /**
- * 渲染进程可发起的 invoke 通道（32 个）。
+ * 渲染进程可发起的 invoke 通道。
  *
- * 15 个 `pi:*` 产品动作通道与 pi-sdk 的命令封装一一对应，**没有**通用的
+ * `pi:*` 产品动作通道与 pi-sdk 的命令封装一一对应，**没有**通用的
  * 转发通道 —— 新增一种 pi 能力必须在这里显式加一行，并因此过一遍威胁模型。
  */
 export const CHANNELS = {
@@ -40,8 +40,32 @@ export const CHANNELS = {
   piCompact: "pi:compact",
   piSetSessionName: "pi:set-session-name",
 
-  // ---- 会话 / 设置 ----
-  sessionsList: "sessions:list",
+  // ---- 会话树 / 分叉（数据面；可视化 UI 本轮不做，见 TASK-009 risks[1]） ----
+  //
+  // rpc.md:694 起的 get_entries 只有 `since`（strictly after）游标，**没有**
+  // before / limit，因此「向更早翻页」在协议层根本不存在 —— 那条路由
+  // main/sessions/session-history.ts 按 JSONL 字节 offset 本地实现，不走这里。
+  piGetEntries: "pi:get-entries",
+  piGetTree: "pi:get-tree",
+  piGetForkMessages: "pi:get-fork-messages",
+  piFork: "pi:fork",
+  piClone: "pi:clone",
+
+  // ---- 会话中心（SES-101，恰 9 条） ----
+  //
+  // 取代原先那条一次性全量枚举的 `sessions:list`：列表、搜索、整理、草稿、
+  // 导出、向前翻页各有各的窄通道，渲染进程一律只持有不透明 sessionId。
+  sessionsQuery: "sessions:query",
+  sessionsRename: "sessions:rename",
+  sessionsSetPinned: "sessions:set-pinned",
+  sessionsSetStatus: "sessions:set-status",
+  sessionsPurge: "sessions:purge",
+  sessionsGetDraft: "sessions:get-draft",
+  sessionsSaveDraft: "sessions:save-draft",
+  sessionsExportHtml: "sessions:export-html",
+  sessionsReadHistory: "sessions:read-history",
+
+  // ---- 设置 ----
   settingsGet: "settings:get",
   settingsSet: "settings:set",
   /**

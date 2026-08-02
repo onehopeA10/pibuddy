@@ -54,7 +54,7 @@ async function onWindowDrop(e: DragEvent): Promise<void> {
     }
     try {
       // 绝对路径在 preload 内部就被换成短期能力凭证，渲染进程拿不到它
-      files.value.push(await window.piBuddy.attachments.fromDrop(file));
+      files.value.push(await window.piBuddy.file.fromDrop(file));
     } catch {
       message.warning(`无法读取文件：${file.name}`);
     }
@@ -62,12 +62,12 @@ async function onWindowDrop(e: DragEvent): Promise<void> {
 }
 
 async function pickFiles(): Promise<void> {
-  const picked = await window.piBuddy.attachments.pick();
+  const picked = await window.piBuddy.dialog.chooseFiles();
   for (const f of picked) {
     if (f.kind === "image") {
       // 凭证换 base64：主进程重做收容、大小与 magic bytes 校验后才给数据
       try {
-        const img = await window.piBuddy.attachments.readImage(f.token);
+        const img = await window.piBuddy.file.readImage(f.token);
         images.value.push({ type: "image", ...img, name: f.name });
       } catch (err) {
         message.warning(

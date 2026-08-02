@@ -27,7 +27,7 @@ function ctx(generation: number, runtimeId = `rt-${generation}`): EnvelopeContex
       getSessionStats: async () => ({ success: false }),
       getAvailableThinkingLevels: async () => ({ success: false }),
     },
-    sessions: { list: async () => [] },
+    sessions: { query: async () => [] },
   },
 };
 

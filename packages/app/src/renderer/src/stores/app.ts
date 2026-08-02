@@ -14,14 +14,9 @@ import type {
   ToolResultMessage,
   UserMessage,
 } from "@sdk";
-import type {
-  AppSettings,
-  AttachmentRef,
-  PiEnvelope,
-  PiExitPayload,
-  SessionMeta,
-} from "@contract";
+import type { AppSettings, AttachmentRef, PiEnvelope, PiExitPayload } from "@contract";
 import { parseEnvelope } from "@contract";
+import { useSessionsStore } from "./sessions";
 
 export interface ChatItem {
   key: number;
@@ -248,7 +243,6 @@ export const useAppStore = defineStore("app", () => {
   const models = shallowRef<Model[]>([]);
   const thinkingLevels = shallowRef<ThinkingLevel[]>(["off"]);
   const stats = shallowRef<SessionStats | null>(null);
-  const sessions = shallowRef<SessionMeta[]>([]);
 
   const items = ref<ChatItem[]>([]);
   const liveAssistant = shallowRef<AssistantMessage | null>(null);
@@ -566,7 +560,7 @@ export const useAppStore = defineStore("app", () => {
     payload: { value?: string; confirmed?: boolean; cancelled?: boolean }
   ): Promise<void> {
     uiRequests.value = uiRequests.value.filter((r) => r.id !== request.id);
-    await window.piBuddy.extensionUi.respond({
+    await window.piBuddy.pi.extensionUi.respond({
       type: "extension_ui_response",
       id: request.id,
       ...payload,
@@ -585,9 +579,9 @@ export const useAppStore = defineStore("app", () => {
   function subscribeOnce(): void {
     if (subscribed) return;
     subscribed = true;
-    unsubscribes.push(window.piBuddy.events.onEvent((e) => handleEventEnvelope(e)));
-    unsubscribes.push(window.piBuddy.events.onUiRequest((r) => handleUiRequestEnvelope(r)));
-    unsubscribes.push(window.piBuddy.events.onExit((e) => handleExitEnvelope(e)));
+    unsubscribes.push(window.piBuddy.pi.events.onEvent((e) => handleEventEnvelope(e)));
+    unsubscribes.push(window.piBuddy.pi.events.onUiRequest((r) => handleUiRequestEnvelope(r)));
+    unsubscribes.push(window.piBuddy.pi.events.onExit((e) => handleExitEnvelope(e)));
   }
 
   /** 解除全部推送订阅（窗口销毁 / 测试收尾）。 */
@@ -601,7 +595,7 @@ export const useAppStore = defineStore("app", () => {
     settings.value = await window.piBuddy.settings.get();
     // 工作目录经 workspace.current() 取不透明 id + 显示名，
     // 而不是从 settings 里读一条绝对路径自己用
-    adoptWorkspace(await window.piBuddy.workspace.current());
+    adoptWorkspace(await window.piBuddy.dialog.currentWorkspace());
     booting.value = false;
     if (workspaceId.value) {
       await start();
@@ -620,16 +614,16 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
-  async function start(sessionPath?: string): Promise<void> {
+  async function start(sessionId?: string): Promise<void> {
     startError.value = "";
     sessionLoadError.value = "";
     started.value = false;
     streaming.value = false;
     resetSessionScopedState();
     try {
-      const result = await window.piBuddy.runtime.start({
+      const result = await window.piBuddy.pi.runtime.start({
         workspaceId: workspaceId.value,
-        sessionPath,
+        sessionId,
       });
       agentState.value = result.state;
       models.value = result.models;
@@ -646,7 +640,7 @@ export const useAppStore = defineStore("app", () => {
       // 恢复历史会话时会话文件里已经记着它自己的 model / thinkingLevel，
       // 无条件覆盖等于用户每打开一个旧会话都被悄悄换成另一个模型。
       const saved = settings.value;
-      if (sessionPath === undefined) {
+      if (sessionId === undefined) {
         if (
           saved.provider &&
           saved.modelId &&
@@ -687,9 +681,13 @@ export const useAppStore = defineStore("app", () => {
     if (resp.success && resp.data) stats.value = resp.data;
   }
 
+  /**
+   * 会话列表的刷新委托给 sessions store —— 列表的查询条件、分页、整理动作
+   * 全在那边，这里只负责在合适的时机（agent_settled / 启动 / 换会话）触发。
+   */
   async function refreshSessions(): Promise<void> {
     if (!workspaceId.value) return;
-    sessions.value = await window.piBuddy.sessions.list(workspaceId.value);
+    await useSessionsStore().refresh(workspaceId.value);
   }
 
   let refreshSessionsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -711,7 +709,7 @@ export const useAppStore = defineStore("app", () => {
 
   async function chooseWorkspace(): Promise<void> {
     // 主进程自己把绝对路径写进设置并注册工作区，这里只收到不透明 id + 显示名
-    const chosen = await window.piBuddy.workspace.choose();
+    const chosen = await window.piBuddy.dialog.chooseFolder();
     if (!chosen) return;
     adoptWorkspace(chosen);
     settings.value = await window.piBuddy.settings.get();
@@ -741,12 +739,18 @@ export const useAppStore = defineStore("app", () => {
     void refreshSessions();
   }
 
-  async function openSession(meta: SessionMeta): Promise<void> {
+  /**
+   * 打开一个历史会话。
+   *
+   * 入参是**不透明 sessionId**：JSONL 的绝对路径全程留在主进程，由会话索引
+   * 反查（CT-15）。渲染进程连一个路径字符串都拿不到，也就无从伪造。
+   */
+  async function openSession(target: { sessionId: string }): Promise<void> {
     if (streaming.value) {
       notify("warning", "请先停止当前任务，再切换历史会话");
       return;
     }
-    const resp = await window.piBuddy.pi.switchSession(meta.path);
+    const resp = await window.piBuddy.pi.switchSession(target.sessionId);
     if (!resp.success) {
       notify("error", resp.error ?? "打开会话失败");
       return;
@@ -851,7 +855,6 @@ export const useAppStore = defineStore("app", () => {
     models,
     thinkingLevels,
     stats,
-    sessions,
     items,
     liveAssistant,
     toolRuns,

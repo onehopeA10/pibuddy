@@ -19,12 +19,12 @@ type CommandHandler = (cmd: { type: string; [k: string]: unknown }) => unknown;
 
 let commandHandler: CommandHandler;
 let commandLog: string[];
-let sessionsList: ReturnType<typeof vi.fn>;
+let sessionsQuery: ReturnType<typeof vi.fn>;
 let startResult: unknown;
 
 function installWindow(): void {
   commandLog = [];
-  sessionsList = vi.fn(async () => []);
+  sessionsQuery = vi.fn(async () => []);
   // TASK-007 之后 window.piBuddy.pi 上只有 15 个产品动作窄方法，通用的
   // command(...) 已被删除。这里把每个窄方法映射回它对应的 rpc 命令 type，
   // 既保留了原有断言（commandLog 记的仍是 rpc 命令名），也让这份 mock 与
@@ -47,8 +47,8 @@ function installWindow(): void {
         ),
         abort: vi.fn(() => dispatch({ type: "abort" })),
         newSession: vi.fn(() => dispatch({ type: "new_session" })),
-        switchSession: vi.fn((sessionPath: string) =>
-          dispatch({ type: "switch_session", sessionPath })
+        switchSession: vi.fn((sessionId: string) =>
+          dispatch({ type: "switch_session", sessionId })
         ),
         setModel: vi.fn((provider: string, modelId: string) =>
           dispatch({ type: "set_model", provider, modelId })
@@ -67,22 +67,24 @@ function installWindow(): void {
           dispatch({ type: "compact", customInstructions })
         ),
         setSessionName: vi.fn((name: string) => dispatch({ type: "set_session_name", name })),
+        // TASK-009 之后 runtime / events / extensionUi 是 pi 的子命名空间
+        runtime: {
+          start: vi.fn(async () => startResult),
+          stop: vi.fn(async () => undefined),
+        },
+        events: {
+          onEvent: () => () => undefined,
+          onUiRequest: () => () => undefined,
+          onExit: () => () => undefined,
+        },
+        extensionUi: { respond: vi.fn(async () => undefined) },
       },
-      runtime: {
-        start: vi.fn(async () => startResult),
-        stop: vi.fn(async () => undefined),
+      dialog: {
+        currentWorkspace: vi.fn(async () => ({ workspaceId: "ws-1", displayPath: "/w" })),
+        chooseFolder: vi.fn(async () => ({ workspaceId: "ws-1", displayPath: "/w" })),
+        chooseFiles: vi.fn(async () => []),
       },
-      events: {
-        onEvent: () => () => undefined,
-        onUiRequest: () => () => undefined,
-        onExit: () => () => undefined,
-      },
-      extensionUi: { respond: vi.fn(async () => undefined) },
-      workspace: {
-        current: vi.fn(async () => ({ workspaceId: "ws-1", displayPath: "/w" })),
-        choose: vi.fn(async () => ({ workspaceId: "ws-1", displayPath: "/w" })),
-      },
-      sessions: { list: sessionsList },
+      sessions: { query: sessionsQuery },
       settings: {
         get: vi.fn(async () => ({ piRuntimeMode: "bundled" })),
         set: vi.fn(async (patch: Record<string, unknown>) => ({
@@ -199,13 +201,7 @@ describe("extension veto（data.cancelled）", () => {
         ? { success: true, data: { cancelled: true } }
         : defaultHandler(cmd);
 
-    await store.openSession({
-      path: "/s/a.jsonl",
-      id: "a",
-      firstMessage: "",
-      messageCount: 0,
-      modified: 1,
-    });
+    await store.openSession({ sessionId: "a" });
 
     expect(store.items.length).toBe(1);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -222,13 +218,7 @@ describe("extension veto（data.cancelled）", () => {
     });
     fillSessionScopedState(store);
 
-    await store.openSession({
-      path: "/s/a.jsonl",
-      id: "a",
-      firstMessage: "",
-      messageCount: 0,
-      modified: 1,
-    });
+    await store.openSession({ sessionId: "a" });
 
     expect(store.items.length).toBe(0);
     expect(Object.keys(store.toolRuns).length).toBe(0);
@@ -251,13 +241,7 @@ describe("switch 成功但消息加载失败", () => {
         ? { success: false, error: "读取会话文件失败" }
         : defaultHandler(cmd);
 
-    await store.openSession({
-      path: "/s/a.jsonl",
-      id: "a",
-      firstMessage: "",
-      messageCount: 0,
-      modified: 1,
-    });
+    await store.openSession({ sessionId: "a" });
 
     expect(store.sessionLoadError).toBe("读取会话文件失败");
     expect(store.items.length).toBe(0);
@@ -352,10 +336,10 @@ describe("会话列表刷新防抖", () => {
     for (let i = 0; i < 10; i++) {
       store.handleEventEnvelope(envelope({ type: "agent_settled" }, i));
     }
-    expect(sessionsList).toHaveBeenCalledTimes(0);
+    expect(sessionsQuery).toHaveBeenCalledTimes(0);
 
     await vi.advanceTimersByTimeAsync(2000);
-    expect(sessionsList).toHaveBeenCalledTimes(1);
+    expect(sessionsQuery).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -385,7 +369,7 @@ describe("start()：只有新会话才套用全局设置", () => {
       messages: [],
     };
 
-    await store.start("/s/old.jsonl");
+    await store.start("s-old");
 
     expect(commandLog).not.toContain("set_model");
     expect(commandLog).not.toContain("set_thinking_level");
