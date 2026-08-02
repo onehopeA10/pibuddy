@@ -8,8 +8,8 @@
   "priority": "high",
   "effort": "large",
   "action": "在 D:/selftool/pi-ui 执行 git init 并提交基线 commit（禁止 git remote add / git push）；在根 package.json 增加 devDependency \"vitest\": \"^3.2.0\" 与 script \"test\": \"vitest run\"；新建 vitest.workspace.ts 列出 [\"packages/*\"]；新建 tools/fake-pi/fake-pi.mjs，通过 argv --scenario 支持字面量 \"normal\" | \"malformed-json\" | \"timeout\" | \"stderr-noise\" | \"exit-immediately\" | \"crash-mid-stream\" | \"extension-ui\" | \"stale-generation\" | \"oversized-line\"，按 rpc.md Framing 规则用 LF 分帧读写 JSONL；新建 packages/pi-sdk/test/client.spec.ts 覆盖 id 关联、事件转发、畸形行忽略、exit 事件；新建 .github/workflows/ci.yml 跑 pnpm install --frozen-lockfile / pnpm typecheck / pnpm test / pnpm build。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed_with_deviations",
+  "completed_at": "2026-08-02T10:42:09.620Z",
   "actual_duration": null,
   "scope": "repo-root + tools/ + packages/pi-sdk/test",
   "focus_paths": [
