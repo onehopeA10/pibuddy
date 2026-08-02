@@ -188,3 +188,22 @@
   `support-bundle.test.ts` 里那条「zip 字节流里搜不到假密钥」的断言会退化成恒真。
 - `SafeModeBanner.vue` 里「下载上一稳定版本」指向本仓库 releases 页；正式下载域名确定后
   需替换（`RELEASE_SETUP.md` §1 第 6 项）。
+
+---
+
+## 推送后的真实 CI 结果（run 30762556148）
+
+- **`verify (ubuntu-latest)` => success**。本 task 新增的两道闸在真实 runner 上实跑通过：
+  `check-workflow-pins: OK（2 个 workflow，全部 action 已 SHA 固定）`、
+  `check-pure-js-deps: OK（扫描 44 个包，无原生扩展；npmRebuild: false 成立）`；
+  `Test Files 63 passed`；`pnpm build` 通过。
+- **`verify (windows-latest)` => failure**，且是**先于本 task 就存在的**同一条失败：
+  `packages/app/test/attachment-registry.spec.ts > 大小与收容 > openAttachment / revealAttachment
+  只接受凭证，且是唯一触达 shell 的路径`。根因是 GitHub Windows runner 的 8.3 短路径
+  （`C:\Users\RUNNER~1\...` vs `C:\Users\runneradmin\...`）与 realpath 归一不一致。
+  该失败自 TASK-007（run 30751874573）起每一次 CI 都出现，本 task 提交前后逐字相同。
+  文件属 TASK-007 领地、不在本 task 的 scope/focus_paths 内，**未修改，如实上报**。
+- 关于「ubuntu runner 上 npmmirror 是否可达」：**仍未验证**。CI 只跑 `pnpm build`
+  （electron-vite，不下载 Electron 二进制），下载只发生在 `electron-builder` 阶段，
+  而 release workflow 因缺凭据失败关闭、从未真实运行过。正式发布走官方源，
+  该问题在 release 路径上不成立；仅当有人在 CI 里显式开 `PIBUDDY_USE_CN_MIRROR` 时才需要回答。
