@@ -1,11 +1,10 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import {
+import type {
   PiRpcClient,
-  type AgentEvent,
-  type ExtensionUiResponse,
-  type RpcCommandBase,
+  ExtensionUiResponse,
+  RpcCommandBase,
 } from "@pibuddy/pi-sdk";
 import type {
   PickedFile,
@@ -19,7 +18,17 @@ import { PROTOCOL_VERSION } from "@pibuddy/contract";
 import { createLogger, type Logger } from "./logger.js";
 import { listSessions } from "./sessions-store.js";
 import { loadSettings, saveSettings, type AppSettings } from "./settings.js";
+import { PiSupervisor } from "./pi-supervisor.js";
 
+/**
+ * webContents id → 当前 runtime 的 client。
+ *
+ * 这份索引的唯一职责是让 `clientFor` 能同步查到 client；代际、序号、信封与
+ * 转发全部由 supervisor 负责。**登记必须发生在任何 await 之前** —— 早先
+ * 这里的 clients.set 排在 client.start() 之后但也在 await 之前，而 spawn 失败
+ * 时 exit 事件根本不触发（ENOENT 实测序列是 error → close），死 client 就此
+ * 滞留在 map 里，后续所有请求都被它接走。
+ */
 const clients = new Map<number, PiRpcClient>();
 
 /** ipc 层的 logger（与 main/index.ts 写同一个目录下的同一份 JSONL）。 */
@@ -31,67 +40,35 @@ function log(): Logger {
   return ipcLogger;
 }
 
-export function disposeClientFor(webContentsId: number): void {
-  const client = clients.get(webContentsId);
-  if (client) {
-    clients.delete(webContentsId);
-    client.stop();
+/** 全应用唯一的运行时监管者（代际、序号、信封、33ms 转发都归它管）。 */
+let supervisorInstance: PiSupervisor | null = null;
+function supervisor(): PiSupervisor {
+  if (!supervisorInstance) {
+    supervisorInstance = new PiSupervisor({
+      info: (event, fields) => log().info(event, fields),
+      warn: (event, fields) => log().warn(event, fields),
+    });
   }
+  return supervisorInstance;
 }
 
-function clientFor(webContentsId: number): PiRpcClient {
-  const client = clients.get(webContentsId);
-  if (!client || !client.running) throw new Error("智能体尚未启动");
-  return client;
+export function disposeClientFor(webContentsId: number): void {
+  clients.delete(webContentsId);
+  supervisor().disposeTarget(webContentsId);
 }
 
 /**
- * 事件合并转发：pi 流式输出时每个 token 都会产生 message_update（携带全量部分消息），
- * 逐条走 IPC 会把渲染进程主线程打满。这里按 33ms 节拍批量转发，
- * 并折叠「连续的累积型事件」（message_update / 同一工具的 tool_execution_update
- * 都包含到目前为止的完整内容，只保留最后一条即可，不丢信息）。
+ * 取当前可用的 client。
+ *
+ * 不可用时抛出的错误必须携带**真实原因**：ENOENT / 权限 / 版本不符各有各的
+ * 处置方式，一律报一句泛化的「运行时没起来」等于把诊断信息扔掉。真因由
+ * client.assertUsable() 从 lastSpawnError 与 stderr 尾巴里取。
  */
-function makeEventForwarder(wc: WebContents): (e: AgentEvent) => void {
-  let queue: AgentEvent[] = [];
-  let timer: NodeJS.Timeout | null = null;
-
-  const flush = (): void => {
-    timer = null;
-    if (wc.isDestroyed() || queue.length === 0) {
-      queue = [];
-      return;
-    }
-    const collapsed: AgentEvent[] = [];
-    for (const e of queue) {
-      const prev = collapsed[collapsed.length - 1];
-      if (
-        prev &&
-        e.type === "message_update" &&
-        prev.type === "message_update"
-      ) {
-        collapsed[collapsed.length - 1] = e;
-        continue;
-      }
-      if (
-        prev &&
-        e.type === "tool_execution_update" &&
-        prev.type === "tool_execution_update" &&
-        (prev as { toolCallId?: string }).toolCallId ===
-          (e as { toolCallId?: string }).toolCallId
-      ) {
-        collapsed[collapsed.length - 1] = e;
-        continue;
-      }
-      collapsed.push(e);
-    }
-    queue = [];
-    for (const e of collapsed) wc.send("pi:event", e);
-  };
-
-  return (e: AgentEvent) => {
-    queue.push(e);
-    if (!timer) timer = setTimeout(flush, 33);
-  };
+function clientFor(webContentsId: number): PiRpcClient {
+  const client = clients.get(webContentsId);
+  if (!client) throw new Error("智能体运行时不可用：尚未启动，请先选择工作文件夹");
+  client.assertUsable();
+  return client;
 }
 
 const IMAGE_MIME: Record<string, string> = {
@@ -119,23 +96,38 @@ export function registerIpc(): void {
       });
       verifyRuntime(spawn.runtime);
 
-      const client = new PiRpcClient({
+      const { client, handle } = supervisor().launch(wc, {
         spawn,
+        workspaceId: opts.workspace,
         cwd: opts.workspace,
-        session: opts.session,
+        sessionPath: opts.session,
       });
-      client.on("event", makeEventForwarder(wc));
-      client.on("ui_request", (r) => !wc.isDestroyed() && wc.send("pi:ui-request", r));
-      client.on("exit", (code) => !wc.isDestroyed() && wc.send("pi:exit", code));
-      client.start();
+      // 必须先登记再 await：spawn 失败（ENOENT 只走 error → close，没有 exit）
+      // 时下面的握手会抛，catch 里才有东西可清。
       clients.set(wc.id, client);
 
-      const state = await client.getState();
-      const [models, messages] = await Promise.all([
-        client.getAvailableModels().catch(() => ({ models: [] })),
-        client.getMessages().catch(() => ({ messages: [] })),
-      ]);
-      return { state, models: models.models, messages: messages.messages };
+      try {
+        const state = await client.getState();
+        supervisor().adoptSession(handle.runtimeId, state.sessionId);
+        const [models, messages] = await Promise.all([
+          client.getAvailableModels().catch(() => ({ models: [] })),
+          client.getMessages().catch(() => ({ messages: [] })),
+        ]);
+        return { state, models: models.models, messages: messages.messages };
+      } catch (err) {
+        // 初始化任一 RPC 失败：立刻停子进程、删索引、摘监听，并把真因
+        // （含最近的脱敏 stderr）结构化地抛回 UI。
+        const cause = client.lastSpawnError?.message ?? (err as Error).message;
+        const tail = client.stderrSnapshot;
+        log().error("pi_runtime_start_failed", {
+          runtimeId: handle.runtimeId,
+          generation: handle.generation,
+          phase: client.phase,
+          cause,
+        });
+        disposeClientFor(wc.id);
+        throw new Error(`启动智能体失败：${cause}${tail ? `\n${tail}` : ""}`);
+      }
     }
   );
 

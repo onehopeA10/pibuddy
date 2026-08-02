@@ -14,7 +14,14 @@ import type {
   ToolResultMessage,
   UserMessage,
 } from "@sdk";
-import type { AppSettings, PickedFile, SessionMeta } from "@contract";
+import type {
+  AppSettings,
+  PickedFile,
+  PiEnvelope,
+  PiExitPayload,
+  SessionMeta,
+} from "@contract";
+import { parseEnvelope } from "@contract";
 
 export interface ChatItem {
   key: number;
@@ -304,6 +311,91 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
+  // ---------- 代际 / 序号闸门（RUN-002 第二层防御） ----------
+  //
+  // 主进程只转发当前代际，这里再挡一次：IPC 是异步的，主进程判定「当前代际」
+  // 与渲染进程读到消息之间存在窗口，重启密集时上一代的消息仍可能挤进来。
+  //
+  // 规则（顺序不可换）：
+  //   generation <  current → 丢弃（上一代迟到）
+  //   generation >  current → 采纳新代际，全部序号线重置
+  //   generation == current → 本通道的 sequence 必须严格递增，否则丢弃
+  //
+  // **序号单调性必须按通道判定，不能全局判**：三条 push 通道共用同一个
+  // 单调计数器，但 pi:event 走 33ms 合批、pi:ui-request 与 pi:exit 立即发出。
+  // 于是一条 ui-request 会带着更大的 sequence 先于队列里的事件到达，若用
+  // 全局闸门，紧随其后的一整批事件都会被误判为「序号倒退」而丢弃 ——
+  // 实测表现是 agent_start 被吃掉、streaming 恒为 false、插话因此退化成普通
+  // prompt 并被 pi 以 "Agent is already processing" 拒绝。
+  // 同一通道内部的子序列仍然严格递增，所以按通道判定既安全又够用。
+  const currentRuntimeId = ref("");
+  const currentGeneration = ref(0);
+  const lastSeqByChannel = reactive<Record<string, number>>({});
+  /** 兼容既有读点：单说「上一个序号」时指的是事件通道。 */
+  const lastSequence = computed(() => lastSeqByChannel["pi:event"] ?? -1);
+  /** 被闸门丢掉的消息计数，UI 不展示，只用于诊断与单测。 */
+  const droppedEnvelopes = ref(0);
+
+  function acceptEnvelope(raw: unknown, channel: string): PiEnvelope<unknown> | null {
+    const parsed = parseEnvelope(raw);
+    if (!parsed.ok) {
+      droppedEnvelopes.value++;
+      return null;
+    }
+    const env = parsed.envelope;
+    if (env.generation < currentGeneration.value) {
+      droppedEnvelopes.value++;
+      return null;
+    }
+    if (env.generation > currentGeneration.value) {
+      currentGeneration.value = env.generation;
+      currentRuntimeId.value = env.runtimeId;
+      for (const key of Object.keys(lastSeqByChannel)) delete lastSeqByChannel[key];
+    } else if (env.sequence <= (lastSeqByChannel[channel] ?? -1)) {
+      droppedEnvelopes.value++;
+      return null;
+    }
+    lastSeqByChannel[channel] = env.sequence;
+    if (!currentRuntimeId.value) currentRuntimeId.value = env.runtimeId;
+    return env;
+  }
+
+  /** pi:event 的入口：先过闸门解包，再进原有 switch reducer。 */
+  function handleEventEnvelope(raw: unknown): void {
+    const env = acceptEnvelope(raw, "pi:event");
+    if (!env) return;
+    handleEvent(env.payload as AgentEvent);
+  }
+
+  function handleUiRequestEnvelope(raw: unknown): void {
+    const env = acceptEnvelope(raw, "pi:ui-request");
+    if (!env) return;
+    handleUiRequest(env.payload as ExtensionUiRequest);
+  }
+
+  /**
+   * pi:exit 的入口。
+   *
+   * 这里就是「刚启动成功的新会话被上一代进程的 exit 打成 started=false」的
+   * 修复点：闸门先按代际丢弃，随后再按 reason 区分主动停止与崩溃 ——
+   * 主动停止不该弹错误提示。
+   */
+  function handleExitEnvelope(raw: unknown): void {
+    const env = acceptEnvelope(raw, "pi:exit");
+    if (!env) return;
+    const payload = env.payload as PiExitPayload;
+    if (!started.value) return;
+    started.value = false;
+    streaming.value = false;
+    if (payload?.reason === "expected-stop") return;
+    notify(
+      "error",
+      payload?.error
+        ? `智能体进程意外退出：${payload.error}`
+        : "智能体进程意外退出，请重新开始"
+    );
+  }
+
   function handleUiRequest(r: ExtensionUiRequest): void {
     switch (r.method) {
       case "select":
@@ -344,18 +436,24 @@ export const useAppStore = defineStore("app", () => {
   // ---------- 生命周期 ----------
 
   let subscribed = false;
+  /**
+   * 三个 on* 返回的 unsubscribe 闭包。
+   * 早先它们被直接丢弃，窗口重载后同一 channel 上会挂着好几代回调。
+   */
+  const unsubscribes: (() => void)[] = [];
+
   function subscribeOnce(): void {
     if (subscribed) return;
     subscribed = true;
-    window.piBuddy.pi.onEvent((e) => handleEvent(e));
-    window.piBuddy.pi.onUiRequest((r) => handleUiRequest(r));
-    window.piBuddy.pi.onExit(() => {
-      if (started.value) {
-        started.value = false;
-        streaming.value = false;
-        notify("error", "智能体进程意外退出，请重新开始");
-      }
-    });
+    unsubscribes.push(window.piBuddy.pi.onEvent((e) => handleEventEnvelope(e)));
+    unsubscribes.push(window.piBuddy.pi.onUiRequest((r) => handleUiRequestEnvelope(r)));
+    unsubscribes.push(window.piBuddy.pi.onExit((e) => handleExitEnvelope(e)));
+  }
+
+  /** 解除全部推送订阅（窗口销毁 / 测试收尾）。 */
+  function dispose(): void {
+    while (unsubscribes.length) unsubscribes.pop()!();
+    subscribed = false;
   }
 
   async function init(): Promise<void> {
@@ -581,6 +679,10 @@ export const useAppStore = defineStore("app", () => {
     startError,
     currentSessionId,
     runtimeScope,
+    currentRuntimeId,
+    currentGeneration,
+    lastSequence,
+    droppedEnvelopes,
     agentState,
     models,
     thinkingLevels,
@@ -601,6 +703,10 @@ export const useAppStore = defineStore("app", () => {
     busyStatus,
     extStatus,
     setNotifier,
+    handleEventEnvelope,
+    handleUiRequestEnvelope,
+    handleExitEnvelope,
+    dispose,
     init,
     start,
     chooseWorkspace,

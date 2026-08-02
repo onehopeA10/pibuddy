@@ -165,11 +165,25 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   },
 };
 
+/**
+ * pi:exit 的 payload。
+ *
+ * `reason` 是 RUN-002 的关键区分：用户点「停止」和进程自己崩了，界面文案与
+ * 后续动作完全不同，早先两者都只有一个 `code` 可看，UI 只能一律报「意外退出」。
+ */
+export const piExitPayloadSchema = z.object({
+  code: z.number().nullable(),
+  reason: z.enum(["expected-stop", "crash"]),
+  error: z.string().optional(),
+});
+
+export type PiExitPayload = z.infer<typeof piExitPayloadSchema>;
+
 /** 推送通道的 payload schema（信封的 payload 位）。 */
 export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   [PUSH_CHANNELS.piEvent]: rpcEnvelopeLikeSchema,
   [PUSH_CHANNELS.piUiRequest]: rpcEnvelopeLikeSchema,
-  [PUSH_CHANNELS.piExit]: z.number().nullable(),
+  [PUSH_CHANNELS.piExit]: piExitPayloadSchema,
 };
 
 /** channel 名是否在白名单内。ipc-guard 的第一道闸。 */

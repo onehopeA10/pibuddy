@@ -8,9 +8,9 @@
   "priority": "high",
   "effort": "large",
   "action": "在 packages/pi-sdk/src/client.ts 增加 readonly runtimeId = randomUUID()、readonly generation、type RuntimePhase = \"idle\"|\"starting\"|\"running\"|\"stopping\"|\"stopped\"|\"crashed\"|\"recovering\" 与 const ALLOWED_TRANSITIONS 表（非法转换在 process.env.NODE_ENV !== \"production\" 时抛错）；send(command, opts?: {timeoutMs?: number; signal?: AbortSignal}) 默认 DEFAULT_RPC_TIMEOUT_MS = 30_000，超时或 abort 后必须 this.pending.delete(id)；注册 proc.on(\"close\") 与 proc.stdin.on(\"error\")、检查 stdin.write 返回值并在 false 时 await once(stdin,\"drain\")；jsonl.ts 增加 MAX_LINE_BYTES = 8*1024*1024 与 MAX_BUFFER_BYTES = 16*1024*1024 超限即报错并重置 buffer；stop() 实现四级阶梯 abort(1500ms) → stdin.end()(1000ms) → SIGTERM(3000ms) → Windows 用 taskkill /pid <pid> /T /F、其它平台 process.kill(-pid,'SIGKILL')；新建 packages/app/src/main/pi-supervisor.ts 实现 @pibuddy/contract 的 PiRuntimeSupervisor，为每次 start 分配不可复用的 runtimeId 与自增 generation、维护单调 sequence，并把 pi:event / pi:ui-request / pi:exit 三条 push 通道全部包进 PiEnvelope；把 ipc.ts:104 的 clients.set(wc.id, client) 移到 client.start() 之后、任何 await 之前；渲染进程 stores/app.ts 在 handleEvent 入口丢弃 generation 小于当前值或 sequence 未递增的信封，并接住 app.ts:285-287 被丢弃的三个 unsubscribe 闭包。",
-  "status": "pending",
-  "completed_at": null,
-  "actual_duration": null,
+  "status": "completed",
+  "completed_at": "2026-08-02T12:52:17.935Z",
+  "actual_duration": "~150m",
   "scope": "packages/pi-sdk + packages/app/src/main + preload + renderer store",
   "focus_paths": [
     "packages/pi-sdk/src/",

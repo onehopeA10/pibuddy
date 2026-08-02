@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { resolve } from "node:path";
 
 /**
  * 仓库根唯一 vitest 配置（CT-21）。
@@ -12,6 +13,15 @@ import { defineConfig } from "vitest/config";
  * 的 packages/* 内，其自带的 vitest.config.ts 必须被排除。
  */
 export default defineConfig({
+  // 与 electron.vite.config.ts / tsconfig.web.json 的 paths 保持一致：
+  // 渲染进程代码里 @contract 不再只是类型导入（parseEnvelope 是运行时函数），
+  // 没有这个别名，任何 import 了 store 的测试都会在解析期就失败。
+  resolve: {
+    alias: {
+      "@sdk": resolve(__dirname, "packages/pi-sdk/src/types.ts"),
+      "@contract": resolve(__dirname, "packages/contract/src/index.ts"),
+    },
+  },
   test: {
     include: [
       "packages/*/src/**/*.{test,spec}.ts",

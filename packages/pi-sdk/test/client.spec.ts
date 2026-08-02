@@ -83,8 +83,8 @@ function textDeltas(events: AgentEvent[]): string[] {
   return deltasOfType(events, "text_delta");
 }
 
-afterEach(() => {
-  while (live.length) live.pop()!.stop();
+afterEach(async () => {
+  while (live.length) await live.pop()!.stop();
 });
 
 // ---------- 路径 1：正常流式响应 ----------
@@ -96,10 +96,12 @@ describe("scenario normal", () => {
     const first = await client.send({ type: "prompt", message: "hi" });
     const second = await client.send({ type: "get_state" });
 
-    expect(first.id).toBe("c1");
+    // id 以 runtimeId 为前缀：跨代际重启后序号从 1 重来，不带前缀的话
+    // 上一代的迟到 response 会被新一代的 pending 认领。
+    expect(first.id).toBe(`${client.runtimeId}:1`);
     expect(first.command).toBe("prompt");
     expect(first.success).toBe(true);
-    expect(second.id).toBe("c2");
+    expect(second.id).toBe(`${client.runtimeId}:2`);
     expect(second.command).toBe("get_state");
   });
 
@@ -150,7 +152,7 @@ describe("scenario malformed-json", () => {
     client.start();
     const resp = await client.send({ type: "prompt", message: "hi" });
 
-    expect(resp.id).toBe("c1");
+    expect(resp.id).toBe(`${client.runtimeId}:1`);
     expect(resp.success).toBe(true);
   });
 

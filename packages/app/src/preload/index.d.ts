@@ -21,6 +21,8 @@ import type {
   SttTranscribeRequest,
   SttTranscribeResult,
   StartResult as ContractStartResult,
+  PiEnvelope,
+  PiExitPayload,
 } from "@contract";
 
 export type {
@@ -42,9 +44,10 @@ export interface PiBuddyApi {
     command: <T = unknown>(command: RpcCommandBase) => Promise<RpcResponse<T>>;
     uiRespond: (response: ExtensionUiResponse) => Promise<void>;
     stop: () => Promise<void>;
-    onEvent: (cb: (e: AgentEvent) => void) => () => void;
-    onUiRequest: (cb: (r: ExtensionUiRequest) => void) => () => void;
-    onExit: (cb: (code: number | null) => void) => () => void;
+    // 三条 push 通道传的都是完整信封，代际与序号在渲染进程侧判定
+    onEvent: (cb: (e: PiEnvelope<AgentEvent>) => void) => () => void;
+    onUiRequest: (cb: (r: PiEnvelope<ExtensionUiRequest>) => void) => () => void;
+    onExit: (cb: (e: PiEnvelope<PiExitPayload>) => void) => () => void;
   };
   sessions: {
     list: (workspace: string) => Promise<SessionMeta[]>;
