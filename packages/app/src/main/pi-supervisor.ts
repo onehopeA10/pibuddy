@@ -107,6 +107,7 @@ export class PiSupervisor implements PiRuntimeSupervisor {
       spawn: options.spawn,
       cwd: options.cwd,
       session: options.sessionPath,
+      sessionDir: options.sessionDir,
       generation,
     });
     const ctx: EnvelopeContext = {

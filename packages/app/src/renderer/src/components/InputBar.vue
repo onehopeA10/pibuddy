@@ -136,14 +136,24 @@ async function submit(): Promise<void> {
   if (!text.trim() && images.value.length === 0 && files.value.length === 0) return;
   sending.value = true;
   try {
-    await store.send(
+    // 只有 RPC 已经接受（success:true）才允许清空 composer。
+    // 早先这里无条件清空，一次发送失败就把文字、图片、文件附件一起抹掉。
+    const payload = {
       text,
-      images.value.map(({ type, data, mimeType }) => ({ type, data, mimeType })),
-      files.value
+      images: images.value.map(({ type, data, mimeType }) => ({ type, data, mimeType })),
+      files: files.value,
+    };
+    if (await store.send(payload)) {
+      store.editorText = "";
+      images.value = [];
+      files.value = [];
+    }
+  } catch (err) {
+    // 没有这个 catch，`void submit()` 路径下抛出的异常就是一条静默的
+    // unhandled rejection：用户只看到发送键转完一圈，什么提示都没有。
+    message.error(
+      err instanceof Error ? `${err.message}（内容已为你保留）` : "发送失败，内容已为你保留"
     );
-    store.editorText = "";
-    images.value = [];
-    files.value = [];
   } finally {
     sending.value = false;
   }

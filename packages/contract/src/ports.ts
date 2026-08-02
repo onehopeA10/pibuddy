@@ -36,6 +36,8 @@ export interface PiRuntimeStartOptions {
   cwd: string;
   /** 续接的会话 jsonl 路径；缺省表示新会话 */
   sessionPath?: string;
+  /** 会话目录（pi 的 --session-dir）；与主进程枚举用的目录必须是同一个 */
+  sessionDir?: string;
 }
 
 /**

@@ -35,6 +35,13 @@ export interface PiClientOptions {
   cwd: string;
   /** 恢复指定会话文件 */
   session?: string;
+  /**
+   * 会话 jsonl 的存放目录（pi 的 --session-dir）。
+   *
+   * 必须由调用方显式给出：不传的话 pi 按自己那套 env + cwd 编码去推断，
+   * 主进程枚举列表时又按另一套推断，两条独立路径必然漂移（SES-001）。
+   */
+  sessionDir?: string;
   sessionName?: string;
   noSession?: boolean;
   provider?: string;
@@ -219,6 +226,7 @@ export class PiRpcClient extends EventEmitter {
     const o = this.options;
     const args = [...(o.spawn.prefixArgs ?? []), "--mode", "rpc"];
     if (o.session) args.push("--session", o.session);
+    if (o.sessionDir) args.push("--session-dir", o.sessionDir);
     if (o.sessionName) args.push("--name", o.sessionName);
     if (o.noSession) args.push("--no-session");
     if (o.provider) args.push("--provider", o.provider);

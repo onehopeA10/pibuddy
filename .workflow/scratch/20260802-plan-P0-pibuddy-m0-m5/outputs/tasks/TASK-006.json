@@ -8,8 +8,8 @@
   "priority": "high",
   "effort": "large",
   "action": "新建 packages/app/src/main/sessions/session-repository.ts 实现 @pibuddy/contract 的 SessionRepository：优先调用 pi 公开导出的 SessionManager.list(cwd, sessionDir)（已确认为 dist/index.js 第 23 行导出的静态方法，签名 static list(cwd: string, sessionDir?: string, onProgress?): Promise<SessionInfo[]>，返回含 path/id/cwd/name/created/modified/messageCount/firstMessage）；导出纯函数 encodeSessionDirSegment(resolvedPath: string): string 严格复刻 `--${resolvedPath.replace(/^[/\\\\]/,\"\").replace(/[/\\\\:]/g,\"-\")}--` 作为回退；sessionDir 解析优先级实现为 settings.sessionDir → process.env.PI_CODING_AGENT_SESSION_DIR → path.join(process.env.PI_CODING_AGENT_DIR, \"sessions\", encodeSessionDirSegment(...)) → path.join(os.homedir(), \".pi\", \"agent\", \"sessions\", encodeSessionDirSegment(path.resolve(cwd)))；全部 I/O 改用 node:fs/promises 并设 MAX_SESSIONS_SCANNED = 200、MAX_SESSION_HEAD_BYTES = 1_048_576；在 packages/pi-sdk/src/client.ts 的 args 组装处补 args.push(\"--session-dir\", o.sessionDir)；渲染进程 store 的 newTask/openSession 增加 resp.data.cancelled === true 分支，send() 返回 Promise<boolean> 且 InputBar.submit 改为 if (await store.send(...)) 才清空并补 catch；新增 resetSessionScopedState() 统一清 items/toolRuns/queue/statusTexts/uiRequests/liveAssistant/streaming/stats 并在 start 与 newTask 中调用；start(sessionPath) 仅在 sessionPath === undefined 时应用 settings 的 provider/modelId/thinkingLevel。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed",
+  "completed_at": "2026-08-02T13:30:58.790Z",
   "actual_duration": null,
   "scope": "packages/app/src/main/sessions/session-repository.ts + renderer 会话交互链路",
   "focus_paths": [

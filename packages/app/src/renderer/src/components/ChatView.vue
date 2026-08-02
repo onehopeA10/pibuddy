@@ -58,7 +58,19 @@ watch(
 
 <template>
   <div ref="scrollEl" class="chat-scroll" @scroll.passive="onScroll">
-    <Welcome v-if="store.items.length === 0 && !store.liveAssistant" />
+    <!--
+      切换会话成功、但消息没读出来。此时旧消息已被清空（不能拿旧会话的内容
+      冒充新会话），必须明确告诉用户「这是加载失败」而不是「这个会话是空的」。
+    -->
+    <div v-if="store.sessionLoadError" class="session-load-error">
+      <span>😕 会话内容没能加载出来：{{ store.sessionLoadError }}</span>
+      <n-button size="tiny" type="primary" secondary @click="store.reloadMessages()">
+        重试
+      </n-button>
+    </div>
+    <Welcome
+      v-if="store.items.length === 0 && !store.liveAssistant && !store.sessionLoadError"
+    />
     <div v-else class="chat-inner">
       <div v-if="hiddenCount > 0" style="text-align: center; margin-bottom: 16px">
         <n-button size="tiny" quaternary @click="showEarlier">

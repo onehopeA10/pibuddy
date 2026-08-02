@@ -9,6 +9,12 @@ import { z } from "zod";
 export const appSettingsSchema = z.object({
   /** 工作目录绝对路径 */
   workspace: z.string().optional(),
+  /**
+   * 会话 jsonl 的存放目录（等价于 pi 的 --session-dir）。
+   * 留空时按 resolveSessionDir 的四级优先链推断；一旦设置，主进程枚举与
+   * pi 写入都以它为准，二者不允许各自推断。
+   */
+  sessionDir: z.string().optional(),
   provider: z.string().optional(),
   modelId: z.string().optional(),
   thinkingLevel: z.string().optional(),

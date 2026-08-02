@@ -16,7 +16,8 @@ import type {
 import { buildPiSpawn, assertRuntimeHandshake } from "./pi-launcher.js";
 import { PROTOCOL_VERSION } from "@pibuddy/contract";
 import { createLogger, type Logger } from "./logger.js";
-import { listSessions } from "./sessions-store.js";
+import { listSessionsForWorkspace } from "./sessions/session-repository.js";
+import { resolveSessionDir } from "./sessions/session-dir.js";
 import { loadSettings, saveSettings, type AppSettings } from "./settings.js";
 import { PiSupervisor } from "./pi-supervisor.js";
 
@@ -101,6 +102,8 @@ export function registerIpc(): void {
         workspaceId: opts.workspace,
         cwd: opts.workspace,
         sessionPath: opts.session,
+        // 主进程列目录与 pi 写目录必须同源，否则历史会话恒为空（SES-001）
+        sessionDir: resolveSessionDir(opts.workspace, settings),
       });
       // 必须先登记再 await：spawn 失败（ENOENT 只走 error → close，没有 exit）
       // 时下面的握手会抛，catch 里才有东西可清。
@@ -143,8 +146,8 @@ export function registerIpc(): void {
     disposeClientFor(event.sender.id);
   });
 
-  ipcMain.handle("sessions:list", (_event, workspace: string) => {
-    return listSessions(workspace);
+  ipcMain.handle("sessions:list", async (_event, workspace: string) => {
+    return listSessionsForWorkspace(workspace, loadSettings());
   });
 
   ipcMain.handle("settings:get", () => loadSettings());

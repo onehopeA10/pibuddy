@@ -92,10 +92,38 @@ body,
   text-overflow: ellipsis;
 }
 
+.session-item .preview {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .session-item .meta {
   font-size: 11px;
   color: #9ca3af;
   margin-top: 2px;
+}
+
+.session-item .parse-error {
+  color: #d97706;
+  margin-left: 4px;
+}
+
+.session-load-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px auto;
+  max-width: 720px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  font-size: 13px;
 }
 
 .sidebar .footer {

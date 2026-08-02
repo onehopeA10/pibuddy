@@ -80,12 +80,111 @@ function imagesOf(content: { type: string }[] | undefined): ImageContent[] {
 
 let keySeq = 0;
 
+/**
+ * agent_settled 到会话列表刷新之间的防抖窗口。
+ *
+ * agent_settled 在一次任务里会连续来很多条，早先每条都直接触发一次全量目录
+ * 扫描。常量放在这里而不是 sessions store 里：刷新时机由本 store 的事件
+ * reducer 决定，归属跟着触发点走。
+ */
+const REFRESH_SESSIONS_DEBOUNCE_MS = 2000;
+
+/**
+ * 会话级状态的清空回调表（CT-25）。
+ *
+ * 「换会话要清哪些东西」是一条语义，不该是散落在 start / newTask 里的手写
+ * 字段枚举 —— 每加一块会话级状态就得记得去补一行，漏了就是上一次会话的
+ * 工具卡片、扩展弹窗留在新会话里。各 store 自己注册自己的清空动作，
+ * 状态归属和清空语义就此解耦。
+ *
+ * key 用于去重：store 在测试里会被反复重建，不去重的话注册表里会堆满
+ * 指向旧实例的死闭包。
+ */
+const sessionScopedResets = new Map<string, () => void>();
+let anonymousResetSeq = 0;
+
+export function registerSessionScopedReset(
+  reset: () => void,
+  key = `anonymous:${++anonymousResetSeq}`
+): void {
+  sessionScopedResets.set(key, reset);
+}
+
+/** 依次执行全部已注册的清空回调。 */
+export function resetSessionScopedState(): void {
+  for (const reset of sessionScopedResets.values()) reset();
+}
+
+export interface SendOptions {
+  text?: string;
+  images?: ImageContent[];
+  files?: PickedFile[];
+}
+
+/**
+ * 发送用户输入。**返回值是「RPC 是否已接受」，调用方据此决定是否清空输入区。**
+ *
+ * 早先这里失败时只是 `return`（正常 resolve），InputBar 里 await 之后的三行
+ * 照常执行，于是文本、图片、文件附件在一次网络抖动里全丢。rpc.md 明确
+ * success:true 即表示已接受/已入队，因此它是唯一可以清空草稿的判据。
+ *
+ * 签名被 TASK-006/007/010/014/015 共同依赖，改写前先看那几条收敛条件。
+ */
+export async function send(opts: SendOptions = {}): Promise<boolean> {
+  const store = useAppStore();
+  const images = opts.images ?? [];
+  const files = opts.files ?? [];
+  let message = (opts.text ?? store.editorText).trim();
+  const refs = files.filter((f) => f.kind !== "image");
+  if (refs.length > 0) {
+    message +=
+      "\n\n[用户提供的文件]\n" + refs.map((f) => `- ${f.path}`).join("\n");
+  }
+  if (!message && images.length === 0) return false;
+
+  const wasStreaming = store.streaming;
+  let resp: { success: boolean; error?: string };
+  try {
+    resp = await window.piBuddy.pi.command({
+      type: "prompt",
+      message,
+      ...(images.length ? { images } : {}),
+      // 插话走 prompt + streamingBehavior:"steer"，不是原生 steer 命令
+      ...(wasStreaming ? { streamingBehavior: "steer" } : {}),
+    });
+  } catch (err) {
+    store.notify("error", err instanceof Error ? err.message : "发送失败");
+    return false;
+  }
+  if (!resp.success) {
+    store.notify("error", resp.error ?? "发送失败");
+    return false;
+  }
+  if (wasStreaming) store.notify("info", "已插话，助手会尽快处理你的新指令");
+
+  const content: (TextContent | ImageContent)[] = [];
+  if (message) content.push({ type: "text", text: message });
+  content.push(...images);
+  store.items.push({
+    key: ++keySeq,
+    message: {
+      role: "user",
+      content: content.length === 1 && content[0].type === "text" ? message : content,
+      timestamp: Date.now(),
+    } as UserMessage,
+  });
+  store.activityTick++;
+  return true;
+}
+
 export const useAppStore = defineStore("app", () => {
   // ---------- 基础状态 ----------
   const booting = ref(true);
   // init() 之前的占位：形状与 schema 默认值一致（piRuntimeMode 有默认值，不能是裸 {}）
   const settings = ref<AppSettings>({ piRuntimeMode: "bundled" });
   const startError = ref("");
+  /** 会话切换成功但消息拉取失败时的提示；非空时 ChatView 显示错误条与「重试」。 */
+  const sessionLoadError = ref("");
 
   // ---------- 运行时状态（按 sessionId 归一化） ----------
   const currentSessionId = ref(PENDING_SCOPE_KEY);
@@ -150,6 +249,18 @@ export const useAppStore = defineStore("app", () => {
   /** 每次有会影响聊天区高度的更新时 +1，供 ChatView 轻量监听滚动（避免 deep watch） */
   const activityTick = ref(0);
 
+  // 本 store 持有的会话级状态：换会话时必须一起清干净。
+  // TASK-012 把 uiRequests / statusTexts 迁到 extensionUi store 后，由那个
+  // store 自行注册，这里删掉对应两行即可，清空语义本身不动。
+  registerSessionScopedReset(() => {
+    items.value = [];
+    for (const key of Object.keys(toolRuns)) delete toolRuns[key];
+    queue.value = { steering: [], followUp: [] };
+    for (const key of Object.keys(statusTexts)) delete statusTexts[key];
+    uiRequests.value = [];
+    liveAssistant.value = null;
+  }, "app");
+
   let notifier: Notifier | null = null;
   function setNotifier(n: Notifier): void {
     notifier = n;
@@ -212,7 +323,7 @@ export const useAppStore = defineStore("app", () => {
         streaming.value = false;
         liveAssistant.value = null;
         void refreshStats();
-        void refreshSessions();
+        scheduleRefreshSessions();
         void refreshState();
         break;
       case "message_start": {
@@ -479,9 +590,10 @@ export const useAppStore = defineStore("app", () => {
 
   async function start(sessionPath?: string): Promise<void> {
     startError.value = "";
+    sessionLoadError.value = "";
     started.value = false;
     streaming.value = false;
-    liveAssistant.value = null;
+    resetSessionScopedState();
     try {
       const result = await window.piBuddy.pi.start({
         workspace: workspace.value,
@@ -498,21 +610,31 @@ export const useAppStore = defineStore("app", () => {
       adoptSession(result.state.sessionId);
       started.value = true;
 
-      // 恢复上次选择的模型与思考力度
+      // 只有**新会话**才套用全局设置里的模型与思考力度。
+      // 恢复历史会话时会话文件里已经记着它自己的 model / thinkingLevel，
+      // 无条件覆盖等于用户每打开一个旧会话都被悄悄换成另一个模型。
       const saved = settings.value;
-      if (
-        saved.provider &&
-        saved.modelId &&
-        (result.state.model?.provider !== saved.provider ||
-          result.state.model?.id !== saved.modelId)
-      ) {
-        await setModel(saved.provider, saved.modelId, false);
-      }
-      if (saved.thinkingLevel) {
-        await window.piBuddy.pi.command({
-          type: "set_thinking_level",
-          level: saved.thinkingLevel,
-        });
+      if (sessionPath === undefined) {
+        if (
+          saved.provider &&
+          saved.modelId &&
+          (result.state.model?.provider !== saved.provider ||
+            result.state.model?.id !== saved.modelId)
+        ) {
+          await setModel(saved.provider, saved.modelId, false);
+        }
+        // 已经是目标等级就不要再发一次命令：多余的 set_thinking_level 会在
+        // 会话里多写一条 thinking_level_change 记录。
+        if (saved.thinkingLevel && result.state.thinkingLevel !== saved.thinkingLevel) {
+          await window.piBuddy.pi.command({
+            type: "set_thinking_level",
+            level: saved.thinkingLevel,
+          });
+        }
+      } else {
+        // 恢复历史会话：沿用会话自身记录的模型与思考等级，这里什么都不做。
+        // TASK-014 的 modelMismatchPrompt（提示用户当前会话模型与默认不同）
+        // 就落在这个分支里。
       }
       await refreshState();
       await refreshThinkingLevels();
@@ -541,6 +663,16 @@ export const useAppStore = defineStore("app", () => {
     sessions.value = await window.piBuddy.sessions.list(workspace.value);
   }
 
+  let refreshSessionsTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 尾沿防抖：连续 N 次 agent_settled 只在安静 2000ms 之后扫一次目录。 */
+  function scheduleRefreshSessions(): void {
+    if (refreshSessionsTimer) clearTimeout(refreshSessionsTimer);
+    refreshSessionsTimer = setTimeout(() => {
+      refreshSessionsTimer = null;
+      void refreshSessions();
+    }, REFRESH_SESSIONS_DEBOUNCE_MS);
+  }
+
   async function refreshThinkingLevels(): Promise<void> {
     const resp = await window.piBuddy.pi.command<{ levels: ThinkingLevel[] }>({
       type: "get_available_thinking_levels",
@@ -557,55 +689,26 @@ export const useAppStore = defineStore("app", () => {
     await start();
   }
 
-  async function send(
-    text: string,
-    images: ImageContent[],
-    files: PickedFile[]
-  ): Promise<void> {
-    let message = text.trim();
-    const refs = files.filter((f) => f.kind !== "image");
-    if (refs.length > 0) {
-      message +=
-        "\n\n[用户提供的文件]\n" + refs.map((f) => `- ${f.path}`).join("\n");
-    }
-    if (!message && images.length === 0) return;
-
-    const wasStreaming = streaming.value;
-    const resp = await window.piBuddy.pi.command({
-      type: "prompt",
-      message,
-      ...(images.length ? { images } : {}),
-      ...(wasStreaming ? { streamingBehavior: "steer" } : {}),
-    });
-    if (!resp.success) {
-      notify("error", resp.error ?? "发送失败");
-      return;
-    }
-    if (wasStreaming) notify("info", "已插话，助手会尽快处理你的新指令");
-
-    const content: (TextContent | ImageContent)[] = [];
-    if (message) content.push({ type: "text", text: message });
-    content.push(...images);
-    pushMessage({
-      role: "user",
-      content: content.length === 1 && content[0].type === "text" ? message : content,
-      timestamp: Date.now(),
-    } as UserMessage);
-  }
-
   async function abortRun(): Promise<void> {
     await window.piBuddy.pi.command({ type: "abort" });
   }
 
   async function newTask(): Promise<void> {
-    const resp = await window.piBuddy.pi.command({ type: "new_session" });
+    const resp = await window.piBuddy.pi.command<{ cancelled?: boolean }>({
+      type: "new_session",
+    });
     if (!resp.success) {
       notify("error", resp.error ?? "无法开始新任务");
       return;
     }
-    items.value = [];
-    for (const key of Object.keys(toolRuns)) delete toolRuns[key];
-    liveAssistant.value = null;
+    // 扩展可以否决新建（rpc.md：success:true 且 data.cancelled:true）。
+    // 只看 success 的话界面会清成一片假空白，而 pi 那边根本没换会话。
+    if (resp.data?.cancelled === true) {
+      notify("warning", "扩展取消了「开始新任务」，当前会话保持不变");
+      return;
+    }
+    sessionLoadError.value = "";
+    resetSessionScopedState();
     stats.value = null;
     await refreshState();
     void refreshSessions();
@@ -616,7 +719,7 @@ export const useAppStore = defineStore("app", () => {
       notify("warning", "请先停止当前任务，再切换历史会话");
       return;
     }
-    const resp = await window.piBuddy.pi.command({
+    const resp = await window.piBuddy.pi.command<{ cancelled?: boolean }>({
       type: "switch_session",
       sessionPath: meta.path,
     });
@@ -624,12 +727,40 @@ export const useAppStore = defineStore("app", () => {
       notify("error", resp.error ?? "打开会话失败");
       return;
     }
-    const messages = await window.piBuddy.pi.command<{ messages: AgentMessage[] }>({
-      type: "get_messages",
-    });
-    if (messages.success && messages.data) loadMessages(messages.data.messages);
+    // 同 new_session：扩展否决时保持原样，不能拿一个空会话冒充切换成功。
+    if (resp.data?.cancelled === true) {
+      notify("warning", "扩展取消了会话切换，当前会话保持不变");
+      return;
+    }
+    // 切换已经生效：旧会话的消息、工具卡片、扩展弹窗全部作废。哪怕下面
+    // 拉消息失败，也绝不能把旧消息留在界面上冒充新会话的内容。
+    resetSessionScopedState();
+    await reloadMessages();
     await refreshState();
     void refreshStats();
+  }
+
+  /**
+   * 拉取当前会话的完整消息列表。失败时只设 sessionLoadError，
+   * 由 ChatView 的「重试」按钮再调一次，绝不静默留白。
+   */
+  async function reloadMessages(): Promise<void> {
+    sessionLoadError.value = "";
+    let resp: { success: boolean; error?: string; data?: { messages: AgentMessage[] } };
+    try {
+      resp = await window.piBuddy.pi.command<{ messages: AgentMessage[] }>({
+        type: "get_messages",
+      });
+    } catch (err) {
+      sessionLoadError.value =
+        err instanceof Error ? err.message : "加载会话消息失败，请重试";
+      return;
+    }
+    if (resp.success && resp.data) {
+      loadMessages(resp.data.messages);
+      return;
+    }
+    sessionLoadError.value = resp.error ?? "加载会话消息失败，请重试";
   }
 
   async function setModel(
@@ -677,6 +808,7 @@ export const useAppStore = defineStore("app", () => {
     settings,
     started,
     startError,
+    sessionLoadError,
     currentSessionId,
     runtimeScope,
     currentRuntimeId,
@@ -703,6 +835,7 @@ export const useAppStore = defineStore("app", () => {
     busyStatus,
     extStatus,
     setNotifier,
+    notify,
     handleEventEnvelope,
     handleUiRequestEnvelope,
     handleExitEnvelope,
@@ -714,6 +847,7 @@ export const useAppStore = defineStore("app", () => {
     abortRun,
     newTask,
     openSession,
+    reloadMessages,
     setModel,
     switchToBundledRuntime,
     setThinkingLevel,
