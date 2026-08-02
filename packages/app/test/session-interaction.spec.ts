@@ -25,19 +25,62 @@ let startResult: unknown;
 function installWindow(): void {
   commandLog = [];
   sessionsList = vi.fn(async () => []);
+  // TASK-007 之后 window.piBuddy.pi 上只有 15 个产品动作窄方法，通用的
+  // command(...) 已被删除。这里把每个窄方法映射回它对应的 rpc 命令 type，
+  // 既保留了原有断言（commandLog 记的仍是 rpc 命令名），也让这份 mock 与
+  // 真实 preload 的接口面一一对应 —— 少一个方法，测试就会立刻炸。
+  const dispatch = async (cmd: { type: string; [k: string]: unknown }): Promise<unknown> => {
+    commandLog.push(cmd.type);
+    return commandHandler(cmd as never);
+  };
   (globalThis as Record<string, unknown>).window = {
     piBuddy: {
       pi: {
+        prompt: vi.fn((payload: Record<string, unknown>) =>
+          dispatch({ type: "prompt", ...payload })
+        ),
+        steer: vi.fn((payload: Record<string, unknown>) =>
+          dispatch({ type: "steer", ...payload })
+        ),
+        followUp: vi.fn((payload: Record<string, unknown>) =>
+          dispatch({ type: "follow_up", ...payload })
+        ),
+        abort: vi.fn(() => dispatch({ type: "abort" })),
+        newSession: vi.fn(() => dispatch({ type: "new_session" })),
+        switchSession: vi.fn((sessionPath: string) =>
+          dispatch({ type: "switch_session", sessionPath })
+        ),
+        setModel: vi.fn((provider: string, modelId: string) =>
+          dispatch({ type: "set_model", provider, modelId })
+        ),
+        setThinkingLevel: vi.fn((level: string) =>
+          dispatch({ type: "set_thinking_level", level })
+        ),
+        getState: vi.fn(() => dispatch({ type: "get_state" })),
+        getMessages: vi.fn(() => dispatch({ type: "get_messages" })),
+        getSessionStats: vi.fn(() => dispatch({ type: "get_session_stats" })),
+        getAvailableModels: vi.fn(() => dispatch({ type: "get_available_models" })),
+        getAvailableThinkingLevels: vi.fn(() =>
+          dispatch({ type: "get_available_thinking_levels" })
+        ),
+        compact: vi.fn((customInstructions?: string) =>
+          dispatch({ type: "compact", customInstructions })
+        ),
+        setSessionName: vi.fn((name: string) => dispatch({ type: "set_session_name", name })),
+      },
+      runtime: {
         start: vi.fn(async () => startResult),
-        command: vi.fn(async (cmd: { type: string }) => {
-          commandLog.push(cmd.type);
-          return commandHandler(cmd as never);
-        }),
-        uiRespond: vi.fn(async () => undefined),
         stop: vi.fn(async () => undefined),
+      },
+      events: {
         onEvent: () => () => undefined,
         onUiRequest: () => () => undefined,
         onExit: () => () => undefined,
+      },
+      extensionUi: { respond: vi.fn(async () => undefined) },
+      workspace: {
+        current: vi.fn(async () => ({ workspaceId: "ws-1", displayPath: "/w" })),
+        choose: vi.fn(async () => ({ workspaceId: "ws-1", displayPath: "/w" })),
       },
       sessions: { list: sessionsList },
       settings: {
@@ -302,7 +345,9 @@ describe("会话列表刷新防抖", () => {
   it("连续 10 次 agent_settled 只触发一次目录枚举", async () => {
     vi.useFakeTimers();
     const store = useAppStore();
-    store.settings = { piRuntimeMode: "bundled", workspace: "/w" };
+    store.settings = { piRuntimeMode: "bundled" };
+    // 会话枚举现在按不透明 workspaceId 走，不再读 settings 里的绝对路径
+    store.workspaceId = "ws-1";
 
     for (let i = 0; i < 10; i++) {
       store.handleEventEnvelope(envelope({ type: "agent_settled" }, i));
@@ -323,9 +368,9 @@ describe("start()：只有新会话才套用全局设置", () => {
       warning: vi.fn(),
       error: vi.fn(),
     });
+    store.workspaceId = "ws-1";
     store.settings = {
       piRuntimeMode: "bundled",
-      workspace: "/w",
       provider: "anthropic",
       modelId: "claude-x",
       thinkingLevel: "max",
@@ -354,9 +399,9 @@ describe("start()：只有新会话才套用全局设置", () => {
       warning: vi.fn(),
       error: vi.fn(),
     });
+    store.workspaceId = "ws-1";
     store.settings = {
       piRuntimeMode: "bundled",
-      workspace: "/w",
       provider: "anthropic",
       modelId: "claude-x",
       thinkingLevel: "max",
@@ -376,9 +421,9 @@ describe("start()：只有新会话才套用全局设置", () => {
       warning: vi.fn(),
       error: vi.fn(),
     });
+    store.workspaceId = "ws-1";
     store.settings = {
       piRuntimeMode: "bundled",
-      workspace: "/w",
       thinkingLevel: "off",
     };
     startResult = { state: makeState({ thinkingLevel: "off" }), models: [], messages: [] };

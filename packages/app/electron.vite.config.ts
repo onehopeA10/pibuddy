@@ -9,7 +9,12 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({ exclude: ["@pibuddy/pi-sdk", "@pibuddy/contract"] })],
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    // 与 main 同理，且在 preload 上更致命：sandbox:true 的 preload 里 require
+    // 只认 electron 与少数几个内建模块，解析不到 workspace 包时**整个 preload
+    // 静默失败**，window.piBuddy 变成 undefined，界面停在空白且控制台没有堆栈。
+    // TASK-007 让 preload 开始把 CHANNELS 当值用（此前只是类型导入，编译期就
+    // 消失了），契约包因此必须随 preload 一起打进产物。
+    plugins: [externalizeDepsPlugin({ exclude: ["@pibuddy/contract"] })],
     build: {
       rollupOptions: {
         // 沙箱化的 preload 只能是 CommonJS：Electron 的 ESM preload（.mjs）

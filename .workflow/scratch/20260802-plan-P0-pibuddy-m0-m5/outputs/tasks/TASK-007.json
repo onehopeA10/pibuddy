@@ -8,9 +8,9 @@
   "priority": "high",
   "effort": "large",
   "action": "删除 packages/app/src/preload/index.ts:16 的 command 方法与 packages/app/src/main/ipc.ts:115-117 的 pi:command handler；在 preload 的 pi 命名空间改为暴露 prompt/steer/followUp/abort/newSession/switchSession/setModel/setThinkingLevel/getState/getMessages/getSessionStats/getAvailableModels/getAvailableThinkingLevels/compact/setSessionName 共 15 个窄方法，且 prompt 的入参保留 streamingBehavior?: \"steer\" | \"followUp\"；新建 packages/app/src/main/ipc-guard.ts（全计划唯一的 handler 注册入口，裁定1）导出 registerHandler(channel, schema, handler) 与 class IpcGuard implements PermissionEngine（checkFrame / checkPayload / checkRate），其内部 assertMainFrame(event) 内容为 if (event.senderFrame !== event.sender.mainFrame) throw new Error(\"IPC_FRAME_REJECTED\")、const MAX_IPC_PAYLOAD_BYTES = 8*1024*1024、const MAX_TEXT_PAYLOAD_BYTES = 262144 与 class RateLimiter（prompt 10 次/10s，其余 30 次/10s），并把 ipcMain.handle / ipcMain.on 的调用点全部收敛进 ipc-guard.ts —— 其余任何文件不得直接调用（裁定1 的结构性守卫），四重校验 assertMainFrame → zod parse（用 @pibuddy/contract 的 per-channel schema）→ CHANNEL_MAX_BYTES 查表尺寸校验（stt:transcribe 25MB / file:read-attachment 10MB，其余 8MB）→ 限流 集中在包装器内执行；新建 packages/app/src/main/workspace-registry.ts：registerWorkspace(absPath) 用 fs.realpathSync.native 归一化后，以 canonical root 的 sha256 派生出稳定的不透明 workspaceId，并经 fs-atomic.ts 的 writeJsonAtomic 一次性持久化到 <userData>/workspaces.json（裁定3：禁止 randomUUID —— 进程级 UUID 跨重启即变，而 TASK-009 的 sessions.workspace_id 声明 NOT NULL 并依其过滤，重启后历史会话会全部查不到且不报任何错），resolveInWorkspace(workspaceId, relativePath) 必须拒绝 path.isAbsolute 与含 '..' 的输入、await fs.realpath 后用 const rel = path.relative(root, real); if (rel.startsWith(\"..\") || path.isAbsolute(rel)) throw，禁止用 real.startsWith(root) 判定；新建 packages/app/src/main/attachment-registry.ts 用 ATTACHMENT_TTL_MS = 1800000（30 分钟滑动过期，访问即续期）的 token 取代绝对路径，并导出 revokeAllForSession / revokeAll 供会话切换与应用退出时显式撤销全部未消费 token（裁定2：5 分钟对「添加附件后再打一段长文字」过短，24 小时对一次性 capability 过长），并对图片做 magic bytes 嗅探（PNG 89 50 4E 47、JPEG FF D8 FF、GIF 47 49 46 38、WEBP RIFF....WEBP、BMP 42 4D）与 MAX_IMAGE_BYTES = 10*1024*1024 校验。",
-  "status": "pending",
-  "completed_at": null,
-  "actual_duration": null,
+  "status": "completed_with_deviations",
+  "completed_at": "2026-08-02T14:18:35.032Z",
+  "actual_duration": "~150m",
   "scope": "packages/app/src/main/ipc.ts + security 模块 + preload + renderer 调用点",
   "focus_paths": [
     "packages/app/src/main/",

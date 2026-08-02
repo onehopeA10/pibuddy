@@ -2,10 +2,12 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { PiSpawn } from "@pibuddy/pi-sdk";
+import { PROTOCOL_VERSION } from "@pibuddy/contract";
 import {
   PI_RUNTIME_RESOLVE_FAILED,
   PiRuntimeResolveError,
   RUNTIME_DIR_NAME,
+  assertRuntimeHandshake,
   readRuntimeManifest,
   resolveRuntimeEntry,
   type RuntimeManifest,
@@ -288,4 +290,42 @@ export function buildPiSpawn(ctx: PiLauncherContext = {}): PiSpawn & { runtime: 
     shell: false,
     runtime,
   };
+}
+
+/**
+ * 启动握手：内置运行时必须与清单声明的版本 / 协议一致。
+ *
+ * 开发形态没有清单（直接跑 node_modules 里的 pi），只记一条日志不做断言。
+ *
+ * 住在这里而不是 ipc.ts：它读的是 runtime 目录的 package.json，属于运行时
+ * 定位这件事的收尾，与 IPC 边界无关。ipc.ts 里则**不允许**出现任何同步文件
+ * 读取 —— 那条通道上的每一次 readFileSync 都直接按住整个 UI 的事件循环。
+ */
+export function verifyRuntimeHandshake(
+  runtime: ResolvedPiRuntime,
+  logger?: LauncherLogger
+): void {
+  if (runtime.source !== "bundled" || !runtime.runtimeRoot) {
+    logger?.info("pi_runtime_handshake_skipped", {
+      selectedRuntime: runtime.source,
+      protocolVersion: PROTOCOL_VERSION,
+    });
+    return;
+  }
+  const pkgPath = path.join(runtime.runtimeRoot, "package.json");
+  const actualVersion = (
+    JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { version?: string }
+  ).version;
+  assertRuntimeHandshake(
+    {
+      runtimeVersion: runtime.bundledVersion ?? "",
+      protocolVersion: runtime.protocolVersion ?? PROTOCOL_VERSION,
+    },
+    { version: actualVersion ?? "", protocolVersion: PROTOCOL_VERSION }
+  );
+  logger?.info("pi_runtime_handshake_ok", {
+    selectedRuntime: runtime.source,
+    bundledVersion: runtime.bundledVersion,
+    protocolVersion: runtime.protocolVersion,
+  });
 }

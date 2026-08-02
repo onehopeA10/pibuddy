@@ -16,7 +16,7 @@ import type {
 } from "@sdk";
 import type {
   AppSettings,
-  PickedFile,
+  AttachmentRef,
   PiEnvelope,
   PiExitPayload,
   SessionMeta,
@@ -118,7 +118,14 @@ export function resetSessionScopedState(): void {
 export interface SendOptions {
   text?: string;
   images?: ImageContent[];
-  files?: PickedFile[];
+  /**
+   * 非图片附件的能力凭证。
+   *
+   * 早先这里是 `files: PickedFile[]`，渲染进程拿着绝对路径自己往提示词里
+   * 拼「[用户提供的文件]」块。现在只传 token，路径由主进程换回来后拼接 ——
+   * 渲染进程从头到尾不知道这些文件在磁盘上的哪里。
+   */
+  attachments?: AttachmentRef[];
 }
 
 /**
@@ -133,22 +140,21 @@ export interface SendOptions {
 export async function send(opts: SendOptions = {}): Promise<boolean> {
   const store = useAppStore();
   const images = opts.images ?? [];
-  const files = opts.files ?? [];
-  let message = (opts.text ?? store.editorText).trim();
-  const refs = files.filter((f) => f.kind !== "image");
-  if (refs.length > 0) {
-    message +=
-      "\n\n[用户提供的文件]\n" + refs.map((f) => `- ${f.path}`).join("\n");
-  }
-  if (!message && images.length === 0) return false;
+  const attachments = opts.attachments ?? [];
+  const message = (opts.text ?? store.editorText).trim();
+  // 非图片附件的路径由主进程凭 token 换回后拼进提示词
+  const attachmentTokens = attachments
+    .filter((a) => a.kind !== "image")
+    .map((a) => a.token);
+  if (!message && images.length === 0 && attachmentTokens.length === 0) return false;
 
   const wasStreaming = store.streaming;
   let resp: { success: boolean; error?: string };
   try {
-    resp = await window.piBuddy.pi.command({
-      type: "prompt",
+    resp = await window.piBuddy.pi.prompt({
       message,
       ...(images.length ? { images } : {}),
+      ...(attachmentTokens.length ? { attachmentTokens } : {}),
       // 插话走 prompt + streamingBehavior:"steer"，不是原生 steer 命令
       ...(wasStreaming ? { streamingBehavior: "steer" } : {}),
     });
@@ -269,7 +275,23 @@ export const useAppStore = defineStore("app", () => {
     notifier?.[kind](text);
   }
 
-  const workspace = computed(() => settings.value.workspace ?? "");
+  /**
+   * 工作目录的不透明标识与显示名。
+   *
+   * 渲染进程只持有 `workspaceId`（sha256(canonical realpath) 派生，跨重启稳定），
+   * 所有需要工作目录的 IPC 都只传它。`displayPath` 是**单向下发**的展示字段 ——
+   * 它可以出现在界面上，但绝不能作为任何 IPC 的入参回传给主进程，否则
+   * capability 化就等于白做。
+   */
+  const workspaceId = ref("");
+  const displayPath = ref("");
+  /** 同名代理：既有组件读 store.workspace 拿显示路径，零改动。 */
+  const workspace = computed(() => displayPath.value);
+
+  function adoptWorkspace(ref_: { workspaceId: string; displayPath: string } | null): void {
+    workspaceId.value = ref_?.workspaceId ?? "";
+    displayPath.value = ref_?.displayPath ?? "";
+  }
   const currentModel = computed(() => agentState.value?.model ?? null);
   /** 运行相关的临时状态（压缩、重试），显示在输入框上方 */
   const busyStatus = computed(() =>
@@ -537,7 +559,7 @@ export const useAppStore = defineStore("app", () => {
     payload: { value?: string; confirmed?: boolean; cancelled?: boolean }
   ): Promise<void> {
     uiRequests.value = uiRequests.value.filter((r) => r.id !== request.id);
-    await window.piBuddy.pi.uiRespond({
+    await window.piBuddy.extensionUi.respond({
       type: "extension_ui_response",
       id: request.id,
       ...payload,
@@ -556,9 +578,9 @@ export const useAppStore = defineStore("app", () => {
   function subscribeOnce(): void {
     if (subscribed) return;
     subscribed = true;
-    unsubscribes.push(window.piBuddy.pi.onEvent((e) => handleEventEnvelope(e)));
-    unsubscribes.push(window.piBuddy.pi.onUiRequest((r) => handleUiRequestEnvelope(r)));
-    unsubscribes.push(window.piBuddy.pi.onExit((e) => handleExitEnvelope(e)));
+    unsubscribes.push(window.piBuddy.events.onEvent((e) => handleEventEnvelope(e)));
+    unsubscribes.push(window.piBuddy.events.onUiRequest((r) => handleUiRequestEnvelope(r)));
+    unsubscribes.push(window.piBuddy.events.onExit((e) => handleExitEnvelope(e)));
   }
 
   /** 解除全部推送订阅（窗口销毁 / 测试收尾）。 */
@@ -570,8 +592,11 @@ export const useAppStore = defineStore("app", () => {
   async function init(): Promise<void> {
     subscribeOnce();
     settings.value = await window.piBuddy.settings.get();
+    // 工作目录经 workspace.current() 取不透明 id + 显示名，
+    // 而不是从 settings 里读一条绝对路径自己用
+    adoptWorkspace(await window.piBuddy.workspace.current());
     booting.value = false;
-    if (settings.value.workspace) {
+    if (workspaceId.value) {
       await start();
     }
   }
@@ -595,9 +620,9 @@ export const useAppStore = defineStore("app", () => {
     streaming.value = false;
     resetSessionScopedState();
     try {
-      const result = await window.piBuddy.pi.start({
-        workspace: workspace.value,
-        session: sessionPath,
+      const result = await window.piBuddy.runtime.start({
+        workspaceId: workspaceId.value,
+        sessionPath,
       });
       agentState.value = result.state;
       models.value = result.models;
@@ -626,10 +651,7 @@ export const useAppStore = defineStore("app", () => {
         // 已经是目标等级就不要再发一次命令：多余的 set_thinking_level 会在
         // 会话里多写一条 thinking_level_change 记录。
         if (saved.thinkingLevel && result.state.thinkingLevel !== saved.thinkingLevel) {
-          await window.piBuddy.pi.command({
-            type: "set_thinking_level",
-            level: saved.thinkingLevel,
-          });
+          await window.piBuddy.pi.setThinkingLevel(saved.thinkingLevel as ThinkingLevel);
         }
       } else {
         // 恢复历史会话：沿用会话自身记录的模型与思考等级，这里什么都不做。
@@ -646,7 +668,7 @@ export const useAppStore = defineStore("app", () => {
   }
 
   async function refreshState(): Promise<void> {
-    const resp = await window.piBuddy.pi.command<AgentState>({ type: "get_state" });
+    const resp = await window.piBuddy.pi.getState();
     if (resp.success && resp.data) {
       agentState.value = resp.data;
       adoptSession(resp.data.sessionId);
@@ -654,13 +676,13 @@ export const useAppStore = defineStore("app", () => {
   }
 
   async function refreshStats(): Promise<void> {
-    const resp = await window.piBuddy.pi.command<SessionStats>({ type: "get_session_stats" });
+    const resp = await window.piBuddy.pi.getSessionStats();
     if (resp.success && resp.data) stats.value = resp.data;
   }
 
   async function refreshSessions(): Promise<void> {
-    if (!workspace.value) return;
-    sessions.value = await window.piBuddy.sessions.list(workspace.value);
+    if (!workspaceId.value) return;
+    sessions.value = await window.piBuddy.sessions.list(workspaceId.value);
   }
 
   let refreshSessionsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -674,29 +696,27 @@ export const useAppStore = defineStore("app", () => {
   }
 
   async function refreshThinkingLevels(): Promise<void> {
-    const resp = await window.piBuddy.pi.command<{ levels: ThinkingLevel[] }>({
-      type: "get_available_thinking_levels",
-    });
+    const resp = await window.piBuddy.pi.getAvailableThinkingLevels();
     thinkingLevels.value = resp.success && resp.data ? resp.data.levels : ["off"];
   }
 
   // ---------- 用户操作 ----------
 
   async function chooseWorkspace(): Promise<void> {
-    const folder = await window.piBuddy.dialog.chooseFolder();
-    if (!folder) return;
-    settings.value = await window.piBuddy.settings.set({ workspace: folder });
+    // 主进程自己把绝对路径写进设置并注册工作区，这里只收到不透明 id + 显示名
+    const chosen = await window.piBuddy.workspace.choose();
+    if (!chosen) return;
+    adoptWorkspace(chosen);
+    settings.value = await window.piBuddy.settings.get();
     await start();
   }
 
   async function abortRun(): Promise<void> {
-    await window.piBuddy.pi.command({ type: "abort" });
+    await window.piBuddy.pi.abort();
   }
 
   async function newTask(): Promise<void> {
-    const resp = await window.piBuddy.pi.command<{ cancelled?: boolean }>({
-      type: "new_session",
-    });
+    const resp = await window.piBuddy.pi.newSession();
     if (!resp.success) {
       notify("error", resp.error ?? "无法开始新任务");
       return;
@@ -719,10 +739,7 @@ export const useAppStore = defineStore("app", () => {
       notify("warning", "请先停止当前任务，再切换历史会话");
       return;
     }
-    const resp = await window.piBuddy.pi.command<{ cancelled?: boolean }>({
-      type: "switch_session",
-      sessionPath: meta.path,
-    });
+    const resp = await window.piBuddy.pi.switchSession(meta.path);
     if (!resp.success) {
       notify("error", resp.error ?? "打开会话失败");
       return;
@@ -748,9 +765,7 @@ export const useAppStore = defineStore("app", () => {
     sessionLoadError.value = "";
     let resp: { success: boolean; error?: string; data?: { messages: AgentMessage[] } };
     try {
-      resp = await window.piBuddy.pi.command<{ messages: AgentMessage[] }>({
-        type: "get_messages",
-      });
+      resp = await window.piBuddy.pi.getMessages();
     } catch (err) {
       sessionLoadError.value =
         err instanceof Error ? err.message : "加载会话消息失败，请重试";
@@ -768,7 +783,7 @@ export const useAppStore = defineStore("app", () => {
     modelId: string,
     persist = true
   ): Promise<void> {
-    const resp = await window.piBuddy.pi.command({ type: "set_model", provider, modelId });
+    const resp = await window.piBuddy.pi.setModel(provider, modelId);
     if (!resp.success) {
       notify("error", resp.error ?? "切换模型失败");
       return;
@@ -781,7 +796,7 @@ export const useAppStore = defineStore("app", () => {
   }
 
   async function setThinkingLevel(level: ThinkingLevel): Promise<void> {
-    const resp = await window.piBuddy.pi.command({ type: "set_thinking_level", level });
+    const resp = await window.piBuddy.pi.setThinkingLevel(level);
     if (resp.success) {
       settings.value = await window.piBuddy.settings.set({ thinkingLevel: level });
       await refreshState();
@@ -831,6 +846,8 @@ export const useAppStore = defineStore("app", () => {
     settingsOpen,
     activityTick,
     workspace,
+    workspaceId,
+    displayPath,
     currentModel,
     busyStatus,
     extStatus,

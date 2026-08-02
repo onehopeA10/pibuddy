@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { NButton, NInput, NSpin, useMessage } from "naive-ui";
 import type { ImageContent } from "@sdk";
-import type { PickedFile } from "@contract";
+import type { AttachmentRef } from "@contract";
 import { useAppStore } from "../stores/app";
 import { VoiceRecorder } from "../stt";
 
@@ -14,7 +14,7 @@ const store = useAppStore();
 const message = useMessage();
 
 const images = ref<ImageAttachment[]>([]);
-const files = ref<PickedFile[]>([]);
+const files = ref<AttachmentRef[]>([]);
 const sending = ref(false);
 
 // ---------- 附件 ----------
@@ -43,7 +43,7 @@ function onPaste(e: ClipboardEvent): void {
   }
 }
 
-function onWindowDrop(e: DragEvent): void {
+async function onWindowDrop(e: DragEvent): Promise<void> {
   e.preventDefault();
   const dropped = e.dataTransfer?.files;
   if (!dropped) return;
@@ -53,14 +53,8 @@ function onWindowDrop(e: DragEvent): void {
       continue;
     }
     try {
-      const path = window.piBuddy.file.pathFor(file);
-      if (path) {
-        const ext = path.split(".").pop()?.toLowerCase() ?? "";
-        const kind = ["mp4", "mov", "avi", "mkv", "webm", "wmv"].includes(ext)
-          ? "video"
-          : "other";
-        files.value.push({ path, name: file.name, size: file.size, kind });
-      }
+      // 绝对路径在 preload 内部就被换成短期能力凭证，渲染进程拿不到它
+      files.value.push(await window.piBuddy.attachments.fromDrop(file));
     } catch {
       message.warning(`无法读取文件：${file.name}`);
     }
@@ -68,11 +62,18 @@ function onWindowDrop(e: DragEvent): void {
 }
 
 async function pickFiles(): Promise<void> {
-  const picked = await window.piBuddy.dialog.chooseFiles();
+  const picked = await window.piBuddy.attachments.pick();
   for (const f of picked) {
     if (f.kind === "image") {
-      const img = await window.piBuddy.file.readImage(f.path);
-      images.value.push({ type: "image", ...img, name: f.name });
+      // 凭证换 base64：主进程重做收容、大小与 magic bytes 校验后才给数据
+      try {
+        const img = await window.piBuddy.attachments.readImage(f.token);
+        images.value.push({ type: "image", ...img, name: f.name });
+      } catch (err) {
+        message.warning(
+          err instanceof Error ? `${f.name}：${err.message}` : `无法读取图片：${f.name}`
+        );
+      }
     } else {
       files.value.push(f);
     }
@@ -141,7 +142,7 @@ async function submit(): Promise<void> {
     const payload = {
       text,
       images: images.value.map(({ type, data, mimeType }) => ({ type, data, mimeType })),
-      files: files.value,
+      attachments: files.value,
     };
     if (await store.send(payload)) {
       store.editorText = "";
@@ -166,8 +167,12 @@ function onKeydown(e: KeyboardEvent): void {
   }
 }
 
-onMounted(() => window.addEventListener("drop", onWindowDrop));
-onBeforeUnmount(() => window.removeEventListener("drop", onWindowDrop));
+function handleWindowDrop(e: DragEvent): void {
+  void onWindowDrop(e);
+}
+
+onMounted(() => window.addEventListener("drop", handleWindowDrop));
+onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
 </script>
 
 <template>

@@ -15,5 +15,9 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "typescript": "^5.9.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./channels": "./src/channels.ts"
   }
 }

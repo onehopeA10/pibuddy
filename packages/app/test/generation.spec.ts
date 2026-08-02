@@ -21,7 +21,12 @@ function ctx(generation: number, runtimeId = `rt-${generation}`): EnvelopeContex
  */
 (globalThis as unknown as { window: unknown }).window = {
   piBuddy: {
-    pi: { command: async () => ({ success: false }) },
+    // agent_settled 会连带触发 refreshState / refreshStats，它们现在走窄方法
+    pi: {
+      getState: async () => ({ success: false }),
+      getSessionStats: async () => ({ success: false }),
+      getAvailableThinkingLevels: async () => ({ success: false }),
+    },
     sessions: { list: async () => [] },
   },
 };
