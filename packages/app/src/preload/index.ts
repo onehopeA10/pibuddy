@@ -9,6 +9,8 @@ import type {
   AttachmentRef,
   PiStartParams,
   ReadImageResult,
+  SecretDescriptor,
+  SecretKind,
   SttTranscribeRequest,
   SttTranscribeResult,
 } from "@pibuddy/contract";
@@ -134,6 +136,14 @@ const api = {
     // patch 里的 workspace 会被契约的 schema 直接拒掉：工作目录只能经
     // workspace.choose()（一次真实的用户手势）设置。
     set: (patch: Record<string, unknown>) => invoke(CHANNELS.settingsSet, patch),
+    /**
+     * 写一把密钥。**没有对应的 get** —— 明文进了主进程就再也出不来，
+     * 渲染进程能问到的极限是下面这个 {configured, last4}。
+     */
+    setSecret: (kind: SecretKind, value: string) =>
+      invoke<SecretDescriptor>(CHANNELS.settingsSetSecret, { kind, value }),
+    describeSecret: (kind: SecretKind) =>
+      invoke<SecretDescriptor>(CHANNELS.settingsDescribeSecret, { kind }),
   },
   workspace: {
     current: () => invoke(CHANNELS.workspaceCurrent),

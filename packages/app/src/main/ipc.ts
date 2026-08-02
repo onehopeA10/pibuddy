@@ -14,10 +14,14 @@ import {
   piStartParamsSchema,
   piSwitchSessionRequestSchema,
   rendererSettingsPatchSchema,
+  secretQueryRequestSchema,
+  secretWriteRequestSchema,
   sttTranscribeRequestSchema,
   tokenRequestSchema,
   voidRequestSchema,
   workspaceIdRequestSchema,
+  APP_SETTINGS_PUBLIC_KEYS,
+  type AppSettings,
   type AttachmentRef,
   type SttTranscribeResult,
 } from "@pibuddy/contract";
@@ -35,6 +39,31 @@ import {
   assertContained,
 } from "./workspace-registry.js";
 import * as attachments from "./attachment-registry.js";
+import { registerEndpoint, requireEndpoint } from "./endpoints.js";
+import { safeFetch } from "./net/outbound-guard.js";
+import { SECRET_KEYS, describeSecret, loadSecret, saveSecret } from "./secret-store.js";
+
+/**
+ * 单次语音载荷上限（25MB，与 CHANNEL_MAX_BYTES 里 stt:transcribe 的放宽值一致）。
+ * guard 那层按 structured-clone 估算整体载荷，这里再按 audio 自身的
+ * byteLength 卡一次 —— 两处都要有，否则「整体没超但音频超了」会溜过去。
+ */
+export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+
+/**
+ * 挑出允许下发给渲染进程的设置字段（CT-09）。
+ *
+ * 不是 `return loadSettings()` —— 那样将来任何一个新加的敏感字段都会自动
+ * 跟着流出去。白名单在契约包里，加字段必须显式过一遍。
+ */
+function publicSettings(settings: AppSettings): Partial<AppSettings> {
+  const out: Record<string, unknown> = {};
+  for (const key of APP_SETTINGS_PUBLIC_KEYS) {
+    const value = (settings as Record<string, unknown>)[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return out as Partial<AppSettings>;
+}
 
 /**
  * webContents id → 当前 runtime 的 client。
@@ -288,12 +317,46 @@ export function registerIpc(): void {
     return listSessionsForWorkspace(root, loadSettings());
   });
 
-  registerHandler(CHANNELS.settingsGet, voidRequestSchema, () => loadSettings());
+  registerHandler(CHANNELS.settingsGet, voidRequestSchema, () =>
+    publicSettings(loadSettings())
+  );
 
   // patch 的 schema 已在契约里剔除 workspace：工作目录只能经真实的用户手势
   // （dialog:choose-folder）设置，不接受渲染进程直接写入一个路径。
-  registerHandler(CHANNELS.settingsSet, rendererSettingsPatchSchema, (patch) =>
-    saveSettings(patch)
+  //
+  // 端点地址是这里唯一还接受渲染进程输入的「网络」字段：它在**落盘之前**
+  // 先过 registerEndpoint（normalizeEndpointUrl + assertPublicAddress），
+  // 被拒时整个 patch 一个字节都不写。
+  registerHandler(CHANNELS.settingsSet, rendererSettingsPatchSchema, async (patch) => {
+    const next: Record<string, unknown> = { ...patch };
+    const raw = typeof patch.sttBaseUrl === "string" ? patch.sttBaseUrl.trim() : "";
+    if (raw !== "") {
+      const endpoint = await registerEndpoint({
+        kind: "stt",
+        baseUrl: raw,
+        model: patch.sttModel,
+      });
+      next.sttBaseUrl = endpoint.baseUrl;
+      next.sttEndpointId = endpoint.endpointId;
+    } else if (patch.sttBaseUrl !== undefined) {
+      next.sttEndpointId = undefined;
+    }
+    return publicSettings(saveSettings(next as Partial<AppSettings>));
+  });
+
+  // 密钥**只进不出**：这条通道能写、能清，但仓库里没有任何一条能把明文
+  // 送回渲染进程的通道。返回值只有 {configured, last4}。
+  registerHandler(CHANNELS.settingsSetSecret, secretWriteRequestSchema, (payload) => {
+    const description = saveSecret(SECRET_KEYS.sttApiKey, payload.value.trim());
+    saveSettings({
+      sttApiKeyConfigured: description.configured,
+      sttApiKeyLast4: description.last4,
+    });
+    return description;
+  });
+
+  registerHandler(CHANNELS.settingsDescribeSecret, secretQueryRequestSchema, () =>
+    describeSecret(SECRET_KEYS.sttApiKey)
   );
 
   // ------------------------------------------------- workspace 与附件 capability
@@ -372,12 +435,22 @@ export function registerIpc(): void {
   });
 
   // ------------------------------------------------------------------ 语音转写
-  // 主进程发请求，避免 CORS；上限 25MB 由 CHANNEL_MAX_BYTES 单独放宽。
+  //
+  // 渲染进程只交出 {endpointId, audio, mimeType}：地址、模型、密钥三样全部
+  // 由主进程按 id 查出来。收敛前它同时交出 baseUrl 与密钥，等于可以把
+  // Bearer token 定向送到任意主机（含 169.254.169.254）。
 
   registerHandler(
     CHANNELS.sttTranscribe,
     sttTranscribeRequestSchema,
     async (request): Promise<SttTranscribeResult> => {
+      if (request.audio.byteLength > MAX_AUDIO_BYTES) {
+        throw new Error(`录音过长（超过 ${MAX_AUDIO_BYTES / 1024 / 1024}MB），请分段录制`);
+      }
+      const endpoint = requireEndpoint(request.endpointId);
+      const secret = loadSecret(SECRET_KEYS.sttApiKey);
+      if (!secret) throw new Error("尚未配置语音识别密钥，请到「设置」里填写");
+
       const form = new FormData();
       const ext = request.mimeType.includes("ogg")
         ? "ogg"
@@ -391,18 +464,19 @@ export function registerIpc(): void {
         new Blob([request.audio], { type: request.mimeType }),
         `voice.${ext}`
       );
-      form.append("model", request.model);
-      const base = request.baseUrl.replace(/\/+$/, "");
-      const resp = await fetch(`${base}/audio/transcriptions`, {
+      form.append("model", endpoint.model);
+
+      const base = endpoint.baseUrl.replace(/\/+$/, "");
+      const resp = await safeFetch(`${base}/audio/transcriptions`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${request.apiKey}` },
+        headers: { Authorization: `Bearer ${secret}` },
         body: form,
       });
       if (!resp.ok) {
-        const detail = await resp.text().catch(() => "");
-        throw new Error(`语音转写失败 (${resp.status}): ${detail.slice(0, 200)}`);
+        // 只报状态码：上游的错误正文里常常回显请求头
+        throw new Error(`语音转写失败（HTTP ${resp.status}）`);
       }
-      const json = (await resp.json()) as { text?: string };
+      const json = JSON.parse(resp.bodyText) as { text?: string };
       return { text: json.text ?? "" };
     }
   );

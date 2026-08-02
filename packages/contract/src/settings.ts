@@ -3,10 +3,27 @@
  *
  * 收敛前此形状同时存在于 packages/app/src/main/settings.ts:5-13 与
  * packages/app/src/preload/index.d.ts:28-36 —— 两份声明必然漂移。
+ *
+ * ## SEC-004：这里不再有任何密钥字段
+ *
+ * 早先本 schema 有一个字符串形态的转写密钥字段，它同时意味着两件事：
+ *   1. 密钥以明文写进 userData/settings.json（settings.ts:30 的 JSON.stringify）
+ *   2. `settings:get` 把明文原样回传给渲染进程
+ * 只要密钥还在这个 schema 里，这两件事就删不掉。因此 TASK-008 把密钥整体
+ * 移出设置：落盘交给 main/secret-store.ts（safeStorage 加密），渲染进程只
+ * 看得到 `sttApiKeyConfigured` 与 `sttApiKeyLast4` 这两个**不可逆**的展示位。
  */
 import { z } from "zod";
 
 export const appSettingsSchema = z.object({
+  /**
+   * 设置文件的 schema 代际；旧文件由 main/settings.ts 的 migrate() 补齐。
+   *
+   * 代际常量 `SETTINGS_SCHEMA_VERSION` 由 main/settings.ts 持有（迁移逻辑在
+   * 那里，代际归它管），契约包只声明这个字段的存在与默认值。契约包不能
+   * 反向 import app 包，所以这里是一个字面量 —— 改代际时两处一起改。
+   */
+  schemaVersion: z.number().int().default(1),
   /** 工作目录绝对路径 */
   workspace: z.string().optional(),
   /**
@@ -18,9 +35,21 @@ export const appSettingsSchema = z.object({
   provider: z.string().optional(),
   modelId: z.string().optional(),
   thinkingLevel: z.string().optional(),
-  /** OpenAI 兼容语音转写端点 */
+  /**
+   * OpenAI 兼容语音转写端点的展示地址。
+   *
+   * 它**只用于显示与再编辑**：真正发请求时主进程按 `sttEndpointId` 从
+   * endpoints.ts 取已校验过的地址，渲染进程无法在一次调用里同时指定
+   * 「往哪发」和「带哪把密钥」。写入本字段会先过 normalizeEndpointUrl +
+   * assertPublicAddress，不合格直接拒绝、不半落盘。
+   */
   sttBaseUrl: z.string().optional(),
-  sttApiKey: z.string().optional(),
+  /** 由主进程签发的不透明端点 id；渲染进程只能把它原样回传 */
+  sttEndpointId: z.string().optional(),
+  /** 是否已配置转写密钥。密钥本体在 secret-store，永不出现在本对象里 */
+  sttApiKeyConfigured: z.boolean().default(false),
+  /** 已配置密钥的尾四位，仅供界面辨认是哪一把 */
+  sttApiKeyLast4: z.string().default(""),
   sttModel: z.string().optional(),
   /**
    * Pi 运行时来源（高级设置）。
@@ -34,6 +63,29 @@ export const appSettingsSchema = z.object({
 });
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;
+
+/**
+ * 允许下发给渲染进程的设置键（CT-09 的唯一口径）。
+ *
+ * `settings:get` 的返回值由主进程按本数组挑选字段构造，而不是把 loadSettings()
+ * 的结果直接外发 —— 后者一旦将来又混进什么敏感字段，会静默地跟着流出去。
+ * 本数组里**没有**任何密钥字段，加一个进来会立刻违反 TASK-008 的收敛断言。
+ */
+export const APP_SETTINGS_PUBLIC_KEYS = [
+  "schemaVersion",
+  "workspace",
+  "sessionDir",
+  "provider",
+  "modelId",
+  "thinkingLevel",
+  "sttBaseUrl",
+  "sttEndpointId",
+  "sttApiKeyConfigured",
+  "sttApiKeyLast4",
+  "sttModel",
+  "piRuntimeMode",
+  "piExternalCommand",
+] as const;
 
 /** settings:set 的入参：任意子集。 */
 export const appSettingsPatchSchema = appSettingsSchema.partial();

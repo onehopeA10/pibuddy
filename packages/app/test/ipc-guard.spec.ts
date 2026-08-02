@@ -173,9 +173,8 @@ describe("闸 3：尺寸", () => {
     const fn = registered.get("stt:transcribe")!;
     await expect(
       fn(mainFrameEvent(), {
-        baseUrl: "https://api.example.com/v1",
-        apiKey: "k",
-        model: "whisper-1",
+        // SEC-004 后的形状：只有 endpointId，没有 URL 也没有密钥
+        endpointId: "e1",
         audio: new ArrayBuffer(9 * 1024 * 1024),
         mimeType: "audio/webm",
       })

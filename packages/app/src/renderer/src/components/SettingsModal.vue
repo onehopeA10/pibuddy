@@ -18,7 +18,15 @@ const store = useAppStore();
 const message = useMessage();
 
 const sttBaseUrl = ref("");
-const sttApiKey = ref("");
+/**
+ * 密钥输入框**永远从空开始**。
+ *
+ * 早先它是 `store.settings.sttApiKey ?? ""` —— 那要求 settings:get 把明文
+ * 回传给渲染进程，也就是 SEC-004 的缺口本身。现在渲染进程拿不到明文，
+ * 只用下面的 secretHint 显示「已配置 ····尾四位」。留空保存 = 不改动密钥。
+ */
+const sttApiKeyInput = ref("");
+const secretHint = ref("");
 const sttModel = ref("");
 const piRuntimeMode = ref<"bundled" | "external">("bundled");
 const piExternalCommand = ref("");
@@ -28,7 +36,10 @@ watch(
   (open) => {
     if (open) {
       sttBaseUrl.value = store.settings.sttBaseUrl ?? "";
-      sttApiKey.value = store.settings.sttApiKey ?? "";
+      sttApiKeyInput.value = "";
+      secretHint.value = store.settings.sttApiKeyConfigured
+        ? `已配置 ····${store.settings.sttApiKeyLast4 || "????"}（留空则不改动）`
+        : "";
       sttModel.value = store.settings.sttModel ?? "";
       piRuntimeMode.value = store.settings.piRuntimeMode ?? "bundled";
       piExternalCommand.value = store.settings.piExternalCommand ?? "";
@@ -36,14 +47,29 @@ watch(
   }
 );
 
+const saveError = ref("");
+
 async function save(): Promise<void> {
-  await store.saveSettings({
-    sttBaseUrl: sttBaseUrl.value.trim(),
-    sttApiKey: sttApiKey.value.trim(),
-    sttModel: sttModel.value.trim(),
-    piRuntimeMode: piRuntimeMode.value,
-    piExternalCommand: piExternalCommand.value.trim(),
-  });
+  saveError.value = "";
+  try {
+    // 端点先保存：地址不合格（非 HTTPS / 指向内网）时这一步就抛，
+    // 密钥与其余字段一个都不会落盘。
+    await store.saveSettings({
+      sttBaseUrl: sttBaseUrl.value.trim(),
+      sttModel: sttModel.value.trim(),
+      piRuntimeMode: piRuntimeMode.value,
+      piExternalCommand: piExternalCommand.value.trim(),
+    });
+    if (sttApiKeyInput.value.trim() !== "") {
+      await store.saveSttSecret(sttApiKeyInput.value.trim());
+    }
+  } catch (err) {
+    // 主进程的 OUTBOUND_BLOCKED / SECRET_STORE_UNAVAILABLE 消息本身就是
+    // 给人看的，原样展示，不要换成一句「保存失败」。
+    saveError.value = err instanceof Error ? err.message : String(err);
+    message.error(saveError.value);
+    return;
+  }
   message.success("设置已保存");
   store.settingsOpen = false;
 }
@@ -82,12 +108,18 @@ async function backToBundled(): Promise<void> {
       </n-form-item>
       <n-form-item label="API Key">
         <n-input
-          v-model:value="sttApiKey"
+          v-model:value="sttApiKeyInput"
           type="password"
           show-password-on="click"
           placeholder="sk-…"
         />
       </n-form-item>
+      <div
+        v-if="secretHint"
+        style="margin: -8px 0 12px 110px; font-size: 12px; color: #8a8f98"
+      >
+        {{ secretHint }}
+      </div>
       <n-form-item label="识别模型">
         <n-input v-model:value="sttModel" placeholder="whisper-1" />
       </n-form-item>
@@ -113,6 +145,10 @@ async function backToBundled(): Promise<void> {
         />
       </n-form-item>
     </n-form>
+
+    <n-alert v-if="saveError" type="error" title="保存被拒绝" style="margin-bottom: 12px">
+      <p style="white-space: pre-wrap; margin: 0">{{ saveError }}</p>
+    </n-alert>
 
     <n-alert
       v-if="store.startError && store.settings.piRuntimeMode === 'external'"

@@ -108,15 +108,19 @@ export const imageContentSchema = z.object({
 });
 
 /**
- * stt:transcribe 的入参。
+ * stt:transcribe 的入参（CT-07：全计划唯一形状，恰好三个字段）。
  *
- * M0 阶段仍由渲染进程携带 baseUrl / apiKey —— 这是 SEC-003 的已知缺口，
- * M2 会把凭据挪进主进程、本类型改为只带 endpointId。
+ * 收敛前这里是 `{baseUrl, apiKey, model, audio, mimeType}` —— 渲染进程在
+ * 一次调用里同时决定「往哪发」和「带哪把密钥」，等价于把 Bearer token
+ * 递给任意一台攻击者指定的主机（`http://169.254.169.254/...` 照发不误）。
+ *
+ * 现在渲染进程只能给出一个由主进程签发的不透明 `endpointId`：地址、模型、
+ * 密钥三样全部由 main 侧按 id 查出来，渲染进程一样都碰不到。
+ * **不得**再退化成 `{audio, mimeType}`（那样就没法支持多个端点），也不得
+ * 加回任何 URL / 密钥形参。
  */
 export const sttTranscribeRequestSchema = z.object({
-  baseUrl: z.string().min(1),
-  apiKey: z.string(),
-  model: z.string().min(1),
+  endpointId: z.string().min(1),
   audio: z.instanceof(ArrayBuffer),
   mimeType: z.string(),
 });
@@ -124,6 +128,31 @@ export type SttTranscribeRequest = z.infer<typeof sttTranscribeRequestSchema>;
 
 export const sttTranscribeResultSchema = z.object({ text: z.string() });
 export type SttTranscribeResult = z.infer<typeof sttTranscribeResultSchema>;
+
+/** 目前只有转写密钥一种。加一种就在这里加一个字面量，并过一遍威胁模型。 */
+export const secretKindSchema = z.enum(["stt"]);
+export type SecretKind = z.infer<typeof secretKindSchema>;
+
+/** settings:set-secret 的入参。value 为空串表示「清除这把密钥」。 */
+export const secretWriteRequestSchema = z.object({
+  kind: secretKindSchema,
+  value: z.string(),
+});
+
+/** settings:describe-secret 的入参。 */
+export const secretQueryRequestSchema = z.object({ kind: secretKindSchema });
+
+/**
+ * 密钥的**不可逆**描述：只说「配没配」和「尾四位是什么」。
+ *
+ * 没有第三个字段，将来也不会有 —— 任何能让渲染进程还原出明文的字段
+ * （哪怕是「前缀 + 长度」）都会让 safeStorage 那层加密失去意义。
+ */
+export const secretDescriptorSchema = z.object({
+  configured: z.boolean(),
+  last4: z.string(),
+});
+export type SecretDescriptor = z.infer<typeof secretDescriptorSchema>;
 
 // ---------- 15 个产品动作的 request schema ----------
 
@@ -207,6 +236,13 @@ export const attachDroppedRequestSchema = z.object({
  */
 export const rendererSettingsPatchSchema = appSettingsPatchSchema.omit({
   workspace: true,
+  // 以下四项是**主进程单向下发**的派生字段：端点 id 由 endpoints.ts 在校验
+  // 通过后签发，配置态由 secret-store 计算，schema 代际由 migrate 维护。
+  // 允许渲染进程写它们，等于允许它自称「已配置」或指向一个没校验过的端点。
+  schemaVersion: true,
+  sttEndpointId: true,
+  sttApiKeyConfigured: true,
+  sttApiKeyLast4: true,
 });
 
 /** RPC 响应的通用外壳；`data` 的具体形状由各命令自行约定。 */
@@ -294,6 +330,14 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   [CHANNELS.settingsSet]: {
     request: rendererSettingsPatchSchema,
     response: appSettingsSchema,
+  },
+  [CHANNELS.settingsSetSecret]: {
+    request: secretWriteRequestSchema,
+    response: secretDescriptorSchema,
+  },
+  [CHANNELS.settingsDescribeSecret]: {
+    request: secretQueryRequestSchema,
+    response: secretDescriptorSchema,
   },
 
   // ---- workspace 与附件 ----

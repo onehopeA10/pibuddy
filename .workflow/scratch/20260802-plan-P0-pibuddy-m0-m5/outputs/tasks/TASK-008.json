@@ -8,9 +8,9 @@
   "priority": "high",
   "effort": "large",
   "action": "新建 packages/app/src/main/secret-store.ts 用 electron safeStorage.isEncryptionAvailable() / encryptString / decryptString 把密钥以 base64 存入 userData/secrets.json，不可用时 fail closed 拒绝保存并提示用户；settings:get 的返回值移除 sttApiKey，改为 sttApiKeyConfigured: boolean 与 sttApiKeyLast4: string；新建 packages/app/src/main/endpoints.ts 保存 {endpointId, baseUrl, model} 并由主进程按 endpointId 取密钥发起请求，stt:transcribe 的入参收窄为 {endpointId, audio, mimeType} 且 audio.byteLength <= MAX_AUDIO_BYTES = 25*1024*1024；新建 packages/app/src/main/net/outbound-guard.ts 导出 normalizeEndpointUrl(raw)（要求 protocol === \"https:\"、剥离 URL 中的用户名密码、host 转小写与 punycode）与 assertPublicAddress(hostname)（先把整数/八进制/十六进制 IP 形式归一化，再 dns.promises.lookup(hostname,{all:true}) 并对每个地址拒绝 127.0.0.0/8、0.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16、100.64.0.0/10、::1、fc00::/7、fe80::/10，以及 ::ffff: 前缀的 IPv4-mapped 地址需解包后重新判定）与 safeFetch（redirect: \"manual\"、最多 3 跳且每跳重新执行 normalize + assert、AbortSignal 组合 CONNECT_TIMEOUT_MS = 5000 与 OVERALL_TIMEOUT_MS = 60000、MAX_RESPONSE_BYTES = 2*1024*1024、content-type 必须以 application/json 开头、错误信息脱敏不回显 URL 与请求头）；packages/app/src/main/settings.ts 改为 SETTINGS_SCHEMA_VERSION = 1 + migrate() + 原子写（写 settings.json.tmp → fs.fsyncSync(fd) → fs.renameSync）+ settings.json.bak 备份。",
-  "status": "pending",
-  "completed_at": null,
-  "actual_duration": null,
+  "status": "completed_with_deviations",
+  "completed_at": "2026-08-02T15:04:34.617Z",
+  "actual_duration": "~150m",
   "scope": "packages/app/src/main/settings.ts + secret-store + net + STT 链路",
   "focus_paths": [
     "packages/app/src/main/",

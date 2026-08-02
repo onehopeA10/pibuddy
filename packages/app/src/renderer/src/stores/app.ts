@@ -187,7 +187,14 @@ export const useAppStore = defineStore("app", () => {
   // ---------- 基础状态 ----------
   const booting = ref(true);
   // init() 之前的占位：形状与 schema 默认值一致（piRuntimeMode 有默认值，不能是裸 {}）
-  const settings = ref<AppSettings>({ piRuntimeMode: "bundled" });
+  // 首帧的占位值：真正的设置由 boot() 里的 settings.get() 覆盖。
+  // 密钥的两个展示位从「未配置」开始，绝不臆造一个 configured:true。
+  const settings = ref<AppSettings>({
+    schemaVersion: 1,
+    piRuntimeMode: "bundled",
+    sttApiKeyConfigured: false,
+    sttApiKeyLast4: "",
+  });
   const startError = ref("");
   /** 会话切换成功但消息拉取失败时的提示；非空时 ChatView 显示错误条与「重试」。 */
   const sessionLoadError = ref("");
@@ -804,7 +811,17 @@ export const useAppStore = defineStore("app", () => {
   }
 
   async function saveSettings(patch: Partial<AppSettings>): Promise<void> {
+    // 不吞异常：端点地址被 SSRF 判定拒绝时，界面要拿到那句可读的原因
     settings.value = await window.piBuddy.settings.set(patch);
+  }
+
+  /**
+   * 写语音识别密钥。明文只在这一次调用里存在于渲染进程，之后由主进程的
+   * safeStorage 保管；回来的只有 {configured, last4}。
+   */
+  async function saveSttSecret(value: string): Promise<void> {
+    await window.piBuddy.settings.setSecret("stt", value);
+    settings.value = await window.piBuddy.settings.get();
   }
 
   /**
@@ -869,6 +886,7 @@ export const useAppStore = defineStore("app", () => {
     switchToBundledRuntime,
     setThinkingLevel,
     saveSettings,
+    saveSttSecret,
     respondUi,
     refreshSessions,
   };

@@ -90,7 +90,8 @@ async function toggleVoice(): Promise<void> {
   if (transcribing.value) return;
   if (!recording.value) {
     const s = store.settings;
-    if (!s.sttApiKey) {
+    // 密钥本体在主进程的 safeStorage 里，渲染进程只看得到「配没配」这一位
+    if (!s.sttApiKeyConfigured || !s.sttEndpointId) {
       message.warning("请先在「设置」里配置语音识别服务（OpenAI 兼容接口）");
       store.settingsOpen = true;
       return;
@@ -107,11 +108,9 @@ async function toggleVoice(): Promise<void> {
   transcribing.value = true;
   try {
     const { audio, mimeType } = await recorder.stop();
-    const s = store.settings;
+    // 只交出端点 id：地址、模型、密钥全部由主进程按 id 查出来
     const result = await window.piBuddy.stt.transcribe({
-      baseUrl: s.sttBaseUrl || "https://api.openai.com/v1",
-      apiKey: s.sttApiKey!,
-      model: s.sttModel || "whisper-1",
+      endpointId: store.settings.sttEndpointId!,
       audio,
       mimeType,
     });

@@ -26,6 +26,8 @@ import type {
   AttachmentRef,
   PiStartParams,
   ReadImageResult,
+  SecretDescriptor,
+  SecretKind,
   SessionMeta,
   SttTranscribeRequest,
   SttTranscribeResult,
@@ -40,6 +42,8 @@ export type {
   AttachmentRef,
   PiStartParams,
   ReadImageResult,
+  SecretDescriptor,
+  SecretKind,
   SessionMeta,
   SttTranscribeRequest,
   SttTranscribeResult,
@@ -49,8 +53,21 @@ export type {
 /** pi:start 的返回，用 pi-sdk 的具体类型实例化契约里的泛型槽位。 */
 export type PiStartResult = ContractStartResult<AgentState, Model, AgentMessage>;
 
-/** 渲染进程可写的设置子集：workspace 被契约层剔除，只能经 workspace.choose()。 */
-export type RendererSettingsPatch = Omit<AppSettingsPatch, "workspace">;
+/**
+ * 渲染进程可写的设置子集。
+ *
+ * workspace 只能经 workspace.choose()（一次真实的用户手势）；schemaVersion 与
+ * sttEndpointId / sttApiKeyConfigured / sttApiKeyLast4 是主进程单向下发的派生
+ * 字段 —— 允许渲染进程写它们等于允许它自称「已配置」或指向未校验的端点。
+ */
+export type RendererSettingsPatch = Omit<
+  AppSettingsPatch,
+  | "workspace"
+  | "schemaVersion"
+  | "sttEndpointId"
+  | "sttApiKeyConfigured"
+  | "sttApiKeyLast4"
+>;
 
 /**
  * 15 个产品动作 —— `window.piBuddy.pi` 上有且只有这些键。
@@ -108,6 +125,9 @@ export interface PiBuddyApi {
   settings: {
     get: () => Promise<AppSettings>;
     set: (patch: RendererSettingsPatch) => Promise<AppSettings>;
+    /** 写一把密钥；**没有对应的读取方法**，明文进主进程后不再出来 */
+    setSecret: (kind: SecretKind, value: string) => Promise<SecretDescriptor>;
+    describeSecret: (kind: SecretKind) => Promise<SecretDescriptor>;
   };
   workspace: {
     /** 当前工作目录；未选择返回 null。displayPath 只用于显示，不得回传 */

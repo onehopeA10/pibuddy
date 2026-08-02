@@ -12,7 +12,7 @@
  */
 
 /**
- * 渲染进程可发起的 invoke 通道（30 个）。
+ * 渲染进程可发起的 invoke 通道（32 个）。
  *
  * 15 个 `pi:*` 产品动作通道与 pi-sdk 的命令封装一一对应，**没有**通用的
  * 转发通道 —— 新增一种 pi 能力必须在这里显式加一行，并因此过一遍威胁模型。
@@ -44,6 +44,14 @@ export const CHANNELS = {
   sessionsList: "sessions:list",
   settingsGet: "settings:get",
   settingsSet: "settings:set",
+  /**
+   * 写入一把密钥（SEC-004）。**只进不出**：渲染进程可以覆盖，但没有任何
+   * 通道能把明文取回来 —— 取回的能力一旦存在，safeStorage 加密就只是
+   * 给磁盘上的字节换了个编码。
+   */
+  settingsSetSecret: "settings:set-secret",
+  /** 查询某把密钥的配置态：{configured, last4}，不含明文 */
+  settingsDescribeSecret: "settings:describe-secret",
 
   // ---- workspace 与附件 capability ----
   workspaceCurrent: "workspace:current",
