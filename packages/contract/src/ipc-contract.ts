@@ -27,6 +27,19 @@ import {
   bundlePreviewSchema,
   diagnosticsReportSchema,
 } from "./diagnostics.js";
+import {
+  providerCustomRequestSchema,
+  providerIdRequestSchema,
+  providerListResultSchema,
+  providerSaveKeyRequestSchema,
+  providerTestResultSchema,
+  setScopeDefaultRequestSchema,
+  usageExportRequestSchema,
+  usageExportResultSchema,
+  usageQuerySchema,
+  usageRecordRequestSchema,
+  usageRowSchema,
+} from "./providers.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -322,6 +335,10 @@ export const rendererSettingsPatchSchema = appSettingsPatchSchema.omit({
   sttEndpointId: true,
   sttApiKeyConfigured: true,
   sttApiKeyLast4: true,
+  // workspace 层默认模型只能经 providers:set-scope-default 写：那条路上
+  // workspaceId 会被解成真实 root 并校验存在，允许渲染进程直接塞一整张表
+  // 等于让它自己编 workspaceId。
+  workspaceDefaults: true,
 });
 
 /** RPC 响应的通用外壳；`data` 的具体形状由各命令自行约定。 */
@@ -564,6 +581,51 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   [CHANNELS.updateDismissVersion]: {
     request: updateDismissRequestSchema,
     response: updateStateSchema,
+  },
+
+  // ---- Provider 与模型中心（PROV-101） ----
+  //
+  // 每一条的 response 都是**权威快照**（providerListResult / providerTestResult）：
+  // 渲染进程做完任何一个动作立刻拿到全量状态，不必自己推断列表变成了什么样。
+  [CHANNELS.providersList]: {
+    request: voidRequestSchema,
+    response: providerListResultSchema,
+  },
+  [CHANNELS.providersSaveKey]: {
+    request: providerSaveKeyRequestSchema,
+    response: providerListResultSchema,
+  },
+  [CHANNELS.providersRemove]: {
+    request: providerIdRequestSchema,
+    response: providerListResultSchema,
+  },
+  [CHANNELS.providersAddCustom]: {
+    request: providerCustomRequestSchema,
+    response: providerListResultSchema,
+  },
+  [CHANNELS.providersTest]: {
+    request: providerIdRequestSchema,
+    response: providerTestResultSchema,
+  },
+  [CHANNELS.providersDiscoverModels]: {
+    request: providerIdRequestSchema,
+    response: providerListResultSchema,
+  },
+  [CHANNELS.providersSetScopeDefault]: {
+    request: setScopeDefaultRequestSchema,
+    response: appSettingsSchema,
+  },
+  [CHANNELS.usageQuery]: {
+    request: usageQuerySchema,
+    response: z.array(usageRowSchema),
+  },
+  [CHANNELS.usageExport]: {
+    request: usageExportRequestSchema,
+    response: usageExportResultSchema,
+  },
+  [CHANNELS.usageRecord]: {
+    request: usageRecordRequestSchema,
+    response: z.void(),
   },
 
   // ---- 诊断与健康（OBS-101，恰 3 条） ----

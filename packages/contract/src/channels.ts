@@ -129,6 +129,29 @@ export const CHANNELS = {
   updateSetAutoDownload: "update:set-auto-download",
   updateDismissVersion: "update:dismiss-version",
 
+  // ---- Provider 与模型中心（PROV-101，恰 8 条） ----
+  //
+  // 让「配账号」这件事不必打开终端，是这一组通道存在的全部理由。它们仍然
+  // 一个密钥字段都不外发：providers:list 回来的是 {configured, last4}，
+  // providers:save-key 是**只进不出**（与 settings:set-secret 同一口径）。
+  //
+  // providers:test 与 providers:discover-models 会发真实出站请求，两条都
+  // 经 net/outbound-guard.ts 的 safeFetch —— 主进程里没有第二条出站路径。
+  providersList: "providers:list",
+  providersSaveKey: "providers:save-key",
+  providersRemove: "providers:remove",
+  providersAddCustom: "providers:add-custom",
+  providersTest: "providers:test",
+  providersDiscoverModels: "providers:discover-models",
+  /** 写全局或 workspace 层的默认模型；session 层归会话文件自己所有 */
+  providersSetScopeDefault: "providers:set-scope-default",
+  /** 按日 / workspace / provider / model 汇总的用量 */
+  usageQuery: "usage:query",
+  /** 导出 CSV / JSON，返回文本由渲染进程交给保存对话框 */
+  usageExport: "usage:export",
+  /** 一次 agent_settled 之后上报会话累计量，由主进程做差值入库 */
+  usageRecord: "usage:record",
+
   // ---- 诊断与健康（OBS-101，恰 3 条） ----
   //
   // 三条都**不接受路径**：诊断包的落盘位置由主进程的保存对话框决定，

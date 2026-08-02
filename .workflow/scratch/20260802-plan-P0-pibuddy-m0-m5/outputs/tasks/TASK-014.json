@@ -8,8 +8,8 @@
   "priority": "high",
   "effort": "large",
   "action": "新建 packages/app/src/main/providers/auth-store.ts，导出 `readAuthFile(): Record<string, PiCredential>` 与 `writeCredential(providerId: string, cred: { type: 'api_key'; key: string; env?: Record<string,string> }): void`，路径固定 `path.join(os.homedir(), '.pi', 'agent', 'auth.json')`，写入用 TASK-002 的 `writeJsonAtomic(p, merged)`（tmp + fsync + rename，全仓唯一原子写实现）并随后 `fs.chmodSync(p, 0o600)`，且必须先读原文件合并（保留 OAuth 条目）、写前把原文件复制到 `<userData>/auth-backup/auth.<epochMs>.json`；新建 providers/models-store.ts 管理 `~/.pi/agent/models.json` 的自定义 provider（id/name/baseUrl/api/models[]）；新建 providers/connectivity.ts 导出 `testProvider(providerId): Promise<{ ok: boolean; latencyMs: number; errorCode?: 'auth'|'network'|'model'|'unknown'; redactedMessage?: string }>`，实现里对错误消息执行 `redactSecrets()` 后才返回 renderer。settings.ts 的 sttApiKey 迁移到 TASK-008（A08）产出的 packages/app/src/main/secret-store.ts（safeStorage 密钥库），`settings:get` 返回体中 sttApiKey 必须替换为 TASK-008 已定名的 `sttApiKeyConfigured: boolean` 与 `sttApiKeyLast4: string`（CT-09：不得引入 sttApiKeySet 这一第三种拼写）。发送图片前在 stores/app.ts 的 send() 增加 `if (images.length && !(currentModel.input ?? []).includes('image')) { notify('warning', '当前模型不支持图片…'); return false; }（CT-26：send 的签名是 Promise<boolean>，裸 return 会返回 undefined 而过不了 typecheck）`。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed",
+  "completed_at": "2026-08-03T04:50:08",
   "actual_duration": null,
   "scope": "packages/app/src/main/providers, packages/app/src/main/settings.ts, packages/app/src/renderer/src/stores/providers.ts, 首次启动向导",
   "focus_paths": [

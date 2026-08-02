@@ -27,6 +27,11 @@ import type {
 import { parseEnvelope, UI_EXPIRED_HINT } from "@contract";
 import { useSessionsStore } from "./sessions";
 import { clearChatUiState } from "./chat-ui";
+import {
+  assertImageCapable,
+  imageBlockedMessage,
+  type ImageCapabilityVerdict,
+} from "./model-capability";
 import { registerSessionScopedReset, resetSessionScopedState } from "./session-scope";
 import { recordUnknownEvent, useExtensionUiStore } from "./extensionUi";
 
@@ -213,6 +218,22 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
     .map((a) => a.token);
   if (!message && images.length === 0 && attachmentTokens.length === 0) return false;
 
+  // 图片能力守卫（PROV-101）。位置必须在**任何 RPC 之前**：事后补救意味着
+  // 图片已经发出去了 —— 上游报一次错、用户被计一次费，而界面上只能显示
+  // 一条看不懂的 API 错误。
+  //
+  // 判据是 get_available_models 返回的 `Model.input`，不是任何硬编码名单。
+  // 这里 `return false` 而不是裸 `return`：send 的签名是 Promise<boolean>，
+  // 裸 return 会返回 undefined，InputBar 那边 `if (await store.send(...))`
+  // 于是不清空输入区 —— 行为碰巧对了，但类型是错的，且过不了 typecheck。
+  const imageVerdict = assertImageCapable(store.currentModel, images.length, store.models);
+  if (!imageVerdict.ok) {
+    store.modelBlockedImages = imageVerdict;
+    store.notify("warning", imageBlockedMessage(imageVerdict));
+    return false;
+  }
+  store.modelBlockedImages = null;
+
   const wasStreaming = store.streaming;
   // streaming 中必须明确产品语义。这里在发 RPC **之前**抛，保证
   // 「mode 缺失 → 底层 RPC 发出次数为 0」。
@@ -267,16 +288,46 @@ export const useAppStore = defineStore("app", () => {
   // 首帧的占位值：真正的设置由 boot() 里的 settings.get() 覆盖。
   // 密钥的两个展示位从「未配置」开始，绝不臆造一个 configured:true。
   const settings = ref<AppSettings>({
-    schemaVersion: 1,
+    schemaVersion: 2,
     piRuntimeMode: "bundled",
     sttApiKeyConfigured: false,
     sttApiKeyLast4: "",
     // 崩溃转储的隐私选择从「没问过」开始，绝不臆造一个 allow。
     crashDumpConsent: "unset",
+    workspaceDefaults: {},
+    // 向导从第 0 步开始，且 onboardingCompletedAt **不设** ——
+    // 首帧就说「已完成」会让主界面在真实设置到达之前闪一下，
+    // 而那一瞬间连 workspace 都还没读到。
+    onboardingStep: 0,
+    notificationsEnabled: true,
+    voiceEnabled: false,
   });
   const startError = ref("");
   /** 会话切换成功但消息拉取失败时的提示；非空时 ChatView 显示错误条与「重试」。 */
   const sessionLoadError = ref("");
+
+  /**
+   * 最近一次被图片能力守卫拦下的判定（PROV-101）。
+   *
+   * 非空时 InputBar 把附件条目标成 `aria-disabled="true"`、禁用发送按钮，
+   * 并给出「切换到支持图片的模型」的快捷动作。清空的时机只有两个：一次
+   * 成功的发送，或用户换了模型。
+   */
+  const modelBlockedImages = ref<ImageCapabilityVerdict | null>(null);
+
+  /**
+   * 打开历史会话时发现「会话记录的模型 ≠ 当前默认」时的询问（PROV-101）。
+   *
+   * **只提示，不动作**。自动切走会丢掉「这条会话当时用的是什么」这个事实；
+   * 自动不切又会让「我明明改了默认模型」变成一个说不清的现象。两个动作
+   * （保持 / 切换）都由用户点。
+   */
+  const modelMismatchPrompt = ref<{
+    sessionModelId: string;
+    sessionProvider: string;
+    targetModelId: string;
+    targetProvider: string;
+  } | null>(null);
 
   // ---------- 运行时状态（按 sessionId 归一化） ----------
   const currentSessionId = ref(PENDING_SCOPE_KEY);
@@ -536,6 +587,8 @@ export const useAppStore = defineStore("app", () => {
       case "message_end": {
         const msg = (e as { message: AgentMessage }).message;
         if (msg.role === "assistant") {
+          // 模型这一轮以错误收场：计入用量页的失败率
+          if ((msg as AssistantMessage).stopReason === "error") noteFailure();
           // 缓冲直接丢弃：message_end 携带的是最终全量消息，比拼接结果权威。
           resetStream();
           liveAssistant.value = null;
@@ -610,7 +663,11 @@ export const useAppStore = defineStore("app", () => {
       case "auto_retry_end": {
         const ev = e as Extract<AgentEvent, { type: "auto_retry_end" }>;
         extUi.setLocalStatus("retry", "");
-        if (!ev.success && ev.finalError) notify("error", "多次重试仍失败，请稍后再试");
+        if (!ev.success && ev.finalError) {
+          // 用量页的失败率来自这里与 assistant.stopReason==='error' 两处
+          noteFailure();
+          notify("error", "多次重试仍失败，请稍后再试");
+        }
         break;
       }
 
@@ -943,9 +1000,33 @@ export const useAppStore = defineStore("app", () => {
           await window.piBuddy.pi.setThinkingLevel(saved.thinkingLevel as ThinkingLevel);
         }
       } else {
-        // 恢复历史会话：沿用会话自身记录的模型与思考等级，这里什么都不做。
-        // TASK-014 的 modelMismatchPrompt（提示用户当前会话模型与默认不同）
-        // 就落在这个分支里。
+        // 恢复历史会话：**一次 setModel 都不发**。会话文件里记着的模型是一个
+        // 事实，覆盖它等于用户每打开一个旧会话都被悄悄换成另一个模型。
+        //
+        // 只在会话模型与「若无会话层则会生效的那一层」不同时置提示，由
+        // TopBar 问用户「这个会话原来用的是 X，是否切换？」，两个动作都由
+        // 用户点。这一段里不允许出现 setModel 调用。
+        const sessionModel = result.state.model;
+        const wsDefault = saved.workspaceDefaults?.[workspaceId.value];
+        const target =
+          wsDefault ??
+          (saved.provider && saved.modelId
+            ? { provider: saved.provider, modelId: saved.modelId }
+            : null);
+        if (
+          sessionModel &&
+          target &&
+          (sessionModel.provider !== target.provider || sessionModel.id !== target.modelId)
+        ) {
+          modelMismatchPrompt.value = {
+            sessionModelId: sessionModel.id,
+            sessionProvider: sessionModel.provider,
+            targetModelId: target.modelId,
+            targetProvider: target.provider,
+          };
+        } else {
+          modelMismatchPrompt.value = null;
+        }
       }
       await refreshState();
       await refreshThinkingLevels();
@@ -967,9 +1048,65 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
+  /**
+   * 待计入下一次上报的失败次数。
+   *
+   * 失败发生在事件流里（agent_settled 之前），而上报只在拿到 session stats
+   * 之后才做得了 —— 中间攒在这里。上报成功即清零，避免同一次失败被计两遍。
+   */
+  let pendingFailures = 0;
+
   async function refreshStats(): Promise<void> {
     const resp = await window.piBuddy.pi.getSessionStats();
-    if (resp.success && resp.data) stats.value = resp.data;
+    if (!resp.success || !resp.data) return;
+    stats.value = resp.data;
+    await recordUsage(resp.data);
+  }
+
+  /**
+   * 把这一轮的用量上报给主进程（PROV-101）。
+   *
+   * **必须挂在这里**：`get_session_stats` 是唯一给出 token 与 cost 的地方，
+   * 而它只在 agent_settled 之后有新值。没有这一步的话，用量页会永远是空的 ——
+   * 表格渲染得好好的、导出按钮点了也有反应、typecheck 与单测全绿，只是
+   * 一行数据都没有。这正是真机验证抓到的形态。
+   *
+   * 主进程按 sessionId 记 last_seen_total 做差值，因此这里送的是**会话累计
+   * 快照**而不是增量；重复上报同一份快照的增量为 0，是幂等的。
+   */
+  async function recordUsage(snapshot: SessionStats): Promise<void> {
+    const model = agentState.value?.model;
+    const sessionId = snapshot.sessionId ?? currentSessionId.value;
+    // 模型未知时不记：一条 provider/model 为空的用量行对用户没有任何意义，
+    // 还会在按模型汇总时多出一行看不懂的空白。
+    if (!model || !sessionId) return;
+    const failed = pendingFailures > 0;
+    try {
+      await window.piBuddy.providers.usage.record({
+        sessionId,
+        workspaceId: workspaceId.value,
+        provider: model.provider,
+        modelId: model.id,
+        inputTokens: snapshot.tokens?.input ?? 0,
+        outputTokens: snapshot.tokens?.output ?? 0,
+        cost: snapshot.cost ?? 0,
+        contextTokens: snapshot.contextUsage?.tokens ?? 0,
+        failed,
+      });
+      if (failed) pendingFailures = 0;
+    } catch (err) {
+      // 用量记不上不该打断对话，但**不能静默**：空 catch 会让「用量页一直
+      // 是空的」变成一个查不出原因的现象（就是这条实测出来的）。
+      lastUsageError.value = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  /** 上一次用量上报失败的原因；不展示给用户，只用于诊断与单测。 */
+  const lastUsageError = ref("");
+
+  /** 事件流里记一次失败，等下一次 stats 刷新时一并上报。 */
+  function noteFailure(): void {
+    pendingFailures++;
   }
 
   /**
@@ -1203,8 +1340,25 @@ export const useAppStore = defineStore("app", () => {
     if (persist) {
       settings.value = await window.piBuddy.settings.set({ provider, modelId });
     }
+    // 换了模型 = 上一次的图片拦截判定作废。不清的话，用户切到支持图片的
+    // 模型之后附件条目仍然是灰的、发送键仍然是禁用的 —— 一个点了没反应的界面。
+    modelBlockedImages.value = null;
+    modelMismatchPrompt.value = null;
     await refreshState();
     await refreshThinkingLevels();
+  }
+
+  /** 「保持这个会话原来的模型」——只关掉提示条，不发任何 RPC。 */
+  function keepSessionModel(): void {
+    modelMismatchPrompt.value = null;
+  }
+
+  /** 「切换到默认模型」——这是用户的显式选择，此时才允许发 set_model。 */
+  async function switchToPromptedModel(): Promise<void> {
+    const prompt = modelMismatchPrompt.value;
+    if (!prompt) return;
+    modelMismatchPrompt.value = null;
+    await setModel(prompt.targetProvider, prompt.targetModelId, false);
   }
 
   async function setThinkingLevel(level: ThinkingLevel): Promise<void> {
@@ -1293,6 +1447,10 @@ export const useAppStore = defineStore("app", () => {
     openSession,
     reloadMessages,
     setModel,
+    modelBlockedImages,
+    modelMismatchPrompt,
+    keepSessionModel,
+    switchToPromptedModel,
     switchToBundledRuntime,
     setThinkingLevel,
     saveSettings,
@@ -1305,6 +1463,7 @@ export const useAppStore = defineStore("app", () => {
     scheduleSaveDraft,
     saveDraftNow,
     lastDraftError,
+    lastUsageError,
     restoreDraft,
     flushStream,
     resetStream,

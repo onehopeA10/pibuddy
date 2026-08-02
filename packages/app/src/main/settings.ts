@@ -15,7 +15,12 @@
 import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { parseAppSettings, type AppSettings } from "@pibuddy/contract";
+import {
+  APP_SETTINGS_PUBLIC_KEYS,
+  parseAppSettings,
+  type AppSettings,
+  type AppSettingsPublic,
+} from "@pibuddy/contract";
 
 import { writeJsonAtomic } from "./fs-atomic.js";
 
@@ -28,7 +33,7 @@ export type { AppSettings };
  * `schemaVersion` 这个字段的存在。加字段或改语义时 +1，并在 migrate() 里
  * 补一段对应的折叠。
  */
-export const SETTINGS_SCHEMA_VERSION = 1;
+export const SETTINGS_SCHEMA_VERSION = 2;
 
 /** 测试注入用的数据目录；生产环境恒为 null。 */
 let dataDirOverride: string | null = null;
@@ -60,6 +65,13 @@ function backupPath(): string {
  *     比直接删掉更糟。删掉之后用户在设置里重填一次，密钥就进加密存储了。
  *   - 其余用户字段（workspace / provider / modelId / thinkingLevel / …）
  *     逐项原样保留：迁移丢字段的表现是用户重启后工作目录没了。
+ *
+ * v1 → v2（PROV-101 / UX-101 加字段）：
+ *   - workspaceDefaults / onboardingStep / notificationsEnabled / voiceEnabled
+ *     取默认值（由 zod 的 .default() 完成，这里只需要放行）
+ *   - **老用户不再走一遍向导**：v1 的文件说明这个人已经在用了，把他扔回
+ *     六步向导是一次纯粹的倒退。已经有 workspace 的，直接标记为已完成。
+ *   - 原有字段逐项保留，一个都不动。
  */
 export function migrate(raw: unknown): Record<string, unknown> {
   const source =
@@ -67,11 +79,31 @@ export function migrate(raw: unknown): Record<string, unknown> {
       ? { ...(raw as Record<string, unknown>) }
       : {};
 
-  if (typeof source.schemaVersion !== "number") {
-    delete source["sttApiKey"];
-    source.schemaVersion = SETTINGS_SCHEMA_VERSION;
+  const version = typeof source.schemaVersion === "number" ? source.schemaVersion : 0;
+
+  switch (version) {
+    case 0:
+      // 历史遗留的明文密钥字段：不「顺手迁进 secret-store」——safeStorage
+      // 未必可用，而一个「迁移时静默失败就把明文留着」的实现比直接删掉更糟。
+      delete source["sttApiKey"];
+    // fallthrough：v0 补完之后还要继续走 v1 → v2
+    case 1: {
+      // 已经在用的人不该被弹回首启向导。判据是「有没有选过工作文件夹」——
+      // 那是向导第一步，选过就说明他至少已经跑起来过一次。
+      const hasWorkspace = typeof source.workspace === "string" && source.workspace !== "";
+      if (hasWorkspace && source.onboardingCompletedAt === undefined) {
+        source.onboardingCompletedAt = Date.now();
+        source.onboardingStep = 6;
+      }
+      break;
+    }
+    default:
+      // 已是当前代际（或来自更新的版本）：不动。降级读新文件时未知字段由
+      // parseAppSettings 宽松丢弃，不会让应用起不来。
+      break;
   }
 
+  source.schemaVersion = SETTINGS_SCHEMA_VERSION;
   return source;
 }
 
@@ -120,4 +152,26 @@ export function saveSettings(patch: Partial<AppSettings>): AppSettings {
 
   writeJsonAtomic(settingsPath(), merged);
   return merged;
+}
+
+/**
+ * 挑出允许下发给渲染进程的设置字段（CT-09 的唯一实现）。
+ *
+ * 两条纪律：
+ *
+ *   1. **不是 `return loadSettings()`** —— 那样将来任何一个新加的敏感字段
+ *      都会自动跟着流出去。白名单在契约包里，加字段必须显式过一遍。
+ *   2. **逐键写出，包括值为 undefined 的可选键** —— 写成「有值才放进去」
+ *      时，`Object.keys(settings.get())` 会随用户设了哪几项而飘，
+ *      「返回的键集合恰好等于白名单」这条断言就没法机械判定了。
+ *
+ * 住在 settings.ts 而不是某个 *-ipc.ts：现在有两个域（misc / providers）
+ * 需要它，放在其中一边会让另一边跨域 import handler 文件。
+ */
+export function publicSettings(settings: AppSettings): AppSettingsPublic {
+  const out: Record<string, unknown> = {};
+  for (const key of APP_SETTINGS_PUBLIC_KEYS) {
+    out[key] = (settings as Record<string, unknown>)[key];
+  }
+  return out as AppSettingsPublic;
 }

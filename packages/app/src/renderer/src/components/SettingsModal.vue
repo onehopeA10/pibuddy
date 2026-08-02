@@ -13,11 +13,29 @@ import {
   useMessage,
 } from "naive-ui";
 import { useAppStore } from "../stores/app";
+import { useProvidersStore } from "../stores/providers";
 import UpdateSettingsPanel from "./UpdateSettingsPanel.vue";
 import DiagnosticsPanel from "./DiagnosticsPanel.vue";
 
 const store = useAppStore();
+const providers = useProvidersStore();
 const message = useMessage();
+
+/**
+ * 打开账号中心 / 用量页。
+ *
+ * 先关设置弹窗再开另一个 —— 两层 modal 叠在一起时，Esc 只关得掉最上面
+ * 那个，而焦点会回到一个已经被遮住的元素上。
+ */
+function openProviders(): void {
+  store.settingsOpen = false;
+  providers.panelOpen = true;
+}
+
+function openUsage(): void {
+  store.settingsOpen = false;
+  providers.usagePanelOpen = true;
+}
 
 const sttBaseUrl = ref("");
 /**
@@ -162,10 +180,15 @@ async function backToBundled(): Promise<void> {
       <n-button size="small" type="primary" @click="backToBundled">切回内置</n-button>
     </n-alert>
 
-    <div style="font-size: 12px; color: #b0b4bc; margin-bottom: 12px">
-      对话模型的账号在终端里运行 <code>pi</code> 后用 <code>/login</code> 配置，
-      或设置 ANTHROPIC_API_KEY / OPENAI_API_KEY 等环境变量。
-    </div>
+    <!--
+      收敛前这里写的是「对话模型的账号在终端里运行 pi 后用 /login 配置」。
+      对一个装了桌面应用的人来说，那句话等价于「这个功能没做」——
+      PROV-101 的核心价值就是消灭这一步。现在给的是两个能点的入口。
+    -->
+    <n-space style="margin: 4px 0 16px">
+      <n-button @click="openProviders">🔑 账号与模型</n-button>
+      <n-button @click="openUsage">📊 用量与花费</n-button>
+    </n-space>
 
     <update-settings-panel />
 

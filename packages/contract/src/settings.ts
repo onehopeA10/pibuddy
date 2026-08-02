@@ -23,7 +23,7 @@ export const appSettingsSchema = z.object({
    * 那里，代际归它管），契约包只声明这个字段的存在与默认值。契约包不能
    * 反向 import app 包，所以这里是一个字面量 —— 改代际时两处一起改。
    */
-  schemaVersion: z.number().int().default(1),
+  schemaVersion: z.number().int().default(2),
   /** 工作目录绝对路径 */
   workspace: z.string().optional(),
   /**
@@ -68,6 +68,33 @@ export const appSettingsSchema = z.object({
    * 显式选了 allow 之后才会被收进诊断包。
    */
   crashDumpConsent: z.enum(["unset", "allow", "deny"]).default("unset"),
+
+  // ---------------------------------------------- 模型作用域（PROV-101）
+  //
+  // `provider` / `modelId` 这两个老字段就是**全局默认**，保持原样不动
+  // （改名会让所有老设置文件的模型选择在一次升级里凭空消失）。这里只加
+  // workspace 层：键是 workspaceId（sha256(canonical realpath) 派生的
+  // 不透明 id），不是绝对路径 —— 设置文件里躺一堆真实路径既是隐私泄漏，
+  // 也会在用户移动文件夹后全部失配。
+  //
+  // session 层不在这里：它记在会话文件自己身上，由 pi 负责，PiBuddy 只
+  // 负责「不要去覆盖它」。
+  workspaceDefaults: z
+    .record(z.string(), z.object({ provider: z.string(), modelId: z.string() }))
+    .default({}),
+
+  // ------------------------------------------------ 首次启动向导（UX-101）
+  //
+  // 分成「走到第几步」与「什么时候走完」两个字段，而不是一个布尔：
+  // 用户在第 4 步关掉应用再打开时，要从第 4 步继续，而不是从头再来一遍，
+  // 也不能被当成「已完成」直接放进主界面（那时候连 provider 都还没配）。
+  onboardingStep: z.number().int().min(0).default(0),
+  /** 只在最后一步完成时写入。未写入 = 向导没走完，AppShell 不渲染主界面 */
+  onboardingCompletedAt: z.number().optional(),
+  /** 任务完成后是否发系统通知 */
+  notificationsEnabled: z.boolean().default(true),
+  /** 是否在输入区显示语音按钮（向导里的可选项） */
+  voiceEnabled: z.boolean().default(false),
 });
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;
@@ -94,7 +121,28 @@ export const APP_SETTINGS_PUBLIC_KEYS = [
   "piRuntimeMode",
   "piExternalCommand",
   "crashDumpConsent",
+  "workspaceDefaults",
+  "onboardingStep",
+  "onboardingCompletedAt",
+  "notificationsEnabled",
+  "voiceEnabled",
 ] as const;
+
+/**
+ * `settings:get` 的返回类型（CT-09 的类型层投影）。
+ *
+ * 键集合与 `APP_SETTINGS_PUBLIC_KEYS` 由 `Pick` 绑死：往白名单里加一个键，
+ * 这个类型自动跟着变；往 schema 里加一个键却忘了加进白名单，那个键就永远
+ * 到不了渲染进程 —— 后者是我们要的默认行为（新字段默认不外发）。
+ *
+ * 主进程侧的构造函数**逐键写出**（包括值为 undefined 的可选键），因此
+ * `Object.keys(settings.get())` 是一个与白名单等长的稳定集合，可以被单测
+ * 逐项比对；写成「有值才放进去」的话，这个断言会随用户设了哪几项而飘。
+ */
+export type AppSettingsPublic = Pick<
+  AppSettings,
+  (typeof APP_SETTINGS_PUBLIC_KEYS)[number]
+>;
 
 /** settings:set 的入参：任意子集。 */
 export const appSettingsPatchSchema = appSettingsSchema.partial();

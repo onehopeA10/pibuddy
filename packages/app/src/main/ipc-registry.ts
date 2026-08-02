@@ -12,6 +12,7 @@ import { registerDiagnosticsIpc } from "./diagnostics/diagnostics-ipc.js";
 import { registerMiscIpc } from "./misc-ipc.js";
 import { registerPiIpc } from "./pi/pi-ipc.js";
 import { registerPiResourcesIpc } from "./pi-resources/pi-resources-ipc.js";
+import { registerProvidersIpc, registerUsageIpc } from "./providers/providers-ipc.js";
 import { registerSessionsIpc } from "./sessions/sessions-ipc.js";
 import { registerUpdateIpc } from "./update/update-ipc.js";
 
@@ -20,6 +21,8 @@ export function registerAllIpc(): void {
   registerPiResourcesIpc();
   registerSessionsIpc();
   registerMiscIpc();
+  registerProvidersIpc();
+  registerUsageIpc();
   registerUpdateIpc();
   registerDiagnosticsIpc();
 }

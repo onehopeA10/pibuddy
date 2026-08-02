@@ -21,6 +21,7 @@
  */
 import { pi } from "./pi.js";
 import { piResources } from "./piResources.js";
+import { providers } from "./providers.js";
 import { sessions } from "./sessions.js";
 import { settings } from "./settings.js";
 import { dialog } from "./dialog.js";
@@ -33,6 +34,8 @@ import { diagnostics } from "./diagnostics.js";
 export const api = {
   pi,
   piResources,
+  /** Provider 与模型中心、用量统计（PROV-101）。只进不出：有 saveKey，没有 getKey */
+  providers,
   sessions,
   settings,
   dialog,

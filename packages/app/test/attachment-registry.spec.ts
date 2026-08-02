@@ -44,7 +44,14 @@ function writePng(filePath: string, padding = 0): void {
 beforeEach(() => {
   openPath.mockClear();
   showItemInFolder.mockClear();
-  tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "pibuddy-att-"));
+  // realpath 归一化：GitHub 的 windows runner 上 `os.tmpdir()` 返回 8.3 短路径
+  // （`C:\Users\RUNNER~1\AppData\Local\Temp`），而 attachment-registry 内部对
+  // 每个文件都做 `fsp.realpath`，拿到的是长路径（`…\runneradmin\…`）。两者
+  // 逐字符不等，于是 `toHaveBeenCalledWith(fs.realpathSync(file))` 与
+  // `resolve()` 里那条「realpath 与签发时记的不一致」的自检双双失败 ——
+  // 本机绿、CI 红，且报错内容完全看不出是路径形态问题。
+  // 在源头把根目录折成 realpath，两侧就永远是同一种形态。
+  tmpRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "pibuddy-att-")));
   userDataDir = path.join(tmpRoot, "userData");
   fs.mkdirSync(userDataDir, { recursive: true });
   workspaceDir = path.join(tmpRoot, "work");

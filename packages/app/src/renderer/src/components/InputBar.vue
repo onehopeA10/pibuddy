@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { NButton, NInput, NSpin, useMessage } from "naive-ui";
 import type { ImageContent } from "@sdk";
 import type { AttachmentRef } from "@contract";
 import { useAppStore, type SendMode } from "../stores/app";
+import { imageCapableModels, supportsImage } from "../stores/model-capability";
 import { VoiceRecorder } from "../stt";
 import QueuePanel from "./QueuePanel.vue";
 import ExtensionWidgetHost from "./ExtensionWidgetHost.vue";
@@ -25,6 +26,46 @@ const sending = ref(false);
  * 默认「立即插话」——用户在助手跑的时候打字，绝大多数是想纠正当前这一轮。
  */
 const sendMode = ref<SendMode>("steer");
+
+// ---------- 图片能力（PROV-101） ----------
+//
+// 判据是当前模型的 `Model.input` 是否含 "image"，来自 get_available_models。
+// 拦截发生在两层：这里（界面上就看得见，附件条目变灰、发送键禁用）与
+// store.send() 的最前面（真正保证「一次 RPC 都不发」）。两层都要有 ——
+// 只有 UI 层的话，任何绕过按钮的调用路径都能把图片发出去；只有 store 层
+// 的话，用户会一直点一个看起来正常的发送键然后收到一句提示。
+
+/** 当前模型收不收图。没有选中模型时按「收不下」保守处理。 */
+const modelTakesImages = computed(() => supportsImage(store.currentModel));
+
+/** 有图片、但当前模型收不下 —— 界面进入受阻状态。 */
+const imagesBlocked = computed(() => images.value.length > 0 && !modelTakesImages.value);
+
+const currentModelId = computed(() => store.currentModel?.id ?? "(未选择模型)");
+
+/**
+ * 可以切过去的模型：只列 `input` 含 image 的。空列表时不显示切换入口。
+ *
+ * 刻意用一段普通 DOM 而不是 n-dropdown 渲染：这个列表要被逐项断言
+ * （每一项的 `data-model-input` 都必须 contains "image"），而 teleport 出去的
+ * 弹层会让「列表里有什么」变成一个取决于挂载位置与打开时机的问题。
+ */
+const imageCapableOptions = computed(() =>
+  imageCapableModels(store.models).map((m) => ({
+    label: `${m.name || m.id}（${m.provider}）`,
+    modelId: m.id,
+    provider: m.provider,
+    inputs: (m.input ?? []).join(","),
+  }))
+);
+
+/** 切换模型的候选列表是否展开。 */
+const switcherOpen = ref(false);
+
+async function switchToImageModel(provider: string, modelId: string): Promise<void> {
+  switcherOpen.value = false;
+  await store.setModel(provider, modelId);
+}
 
 /**
  * 每次输入变化就重排一次草稿写入（store 里 debounce 500ms）。
@@ -232,7 +273,19 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
 
     <div class="composer" @paste="onPaste">
       <div v-if="images.length || files.length" class="attachment-row">
-        <span v-for="(img, i) in images" :key="`img-${i}`" class="attach-chip">
+        <span
+          v-for="(img, i) in images"
+          :key="`img-${i}`"
+          class="attach-chip"
+          :class="{ blocked: imagesBlocked }"
+          data-testid="image-attachment"
+          :aria-disabled="imagesBlocked ? 'true' : 'false'"
+          :title="
+            imagesBlocked
+              ? `当前模型 ${currentModelId} 不支持图片`
+              : img.name
+          "
+        >
           <img :src="`data:${img.mimeType};base64,${img.data}`" alt="" />
           <span class="name">{{ img.name }}</span>
           <span class="close" @click="images.splice(i, 1)">✕</span>
@@ -242,6 +295,50 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
           <span class="name">{{ f.name }}</span>
           <span class="close" @click="files.splice(i, 1)">✕</span>
         </span>
+      </div>
+
+      <!--
+        受阻说明 + 切换入口（PROV-101）。
+        说明文本必须含当前模型 id —— 「不支持图片」不告诉用户是哪个模型
+        不支持，他就不知道该换掉什么。
+      -->
+      <div v-if="imagesBlocked" class="image-blocked" role="alert" data-testid="image-blocked-hint">
+        <span data-testid="image-blocked-text">
+          当前模型「{{ currentModelId }}」不支持图片，发送前请切换模型或移除图片。
+        </span>
+        <n-button
+          v-if="imageCapableOptions.length"
+          size="tiny"
+          type="primary"
+          data-testid="switch-image-model"
+          :aria-expanded="switcherOpen ? 'true' : 'false'"
+          @click="switcherOpen = !switcherOpen"
+        >
+          切换到支持图片的模型
+        </n-button>
+        <span v-else class="muted">（当前没有支持图片的模型可选）</span>
+
+        <ul
+          v-if="switcherOpen && imageCapableOptions.length"
+          class="model-switcher"
+          role="listbox"
+          aria-label="支持图片的模型"
+          data-testid="image-model-list"
+        >
+          <li
+            v-for="opt in imageCapableOptions"
+            :key="`${opt.provider}::${opt.modelId}`"
+            role="option"
+            tabindex="0"
+            :aria-selected="opt.modelId === currentModelId ? 'true' : 'false'"
+            :data-model-input="opt.inputs"
+            :data-model-id="opt.modelId"
+            @click="switchToImageModel(opt.provider, opt.modelId)"
+            @keydown.enter="switchToImageModel(opt.provider, opt.modelId)"
+          >
+            {{ opt.label }}
+          </li>
+        </ul>
       </div>
 
       <n-input
@@ -325,7 +422,13 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
           type="primary"
           size="small"
           :loading="sending"
-          :disabled="!store.started"
+          :disabled="!store.started || imagesBlocked"
+          data-testid="send-button"
+          :title="
+            imagesBlocked
+              ? `当前模型 ${currentModelId} 不支持图片，无法发送`
+              : '发送'
+          "
           @click="submit()"
         >
           发送 ↩
@@ -336,3 +439,54 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
     <ExtensionWidgetHost placement="belowEditor" />
   </div>
 </template>
+
+<style scoped>
+/* 受阻的图片附件：视觉上一眼可辨，同时 aria-disabled 让辅助技术也读得到 */
+.attach-chip.blocked {
+  opacity: 0.55;
+  outline: 1px dashed rgba(208, 48, 80, 0.6);
+}
+.image-blocked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+  font-size: 12.5px;
+  color: #d03050;
+}
+.image-blocked .muted {
+  color: #8a8f98;
+}
+.model-switcher {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px;
+  width: 100%;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 6px;
+  background: #fff;
+}
+.model-switcher li {
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #333;
+}
+.model-switcher li:hover,
+.model-switcher li:focus-visible {
+  background: rgba(24, 160, 88, 0.12);
+  outline: none;
+}
+
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  .attach-chip,
+  .image-blocked {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+</style>

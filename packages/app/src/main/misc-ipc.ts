@@ -7,7 +7,6 @@
 import { BrowserWindow, dialog } from "electron";
 import {
   CHANNELS,
-  APP_SETTINGS_PUBLIC_KEYS,
   attachDroppedRequestSchema,
   rendererSettingsPatchSchema,
   secretQueryRequestSchema,
@@ -26,7 +25,7 @@ import { registerHandler } from "./ipc-guard.js";
 import { safeFetch } from "./net/outbound-guard.js";
 import { log } from "./pi/pi-ipc.js";
 import { SECRET_KEYS, describeSecret, loadSecret, saveSecret } from "./secret-store.js";
-import { loadSettings, saveSettings } from "./settings.js";
+import { loadSettings, publicSettings, saveSettings } from "./settings.js";
 import { describeWorkspace, registerWorkspace } from "./workspace-registry.js";
 
 /**
@@ -36,20 +35,8 @@ import { describeWorkspace, registerWorkspace } from "./workspace-registry.js";
  */
 export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
-/**
- * 挑出允许下发给渲染进程的设置字段（CT-09）。
- *
- * 不是 `return loadSettings()` —— 那样将来任何一个新加的敏感字段都会自动
- * 跟着流出去。白名单在契约包里，加字段必须显式过一遍。
- */
-function publicSettings(settings: AppSettings): Partial<AppSettings> {
-  const out: Record<string, unknown> = {};
-  for (const key of APP_SETTINGS_PUBLIC_KEYS) {
-    const value = (settings as Record<string, unknown>)[key];
-    if (value !== undefined) out[key] = value;
-  }
-  return out as Partial<AppSettings>;
-}
+// publicSettings 住在 settings.ts（CT-09 的唯一实现）：providers-ipc 也要用它，
+// 留在本文件会让那一域跨域 import 另一个 handler 文件。
 
 export function registerMiscIpc(): void {
   // ------------------------------------------------------------------ 设置
