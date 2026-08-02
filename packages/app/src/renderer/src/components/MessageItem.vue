@@ -9,7 +9,7 @@ import type {
   TextContent,
   UserMessage,
 } from "@sdk";
-import { renderMarkdown } from "../markdown";
+import { renderMarkdown, truncateToolOutput } from "../markdown";
 import ToolActivity from "./ToolActivity.vue";
 
 const props = defineProps<{
@@ -78,7 +78,7 @@ const openThinking = ref<Record<number, boolean>>({});
           <div
             v-else-if="block.type === 'text' && block.text"
             class="markdown"
-            v-html="renderMarkdown(block.text)"
+            v-html="renderMarkdown(truncateToolOutput(block.text))"
           />
 
           <ToolActivity v-else-if="block.type === 'toolCall'" :call="block" />

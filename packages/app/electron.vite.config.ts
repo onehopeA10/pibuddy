@@ -10,6 +10,15 @@ export default defineConfig({
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        // 沙箱化的 preload 只能是 CommonJS：Electron 的 ESM preload（.mjs）
+        // 明确只在 sandbox:false 下生效，开了 sandbox 就会静默不加载，
+        // window.piBuddy 直接变 undefined。SEC-001 要求 sandbox:true，
+        // 因此 preload 必须产出 .cjs。
+        output: { format: "cjs", entryFileNames: "index.cjs" },
+      },
+    },
   },
   renderer: {
     root: resolve(__dirname, "src/renderer"),

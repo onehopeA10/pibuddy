@@ -3,6 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      内容安全策略。内容必须与 main/security/window-policy.ts 的 CSP_POLICY 一致。
+      响应头那条覆盖 dev 的 http:// 加载路径；packaged 下渲染进程走 file://，
+      不经过 webRequest，只有这条 meta 生效，两条缺一不可。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'"
+    />
     <title>PiBuddy · AI 办公小助手</title>
   </head>
   <body>

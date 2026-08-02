@@ -8,9 +8,9 @@
   "priority": "high",
   "effort": "medium",
   "action": "packages/app/src/main/index.ts 把 webPreferences.sandbox 由 false 改为 true；新建 packages/app/src/main/security/window-policy.ts 导出 applyWindowPolicy(win) 与 openExternalSafely(raw)：用 session.defaultSession.webRequest.onHeadersReceived 注入 CSP 头 \"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\"；webContents.on(\"will-navigate\") 对非应用 origin 调 event.preventDefault()；setWindowOpenHandler 恒返回 {action:\"deny\"}；openExternalSafely 只放行 new URL(raw).protocol 属于 [\"https:\",\"http:\",\"mailto:\"] 且 /[\\u0000-\\u001F\\u007F]/.test(raw) 为 false 的输入；session.defaultSession.setPermissionRequestHandler 只在 wc === mainWindow.webContents 且 permission === \"media\" 且 details.mediaTypes 含 \"audio\" 时回调 true，其余一律 false，并配套 setPermissionCheckHandler；把 index.ts:25 的 if (process.env.ELECTRON_RENDERER_URL) 改为 if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL)；renderer/index.html 增加同等 CSP 的 meta 标签；renderer/src/markdown.ts 保持 html:false 并增加 validateLink 白名单与 const MAX_TOOL_OUTPUT_BYTES = 65536 截断。",
-  "status": "pending",
-  "completed_at": null,
-  "actual_duration": null,
+  "status": "completed_with_deviations",
+  "completed_at": "2026-08-02T19:38:04",
+  "actual_duration": "~75m",
   "scope": "packages/app/src/main/index.ts + security/ + renderer 内容渲染",
   "focus_paths": [
     "packages/app/src/main/",
