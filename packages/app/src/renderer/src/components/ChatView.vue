@@ -1,24 +1,36 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { NButton } from "naive-ui";
 import { useAppStore } from "../stores/app";
+import { useChatWindow } from "../stores/chat-window";
 import MessageItem from "./MessageItem.vue";
 import Welcome from "./Welcome.vue";
 
 const store = useAppStore();
+const win = useChatWindow();
 const scrollEl = ref<HTMLElement | null>(null);
-let stickToBottom = true;
+
+/**
+ * 流式滚动的唯一驱动。
+ *
+ * `stickToBottom` 现在住在 useChatWindow 里（未读分界线要读同一个判据），
+ * 但**下面那个 activityTick watcher 一个字都不能删** —— 它是流式期间聊天区
+ * 跟随滚动的唯一来源，丢了订阅不会报错，只是助手一边输出一边把内容顶到
+ * 视口外面去。
+ */
+const stickToBottom = win.stickToBottom;
 
 // 长会话只渲染最近的一段消息，避免几百条消息全量渲染卡住主线程。
-// 效果等同虚拟滚动，但实现简单得多（聊天场景用户极少回看很早的内容）。
 const INITIAL_WINDOW = 60;
 const visibleCount = ref(INITIAL_WINDOW);
 
 watch(
-  () => store.agentState?.sessionFile,
+  () => store.currentSessionId,
   () => {
     visibleCount.value = INITIAL_WINDOW;
-    stickToBottom = true;
+    // sizeBytes 首屏用 0：真正的字节上界由 SessionListPanel 打开会话时给出，
+    // 这里只保证换会话后不会带着上一会话的游标继续翻页。
+    win.reset(0);
   }
 );
 
@@ -32,8 +44,10 @@ const visibleItems = computed(() =>
 async function showEarlier(): Promise<void> {
   const el = scrollEl.value;
   const prevHeight = el?.scrollHeight ?? 0;
-  stickToBottom = false;
+  win.onLeaveBottom();
   visibleCount.value += 100;
+  // 内存里的还没铺完就先铺内存里的；铺完了才向主进程要更早的字节。
+  if (hiddenCount.value === 0) await win.loadEarlier();
   await nextTick();
   // 扩窗后补偿滚动位置，视口停留在原来看到的消息上
   if (el) el.scrollTop += el.scrollHeight - prevHeight;
@@ -42,18 +56,44 @@ async function showEarlier(): Promise<void> {
 function onScroll(): void {
   const el = scrollEl.value;
   if (!el) return;
-  stickToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  if (atBottom) win.onReachBottom();
+  else win.onLeaveBottom();
+  if (el.scrollTop < 40) void showEarlier();
 }
+
+async function jumpToBottom(): Promise<void> {
+  win.onReachBottom();
+  await nextTick();
+  const el = scrollEl.value;
+  if (el) el.scrollTop = el.scrollHeight;
+}
+
+// 新消息到达且视口不在底部 → 插一条未读分界线（只插第一条）
+watch(
+  () => store.items.length,
+  (next, prev) => {
+    if (next <= (prev ?? 0)) return;
+    const last = store.items[store.items.length - 1];
+    if (last) win.onIncoming(last.key);
+  }
+);
 
 watch(
   () => store.activityTick,
   async () => {
-    if (!stickToBottom) return;
+    if (!stickToBottom.value) return;
     await nextTick();
     const el = scrollEl.value;
     if (el) el.scrollTop = el.scrollHeight;
   }
 );
+
+onBeforeUnmount(() => win.dispose());
+
+function resend(text: string): void {
+  store.editorText = text;
+}
 </script>
 
 <template>
@@ -72,21 +112,95 @@ watch(
       v-if="store.items.length === 0 && !store.liveAssistant && !store.sessionLoadError"
     />
     <div v-else class="chat-inner">
-      <div v-if="hiddenCount > 0" style="text-align: center; margin-bottom: 16px">
-        <n-button size="tiny" quaternary @click="showEarlier">
-          ↑ 查看更早的 {{ hiddenCount }} 条消息
+      <div v-if="win.loadError.value" class="history-load-error">
+        <span>😕 更早的消息没能加载出来：{{ win.loadError.value }}</span>
+        <n-button
+          size="tiny"
+          type="primary"
+          secondary
+          aria-label="重试加载更早的消息"
+          @click="win.retry()"
+        >
+          重试
         </n-button>
       </div>
-      <MessageItem
-        v-for="item in visibleItems"
-        :key="item.key"
-        :message="item.message"
-      />
+      <div
+        v-else-if="hiddenCount > 0 || !win.reachedTop.value"
+        style="text-align: center; margin-bottom: 16px"
+      >
+        <n-button
+          size="tiny"
+          quaternary
+          :loading="win.loading.value"
+          aria-label="查看更早的消息"
+          @click="showEarlier"
+        >
+          ↑ 查看更早的消息{{ hiddenCount > 0 ? `（还有 ${hiddenCount} 条）` : "" }}
+        </n-button>
+      </div>
+
+      <template v-for="item in visibleItems" :key="item.key">
+        <div
+          v-if="win.unreadDivider.value === item.key"
+          data-unread-divider
+          class="unread-divider"
+        >
+          <span>以下是新消息</span>
+        </div>
+        <MessageItem
+          :message="item.message"
+          :message-key="item.key"
+          @resend="resend"
+        />
+      </template>
       <MessageItem
         v-if="store.liveAssistant"
         :message="store.liveAssistant"
         streaming
       />
     </div>
+
+    <n-button
+      v-if="!win.stickToBottom.value"
+      class="jump-bottom"
+      size="tiny"
+      secondary
+      aria-label="跳到底部"
+      @click="jumpToBottom"
+    >
+      ↓ 跳到底部
+    </n-button>
   </div>
 </template>
+
+<style scoped>
+.unread-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  color: #ef4444;
+  font-size: 12px;
+}
+.unread-divider::before,
+.unread-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #fecaca;
+}
+.history-load-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+  color: #b45309;
+}
+.jump-bottom {
+  position: sticky;
+  bottom: 12px;
+  left: 50%;
+}
+</style>

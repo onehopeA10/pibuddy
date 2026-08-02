@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { NButton, NInput, NSpin, useMessage } from "naive-ui";
 import type { ImageContent } from "@sdk";
 import type { AttachmentRef } from "@contract";
-import { useAppStore } from "../stores/app";
+import { useAppStore, type SendMode } from "../stores/app";
 import { VoiceRecorder } from "../stt";
+import QueuePanel from "./QueuePanel.vue";
 
 interface ImageAttachment extends ImageContent {
   name: string;
@@ -16,6 +17,32 @@ const message = useMessage();
 const images = ref<ImageAttachment[]>([]);
 const files = ref<AttachmentRef[]>([]);
 const sending = ref(false);
+
+/**
+ * 助手正在输出时，这条新指令的产品语义。
+ *
+ * 默认「立即插话」——用户在助手跑的时候打字，绝大多数是想纠正当前这一轮。
+ */
+const sendMode = ref<SendMode>("steer");
+
+/**
+ * 每次输入变化就重排一次草稿写入（store 里 debounce 500ms）。
+ *
+ * 不防抖的话，长输入是「每按一个键一次 IPC + 一次 SQLite 写」，界面上没有
+ * 任何征兆。
+ */
+function onDraftChanged(): void {
+  store.draftAttachments = [...files.value];
+  store.scheduleSaveDraft();
+}
+
+/**
+ * 草稿的触发源是**状态变化**，不是键盘事件。
+ *
+ * 早先只挂在 @keydown 上：语音转写、扩展的 set_editor_text、粘贴图片、
+ * 拖入文件全都不经过键盘，那些内容一个字都存不下来。
+ */
+watch([() => store.editorText, images, files], onDraftChanged, { deep: true });
 
 // ---------- 附件 ----------
 
@@ -130,7 +157,7 @@ async function toggleVoice(): Promise<void> {
 
 // ---------- 发送 ----------
 
-async function submit(): Promise<void> {
+async function submit(mode?: SendMode): Promise<void> {
   if (sending.value) return;
   const text = store.editorText;
   if (!text.trim() && images.value.length === 0 && files.value.length === 0) return;
@@ -138,15 +165,18 @@ async function submit(): Promise<void> {
   try {
     // 只有 RPC 已经接受（success:true）才允许清空 composer。
     // 早先这里无条件清空，一次发送失败就把文字、图片、文件附件一起抹掉。
+    // streaming 时 mode 必填：store.send 在缺失时抛错且一次 RPC 都不发。
     const payload = {
       text,
       images: images.value.map(({ type, data, mimeType }) => ({ type, data, mimeType })),
       attachments: files.value,
+      ...(store.streaming ? { mode: mode ?? sendMode.value } : {}),
     };
     if (await store.send(payload)) {
       store.editorText = "";
       images.value = [];
       files.value = [];
+      onDraftChanged();
     }
   } catch (err) {
     // 没有这个 catch，`void submit()` 路径下抛出的异常就是一条静默的
@@ -159,11 +189,21 @@ async function submit(): Promise<void> {
   }
 }
 
+/** 把当前输入放进本地未发送队列（不发给 pi，因而随时可改可删）。 */
+function queueLocally(): void {
+  const text = store.editorText.trim();
+  if (!text) return;
+  store.enqueueLocal(text, sendMode.value);
+  store.editorText = "";
+}
+
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     void submit();
+    return;
   }
+  onDraftChanged();
 }
 
 function handleWindowDrop(e: DragEvent): void {
@@ -182,6 +222,8 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
       <span v-if="store.queue.steering.length">（已排队 {{ store.queue.steering.length }} 条插话）</span>
       <span v-if="store.busyStatus">{{ store.busyStatus }}</span>
     </div>
+
+    <QueuePanel />
 
     <div class="composer" @paste="onPaste">
       <div v-if="images.length || files.length" class="attachment-row">
@@ -233,12 +275,53 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
         >
           ⏹ 停止
         </n-button>
+        <!--
+          助手在跑的时候，「现在就打断」和「等它做完这一轮」是两件事，
+          必须让用户自己选，不能替他决定。两者都走 prompt 命令，
+          区别只在 streamingBehavior 取值。
+        -->
+        <template v-if="store.streaming">
+          <!--
+            先攒着、待会儿再说。攒下的条目留在**本地**队列里，可以改可以删；
+            一旦交给 pi 就撤不回来了（协议没有撤回命令）。
+          -->
+          <n-button
+            size="small"
+            quaternary
+            :disabled="!store.started || !store.editorText.trim()"
+            aria-label="先加入队列稍后再发"
+            @click="queueLocally"
+          >
+            先攒着
+          </n-button>
+          <n-button
+            size="small"
+            type="primary"
+            :loading="sending"
+            :disabled="!store.started"
+            aria-label="立即插话"
+            @click="submit('steer')"
+          >
+            立即插话
+          </n-button>
+          <n-button
+            size="small"
+            secondary
+            :loading="sending"
+            :disabled="!store.started"
+            aria-label="下一轮处理"
+            @click="submit('followUp')"
+          >
+            下一轮处理
+          </n-button>
+        </template>
         <n-button
+          v-else
           type="primary"
           size="small"
           :loading="sending"
           :disabled="!store.started"
-          @click="submit"
+          @click="submit()"
         >
           发送 ↩
         </n-button>

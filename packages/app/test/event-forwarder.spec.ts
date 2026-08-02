@@ -19,6 +19,15 @@ function env(sequence: number, payload: AgentEvent): PiEnvelope<AgentEvent> {
   return wrapEnvelope(CTX, sequence, payload);
 }
 
+/** text_delta 形态的 message_update：TASK-010 之后只有这种才会被折叠。 */
+function textDelta(sequence: number, delta: string, contentIndex = 0): PiEnvelope<AgentEvent> {
+  return env(sequence, {
+    type: "message_update",
+    message: { role: "assistant", content: [] },
+    assistantMessageEvent: { type: "text_delta", contentIndex, delta },
+  } as unknown as AgentEvent);
+}
+
 function fakeTarget(): ForwarderTarget & { sent: unknown[]; send: ReturnType<typeof vi.fn> } {
   const sent: unknown[] = [];
   const send = vi.fn((_channel: string, payload: unknown) => {
@@ -42,14 +51,26 @@ describe("collapseEnvelopes", () => {
   });
 
   it("折叠判据读的是信封的 payload，而不是裸事件", () => {
-    // 这三条 message_update 携带累积快照，只保留最后一条不丢信息。
+    // TASK-010 起 message_update 按 assistantMessageEvent.delta 拼接：
+    // 只有同类型、同 contentIndex 的 text_delta / thinking_delta 才合并。
     const out = collapseEnvelopes([
-      env(0, { type: "message_update", message: { text: "你" } } as AgentEvent),
-      env(1, { type: "message_update", message: { text: "你好" } } as AgentEvent),
-      env(2, { type: "message_update", message: { text: "你好世界" } } as AgentEvent),
+      textDelta(0, "你"),
+      textDelta(1, "好"),
+      textDelta(2, "世界"),
     ]);
     expect(out).toHaveLength(1);
     expect(out[0].sequence).toBe(2);
+    expect(
+      (out[0].payload as { assistantMessageEvent: { delta: string } }).assistantMessageEvent.delta
+    ).toBe("你好世界");
+  });
+
+  it("没有 assistantMessageEvent 的 message_update 不再被折叠（宁可多发，不可丢字）", () => {
+    const out = collapseEnvelopes([
+      env(0, { type: "message_update", message: { text: "你" } } as unknown as AgentEvent),
+      env(1, { type: "message_update", message: { text: "你好" } } as unknown as AgentEvent),
+    ]);
+    expect(out).toHaveLength(2);
   });
 
   it("不同 toolCallId 的 tool_execution_update 不会被折叠到一起", () => {
@@ -69,8 +90,8 @@ describe("createForwarder", () => {
     const forwarder = createForwarder(target, fakeSource());
 
     forwarder.push(env(0, { type: "agent_start" }));
-    forwarder.push(env(1, { type: "message_update" } as AgentEvent));
-    forwarder.push(env(2, { type: "message_update" } as AgentEvent));
+    forwarder.push(textDelta(1, "你"));
+    forwarder.push(textDelta(2, "好"));
     // 窗口未到期，一条都不该出去。
     expect(target.send).toHaveBeenCalledTimes(0);
 
@@ -87,7 +108,7 @@ describe("createForwarder", () => {
 
     forwarder.dispose();
     forwarder.push(env(0, { type: "agent_start" }));
-    forwarder.push(env(1, { type: "message_update" } as AgentEvent));
+    forwarder.push(textDelta(1, "你"));
     await new Promise((r) => setTimeout(r, BATCH_INTERVAL_MS + 30));
 
     expect(target.send).toHaveBeenCalledTimes(0);

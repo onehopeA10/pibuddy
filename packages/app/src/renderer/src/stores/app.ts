@@ -4,6 +4,7 @@ import type {
   AgentEvent,
   AgentMessage,
   AgentState,
+  AssistantContent,
   AssistantMessage,
   ExtensionUiRequest,
   ImageContent,
@@ -14,13 +15,27 @@ import type {
   ToolResultMessage,
   UserMessage,
 } from "@sdk";
-import type { AppSettings, AttachmentRef, PiEnvelope, PiExitPayload } from "@contract";
+import type {
+  AppSettings,
+  AttachmentRef,
+  DraftRecord,
+  PiEnvelope,
+  PiExitPayload,
+} from "@contract";
 import { parseEnvelope } from "@contract";
 import { useSessionsStore } from "./sessions";
+import { clearChatUiState } from "./chat-ui";
 
 export interface ChatItem {
   key: number;
   message: AgentMessage;
+}
+
+/** 本地未提交的队列项。`id` 是渲染侧自增序号，pi 那边并不知道它。 */
+export interface LocalQueueItem {
+  id: number;
+  text: string;
+  mode: "steer" | "followUp";
 }
 
 export interface ToolRun {
@@ -75,6 +90,38 @@ function imagesOf(content: { type: string }[] | undefined): ImageContent[] {
 
 let keySeq = 0;
 
+// ---------------------------------------------------- 流式 delta 缓冲（SES-102）
+//
+// message_update 现在按 `assistantMessageEvent.delta` 拼帧，而不是每帧重写
+// 一份全量累积消息。全量重写的代价是 O(n²)：第 n 个 token 到达时要再传一遍
+// 前面 n-1 个字符、再解析一遍整段 Markdown，长回复到后段肉眼可见地卡。
+//
+// 缓冲区按 animation frame 落地：33ms 合批之后每帧最多一条 message_update，
+// 再叠一层 rAF 保证「一次重绘至多写一次响应式状态」。
+//
+// **跨会话必须清干净**：残留的缓冲会把上一会话的尾字符渗进新会话的首条
+// 消息里，typecheck 与构建都不会报错，只有肉眼能看出来。
+let streamBuffer = "";
+let streamContentIndex = 0;
+let streamKind: "text" | "thinking" = "text";
+let rafId: number | null = null;
+
+/** 仅供单测：rAF 句柄与缓冲区当前值。 */
+export function __streamState(): { rafId: number | null; streamBuffer: string } {
+  return { rafId, streamBuffer };
+}
+
+/** Node 侧单测没有 rAF，回落到 ~60fps 的定时器，语义等价。 */
+function scheduleFrame(cb: () => void): number {
+  if (typeof requestAnimationFrame === "function") return requestAnimationFrame(() => cb());
+  return setTimeout(cb, 16) as unknown as number;
+}
+
+function cancelFrame(id: number): void {
+  if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(id);
+  else clearTimeout(id as unknown as ReturnType<typeof setTimeout>);
+}
+
 /**
  * agent_settled 到会话列表刷新之间的防抖窗口。
  *
@@ -110,6 +157,38 @@ export function resetSessionScopedState(): void {
   for (const reset of sessionScopedResets.values()) reset();
 }
 
+/**
+ * 助手正在输出时，用户新指令的两种**产品语义**。
+ *
+ *   - `steer`（立即插话）：当前这一轮的工具调用跑完、下一次调用模型之前投递；
+ *   - `followUp`（下一轮处理）：当前这一轮整体结束之后再投递。
+ */
+export type SendMode = "steer" | "followUp";
+
+/**
+ * 产品语义 → 传输参数的**唯一**映射表。
+ *
+ * 两种语义都经 `prompt` 命令传输，靠 streamingBehavior 取值区分，**不发**
+ * 原生 `{type:"steer"}` / `{type:"follow_up"}` 命令。三条依据（rpc.md 原文）：
+ *
+ *  1. 投递语义逐字相同 —— rpc.md:62 描述 prompt 的 streamingBehavior:"steer"
+ *     与 rpc.md:82 描述原生 steer 用的是同一句话，一字不差；
+ *  2. 原生命令有净损失 —— rpc.md:82 / :104 明文 "Extension commands are not
+ *     allowed (use `prompt` instead)"，而 rpc.md:67 规定 prompt 路径下扩展
+ *     命令 "executes immediately even during streaming"。改原生命令 =
+ *     用户在助手运行期间用不了斜杠命令，且无任何补偿收益；
+ *  3. 两者进入同一对内部队列（agent-session.js:832-838 的
+ *     `_queueFollowUp` / `_queueSteer`），set_steering_mode 与 queue_update
+ *     对二者一致适用。
+ *
+ * 写成字面量表而不是 `{ streamingBehavior: mode }`，是为了让两个取值在源码
+ * 里各留一处可 grep 的锚点 —— 「下一轮处理」被悄悄删掉时静态断言会失败。
+ */
+const STREAMING_BEHAVIOR: Record<SendMode, { streamingBehavior: SendMode }> = {
+  steer: { streamingBehavior: "steer" },
+  followUp: { streamingBehavior: "followUp" },
+};
+
 export interface SendOptions {
   text?: string;
   images?: ImageContent[];
@@ -121,6 +200,14 @@ export interface SendOptions {
    * 渲染进程从头到尾不知道这些文件在磁盘上的哪里。
    */
   attachments?: AttachmentRef[];
+  /**
+   * 助手正在输出时必填。
+   *
+   * 缺失即抛错、**一次 RPC 都不发**：rpc.md:65 规定 streaming 中不带
+   * streamingBehavior 的裸 prompt 直接返回 error，与其让用户看到一句
+   * 「Agent is already processing」，不如在调用点就暴露出来。
+   */
+  mode?: SendMode;
 }
 
 /**
@@ -144,14 +231,19 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
   if (!message && images.length === 0 && attachmentTokens.length === 0) return false;
 
   const wasStreaming = store.streaming;
+  // streaming 中必须明确产品语义。这里在发 RPC **之前**抛，保证
+  // 「mode 缺失 → 底层 RPC 发出次数为 0」。
+  if (wasStreaming && !opts.mode) {
+    throw new Error("助手正在输出，请选择「立即插话」或「下一轮处理」");
+  }
   let resp: { success: boolean; error?: string };
   try {
     resp = await window.piBuddy.pi.prompt({
       message,
       ...(images.length ? { images } : {}),
       ...(attachmentTokens.length ? { attachmentTokens } : {}),
-      // 插话走 prompt + streamingBehavior:"steer"，不是原生 steer 命令
-      ...(wasStreaming ? { streamingBehavior: "steer" } : {}),
+      // 传输命令恒为 prompt，产品语义由 streamingBehavior 取值区分
+      ...(wasStreaming ? STREAMING_BEHAVIOR[opts.mode!] : {}),
     });
   } catch (err) {
     store.notify("error", err instanceof Error ? err.message : "发送失败");
@@ -161,7 +253,14 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
     store.notify("error", resp.error ?? "发送失败");
     return false;
   }
-  if (wasStreaming) store.notify("info", "已插话，助手会尽快处理你的新指令");
+  if (wasStreaming) {
+    store.notify(
+      "info",
+      opts.mode === "followUp"
+        ? "已排队，助手做完这一轮就处理你的新指令"
+        : "已插话，助手会尽快处理你的新指令"
+    );
+  }
 
   const content: (TextContent | ImageContent)[] = [];
   if (message) content.push({ type: "text", text: message });
@@ -250,6 +349,17 @@ export const useAppStore = defineStore("app", () => {
   const queue = ref<{ steering: string[]; followUp: string[] }>({ steering: [], followUp: [] });
   const statusTexts = reactive<Record<string, string>>({});
 
+  /**
+   * 本地**未提交**队列。
+   *
+   * 与 `queue`（pi 经 queue_update 下发的已提交队列）严格分开：pi 的
+   * queue_update 只给字符串数组、没有稳定 id，协议里也没有「撤回队列项」
+   * 的命令 —— 已提交的东西删不掉是上游能力缺失，不能用一个假的删除按钮
+   * 冒充。只有还在这个数组里的条目可以编辑、可以删除。
+   */
+  const localQueue = ref<LocalQueueItem[]>([]);
+  let localQueueSeq = 0;
+
   const uiRequests = ref<ExtensionUiRequest[]>([]);
   const editorText = ref("");
   const settingsOpen = ref(false);
@@ -263,9 +373,16 @@ export const useAppStore = defineStore("app", () => {
     items.value = [];
     for (const key of Object.keys(toolRuns)) delete toolRuns[key];
     queue.value = { steering: [], followUp: [] };
+    localQueue.value = [];
     for (const key of Object.keys(statusTexts)) delete statusTexts[key];
     uiRequests.value = [];
     liveAssistant.value = null;
+    // 流式缓冲与挂起的 rAF 也是会话级状态：不清就会把上一会话的尾字符
+    // 渗进新会话的首条消息（三大门禁全绿，只有肉眼能发现）。
+    resetStream();
+    // 展开态按 `${messageKey}:${blockIndex}` 归一化，换会话后会错配到同序号
+    // 的另一条消息上。
+    clearChatUiState();
   }, "app");
 
   let notifier: Notifier | null = null;
@@ -315,6 +432,60 @@ export const useAppStore = defineStore("app", () => {
     items.value.push({ key: ++keySeq, message });
   }
 
+  // ---------- 流式缓冲的落地 / 清空 ----------
+
+  /** rAF 回调：把攒下的 delta 一次性追加到 liveAssistant 的目标内容块上。 */
+  function applyStreamBuffer(): void {
+    rafId = null;
+    const chunk = streamBuffer;
+    streamBuffer = "";
+    if (!chunk) return;
+    const live = liveAssistant.value;
+    if (!live) return;
+    const content = [...((live.content ?? []) as AssistantContent[])];
+    while (content.length <= streamContentIndex) {
+      content.push(
+        streamKind === "thinking"
+          ? ({ type: "thinking", thinking: "" } as AssistantContent)
+          : ({ type: "text", text: "" } as AssistantContent)
+      );
+    }
+    const block = content[streamContentIndex];
+    if (streamKind === "thinking" && block?.type === "thinking") {
+      content[streamContentIndex] = { ...block, thinking: (block.thinking ?? "") + chunk };
+    } else if (streamKind === "text" && block?.type === "text") {
+      content[streamContentIndex] = { ...block, text: (block.text ?? "") + chunk };
+    } else {
+      content[streamContentIndex] = (
+        streamKind === "thinking"
+          ? { type: "thinking", thinking: chunk }
+          : { type: "text", text: chunk }
+      ) as AssistantContent;
+    }
+    liveAssistant.value = { ...live, content };
+    activityTick.value++;
+  }
+
+  /** 立刻落地（切换内容块、边界事件、会话结束时调用）。 */
+  function flushStream(): void {
+    if (rafId !== null) {
+      cancelFrame(rafId);
+      rafId = null;
+    }
+    applyStreamBuffer();
+  }
+
+  /** 丢弃缓冲并取消挂起的帧 —— 换会话 / 卸载时必须调，否则跨会话渗字符。 */
+  function resetStream(): void {
+    if (rafId !== null) {
+      cancelFrame(rafId);
+      rafId = null;
+    }
+    streamBuffer = "";
+    streamContentIndex = 0;
+    streamKind = "text";
+  }
+
   function recordToolResult(msg: ToolResultMessage): void {
     const existing = toolRuns[msg.toolCallId];
     toolRuns[msg.toolCallId] = {
@@ -351,17 +522,41 @@ export const useAppStore = defineStore("app", () => {
         break;
       case "message_start": {
         const msg = (e as { message: AgentMessage }).message;
+        resetStream();
         if (msg.role === "assistant") liveAssistant.value = msg as AssistantMessage;
         break;
       }
       case "message_update": {
-        const msg = (e as { message: AgentMessage }).message;
-        if (msg.role === "assistant") liveAssistant.value = { ...(msg as AssistantMessage) };
+        const ev = e as Extract<AgentEvent, { type: "message_update" }>;
+        const delta = ev.assistantMessageEvent;
+        const kind = delta?.type;
+        if (kind === "text_delta" || kind === "thinking_delta") {
+          const index = delta.contentIndex ?? 0;
+          const nextKind = kind === "thinking_delta" ? "thinking" : "text";
+          // 换了内容块就先把上一块落地，否则文字会串到另一个块里
+          if (index !== streamContentIndex || nextKind !== streamKind) {
+            flushStream();
+            streamContentIndex = index;
+            streamKind = nextKind;
+          }
+          streamBuffer += delta.delta ?? "";
+          if (rafId === null) rafId = scheduleFrame(applyStreamBuffer);
+          break;
+        }
+        // 边界事件（text_start / text_end / toolcall_* / done / error）：
+        // 先把缓冲落地，再用事件携带的**全量累积快照**对齐一次 —— 这一步
+        // 让任何拼接漂移在每个内容块的边界上自愈，而不是攒到整段结束。
+        flushStream();
+        if (ev.message?.role === "assistant") {
+          liveAssistant.value = { ...(ev.message as AssistantMessage) };
+        }
         break;
       }
       case "message_end": {
         const msg = (e as { message: AgentMessage }).message;
         if (msg.role === "assistant") {
+          // 缓冲直接丢弃：message_end 携带的是最终全量消息，比拼接结果权威。
+          resetStream();
           liveAssistant.value = null;
           pushMessage(msg);
         } else if (msg.role === "toolResult") {
@@ -662,7 +857,10 @@ export const useAppStore = defineStore("app", () => {
       await refreshState();
       await refreshThinkingLevels();
       void refreshStats();
-      void refreshSessions();
+      // 草稿恢复必须**排在会话索引同步之后**：新会话的 .jsonl 刚落地，
+      // sessions:get-draft 反查 sessionId 会以 SESSION_UNKNOWN 失败 ——
+      // 渲染侧吞掉了异常，用户看不到，但主进程每次启动都记一条 ipc_rejected。
+      void refreshSessions().then(() => restoreDraft());
     } catch (err) {
       startError.value = err instanceof Error ? err.message : String(err);
     }
@@ -765,6 +963,7 @@ export const useAppStore = defineStore("app", () => {
     resetSessionScopedState();
     await reloadMessages();
     await refreshState();
+    void restoreDraft();
     void refreshStats();
   }
 
@@ -787,6 +986,115 @@ export const useAppStore = defineStore("app", () => {
       return;
     }
     sessionLoadError.value = resp.error ?? "加载会话消息失败，请重试";
+  }
+
+  // ---------- 本地队列 + 草稿持久化（SES-102） ----------
+
+  function enqueueLocal(text: string, mode: SendMode): LocalQueueItem {
+    const item: LocalQueueItem = { id: ++localQueueSeq, text, mode };
+    localQueue.value = [...localQueue.value, item];
+    scheduleSaveDraft();
+    return item;
+  }
+
+  function updateLocalQueueItem(id: number, text: string): void {
+    localQueue.value = localQueue.value.map((i) => (i.id === id ? { ...i, text } : i));
+    scheduleSaveDraft();
+  }
+
+  function removeLocalQueueItem(id: number): void {
+    localQueue.value = localQueue.value.filter((i) => i.id !== id);
+    scheduleSaveDraft();
+  }
+
+  /** 草稿里的附件条目（能力凭证，不含路径）。由 InputBar 同步过来。 */
+  const draftAttachments = ref<unknown[]>([]);
+
+  /** 上一次草稿写入失败的原因；不展示给用户，只用于诊断与单测。 */
+  const lastDraftError = ref("");
+
+  /**
+   * 剥掉 Vue 的响应式代理，得到可结构化克隆的纯数据。
+   *
+   * 直接把 `ref([...]).value` 交给 Electron IPC 会以
+   * "An object could not be cloned." 失败 —— 而这个异常只在 await 处冒出来，
+   * 界面上没有任何征兆、主进程也不记一行日志，表现就是「草稿永远存不上」。
+   * 草稿是纯数据记录，一次 JSON 往返最省事，也不会漏掉嵌套层里的代理。
+   */
+  function plainCopy<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value)) as T;
+  }
+
+  const DRAFT_DEBOUNCE_MS = 500;
+  let draftTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * 尾沿防抖 500ms 写草稿。
+   *
+   * 不防抖的话长输入是「每按一个键一次 IPC + 一次 SQLite 写」，UI 上没有
+   * 任何征兆，只有主进程在闷头刷盘。
+   */
+  function scheduleSaveDraft(): void {
+    if (draftTimer) clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => {
+      draftTimer = null;
+      void saveDraftNow();
+    }, DRAFT_DEBOUNCE_MS);
+  }
+
+  async function saveDraftNow(): Promise<void> {
+    const sessionId = currentSessionId.value;
+    if (!sessionId) return;
+    const draft: DraftRecord = {
+      text: editorText.value,
+      attachments: draftAttachments.value,
+      queue: {
+        steering: localQueue.value.filter((i) => i.mode === "steer").map((i) => i.text),
+        followUp: localQueue.value.filter((i) => i.mode === "followUp").map((i) => i.text),
+      },
+      updatedAt: Date.now(),
+    };
+    try {
+      await window.piBuddy.sessions.saveDraft(sessionId, plainCopy(draft));
+    } catch (err) {
+      // 草稿写失败不该打断输入（下一次输入会再试一次），但**不能静默**：
+      // 空 catch 会让「草稿一直存不下来」变成一个查不出原因的现象。
+      // 空 catch 会让「草稿一直存不下来」变成一个查不出原因的现象：
+      // 结构化克隆失败时 UI 上没有任何征兆，主进程也不会记一行日志。
+      lastDraftError.value = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  /** 打开会话后恢复草稿：文本、附件条目、未发送队列。 */
+  async function restoreDraft(): Promise<void> {
+    const sessionId = currentSessionId.value;
+    if (!sessionId) return;
+    // **全新会话在 pi 写下第一条消息之前根本没有 .jsonl 文件**，因而也不可能
+    // 在索引里。直接问 getDraft 会拿到 SESSION_UNKNOWN：渲染侧吞得下，但
+    // 主进程每次启动都会记一条 ipc_rejected + 一段 handler 异常栈。
+    // 没有会话文件就一定没有草稿，先在索引里确认存在再问。
+    if (!useSessionsStore().rows.some((r) => r.sessionId === sessionId)) return;
+    let draft: DraftRecord | null = null;
+    try {
+      draft = await window.piBuddy.sessions.getDraft(sessionId);
+    } catch {
+      return;
+    }
+    if (!draft) return;
+    editorText.value = draft.text ?? "";
+    draftAttachments.value = draft.attachments ?? [];
+    localQueue.value = [
+      ...(draft.queue?.steering ?? []).map((text) => ({
+        id: ++localQueueSeq,
+        text,
+        mode: "steer" as SendMode,
+      })),
+      ...(draft.queue?.followUp ?? []).map((text) => ({
+        id: ++localQueueSeq,
+        text,
+        mode: "followUp" as SendMode,
+      })),
+    ];
   }
 
   async function setModel(
@@ -860,6 +1168,8 @@ export const useAppStore = defineStore("app", () => {
     toolRuns,
     streaming,
     queue,
+    localQueue,
+    draftAttachments,
     statusTexts,
     uiRequests,
     editorText,
@@ -892,5 +1202,14 @@ export const useAppStore = defineStore("app", () => {
     saveSttSecret,
     respondUi,
     refreshSessions,
+    enqueueLocal,
+    updateLocalQueueItem,
+    removeLocalQueueItem,
+    scheduleSaveDraft,
+    saveDraftNow,
+    lastDraftError,
+    restoreDraft,
+    flushStream,
+    resetStream,
   };
 });

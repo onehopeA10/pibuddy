@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import vue from "@vitejs/plugin-vue";
 import { resolve } from "node:path";
 
 /**
@@ -13,6 +14,12 @@ import { resolve } from "node:path";
  * 的 packages/* 内，其自带的 vitest.config.ts 必须被排除。
  */
 export default defineConfig({
+  // 组件单测要编译 .vue 单文件组件。加在这里而不是新建第二份配置：
+  // CT-21 规定全仓只有这一个 vitest 配置，一旦分家，packages/app/test/ 下
+  // 的 spec 会整批脱离发现范围，而 `pnpm -w test` 仍然退出 0。
+  // 没有这个插件，任何 import 了 .vue 的 spec 会在解析期就失败 —— 而失败的
+  // 表现是「1 个文件跑不起来」，很容易被当成环境问题忽略过去。
+  plugins: [vue()],
   // 与 electron.vite.config.ts / tsconfig.web.json 的 paths 保持一致：
   // 渲染进程代码里 @contract 不再只是类型导入（parseEnvelope 是运行时函数），
   // 没有这个别名，任何 import 了 store 的测试都会在解析期就失败。
