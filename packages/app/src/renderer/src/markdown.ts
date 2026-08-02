@@ -19,7 +19,9 @@ function schemeOf(raw: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-const md = new MarkdownIt({
+// 显式标注类型：highlight 回调里用到了 md.utils，不标注会让 md 落进
+// "在自身初始化器中被引用" 的循环推断，整个文件退化成 any（TS7022 + 一串 TS7006）
+const md: MarkdownIt = new MarkdownIt({
   html: false,
   linkify: true,
   breaks: true,

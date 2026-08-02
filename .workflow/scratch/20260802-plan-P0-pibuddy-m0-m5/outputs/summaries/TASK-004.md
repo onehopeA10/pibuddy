@@ -111,18 +111,24 @@ $ pnpm vitest run packages/app/test/window-policy.spec.ts
 ### c[11] 全量门禁
 
 ```
+$ pnpm typecheck
+packages/pi-sdk typecheck: Done
+packages/contract typecheck: Done
+packages/app typecheck: Done
+ → 退出码 0
+
 $ pnpm -w test
  Test Files  7 passed (7)
       Tests  44 passed (44)
  → 退出码 0
 
 $ pnpm --filter @pibuddy/app build
- ✓ built in 1.06s / 17ms / 9.34s
+ ✓ built in 10.52s
  → 退出码 0
 ```
-- [x] `pnpm -w test` 通过。
-- [x] `pnpm --filter @pibuddy/app build` 通过。
-- [ ] **`pnpm typecheck` 未通过 —— 但 0 条错误来自本任务文件，见偏差 D2。**
+- [x] `pnpm typecheck` 退出码 0
+- [x] `pnpm -w test` 退出码 0
+- [x] `pnpm --filter @pibuddy/app build` 退出码 0
 
 ### c[12]/c[13] UI-observable
 
@@ -175,22 +181,22 @@ TASK-003 截至本任务提交时未修改该文件（`git status` 确认）。�
 另外若 `electron-builder.yml` 的 `files` 白名单显式列了 `out/preload/index.mjs`，
 需同步改为 `index.cjs`（该文件归 TASK-003，本任务未动）。
 
-### D2 `pnpm typecheck` 退出码 2，错误全部来自 TASK-003 在飞的改动
+### D2 首次提交引入过 22 条 typecheck 错误，已在同一任务内修复
 
-```
-$ pnpm typecheck
-packages/contract/src/settings.ts(42,41): error TS2741: Property 'piRuntimeMode' is missing ...
-packages/app/src/main/pi-runtime-manifest.ts(12,19): error TS2307: Cannot find module 'zod'
-packages/app/src/main/pi-runtime-manifest.ts(76,15): error TS7006: Parameter 'i' implicitly has an 'any' type
-packages/app/src/main/settings.ts(16,5): error TS2741: Property 'piRuntimeMode' is missing ...
-packages/app/src/renderer/src/stores/app.ts(79,37): error TS2345: ... 'piRuntimeMode' is missing ...
-```
+首提 `7d07567` 时 `pnpm typecheck` 有两类错误混在一起，当时判断"全部来自 TASK-003 在飞的
+`piRuntimeMode` 改造"，**这个判断是错的**：其中 22 条出自本任务的 `markdown.ts`。
 
-5 条错误，`pi-runtime-manifest.ts` / `settings.ts` / `contract/settings.ts` /
-`stores/app.ts:79` 全部是 TASK-003 的 `piRuntimeMode` 运行时定位改造（工作区共享，
-提交时其尚未收口）。**本任务改动的 6 个文件零错误**：`main/index.ts`、
-`security/window-policy.ts`、`renderer/index.html`、`markdown.ts`、`MessageItem.vue`、
-`electron.vite.config.ts` 均未出现在错误列表中。TASK-003 收口后需复跑全量 typecheck 确认。
+成因：D3 的 highlight fallback 分支用了 `md.utils.escapeHtml`，在 `md` 自己的初始化器里
+引用了 `md`，触发 TS7022"在自身初始化器中被引用"，`md` 退化成 `any`，
+连带 4 个 renderer 规则的 20 个参数全部 TS7006。
+
+漏检原因：中途单独跑 vue-tsc 的那一次在 D3 改动**之前**，之后只跑了 test + build，
+而 electron-vite 的 build 不做类型检查，所以构建绿灯掩盖了类型红灯。
+
+修复：`const md: MarkdownIt = new MarkdownIt({...})` 显式标注类型，切断循环推断。
+修复后 `pnpm typecheck` 全仓退出码 0（TASK-003 的 `piRuntimeMode` 错误此时也已由其自行收口）。
+
+教训：build 通过 ≠ 类型通过，改完渲染侧代码必须单独跑 vue-tsc。
 
 ### D3 `markdown.ts` 的 highlight 外壳（超出计划的一处小修）
 
@@ -224,6 +230,24 @@ markdown scheme 白名单与 tool output 字节上限。
 - `connect-src 'self'`：实测会阻断渲染进程对 `data:` URL 的 `fetch()`。当前代码
   一律把 data URL 直接赋给 `img.src`，不受影响；已在回归文档记录为已知副作用。
   STT 与 Provider 请求本就由主进程发起（`ipc.ts` 的 `stt:transcribe`），未被影响。
+
+### D7 `git pull --rebase` 未能执行（工作区有 TASK-003 的未提交改动）
+
+```
+$ git pull --rebase
+error: cannot pull with rebase: You have unstaged changes.
+```
+
+未用 `--autostash` 强行绕过 —— 那会把 TASK-003 正在写的文件 stash/pop 一遍，
+在两个 agent 同时写同一工作区时有丢改动的风险。改为先 `git fetch` 确认落后量：
+
+```
+$ git rev-list --left-right --count HEAD...origin/main
+1	0
+```
+
+落后 0 个提交，rebase 本就是空操作，push 为 fast-forward，已成功：
+`cf6297a..7d07567  main -> main`，类型修复为后续 commit。
 
 ## Notes
 
