@@ -35,6 +35,7 @@ import {
   type Forwarder,
   type ForwarderTarget,
 } from "./pi/event-forwarder.js";
+import { agentActivity } from "./lifecycle/graceful-shutdown.js";
 
 /** 转发目标同时要能被按 id 索引（生产即 Electron 的 WebContents.id）。 */
 export interface SupervisorTarget extends ForwarderTarget {
@@ -122,6 +123,11 @@ export class PiSupervisor implements PiRuntimeSupervisor {
 
     client.on("event", (e: AgentEvent) => {
       if (!this.isCurrent(record)) return;
+      // 「现在能不能安全地重启」的判据只认 pi 的这两个协议事件（UPD-004）。
+      // 放在 isCurrent 之后：上一代 runtime 的迟到 agent_start 不该把
+      // 更新安装拦在门外。
+      if (e.type === "agent_start") agentActivity.markBusy(client.runtimeId);
+      else if (e.type === "agent_settled") agentActivity.markSettled(client.runtimeId);
       forwarder.push(this.nextEnvelope(record, e));
     });
     client.on("ui_request", (r: ExtensionUiRequest) => {
@@ -233,6 +239,9 @@ export class PiSupervisor implements PiRuntimeSupervisor {
       this.byTarget.delete(record.target.id);
     }
     this.byRuntimeId.delete(record.ctx.runtimeId);
+    // runtime 没了就一定不忙了。漏掉这一行的话，一次崩溃会把 busy 永久钉住，
+    // 用户从此再也装不上更新，而界面上没有任何线索。
+    agentActivity.forget(record.ctx.runtimeId);
     record.forwarder.dispose();
   }
 }

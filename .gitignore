@@ -23,3 +23,6 @@ packages/app/resources/pi-runtime/
 # 系统
 .DS_Store
 Thumbs.db
+
+# 本地 fake 更新源的开发期配置（packages/app/scripts/fake-update-server.mjs 生成）
+dev-app-update.yml

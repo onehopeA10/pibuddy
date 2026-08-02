@@ -3,6 +3,7 @@ import path from "node:path";
 import { registerIpc, disposeClientFor } from "./ipc.js";
 import { createLogger, type Logger } from "./logger.js";
 import { applyWindowPolicy } from "./security/window-policy.js";
+import { armUpdateChecks, disposeUpdateService } from "./update/update-ipc.js";
 
 /** 全应用唯一的 logger 实例，在 whenReady 之后才可用（依赖 userData 路径）。 */
 let logger: Logger | null = null;
@@ -39,6 +40,11 @@ function createWindow(): void {
   const wcId = win.webContents.id;
   win.on("closed", () => disposeClientFor(wcId));
 
+  // 主窗口可交互之后才排更新检查（30s 后首检，见 UpdateService）。
+  // 不在 whenReady 里排：那会儿主线程正忙着渲染首屏，一次网络请求足以
+  // 让首帧再晚半秒。
+  win.once("ready-to-show", () => armUpdateChecks());
+
   // 生产二进制里即使外部注入了 ELECTRON_RENDERER_URL 也不得加载远程地址
   if (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL);
@@ -72,6 +78,9 @@ if (!gotLock) {
   });
 
   app.on("window-all-closed", () => {
+    // 更新检查的定时器已经 unref 过，这里再显式拆一次：崩溃现场里
+    // 「进程退不掉」的原因往往就是某个没人清的 timer。
+    disposeUpdateService();
     app.quit();
   });
 }

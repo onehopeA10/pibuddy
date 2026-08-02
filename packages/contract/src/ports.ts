@@ -96,18 +96,12 @@ export interface SettingsStore {
 
 // ---------------------------------------------------------------- M4 / M5
 
-export type UpdateStatus =
-  | { state: "idle" }
-  | { state: "checking" }
-  | { state: "available"; version: string }
-  | { state: "downloading"; percent: number }
-  | { state: "ready"; version: string }
-  | { state: "error"; message: string };
-
-/** 应用自更新。M0 只留空壳，M4/M5 落地。 */
-export interface UpdateService {
-  check(): Promise<UpdateStatus>;
-  download(): Promise<UpdateStatus>;
-  quitAndInstall(): void;
-  onStatus(listener: (status: UpdateStatus) => void): () => void;
-}
+// 自更新的端口在 M0 阶段是一个六态空壳（`UpdateStatus` / `UpdateService`）。
+// M4 落地时它被 ./update.ts 的十态状态机整体取代 —— 空壳里的 'ready' 与
+// 真实实现的 'downloaded' / 'waiting-for-agent' / 'installing' 对不上，
+// 而 UpdateService 这个名字同时被主进程的实现类占用（契约唯一性闸门会当场
+// 拦下同名 export）。因此这里不留一个永远不会被实现的接口：
+//
+//   状态与错误码  → ./update.ts 的 UpdateStatus / UpdateState / UpdateErrorCode
+//   动作面        → ./channels.ts 的 update:* 九条窄通道
+//   主进程实现    → packages/app/src/main/update/update-service.ts

@@ -8,5 +8,6 @@ export * from "./channels.js";
 export * from "./envelope.js";
 export * from "./settings.js";
 export * from "./session.js";
+export * from "./update.js";
 export * from "./ipc-contract.js";
 export * from "./ports.js";

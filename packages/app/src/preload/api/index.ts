@@ -17,6 +17,7 @@
  *   file      附件能力凭证的进出口
  *   shell     用系统程序打开 / 定位（入参只有凭证）
  *   stt       语音转写
+ *   update    应用自更新（状态快照 + 九个动作 + 事件订阅）
  */
 import { pi } from "./pi.js";
 import { sessions } from "./sessions.js";
@@ -25,7 +26,8 @@ import { dialog } from "./dialog.js";
 import { file } from "./file.js";
 import { shell } from "./shell.js";
 import { stt } from "./stt.js";
+import { update } from "./update.js";
 
-export const api = { pi, sessions, settings, dialog, file, shell, stt };
+export const api = { pi, sessions, settings, dialog, file, shell, stt, update };
 
 export type PiBuddyApi = typeof api;

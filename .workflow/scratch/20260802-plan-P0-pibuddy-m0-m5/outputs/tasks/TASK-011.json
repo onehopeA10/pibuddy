@@ -8,8 +8,8 @@
   "priority": "high",
   "effort": "large",
   "action": "在 packages/app/package.json 的 dependencies 写入精确版本（无 ^）：`\"electron-updater\": \"6.8.9\"`、`\"electron-log\": \"5.4.4\"`，devDependencies 写入 `\"electron-builder\": \"26.15.3\"`；写入前先跑 `npm view electron-updater@6.8.9 version && npm view electron-log@5.4.4 version && npm view electron-builder@26.15.3 version` 确认三者存在，并 `pnpm install` 后用 `pnpm ls --depth 0 --filter @pibuddy/app` 与 pnpm-lock.yaml 交叉核对唯一版本。新建 packages/app/src/main/update/update-types.ts 定义 `export type UpdateStatus = 'unsupported' | 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'waiting-for-agent' | 'installing' | 'error'` 与 `export interface UpdateState { status: UpdateStatus; stateSequence: number; currentVersion: string; candidateVersion: string | null; channel: 'stable' | 'beta'; checkSource: 'auto' | 'manual' | 'startup' | null; lastCheckedAt: number | null; releaseDate: string | null; releaseNotes: string | null; bytesTransferred: number; totalBytes: number; percent: number; bytesPerSecond: number; errorCode: UpdateErrorCode | null; retryable: boolean; dismissedVersion: string | null }`；update-service.ts 的 `private initAutoUpdater()` 按固定顺序执行 `autoUpdater.autoDownload = false;` → `autoUpdater.autoInstallOnAppQuit = false;` → `autoUpdater.channel = channel === 'beta' ? 'beta' : 'latest';` → `autoUpdater.allowPrerelease = channel === 'beta';` → `autoUpdater.allowDowngrade = false;`（allowDowngrade 必须最后一行）。版本真相取 `app.getVersion()`，renderer 侧任何硬编码版本号一律禁止。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed_with_deviations",
+  "completed_at": "2026-08-02T17:48:14.095Z",
   "actual_duration": null,
   "scope": "packages/app/src/main/update, packages/app/src/main/lifecycle, packages/app/src/renderer/src/stores/update.ts",
   "focus_paths": [

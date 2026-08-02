@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 /**
  * preload 分层不留悬空调用。
  *
- * `Object.keys(api)` 必须**恰好**等于那七个命名空间：多挂一个不会有任何
+ * `Object.keys(api)` 必须**恰好**等于那八个命名空间：多挂一个不会有任何
  * 报错（只是接口面悄悄变大），漏挂一个则要等到用户点到那个功能才暴露成
  * 一句 "Cannot read properties of undefined"。
  */
@@ -33,7 +33,8 @@ const { api } = await import("../src/preload/api/index.js");
 const { CHANNELS } = await import("@pibuddy/contract/channels");
 
 describe("api 聚合对象", () => {
-  it("恰含 pi / sessions / settings / dialog / file / shell / stt 七个键", () => {
+  it("恰含 pi / sessions / settings / dialog / file / shell / stt / update 八个键", () => {
+    // update 是 UPD-001 加进来的第八个命名空间（九个动作 + 一个事件订阅）。
     expect(Object.keys(api).sort()).toEqual([
       "dialog",
       "file",
@@ -42,8 +43,9 @@ describe("api 聚合对象", () => {
       "settings",
       "shell",
       "stt",
+      "update",
     ]);
-    expect(Object.keys(api).length).toBe(7);
+    expect(Object.keys(api).length).toBe(8);
   });
 
   it("sessions 命名空间覆盖全部 9 条通道，一条不漏", async () => {

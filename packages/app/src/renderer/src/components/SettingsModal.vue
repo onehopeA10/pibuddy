@@ -13,6 +13,7 @@ import {
   useMessage,
 } from "naive-ui";
 import { useAppStore } from "../stores/app";
+import UpdateSettingsPanel from "./UpdateSettingsPanel.vue";
 
 const store = useAppStore();
 const message = useMessage();
@@ -165,7 +166,9 @@ async function backToBundled(): Promise<void> {
       或设置 ANTHROPIC_API_KEY / OPENAI_API_KEY 等环境变量。
     </div>
 
-    <n-space justify="end">
+    <update-settings-panel />
+
+    <n-space justify="end" style="margin-top: 12px">
       <n-button @click="store.settingsOpen = false">取消</n-button>
       <n-button type="primary" @click="save">保存</n-button>
     </n-space>

@@ -8,8 +8,12 @@ import ChatView from "./ChatView.vue";
 import InputBar from "./InputBar.vue";
 import ExtensionUiHost from "./ExtensionUiHost.vue";
 import SettingsModal from "./SettingsModal.vue";
+import UpdateBanner from "./UpdateBanner.vue";
+import InstallBlockerDialog from "./InstallBlockerDialog.vue";
+import { useUpdateStore } from "../stores/update";
 
 const store = useAppStore();
+const updateStore = useUpdateStore();
 const message = useMessage();
 store.setNotifier(message);
 
@@ -17,6 +21,9 @@ const dragging = ref(0);
 
 onMounted(() => {
   void store.init();
+  // 先取快照再订阅：窗口 reload 之后进度必须从 main 的快照原样恢复，
+  // 而不是回到 idle。
+  void updateStore.init();
 });
 
 function onDragEnter(e: DragEvent): void {
@@ -61,7 +68,7 @@ function onDrop(): void {
     <!-- 布局契约（TASK-009 定义，M3-M5 各任务只往这四个具名插槽里注入内容，
          不得改动插槽名集合）：banner 顶部通条 / sidebar 侧栏 / main 主区 /
          overlay 浮层。默认内容即当前形态，不传插槽时渲染结果与改造前一致。 -->
-    <slot name="banner"></slot>
+    <slot name="banner"><UpdateBanner /></slot>
 
     <slot name="sidebar"><Sidebar /></slot>
     <div class="main-col">
@@ -93,6 +100,7 @@ function onDrop(): void {
     <slot name="overlay">
       <ExtensionUiHost />
       <SettingsModal />
+      <InstallBlockerDialog />
     </slot>
   </div>
 </template>

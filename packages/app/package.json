@@ -11,6 +11,8 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "prepare:runtime": "node scripts/prepare-pi-runtime.mjs",
+    "check-update-deps": "node scripts/check-update-deps.mjs",
+    "check-updater-capability": "node scripts/check-updater-capability.mjs",
     "dist": "node scripts/prepare-pi-runtime.mjs && electron-vite build && electron-builder",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run --root ../.."
@@ -18,6 +20,8 @@
   "dependencies": {
     "@pibuddy/contract": "workspace:*",
     "@pibuddy/pi-sdk": "workspace:*",
+    "electron-log": "5.4.4",
+    "electron-updater": "6.8.9",
     "highlight.js": "^11.10.0",
     "markdown-it": "^14.1.0",
     "naive-ui": "^2.42.0",
@@ -30,7 +34,7 @@
     "@types/node": "^22.10.0",
     "@vitejs/plugin-vue": "^6.0.0",
     "electron": "^43.0.0",
-    "electron-builder": "^26.0.0",
+    "electron-builder": "26.15.3",
     "electron-vite": "^4.0.0",
     "typescript": "^5.9.0",
     "vite": "^7.0.0",

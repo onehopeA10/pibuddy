@@ -26,6 +26,10 @@ import type {
   SessionStatus,
   SttTranscribeRequest,
   SttTranscribeResult,
+  UpdateBlocker,
+  UpdateChannel,
+  UpdateState,
+  UpdateStatus,
   WorkspaceRef,
 } from "@contract";
 
@@ -44,6 +48,10 @@ export type {
   SessionStatus,
   SttTranscribeRequest,
   SttTranscribeResult,
+  UpdateBlocker,
+  UpdateChannel,
+  UpdateState,
+  UpdateStatus,
   WorkspaceRef,
 };
 

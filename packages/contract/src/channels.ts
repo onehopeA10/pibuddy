@@ -89,13 +89,30 @@ export const CHANNELS = {
 
   // ---- 语音 ----
   sttTranscribe: "stt:transcribe",
+
+  // ---- 应用自更新（UPD-001~004，恰 9 条） ----
+  //
+  // 渲染进程能表达的极限就是这九个意图。没有 setFeedURL、没有「装这个文件」、
+  // 没有任何形式的 URL 或路径形参 —— 更新是唯一一个错了会砸掉用户数据的
+  // 子系统，它的副作用必须整体收在主进程里。
+  updateGetState: "update:get-state",
+  updateCheck: "update:check",
+  updateDownload: "update:download",
+  updateCancelDownload: "update:cancel-download",
+  updateInstall: "update:install",
+  updateSetChannel: "update:set-channel",
+  updateSetAutoCheck: "update:set-auto-check",
+  updateSetAutoDownload: "update:set-auto-download",
+  updateDismissVersion: "update:dismiss-version",
 } as const;
 
-/** 主进程单向推送通道（3 个）。 */
+/** 主进程单向推送通道（4 个）。 */
 export const PUSH_CHANNELS = {
   piEvent: "pi:event",
   piUiRequest: "pi:ui-request",
   piExit: "pi:exit",
+  /** 更新状态变更；payload 是 UpdateEnvelope（不是 PiEnvelope，语义不同） */
+  updateEvent: "update:event",
 } as const;
 
 export type InvokeChannel = (typeof CHANNELS)[keyof typeof CHANNELS];

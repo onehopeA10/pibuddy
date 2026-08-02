@@ -30,6 +30,15 @@ import {
   sessionRowSchema,
   sessionStatusSchema,
 } from "./session.js";
+import {
+  updateCheckRequestSchema,
+  updateDismissRequestSchema,
+  updateEnvelopeSchema,
+  updateInstallRequestSchema,
+  updateSetChannelRequestSchema,
+  updateStateSchema,
+  updateToggleRequestSchema,
+} from "./update.js";
 
 // 通道名常量住在 channels.ts（那个文件不依赖 zod，preload 可以单独引它）。
 
@@ -461,6 +470,41 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     request: sttTranscribeRequestSchema,
     response: sttTranscribeResultSchema,
   },
+
+  // ---- 应用自更新 ----
+  //
+  // 九条全部以 UpdateState 作为返回：渲染进程发起任何一个动作之后立刻拿到
+  // 权威快照，不必等推送 —— 「点了没反应」这类问题在结构上就不成立。
+  [CHANNELS.updateGetState]: { request: voidRequestSchema, response: updateStateSchema },
+  [CHANNELS.updateCheck]: {
+    request: updateCheckRequestSchema,
+    response: updateStateSchema,
+  },
+  [CHANNELS.updateDownload]: { request: voidRequestSchema, response: updateStateSchema },
+  [CHANNELS.updateCancelDownload]: {
+    request: voidRequestSchema,
+    response: updateStateSchema,
+  },
+  [CHANNELS.updateInstall]: {
+    request: updateInstallRequestSchema,
+    response: updateStateSchema,
+  },
+  [CHANNELS.updateSetChannel]: {
+    request: updateSetChannelRequestSchema,
+    response: updateStateSchema,
+  },
+  [CHANNELS.updateSetAutoCheck]: {
+    request: updateToggleRequestSchema,
+    response: updateStateSchema,
+  },
+  [CHANNELS.updateSetAutoDownload]: {
+    request: updateToggleRequestSchema,
+    response: updateStateSchema,
+  },
+  [CHANNELS.updateDismissVersion]: {
+    request: updateDismissRequestSchema,
+    response: updateStateSchema,
+  },
 };
 
 /**
@@ -488,6 +532,9 @@ export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   [PUSH_CHANNELS.piEvent]: rpcEnvelopeLikeSchema,
   [PUSH_CHANNELS.piUiRequest]: rpcEnvelopeLikeSchema,
   [PUSH_CHANNELS.piExit]: piExitPayloadSchema,
+  // update:event 推的是完整信封（不是裸 payload）：代际与序号必须送到渲染
+  // 进程才能用来丢弃陈旧帧，在中途剥壳等于把丢弃判据扔了。
+  [PUSH_CHANNELS.updateEvent]: updateEnvelopeSchema,
 };
 
 /** channel 名是否在白名单内。ipc-guard 的第一道闸。 */

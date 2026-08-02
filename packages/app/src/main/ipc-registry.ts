@@ -11,9 +11,11 @@
 import { registerMiscIpc } from "./misc-ipc.js";
 import { registerPiIpc } from "./pi/pi-ipc.js";
 import { registerSessionsIpc } from "./sessions/sessions-ipc.js";
+import { registerUpdateIpc } from "./update/update-ipc.js";
 
 export function registerAllIpc(): void {
   registerPiIpc();
   registerSessionsIpc();
   registerMiscIpc();
+  registerUpdateIpc();
 }
