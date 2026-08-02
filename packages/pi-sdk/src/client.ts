@@ -28,6 +28,15 @@ export interface PiSpawn {
   env?: NodeJS.ProcessEnv;
   /** 通过 shell 启动（Windows 上运行 .cmd 时需要） */
   shell?: boolean;
+  /**
+   * 追加在 `--mode rpc` 之后的启动参数。
+   *
+   * 目前唯一的用途是 project trust 的一次性覆盖（`-a` / `-na`，见
+   * pi docs/security.md:30）：RPC 模式不弹 trust 提示，PiBuddy 自己问完
+   * 用户之后，把结论作为本次运行的参数传下去。**不是**通用的命令行入口：
+   * 值只由主进程的 buildPiSpawn 组装，渲染进程无法影响它。
+   */
+  args?: string[];
 }
 
 export interface PiClientOptions {
@@ -224,7 +233,9 @@ export class PiRpcClient extends EventEmitter {
     if (this.proc) throw new Error("PiRpcClient already started");
     this.transition("starting");
     const o = this.options;
-    const args = [...(o.spawn.prefixArgs ?? []), "--mode", "rpc"];
+    // spawn.args 在 --mode rpc 之后、会话参数之前展开：trust 覆盖参数
+    // （-a / -na）是整次运行的属性，与具体会话无关。
+    const args = [...(o.spawn.prefixArgs ?? []), "--mode", "rpc", ...(o.spawn.args ?? [])];
     if (o.session) args.push("--session", o.session);
     if (o.sessionDir) args.push("--session-dir", o.sessionDir);
     if (o.sessionName) args.push("--name", o.sessionName);
@@ -470,8 +481,27 @@ export class PiRpcClient extends EventEmitter {
     return resp.data as T;
   }
 
-  respondUi(response: ExtensionUiResponse): void {
-    this.write(response);
+  /**
+   * 回答一条扩展弹窗。**返回 false 表示这次回答没有送出去**。
+   *
+   * 早先这里是 `void` 并直接 `this.write(response)`：进程已经退出时
+   * assertWritable 抛错，而唯一的调用点没有 try/catch，于是它变成一条
+   * 未处理的 promise rejection —— 用户看到的是「点了确定，弹窗关了，
+   * 助手那边什么都没发生」，日志里也只有一条无人认领的 rejection。
+   *
+   * 改成返回布尔而不是继续抛错，是因为「对端已经不在了」在这条路径上是
+   * **正常情况**：上游带 timeout 的 dialog 到期会自行 auto-resolve，此后
+   * 任何回答都注定无人接收。调用方据返回值给用户一句解释即可。
+   */
+  respondUi(response: ExtensionUiResponse): boolean {
+    if (!this.running || this.terminated) return false;
+    try {
+      this.write(response);
+      return true;
+    } catch (err) {
+      this.recordDiagnostic("stdin-error", (err as Error).message);
+      return false;
+    }
   }
 
   // ---------- 常用命令封装 ----------

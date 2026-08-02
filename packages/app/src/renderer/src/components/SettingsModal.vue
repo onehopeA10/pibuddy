@@ -14,6 +14,7 @@ import {
 } from "naive-ui";
 import { useAppStore } from "../stores/app";
 import UpdateSettingsPanel from "./UpdateSettingsPanel.vue";
+import DiagnosticsPanel from "./DiagnosticsPanel.vue";
 
 const store = useAppStore();
 const message = useMessage();
@@ -167,6 +168,9 @@ async function backToBundled(): Promise<void> {
     </div>
 
     <update-settings-panel />
+
+    <!-- 「关于与更新」下的诊断区块：出问题时用户从这里一键导出诊断包 -->
+    <diagnostics-panel />
 
     <n-space justify="end" style="margin-top: 12px">
       <n-button @click="store.settingsOpen = false">取消</n-button>

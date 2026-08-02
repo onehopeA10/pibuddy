@@ -20,6 +20,7 @@
  *   update    应用自更新（状态快照 + 九个动作 + 事件订阅）
  */
 import { pi } from "./pi.js";
+import { piResources } from "./piResources.js";
 import { sessions } from "./sessions.js";
 import { settings } from "./settings.js";
 import { dialog } from "./dialog.js";
@@ -27,7 +28,19 @@ import { file } from "./file.js";
 import { shell } from "./shell.js";
 import { stt } from "./stt.js";
 import { update } from "./update.js";
+import { diagnostics } from "./diagnostics.js";
 
-export const api = { pi, sessions, settings, dialog, file, shell, stt, update };
+export const api = {
+  pi,
+  piResources,
+  sessions,
+  settings,
+  dialog,
+  file,
+  shell,
+  stt,
+  update,
+  diagnostics,
+};
 
 export type PiBuddyApi = typeof api;

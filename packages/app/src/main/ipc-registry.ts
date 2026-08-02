@@ -8,14 +8,18 @@
  * pi-ipc 持有的 client 索引取当前 runtime，虽然那是运行期才解引用的，但把
  * 「谁持有 client」这件事在注册顺序上也表达一次，日后读代码少绕一圈。
  */
+import { registerDiagnosticsIpc } from "./diagnostics/diagnostics-ipc.js";
 import { registerMiscIpc } from "./misc-ipc.js";
 import { registerPiIpc } from "./pi/pi-ipc.js";
+import { registerPiResourcesIpc } from "./pi-resources/pi-resources-ipc.js";
 import { registerSessionsIpc } from "./sessions/sessions-ipc.js";
 import { registerUpdateIpc } from "./update/update-ipc.js";
 
 export function registerAllIpc(): void {
   registerPiIpc();
+  registerPiResourcesIpc();
   registerSessionsIpc();
   registerMiscIpc();
   registerUpdateIpc();
+  registerDiagnosticsIpc();
 }

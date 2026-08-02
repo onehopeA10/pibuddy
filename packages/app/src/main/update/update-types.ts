@@ -134,9 +134,29 @@ export interface UpdateServiceDeps {
   verifyBeforeInstall(candidate: InstallCandidate): IntegrityResult;
   /** 仅在 PIBUDDY_FAKE_UPDATE_FEED 存在时非空 */
   fakeFeedUrl?: string | null;
+  /**
+   * 更新交接 marker（UPD-006）。
+   *
+   * quitAndInstall **之前**写 pending-update：进程从这一刻起随时可能被
+   * 替换掉，marker 写晚一步就永远写不上了，下次启动也就无从知道
+   * 「这是一次更新之后的第一次启动」，健康检查与安全模式整条链都失效。
+   *
+   * 可选是为了让既有单测不必全部改造；主进程侧一定注入。
+   */
+  markers?: UpdateMarkerSink;
   timers?: TimerApi;
   now?: () => number;
   random?: () => number;
+}
+
+/**
+ * 更新交接 marker 的写入口。
+ *
+ * 只有一个方法：写。清除与 last-known-good 的写入发生在**下一次启动**的
+ * 健康检查路径上，不属于 UpdateService 的职责 —— 那时候这个进程已经不在了。
+ */
+export interface UpdateMarkerSink {
+  writePendingUpdate(fromVersion: string, toVersion: string): void;
 }
 
 /** 安装前校验的入参。 */

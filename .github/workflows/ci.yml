@@ -54,6 +54,16 @@ jobs:
       - name: Check contract uniqueness
         run: node scripts/check-contract-uniqueness.mjs
 
+      # 第三方 action 必须 SHA 固定：tag 是可移动的，上游被攻陷时这边的 diff
+      # 是空的。看 scripts/check-workflow-pins.mjs 的文件头。
+      - name: Check workflow action pins
+        run: node scripts/check-workflow-pins.mjs
+
+      # 原生扩展在 npmRebuild: false 下会以「用户机器上启动即崩」的形式发作，
+      # 而 CI 全绿。闸门放在依赖进来的那一刻。
+      - name: Check pure-JS dependency closure
+        run: node packages/app/scripts/check-pure-js-deps.mjs
+
       - name: Test
         run: pnpm test
 

@@ -1,0 +1,259 @@
+name: Release
+
+# 三平台原生 runner 构建 → 校验 → 上传不可变产物 → **最后**发布更新清单。
+#
+# 顺序不是风格问题。清单先于产物发布时，客户端在那几十秒里会读到一个指向
+# 不存在文件的 latest.yml，表现是「下载更新失败」而服务端一切正常。因此
+# 本 workflow 把 build/upload 与 manifest 拆成两个 job，用 needs 声明依赖，
+# 并把清单上传固定为 publish-manifest 的**最后一个 step**。
+#
+# 缺签名凭据时 **失败关闭**：preflight 在任何构建开始之前就 exit 1。
+# 绝不静默产出「正式版未签名包」—— 未签名包在 Windows 上会被 SmartScreen
+# 拦，在 macOS 上直接打不开，而用户看到的只是「这个软件有问题」。
+# 真实凭据必须由产品所有者配置，见 docs/product/RELEASE_SETUP.md。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "发布渠道。stable 强制要求全部签名凭据；beta/nightly 允许产出明确标注的未签名 artifact，但不进 stable feed。"
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+          - nightly
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
+
+jobs:
+  # ---------------------------------------------------------------- 闸门
+  # 放在最前面、且不 needs 任何东西：凭据不全时一次构建都不许开始。
+  preflight:
+    name: preflight (fail-closed on missing credentials)
+    runs-on: ubuntu-latest
+    outputs:
+      signed: ${{ steps.gate.outputs.signed }}
+    steps:
+      - name: Require signing and feed credentials
+        id: gate
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          PIBUDDY_UPDATE_FEED_URL: ${{ secrets.PIBUDDY_UPDATE_FEED_URL }}
+        run: |
+          set -euo pipefail
+          missing=0
+
+          if [ -z "${WIN_CSC_LINK}" ]; then echo "::error::WIN_CSC_LINK missing - release blocked"; missing=1; fi
+          if [ -z "${WIN_CSC_KEY_PASSWORD}" ]; then echo "::error::WIN_CSC_KEY_PASSWORD missing - release blocked"; missing=1; fi
+          if [ -z "${APPLE_TEAM_ID}" ]; then echo "::error::APPLE_TEAM_ID missing - release blocked"; missing=1; fi
+          if [ -z "${APPLE_ID}" ]; then echo "::error::APPLE_ID missing - release blocked"; missing=1; fi
+          if [ -z "${APPLE_APP_SPECIFIC_PASSWORD}" ]; then echo "::error::APPLE_APP_SPECIFIC_PASSWORD missing - release blocked"; missing=1; fi
+          if [ -z "${PIBUDDY_UPDATE_FEED_URL}" ]; then echo "::error::PIBUDDY_UPDATE_FEED_URL missing - release blocked"; missing=1; fi
+
+          if [ "${missing}" -eq 0 ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "all release credentials present"
+            exit 0
+          fi
+
+          echo "signed=false" >> "$GITHUB_OUTPUT"
+          if [ "${RELEASE_CHANNEL}" = "stable" ]; then
+            echo "::error::stable release requires every credential above. Configure them per docs/product/RELEASE_SETUP.md, then re-run."
+            exit 1
+          fi
+          echo "::warning::channel=${RELEASE_CHANNEL} -> producing UNSIGNED artifacts. They must never be published to the stable feed."
+
+  # ------------------------------------------------- 三平台构建 + 不可变产物
+  upload-artifacts:
+    name: upload-artifacts (${{ matrix.platform }})
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            builder_flags: --win nsis
+          - os: macos-latest
+            platform: mac
+            builder_flags: --mac dmg zip
+          - os: ubuntu-latest
+            platform: linux
+            builder_flags: --linux AppImage deb
+
+    steps:
+      # actions/checkout v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # pnpm/action-setup v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10
+
+      # actions/setup-node v4
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Guard against native dependencies
+        run: node packages/app/scripts/check-pure-js-deps.mjs
+
+      # Electron 二进制走官方源。build-config.mjs 默认不注入任何第三方镜像，
+      # 且本 workflow 不设那个开关变量 —— 正式产物的二进制来源因此是确定的。
+      - name: Show resolved build config
+        run: node packages/app/scripts/build-config.mjs
+
+      - name: Build and package (--publish never)
+        shell: bash
+        env:
+          # electron-builder 在 Windows 上读 WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD，
+          # 在 macOS 上读 CSC_LINK / CSC_KEY_PASSWORD 与三个 Apple 凭据。
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          PIBUDDY_UPDATE_FEED_URL: ${{ secrets.PIBUDDY_UPDATE_FEED_URL }}
+          # 未配置证书时不要让 electron-builder 去碰钥匙串 / 自签一个假证书。
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ needs.preflight.outputs.signed }}
+        run: |
+          set -euo pipefail
+          pnpm --filter @pibuddy/app run prepare:runtime
+          pnpm --filter @pibuddy/app run build
+          pnpm --filter @pibuddy/app exec electron-builder ${{ matrix.builder_flags }} --publish never
+
+      - name: Verify release artifacts
+        run: node packages/app/scripts/verify-release-artifacts.mjs ${{ matrix.platform }} --channel ${{ env.RELEASE_CHANNEL }}
+
+      # 不可变产物（安装包 + blockmap）先落地。清单**不在这一步**上传。
+      # actions/upload-artifact v4
+      - name: Upload immutable payloads
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: payload-${{ matrix.platform }}${{ needs.preflight.outputs.signed == 'true' && '' || '-UNSIGNED-DO-NOT-PUBLISH' }}
+          path: |
+            packages/app/release/*.exe
+            packages/app/release/*.exe.blockmap
+            packages/app/release/*.dmg
+            packages/app/release/*.dmg.blockmap
+            packages/app/release/*.zip
+            packages/app/release/*.AppImage
+            packages/app/release/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+      # actions/upload-artifact v4
+      - name: Upload channel manifest (staged, not published yet)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: manifest-${{ matrix.platform }}
+          path: packages/app/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  # ------------------------------------------------- 最后一步才发布更新清单
+  publish-manifest:
+    name: publish-manifest
+    needs: upload-artifacts
+    # 只有 tag push 才发 feed。手动 dispatch 的 beta/nightly 到 upload-artifacts
+    # 为止，产物停在 Actions artifact 上并带 UNSIGNED 标记，进不了 stable feed。
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # actions/checkout v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # 第二道失败关闭闸。preflight 已经拦过一次，这里再拦一次的理由是：
+      # publish 是唯一一个「做了就撤不回来」的动作，它不该依赖上游 job 的
+      # 输出还活着，而应该自己直接看一眼凭据在不在。
+      - name: Re-assert signing credentials before publishing
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PIBUDDY_UPDATE_FEED_URL: ${{ secrets.PIBUDDY_UPDATE_FEED_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WIN_CSC_LINK}" ]; then echo "::error::WIN_CSC_LINK missing - release blocked"; exit 1; fi
+          if [ -z "${APPLE_TEAM_ID}" ]; then echo "::error::APPLE_TEAM_ID missing - release blocked"; exit 1; fi
+          if [ -z "${PIBUDDY_UPDATE_FEED_URL}" ]; then echo "::error::PIBUDDY_UPDATE_FEED_URL missing - release blocked"; exit 1; fi
+
+      # actions/download-artifact v4
+      - name: Download immutable payloads
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: payload-*
+          merge-multiple: true
+          path: dist
+
+      # actions/download-artifact v4
+      - name: Download staged manifests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: manifest-*
+          merge-multiple: true
+          path: dist
+
+      - name: Verify complete artifact set before publishing
+        run: node packages/app/scripts/verify-release-artifacts.mjs all --dir dist --channel ${{ env.RELEASE_CHANNEL }}
+
+      # 先发不可变产物。这一步失败时 feed 里的旧清单依然指向旧的、存在的文件，
+      # 客户端不受影响 —— 这正是拆两步的意义。
+      - name: Publish immutable payloads first
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --notes "PiBuddy ${GITHUB_REF_NAME}" --draft || true
+          shopt -s nullglob
+          payloads=(dist/*.exe dist/*.exe.blockmap dist/*.dmg dist/*.dmg.blockmap dist/*.zip dist/*.AppImage dist/*.deb)
+          if [ ${#payloads[@]} -eq 0 ]; then echo "::error::no payloads to publish"; exit 1; fi
+          gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${payloads[@]}"
+
+      # ⚠️ 本 step 必须是 publish-manifest 的**最后一个 step**。
+      # 清单一旦发布，全网客户端在下一次检查时立刻看到新版本；上面任何一步
+      # 没走完就发清单，等于把用户指向还没上传完的文件。
+      # packages/app/test/release-workflow.spec.ts 按步骤下标断言这一点。
+      - name: Publish channel manifests last
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          manifests=(dist/latest*.yml)
+          if [ ${#manifests[@]} -eq 0 ]; then echo "::error::no channel manifest to publish"; exit 1; fi
+          gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${manifests[@]}"
+          gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false

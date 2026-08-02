@@ -96,6 +96,20 @@ export interface PiLauncherContext {
   logger?: LauncherLogger;
   /** 仅供测试注入：覆盖开发形态下的 ESM 解析 */
   resolveDevEntry?: () => string;
+  /**
+   * project trust 的**一次性覆盖**参数（pi docs/security.md:30）。
+   *
+   * RPC 模式不弹 trust 提示，所以 PiBuddy 必须自己问完用户再把结论带下来：
+   *   - trust.json 里已经有该目录（或其祖先）的决定 → `[]`，让 pi 自己去读，
+   *     我们不该把一个已保存的决定重复表达一遍（两处不一致时以谁为准？）
+   *   - 无已保存决定 + 用户拒绝 → `["-na"]`
+   *   - 无已保存决定 + 用户信任 → `["-a"]`
+   *
+   * 这里只接受**已经算好的数组**，判定逻辑住在 pi-resources/trust-store.ts
+   * 的 trustArgsFor —— 定位运行时与决定信任是两件事，混在一个函数里会让
+   * 「找不到内置运行时就抛错」这条行为多出一条谁都想不到的旁路。
+   */
+  trustArgs?: string[];
 }
 
 export interface ResolvedPiRuntime {
@@ -286,6 +300,9 @@ export function buildPiSpawn(ctx: PiLauncherContext = {}): PiSpawn & { runtime: 
   return {
     command: runtime.command,
     prefixArgs: runtime.prefixArgs,
+    // 唯一的可变部分：trust 的一次性覆盖。**不得**在这里追加任何其它参数 ——
+    // 尤其不得因为「运行时没找到」而改用系统上的全局 pi（CT-11）。
+    args: [...(ctx.trustArgs ?? [])],
     env: buildChildEnv(ctx.env ?? process.env),
     shell: false,
     runtime,

@@ -451,6 +451,20 @@ export class UpdateService {
       this.disarmIdleWait();
       this.commit({ status: "installing", blockers: [] });
       this.stopSchedule();
+
+      // pending-update marker 必须在 quitAndInstall **之前**落盘：这一行之后
+      // 进程随时可能被替换掉，marker 写晚一步就永远写不上，下次启动也就
+      // 无从知道「这是更新之后的第一次启动」，健康检查与安全模式整条链失效。
+      // 写失败不阻断安装 —— 更新本身比诊断能力重要，但要留痕。
+      try {
+        this.deps.markers?.writePendingUpdate(
+          this.state.currentVersion,
+          this.state.candidateVersion ?? "unknown"
+        );
+      } catch (err) {
+        this.deps.logger.warn("update_marker_write_failed", { error: String(err) });
+      }
+
       this.deps.updater.quitAndInstall(false, true);
       return this.state;
     } finally {

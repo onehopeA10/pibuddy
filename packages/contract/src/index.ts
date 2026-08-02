@@ -9,5 +9,7 @@ export * from "./envelope.js";
 export * from "./settings.js";
 export * from "./session.js";
 export * from "./update.js";
+export * from "./pi-resources.js";
+export * from "./diagnostics.js";
 export * from "./ipc-contract.js";
 export * from "./ports.js";

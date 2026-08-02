@@ -60,6 +60,14 @@ export const appSettingsSchema = z.object({
   piRuntimeMode: z.enum(["bundled", "external"]).default("bundled"),
   /** external 模式下的命令：绝对/相对路径优先，否则在 PATH 中查找 */
   piExternalCommand: z.string().optional(),
+  /**
+   * 崩溃转储的隐私选择（OBS-101）。
+   *
+   * 默认 `unset`：**没问过就当没同意**。crash dump 是进程内存的快照，里面
+   * 可能有用户刚打的任何一个字，脱敏对二进制转储不成立，因此它只在用户
+   * 显式选了 allow 之后才会被收进诊断包。
+   */
+  crashDumpConsent: z.enum(["unset", "allow", "deny"]).default("unset"),
 });
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;
@@ -85,6 +93,7 @@ export const APP_SETTINGS_PUBLIC_KEYS = [
   "sttModel",
   "piRuntimeMode",
   "piExternalCommand",
+  "crashDumpConsent",
 ] as const;
 
 /** settings:set 的入参：任意子集。 */

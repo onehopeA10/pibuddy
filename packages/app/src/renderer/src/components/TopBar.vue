@@ -3,9 +3,20 @@ import { computed } from "vue";
 import { NButton, NSelect, NTooltip } from "naive-ui";
 import type { SelectOption, SelectGroupOption } from "naive-ui";
 import { useAppStore } from "../stores/app";
+import { useExtensionUiStore } from "../stores/extensionUi";
+import { usePiResourcesStore } from "../stores/piResources";
 import type { ThinkingLevel } from "@sdk";
 
 const store = useAppStore();
+/**
+ * 扩展上报的窗口标题（rpc.md:1300 setTitle）。
+ *
+ * 前缀与 60 字符截断在 store 的 displayTitle 里做，不在模板里做：
+ * 模板里做意味着「改了模板、测试还绿」。扩展可以上报任意长度的标题，
+ * 不截断会静默撑破顶栏布局 —— 不报错，只是模型选择框被挤出可视区。
+ */
+const extUi = useExtensionUiStore();
+const piRes = usePiResourcesStore();
 
 const folderName = computed(() => {
   const ws = store.workspace;
@@ -64,7 +75,20 @@ const contextPercent = computed(() => store.stats?.contextUsage?.percent ?? null
       工作文件夹：{{ store.workspace }}（点击更换）
     </n-tooltip>
 
+    <span v-if="extUi.displayTitle" class="ext-title" :title="extUi.displayTitle">
+      {{ extUi.displayTitle }}
+    </span>
+
     <div class="spacer" />
+
+    <n-tooltip>
+      <template #trigger>
+        <n-button quaternary size="small" aria-label="Pi 资源" @click="piRes.panelOpen = true">
+          🧩 资源
+        </n-button>
+      </template>
+      查看和管理 Pi 的技能、扩展与包
+    </n-tooltip>
 
     <span v-if="store.extStatus" class="usage ext-status">{{ store.extStatus }}</span>
 
@@ -94,3 +118,15 @@ const contextPercent = computed(() => store.stats?.contextUsage?.percent ?? null
     />
   </header>
 </template>
+
+<style scoped>
+.ext-title {
+  margin-left: 12px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  opacity: 0.72;
+}
+</style>

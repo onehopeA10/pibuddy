@@ -286,19 +286,50 @@ export function toAgentEvent(raw: unknown): AgentEvent {
 
 // ---------- Extension UI 子协议 ----------
 
+/**
+ * pi 0.83.0 公开的**全部** Extension UI 方法（docs/rpc.md:1170-1310）。
+ *
+ * 这张表是 contract test 的唯一来源：断言「实现覆盖了这张表里的每一个」，
+ * 而不是断言「实现覆盖了 9 个」。升级 pi 后表变长，测试自动变严 ——
+ * 硬编码 9 的写法在上游加第 10 个方法时会照样全绿，而那个方法在产品里
+ * 会落进 default 分支被静默丢弃。
+ */
+export const EXTENSION_UI_METHODS = [
+  // dialog：发出请求后阻塞等待 extension_ui_response
+  "select",
+  "confirm",
+  "input",
+  "editor",
+  // fire-and-forget：发出即完成，客户端可以显示也可以忽略，但**不能挂起**
+  "notify",
+  "setStatus",
+  "setWidget",
+  "setTitle",
+  "set_editor_text",
+] as const;
+
+export type ExtensionUiMethod = (typeof EXTENSION_UI_METHODS)[number];
+
+/**
+ * 会阻塞扩展、必须回一条 extension_ui_response 的四个方法。
+ *
+ * 这四个之外的方法**一律不得进入挂起表**：给 notify 挂一个等待项，等于
+ * 制造一个永远不会被回答的弹窗。
+ */
+export const EXTENSION_UI_DIALOG_METHODS = ["select", "confirm", "input", "editor"] as const;
+
+export type ExtensionUiDialogMethod = (typeof EXTENSION_UI_DIALOG_METHODS)[number];
+
+const DIALOG_METHOD_SET: ReadonlySet<string> = new Set(EXTENSION_UI_DIALOG_METHODS);
+
+export function isDialogMethod(method: string): method is ExtensionUiDialogMethod {
+  return DIALOG_METHOD_SET.has(method);
+}
+
 export interface ExtensionUiRequest {
   type: "extension_ui_request";
   id: string;
-  method:
-    | "select"
-    | "confirm"
-    | "input"
-    | "editor"
-    | "notify"
-    | "setStatus"
-    | "setWidget"
-    | "setTitle"
-    | "set_editor_text";
+  method: ExtensionUiMethod;
   title?: string;
   message?: string;
   options?: string[];

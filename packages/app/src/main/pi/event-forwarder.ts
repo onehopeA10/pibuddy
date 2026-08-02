@@ -27,7 +27,7 @@
  *     事件污染的通道之一。
  */
 import type { AgentEvent, AssistantMessageEvent } from "@pibuddy/pi-sdk";
-import type { PiEnvelope } from "@pibuddy/contract";
+import type { PiEnvelope, PushChannel } from "@pibuddy/contract";
 
 /** 合批节拍。约等于 30fps，人眼看不出，主线程压力下降一到两个数量级。 */
 export const BATCH_INTERVAL_MS = 33;
@@ -40,6 +40,32 @@ export const BATCH_INTERVAL_MS = 33;
  * 混进来会把「结束」这个状态转移吃掉。
  */
 const MERGEABLE_DELTA_TYPES: ReadonlySet<string> = new Set(["text_delta", "thinking_delta"]);
+
+/**
+ * 非合批推送通道的**唯一**出口。
+ *
+ * `pi:event` 走上面的 33ms 合批；`pi:ui-request` / `pi:exit` /
+ * `pi:ui-expire` / `pi:ui-expire-all` 四条必须立即发出（弹窗晚 33ms 出现
+ * 无所谓，但「这个框已经作废了」晚一帧就意味着用户可能刚好在这一帧点了
+ * 那个没人接收的按钮）。
+ *
+ * 让它们也从本文件发出，是为了让这条结构断言成立：
+ *
+ *     rg '\.send\("pi:' packages/app/src/main -g '!pi/event-forwarder.ts'   # 恒为 0
+ *
+ * 也就是说，**任何新增的 main→renderer 推送都必须经过这里**，从而自动获得
+ * PiEnvelope 包装与渲染侧的代际/序号丢弃规则。改造前 pi-supervisor.ts:135
+ * 自己直发 pi:ui-request，那条路上再加一条新通道时没有任何东西提醒你
+ * 「信封呢」。
+ */
+export function sendPush<T>(
+  target: ForwarderTarget,
+  channel: PushChannel,
+  envelope: PiEnvelope<T>
+): void {
+  if (target.isDestroyed()) return;
+  target.send(channel, envelope);
+}
 
 /** 转发目标（生产是 Electron WebContents，测试是最小替身）。 */
 export interface ForwarderTarget {

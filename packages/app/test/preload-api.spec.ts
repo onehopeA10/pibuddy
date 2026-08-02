@@ -33,19 +33,24 @@ const { api } = await import("../src/preload/api/index.js");
 const { CHANNELS } = await import("@pibuddy/contract/channels");
 
 describe("api 聚合对象", () => {
-  it("恰含 pi / sessions / settings / dialog / file / shell / stt / update 八个键", () => {
-    // update 是 UPD-001 加进来的第八个命名空间（九个动作 + 一个事件订阅）。
+  it("命名空间集合与 api/*.ts 一一对应，一个不多一个不少", () => {
+    // update 是 UPD-001 加进来的第八个命名空间（九个动作 + 一个事件订阅）；
+    // piResources 是 EXT-102（资源中心 + project trust）；
+    // diagnostics 是 OBS-101（诊断包预览 / 导出 / 健康报告）。
+    // 新增命名空间 = 新增 api/<ns>.ts + 在 index.ts 加一行 + 在这里加一行，
+    // 三处对不上就说明有人绕过了那条唯一的接口面定义。
     expect(Object.keys(api).sort()).toEqual([
+      "diagnostics",
       "dialog",
       "file",
       "pi",
+      "piResources",
       "sessions",
       "settings",
       "shell",
       "stt",
       "update",
     ]);
-    expect(Object.keys(api).length).toBe(8);
   });
 
   it("sessions 命名空间覆盖全部 9 条通道，一条不漏", async () => {

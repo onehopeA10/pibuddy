@@ -21,6 +21,12 @@ import {
   type InvokeChannel,
   type PushChannel,
 } from "./channels.js";
+import {
+  bundleExportRequestSchema,
+  bundleExportResultSchema,
+  bundlePreviewSchema,
+  diagnosticsReportSchema,
+} from "./diagnostics.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -30,6 +36,20 @@ import {
   sessionRowSchema,
   sessionStatusSchema,
 } from "./session.js";
+import {
+  extUiSnapshotSchema,
+  extensionUiRespondResultSchema,
+  piPackageCommandRequestSchema,
+  piPackageCommandResultSchema,
+  piResourceIdRequestSchema,
+  piResourceScanResultSchema,
+  piResourceSetEnabledRequestSchema,
+  piUiExpireAllPayloadSchema,
+  piUiExpirePayloadSchema,
+  projectTrustStateSchema,
+  trustDecideRequestSchema,
+  workspaceScopedRequestSchema,
+} from "./pi-resources.js";
 import {
   updateCheckRequestSchema,
   updateDismissRequestSchema,
@@ -348,7 +368,13 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   [CHANNELS.piStop]: { request: voidRequestSchema, response: z.void() },
   [CHANNELS.piUiRespond]: {
     request: extensionUiResponseSchema,
-    response: z.void(),
+    // 返回值不是 void：respond 会因为「这条已经过期」或「runtime 没了」
+    // 而失败，渲染进程必须能看见并据此给用户一句解释。
+    response: extensionUiRespondResultSchema,
+  },
+  [CHANNELS.piUiPending]: {
+    request: voidRequestSchema,
+    response: extUiSnapshotSchema,
   },
 
   // ---- 15 个产品动作 ----
@@ -471,6 +497,40 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     response: sttTranscribeResultSchema,
   },
 
+  // ---- Pi 资源中心与 project trust（7 条） ----
+  //
+  // 五条资源通道全部以 scan 结果作为返回：任何一次改动之后渲染进程立刻拿到
+  // 权威快照，不必自己推断列表变成了什么样 —— 「开关拨了但列表没变」这类
+  // 问题在结构上不成立。
+  [CHANNELS.piResourcesScan]: {
+    request: workspaceScopedRequestSchema,
+    response: piResourceScanResultSchema,
+  },
+  [CHANNELS.piResourcesSetEnabled]: {
+    request: piResourceSetEnabledRequestSchema,
+    response: piResourceScanResultSchema,
+  },
+  [CHANNELS.piResourcesInstall]: {
+    request: piPackageCommandRequestSchema,
+    response: piPackageCommandResultSchema,
+  },
+  [CHANNELS.piResourcesRemove]: {
+    request: piPackageCommandRequestSchema,
+    response: piPackageCommandResultSchema,
+  },
+  [CHANNELS.piResourcesOpenDir]: {
+    request: piResourceIdRequestSchema,
+    response: z.void(),
+  },
+  [CHANNELS.trustDescribe]: {
+    request: workspaceScopedRequestSchema,
+    response: projectTrustStateSchema,
+  },
+  [CHANNELS.trustDecide]: {
+    request: trustDecideRequestSchema,
+    response: projectTrustStateSchema,
+  },
+
   // ---- 应用自更新 ----
   //
   // 九条全部以 UpdateState 作为返回：渲染进程发起任何一个动作之后立刻拿到
@@ -505,6 +565,20 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     request: updateDismissRequestSchema,
     response: updateStateSchema,
   },
+
+  // ---- 诊断与健康（OBS-101，恰 3 条） ----
+  [CHANNELS.diagnosticsPreviewBundle]: {
+    request: voidRequestSchema,
+    response: bundlePreviewSchema,
+  },
+  [CHANNELS.diagnosticsExportBundle]: {
+    request: bundleExportRequestSchema,
+    response: bundleExportResultSchema,
+  },
+  [CHANNELS.diagnosticsGetReport]: {
+    request: voidRequestSchema,
+    response: diagnosticsReportSchema,
+  },
 };
 
 /**
@@ -532,6 +606,8 @@ export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   [PUSH_CHANNELS.piEvent]: rpcEnvelopeLikeSchema,
   [PUSH_CHANNELS.piUiRequest]: rpcEnvelopeLikeSchema,
   [PUSH_CHANNELS.piExit]: piExitPayloadSchema,
+  [PUSH_CHANNELS.piUiExpire]: piUiExpirePayloadSchema,
+  [PUSH_CHANNELS.piUiExpireAll]: piUiExpireAllPayloadSchema,
   // update:event 推的是完整信封（不是裸 payload）：代际与序号必须送到渲染
   // 进程才能用来丢弃陈旧帧，在中途剥壳等于把丢弃判据扔了。
   [PUSH_CHANNELS.updateEvent]: updateEnvelopeSchema,

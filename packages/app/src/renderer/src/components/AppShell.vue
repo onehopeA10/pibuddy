@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { useMessage, NButton, NSpin } from "naive-ui";
 import { useAppStore } from "../stores/app";
 import Sidebar from "./Sidebar.vue";
@@ -9,11 +9,16 @@ import InputBar from "./InputBar.vue";
 import ExtensionUiHost from "./ExtensionUiHost.vue";
 import SettingsModal from "./SettingsModal.vue";
 import UpdateBanner from "./UpdateBanner.vue";
+import SafeModeBanner from "./SafeModeBanner.vue";
 import InstallBlockerDialog from "./InstallBlockerDialog.vue";
+import PiResourcesPanel from "./PiResourcesPanel.vue";
+import ProjectTrustDialog from "./ProjectTrustDialog.vue";
 import { useUpdateStore } from "../stores/update";
+import { usePiResourcesStore } from "../stores/piResources";
 
 const store = useAppStore();
 const updateStore = useUpdateStore();
+const piRes = usePiResourcesStore();
 const message = useMessage();
 store.setNotifier(message);
 
@@ -25,6 +30,21 @@ onMounted(() => {
   // 而不是回到 idle。
   void updateStore.init();
 });
+
+/**
+ * 工作目录一旦确定就问一次 project trust。
+ *
+ * 必须在这里而不是在 pi:start 里等它自己发现：RPC 模式下 pi 不弹 trust
+ * 提示（security.md:30），没有已保存决定时 `defaultProjectTrust: "ask"`
+ * 的行为等同于 `"never"` —— 项目里的技能会毫无提示地不被加载。
+ */
+watch(
+  () => store.workspaceId,
+  (id) => {
+    if (id) void piRes.describeTrust(id);
+  },
+  { immediate: true }
+);
 
 function onDragEnter(e: DragEvent): void {
   if (e.dataTransfer?.types.includes("Files")) dragging.value++;
@@ -68,7 +88,9 @@ function onDrop(): void {
     <!-- 布局契约（TASK-009 定义，M3-M5 各任务只往这四个具名插槽里注入内容，
          不得改动插槽名集合）：banner 顶部通条 / sidebar 侧栏 / main 主区 /
          overlay 浮层。默认内容即当前形态，不传插槽时渲染结果与改造前一致。 -->
-    <slot name="banner"><UpdateBanner /></slot>
+    <!-- safe mode 横幅排在更新横幅**之前**：进了安全模式的用户最需要看到的
+         是「什么被关了、我现在能做什么」，而不是又一条更新提示。 -->
+    <slot name="banner"><SafeModeBanner /><UpdateBanner /></slot>
 
     <slot name="sidebar"><Sidebar /></slot>
     <div class="main-col">
@@ -101,6 +123,8 @@ function onDrop(): void {
       <ExtensionUiHost />
       <SettingsModal />
       <InstallBlockerDialog />
+      <PiResourcesPanel />
+      <ProjectTrustDialog />
     </slot>
   </div>
 </template>

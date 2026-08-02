@@ -8,8 +8,8 @@
   "priority": "high",
   "effort": "large",
   "action": "修改 packages/app/electron-builder.yml：mac.target 由 `[dmg]` 改为 `[dmg, zip]` 并加 `hardenedRuntime: true`、`gatekeeperAssess: false`、`entitlements: build/entitlements.mac.plist`、`entitlementsInherit: build/entitlements.mac.plist`、`notarize: true`，`extendInfo.NSMicrophoneUsageDescription: \"PiBuddy 需要使用麦克风来把你说的话转成文字\"`；win.target 保持 nsis 且 nsis.perMachine 保持 false（per-user）；linux.target 改为 `[AppImage, deb]`；新增 `publish` 块使用 `provider: generic` + `url: ${env.PIBUDDY_UPDATE_FEED_URL}` 并把 `electronDownload.mirror` 改为仅当 `${env.PIBUDDY_USE_CN_MIRROR}` 为 true 时生效（在 packages/app/scripts/build-config.mjs 中拼装，CI 不设该变量）。在 TASK-002 建立的唯一日志器 packages/app/src/main/logger.ts 上扩展（裁定4：全计划只允许一个日志器实现，不得新建 main/logging/logger.ts）：MAX_LOG_BYTES = 5 * 1024 * 1024、MAX_LOG_FILES = 7，导出 `createLogger(scope: 'main'|'pi-runtime'|'updater'|'session-index'|'permission')`，每条日志强制带 `correlationId / runtimeId / sessionId`，并把 redactSecrets 挂到真正写盘的函数内。electron-log 的锁版仅供 electron-updater 内部使用，autoUpdater.logger 以适配器接到 createLogger('updater')。在 TASK-002 建立的唯一脱敏实现 packages/app/src/main/logger-redact.ts 上扩规则，其 `redactSecrets(input: string): string`，至少覆盖 `sk-[A-Za-z0-9_-]{16,}`、`Bearer\\s+\\S+`、`\"key\"\\s*:\\s*\"[^\"]+\"`、`os.homedir()` 绝对路径（替换为 `~`）与 `process.env` 值。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed_with_deviations",
+  "completed_at": "2026-08-02T19:02:56.575Z",
   "actual_duration": null,
   "scope": "packages/app/electron-builder.yml, .github/workflows, packages/app/src/main/logging, packages/app/src/main/diagnostics, packages/app/src/main/health, docs/product",
   "focus_paths": [

@@ -2,6 +2,7 @@ appId: com.pibuddy.app
 productName: PiBuddy
 directories:
   output: release
+  buildResources: build
 
 files:
   - out/**
@@ -14,6 +15,9 @@ files:
 # process.resourcesPath/pi-runtime，主进程只按 runtime-manifest.json 定位。
 # 这样 pi 动态加载扩展/技能文件的路径全部落在普通文件系统上，
 # 不再需要为了它牺牲整个产物的 asar 保护。
+#
+# 代价见 docs/product/ADR-0001-update-feed.md：pi-runtime 与 convert-worker
+# 都不参与 asar 内的 blockmap 差分，它们体积一变就是整包重下。
 asar: true
 npmRebuild: false
 
@@ -25,8 +29,21 @@ extraResources:
 # 依赖必须由 afterPack 手动补齐，否则打包后 pi 启动即 ERR_MODULE_NOT_FOUND。
 afterPack: scripts/after-pack.cjs
 
-electronDownload:
-  mirror: https://npmmirror.com/mirrors/electron/
+# electronDownload.mirror 刻意**不写在这里**。
+#
+# 硬编码第三方镜像意味着正式发布产物的 Electron 二进制来自一个未经供应链
+# 审批的来源，而且没有任何开关能在发布时把它关掉。镜像改由
+# scripts/build-config.mjs 按 PIBUDDY_USE_CN_MIRROR 注入 ELECTRON_MIRROR
+# 环境变量，CI 的 release job 不设该变量，因此正式包恒走官方源。
+#   开发机加速：  PIBUDDY_USE_CN_MIRROR=1 pnpm --filter @pibuddy/app dist
+
+# 更新源。provider 固定 generic：客户端只认一个 URL，二进制里没有任何
+# GitHub token —— 私有仓库的 token 一旦打进客户端，等于随包分发给所有人。
+# 选型理由见 docs/product/ADR-0001-update-feed.md。
+publish:
+  provider: generic
+  url: ${env.PIBUDDY_UPDATE_FEED_URL}
+  channel: latest
 
 win:
   target:
@@ -35,15 +52,31 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  # per-user 安装（不写 Program Files、不需要 UAC）。electron-updater 的
+  # NsisUpdater 在 perMachine: true 下每次更新都要弹 UAC，静默更新直接失效。
   perMachine: false
   artifactName: ${productName}-Setup-${version}.${ext}
 
 mac:
+  # dmg 是给人下载的，zip 是给 updater 用的。**缺 zip 时 macOS 自动更新
+  # 整体不工作**：electron-updater 的 MacUpdater 只认 latest-mac.yml 里的
+  # ZIP payload，而 latest-mac.yml 本身也只在产出 zip 时才会生成。
   target:
     - dmg
+    - zip
   category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
+  extendInfo:
+    NSMicrophoneUsageDescription: PiBuddy 需要使用麦克风来把你说的话转成文字
 
 linux:
+  # AppImage 走 electron-updater 自更新；deb 没有可靠的自更新路径，
+  # 界面按 UPD-006 明确降级提示「请从官网下载新版本」，不伪装自动安装。
   target:
     - AppImage
+    - deb
   category: Utility

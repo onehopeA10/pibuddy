@@ -6,6 +6,7 @@ import type { AttachmentRef } from "@contract";
 import { useAppStore, type SendMode } from "../stores/app";
 import { VoiceRecorder } from "../stt";
 import QueuePanel from "./QueuePanel.vue";
+import ExtensionWidgetHost from "./ExtensionWidgetHost.vue";
 
 interface ImageAttachment extends ImageContent {
   name: string;
@@ -225,6 +226,10 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
 
     <QueuePanel />
 
+    <!-- 扩展 widget（rpc.md:1275）：aboveEditor 在输入框之上，belowEditor 在其下。
+         改造前这两个位置都不存在，setWidget 落进 default 分支被静默丢弃。 -->
+    <ExtensionWidgetHost placement="aboveEditor" />
+
     <div class="composer" @paste="onPaste">
       <div v-if="images.length || files.length" class="attachment-row">
         <span v-for="(img, i) in images" :key="`img-${i}`" class="attach-chip">
@@ -327,5 +332,7 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
         </n-button>
       </div>
     </div>
+
+    <ExtensionWidgetHost placement="belowEditor" />
   </div>
 </template>

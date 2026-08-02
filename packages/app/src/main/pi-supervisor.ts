@@ -23,15 +23,18 @@ import {
 } from "@pibuddy/pi-sdk";
 import {
   PROTOCOL_VERSION,
+  PUSH_CHANNELS,
   wrapEnvelope,
   type EnvelopeContext,
   type PiEnvelope,
   type PiRuntimeHandle,
   type PiRuntimeStartOptions,
   type PiRuntimeSupervisor,
+  type PushChannel,
 } from "@pibuddy/contract";
 import {
   createForwarder,
+  sendPush,
   type Forwarder,
   type ForwarderTarget,
 } from "./pi/event-forwarder.js";
@@ -72,7 +75,36 @@ export class PiSupervisor implements PiRuntimeSupervisor {
   private latest: PiRuntimeHandle | null = null;
   private boundTarget: SupervisorTarget | null = null;
 
+  /**
+   * 每收到一条 extension_ui_request 时的登记回调（ExtensionUiService 注册）。
+   *
+   * 用回调而不是让 supervisor 直接持有 service：supervisor 已经是本进程里
+   * 最重的那个对象，再给它加一份挂起表的所有权，「谁负责清定时器」就会变成
+   * 两个地方都能改的事。
+   */
+  private uiHook: ((targetId: number, generation: number, request: ExtensionUiRequest) => void) | null =
+    null;
+
   constructor(private readonly logger: SupervisorLogger = NOOP_LOGGER) {}
+
+  setUiHook(
+    hook: (targetId: number, generation: number, request: ExtensionUiRequest) => void
+  ): void {
+    this.uiHook = hook;
+  }
+
+  /**
+   * 以当前 runtime 的信封向某个窗口推一条消息。
+   *
+   * ExtensionUiService 的 expire / expire-all 走这里，因此它们同样带上代际
+   * 与本通道的单调序号，渲染侧的闸门对它们一视同仁。没有活跃 runtime 时
+   * 静默丢弃 —— 那种情况下渲染进程本来就要整体重来。
+   */
+  push(targetId: number, channel: PushChannel, payload: unknown): void {
+    const record = this.byTarget.get(targetId);
+    if (!record) return;
+    sendPush(record.target, channel, this.nextEnvelope(record, payload));
+  }
 
   /** 供 `start()`（端口签名不带 target）使用的默认目标。 */
   bindTarget(target: SupervisorTarget): void {
@@ -132,7 +164,10 @@ export class PiSupervisor implements PiRuntimeSupervisor {
     });
     client.on("ui_request", (r: ExtensionUiRequest) => {
       if (!this.isCurrent(record) || target.isDestroyed()) return;
-      target.send("pi:ui-request", this.nextEnvelope(record, r));
+      // 先登记再转发：渲染进程收到弹窗的下一刻就可能作答，此时挂起表里
+      // 必须已经有这一条，否则合法回答会被判成 expired。
+      this.uiHook?.(target.id, record.ctx.generation, r);
+      sendPush(target, PUSH_CHANNELS.piUiRequest, this.nextEnvelope(record, r));
     });
     client.on("stderr", (text: string) => {
       // stderr 不单开 IPC 通道，但同样带上代际上下文进日志（OBS-001）。
@@ -153,16 +188,15 @@ export class PiSupervisor implements PiRuntimeSupervisor {
         return;
       }
       forwarder.flush();
-      if (!target.isDestroyed()) {
-        target.send(
-          "pi:exit",
-          this.nextEnvelope(record, {
-            code,
-            reason: meta.reason,
-            ...(meta.error ? { error: meta.error } : {}),
-          })
-        );
-      }
+      sendPush(
+        target,
+        PUSH_CHANNELS.piExit,
+        this.nextEnvelope(record, {
+          code,
+          reason: meta.reason,
+          ...(meta.error ? { error: meta.error } : {}),
+        })
+      );
       this.forget(record);
     });
 

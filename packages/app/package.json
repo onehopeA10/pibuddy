@@ -13,7 +13,9 @@
     "prepare:runtime": "node scripts/prepare-pi-runtime.mjs",
     "check-update-deps": "node scripts/check-update-deps.mjs",
     "check-updater-capability": "node scripts/check-updater-capability.mjs",
-    "dist": "node scripts/prepare-pi-runtime.mjs && electron-vite build && electron-builder",
+    "dist": "node scripts/prepare-pi-runtime.mjs && electron-vite build && node scripts/build-config.mjs --exec -- electron-builder",
+    "verify:artifacts": "node scripts/verify-release-artifacts.mjs",
+    "check-pure-js-deps": "node scripts/check-pure-js-deps.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run --root ../.."
   },

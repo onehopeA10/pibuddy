@@ -21,10 +21,14 @@ import type {
   DraftRecord,
   PiEnvelope,
   PiExitPayload,
+  PiUiExpireAllPayload,
+  PiUiExpirePayload,
 } from "@contract";
-import { parseEnvelope } from "@contract";
+import { parseEnvelope, UI_EXPIRED_HINT } from "@contract";
 import { useSessionsStore } from "./sessions";
 import { clearChatUiState } from "./chat-ui";
+import { registerSessionScopedReset, resetSessionScopedState } from "./session-scope";
+import { recordUnknownEvent, useExtensionUiStore } from "./extensionUi";
 
 export interface ChatItem {
   key: number;
@@ -131,31 +135,10 @@ function cancelFrame(id: number): void {
  */
 const REFRESH_SESSIONS_DEBOUNCE_MS = 2000;
 
-/**
- * 会话级状态的清空回调表（CT-25）。
- *
- * 「换会话要清哪些东西」是一条语义，不该是散落在 start / newTask 里的手写
- * 字段枚举 —— 每加一块会话级状态就得记得去补一行，漏了就是上一次会话的
- * 工具卡片、扩展弹窗留在新会话里。各 store 自己注册自己的清空动作，
- * 状态归属和清空语义就此解耦。
- *
- * key 用于去重：store 在测试里会被反复重建，不去重的话注册表里会堆满
- * 指向旧实例的死闭包。
- */
-const sessionScopedResets = new Map<string, () => void>();
-let anonymousResetSeq = 0;
-
-export function registerSessionScopedReset(
-  reset: () => void,
-  key = `anonymous:${++anonymousResetSeq}`
-): void {
-  sessionScopedResets.set(key, reset);
-}
-
-/** 依次执行全部已注册的清空回调。 */
-export function resetSessionScopedState(): void {
-  for (const reset of sessionScopedResets.values()) reset();
-}
+// 清空回调表住在 ./session-scope.ts（原地再导出，既有引用点零改动）。
+// 抽出去的原因见那个文件的头注释：extensionUi store 要注册自己的清空动作，
+// 而 app store 反过来要读 extensionUi 的状态做兼容代理。
+export { registerSessionScopedReset, resetSessionScopedState };
 
 /**
  * 助手正在输出时，用户新指令的两种**产品语义**。
@@ -288,6 +271,8 @@ export const useAppStore = defineStore("app", () => {
     piRuntimeMode: "bundled",
     sttApiKeyConfigured: false,
     sttApiKeyLast4: "",
+    // 崩溃转储的隐私选择从「没问过」开始，绝不臆造一个 allow。
+    crashDumpConsent: "unset",
   });
   const startError = ref("");
   /** 会话切换成功但消息拉取失败时的提示；非空时 ChatView 显示错误条与「重试」。 */
@@ -347,7 +332,6 @@ export const useAppStore = defineStore("app", () => {
   const liveAssistant = shallowRef<AssistantMessage | null>(null);
   const toolRuns = reactive<Record<string, ToolRun>>({});
   const queue = ref<{ steering: string[]; followUp: string[] }>({ steering: [], followUp: [] });
-  const statusTexts = reactive<Record<string, string>>({});
 
   /**
    * 本地**未提交**队列。
@@ -360,7 +344,14 @@ export const useAppStore = defineStore("app", () => {
   const localQueue = ref<LocalQueueItem[]>([]);
   let localQueueSeq = 0;
 
-  const uiRequests = ref<ExtensionUiRequest[]>([]);
+  /**
+   * 扩展 UI 的四样状态（弹窗队列 / 状态条 / widget / 标题）现在归
+   * extensionUi store 所有。这里保留同名代理是为了让既有组件与测试零改动 ——
+   * 迁移不该顺手改掉一堆读点，那样一次改动会同时验证两件事。
+   */
+  const extUi = useExtensionUiStore();
+  const uiRequests = computed(() => extUi.uiRequests);
+  const statusTexts = extUi.statusTexts;
   const editorText = ref("");
   const settingsOpen = ref(false);
   /** 每次有会影响聊天区高度的更新时 +1，供 ChatView 轻量监听滚动（避免 deep watch） */
@@ -374,8 +365,8 @@ export const useAppStore = defineStore("app", () => {
     for (const key of Object.keys(toolRuns)) delete toolRuns[key];
     queue.value = { steering: [], followUp: [] };
     localQueue.value = [];
-    for (const key of Object.keys(statusTexts)) delete statusTexts[key];
-    uiRequests.value = [];
+    // statusTexts / uiRequests 的清空由 extensionUi store 自己注册的那一条
+    // 回调负责（CT-25）：状态归谁所有，清空就归谁写。
     liveAssistant.value = null;
     // 流式缓冲与挂起的 rAF 也是会话级状态：不清就会把上一会话的尾字符
     // 渗进新会话的首条消息（三大门禁全绿，只有肉眼能发现）。
@@ -411,20 +402,10 @@ export const useAppStore = defineStore("app", () => {
     displayPath.value = ref_?.displayPath ?? "";
   }
   const currentModel = computed(() => agentState.value?.model ?? null);
-  /** 运行相关的临时状态（压缩、重试），显示在输入框上方 */
-  const busyStatus = computed(() =>
-    Object.entries(statusTexts)
-      .filter(([key, text]) => !key.startsWith("ext:") && text)
-      .map(([, text]) => text)
-      .join(" · ")
-  );
+  /** 运行相关的临时状态（压缩、重试、摘要重试），显示在输入框上方 */
+  const busyStatus = computed(() => extUi.busyStatus);
   /** 扩展上报的常驻状态（如 AUTO/YOLO 模式），弱化显示在顶栏 */
-  const extStatus = computed(() =>
-    Object.entries(statusTexts)
-      .filter(([key, text]) => key.startsWith("ext:") && text)
-      .map(([, text]) => text)
-      .join(" · ")
-  );
+  const extStatus = computed(() => extUi.extStatus);
 
   // ---------- 事件处理 ----------
 
@@ -616,27 +597,84 @@ export const useAppStore = defineStore("app", () => {
         break;
       }
       case "compaction_start":
-        statusTexts.compaction = "正在整理对话记忆…";
+        extUi.setLocalStatus("compaction", "正在整理对话记忆…");
         break;
       case "compaction_end":
-        statusTexts.compaction = "";
+        extUi.setLocalStatus("compaction", "");
         break;
       case "auto_retry_start": {
         const ev = e as Extract<AgentEvent, { type: "auto_retry_start" }>;
-        statusTexts.retry = `网络繁忙，正在重试 (${ev.attempt}/${ev.maxAttempts})…`;
+        extUi.setLocalStatus("retry", `网络繁忙，正在重试 (${ev.attempt}/${ev.maxAttempts})…`);
         break;
       }
       case "auto_retry_end": {
         const ev = e as Extract<AgentEvent, { type: "auto_retry_end" }>;
-        statusTexts.retry = "";
+        extUi.setLocalStatus("retry", "");
         if (!ev.success && ev.finalError) notify("error", "多次重试仍失败，请稍后再试");
         break;
       }
+
+      // ---- 早先落进 default 分支被静默丢弃的五类事件 ----
+      //
+      // turn_start / turn_end 是一轮内的边界，本身不改变界面，但必须显式
+      // 列出来：写成 default 的话，「我们决定不处理它」和「我们不知道有
+      // 这个事件」在代码里长得一模一样。
+      case "turn_start":
+      case "turn_end":
+        break;
+      case "agent_end": {
+        // agent_end 带 willRetry 时后面还有一轮，此时把 streaming 收掉会让
+        // 输入框以为可以正常发消息，而 pi 那边仍在处理（插话会被拒）。
+        const ev = e as Extract<AgentEvent, { type: "agent_end" }>;
+        if (!ev.willRetry) streaming.value = false;
+        break;
+      }
+      case "bash_execution_update": {
+        // 内置 bash 工具的流式输出。归到对应的工具卡片上；找不到卡片
+        // （id 缺席）时不新建，避免凭空冒出一张没有标题的卡。
+        const ev = e as Extract<AgentEvent, { type: "bash_execution_update" }>;
+        const run = ev.id ? toolRuns[ev.id] : undefined;
+        if (run) {
+          run.output += ev.delta ?? "";
+          activityTick.value++;
+        }
+        break;
+      }
+      case "summarization_retry_scheduled": {
+        const ev = e as Extract<AgentEvent, { type: "summarization_retry_scheduled" }>;
+        extUi.setLocalStatus(
+          "summarization",
+          `整理记忆失败，${Math.round((ev.delayMs ?? 0) / 1000)} 秒后重试 (${ev.attempt}/${ev.maxAttempts})…`
+        );
+        break;
+      }
+      case "summarization_retry_attempt_start": {
+        const ev = e as Extract<AgentEvent, { type: "summarization_retry_attempt_start" }>;
+        const what = ev.source === "branchSummary" ? "分支摘要" : "对话记忆";
+        extUi.setLocalStatus("summarization", `正在重试整理${what}…`);
+        break;
+      }
+      case "summarization_retry_finished":
+        extUi.setLocalStatus("summarization", "");
+        break;
+
       case "extension_error":
         notify("warning", "扩展出现问题，但不影响继续使用");
         break;
-      default:
+      // `unknown` 是 pi-sdk 对未建模事件的归一化形式；default 兜住那些连
+      // 归一化都没经过的（比如直接投喂进来的原始对象）。
+      case "unknown":
+      default: {
+        // 裸 `break` 会让新版本 pi 新增的事件永久静默消失：不报错、不记数、
+        // 不留痕。这里至少留下一个计数与一份 debug 快照 —— 下次「怎么少了
+        // 一块提示」有地方可查。
+        const type = (e as { type?: string }).type ?? "";
+        const raw = type === "unknown" ? (e as { raw?: unknown }).raw : undefined;
+        const rawType =
+          raw && typeof raw === "object" ? String((raw as { type?: unknown }).type ?? "") : "";
+        extUi.recordUnknownEvent(rawType || type);
         break;
+      }
     }
   }
 
@@ -725,13 +763,23 @@ export const useAppStore = defineStore("app", () => {
     );
   }
 
+  /**
+   * 九个 method 全覆盖（rpc.md:1170-1310）。
+   *
+   * 改造前只有七个 case，setWidget / setTitle 落进那条裸的 default 分支被静默
+   * 丢弃 —— 它们是 fire-and-forget，丢了不会挂起任何东西，所以既不报错也
+   * 不失败，只是扩展写出来的东西永远显示不出来。
+   *
+   * switch 上没有 default：新增一个上游 method 时，`method` 的联合类型会
+   * 让 `never` 断言在 typecheck 阶段失败，而不是等到用户报「按钮没反应」。
+   */
   function handleUiRequest(r: ExtensionUiRequest): void {
     switch (r.method) {
       case "select":
       case "confirm":
       case "input":
       case "editor":
-        uiRequests.value = [...uiRequests.value, r];
+        extUi.enqueue(r);
         break;
       case "notify": {
         const kind =
@@ -740,26 +788,67 @@ export const useAppStore = defineStore("app", () => {
         break;
       }
       case "setStatus":
-        statusTexts[`ext:${r.statusKey ?? ""}`] = r.statusText ?? "";
+        extUi.setStatus(r.statusKey ?? "", r.statusText);
+        break;
+      case "setWidget":
+        extUi.setWidget(r.widgetKey ?? "", r.widgetLines, r.widgetPlacement ?? "aboveEditor");
+        break;
+      case "setTitle":
+        extUi.setTitle(r.title);
         break;
       case "set_editor_text":
         editorText.value = r.text ?? "";
         break;
-      default:
-        break;
     }
   }
 
+  /** 主进程告知某条弹窗已失效（超时 / 代际作废）。 */
+  function handleUiExpireEnvelope(raw: unknown): void {
+    const env = acceptEnvelope(raw, "pi:ui-expire");
+    if (!env) return;
+    const payload = env.payload as PiUiExpirePayload;
+    if (extUi.expire(payload)) notify("info", UI_EXPIRED_HINT);
+  }
+
+  function handleUiExpireAllEnvelope(raw: unknown): void {
+    const env = acceptEnvelope(raw, "pi:ui-expire-all");
+    if (!env) return;
+    const n = extUi.expireAll(env.payload as PiUiExpireAllPayload);
+    if (n > 0) notify("info", UI_EXPIRED_HINT);
+  }
+
+  /**
+   * 回答一条弹窗。
+   *
+   * **必须看返回值**：主进程会因为「这条已经过期」或「runtime 已经没了」
+   * 而拒绝转发。改造前这条路径返回 void、失败静默吞掉，用户点了确定、
+   * 弹窗关了，助手那边什么都没发生，界面上没有任何线索。
+   */
   async function respondUi(
     request: ExtensionUiRequest,
     payload: { value?: string; confirmed?: boolean; cancelled?: boolean }
-  ): Promise<void> {
-    uiRequests.value = uiRequests.value.filter((r) => r.id !== request.id);
-    await window.piBuddy.pi.extensionUi.respond({
-      type: "extension_ui_response",
-      id: request.id,
-      ...payload,
-    });
+  ): Promise<{ ok: boolean; reason?: string }> {
+    extUi.remove(request.id);
+    try {
+      const result = await window.piBuddy.pi.extensionUi.respond({
+        type: "extension_ui_response",
+        id: request.id,
+        ...payload,
+      });
+      if (!result?.ok) {
+        notify(
+          "warning",
+          result?.reason === "no-runtime"
+            ? "助手已经停止了，这个回答没能送出去"
+            : UI_EXPIRED_HINT
+        );
+      }
+      return result ?? { ok: false, reason: "unknown" };
+    } catch (err) {
+      // clientFor 抛错曾经在这里变成一条未处理的 promise rejection
+      notify("warning", UI_EXPIRED_HINT);
+      return { ok: false, reason: (err as Error).message };
+    }
   }
 
   // ---------- 生命周期 ----------
@@ -777,6 +866,10 @@ export const useAppStore = defineStore("app", () => {
     unsubscribes.push(window.piBuddy.pi.events.onEvent((e) => handleEventEnvelope(e)));
     unsubscribes.push(window.piBuddy.pi.events.onUiRequest((r) => handleUiRequestEnvelope(r)));
     unsubscribes.push(window.piBuddy.pi.events.onExit((e) => handleExitEnvelope(e)));
+    unsubscribes.push(window.piBuddy.pi.events.onUiExpire((e) => handleUiExpireEnvelope(e)));
+    unsubscribes.push(
+      window.piBuddy.pi.events.onUiExpireAll((e) => handleUiExpireAllEnvelope(e))
+    );
   }
 
   /** 解除全部推送订阅（窗口销毁 / 测试收尾）。 */
@@ -1183,8 +1276,12 @@ export const useAppStore = defineStore("app", () => {
     extStatus,
     setNotifier,
     notify,
+    handleEvent,
     handleEventEnvelope,
+    handleUiRequest,
     handleUiRequestEnvelope,
+    handleUiExpireEnvelope,
+    handleUiExpireAllEnvelope,
     handleExitEnvelope,
     dispose,
     init,

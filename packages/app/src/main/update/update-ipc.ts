@@ -32,6 +32,7 @@ import {
   agentActivity,
 } from "../lifecycle/graceful-shutdown.js";
 import { writeJsonAtomic } from "../fs-atomic.js";
+import { markerDir, writePendingUpdate } from "../health/update-markers.js";
 import { log } from "../pi/pi-ipc.js";
 import { verifyBeforeInstall } from "./release-integrity.js";
 import { UpdateService } from "./update-service.js";
@@ -137,6 +138,14 @@ export function updateService(): UpdateService {
       // 只有显式设置了这个环境变量才注入 fake provider；生产二进制里
       // 它不存在，因此这条分支在用户机器上恒不成立。
       fakeFeedUrl: process.env.PIBUDDY_FAKE_UPDATE_FEED ?? null,
+      markers: {
+        writePendingUpdate: (fromVersion, toVersion) =>
+          writePendingUpdate(markerDir(app.getPath("userData")), {
+            fromVersion,
+            toVersion,
+            startedAt: Date.now(),
+          }),
+      },
     },
     // 代际取进程启动时刻：主进程重启后必然前进，窗口 reload 时不变，
     // 正好是 shouldAcceptEnvelope 需要的语义。

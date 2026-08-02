@@ -17,6 +17,7 @@ import path from "node:path";
 import type { PiRpcClient } from "@pibuddy/pi-sdk";
 import {
   CHANNELS,
+
   extensionUiResponseSchema,
   piCompactRequestSchema,
   piForkRequestSchema,
@@ -32,9 +33,12 @@ import {
 } from "@pibuddy/contract";
 
 import * as attachments from "../attachment-registry.js";
+import { ExtensionUiService, type ExtUiHost } from "../extension-ui/ext-ui-service.js";
 import { registerHandler, forgetSender } from "../ipc-guard.js";
 import { createLogger, type Logger } from "../logger.js";
 import { buildPiSpawn, verifyRuntimeHandshake } from "../pi-launcher.js";
+import { sessionTrustFor } from "../pi-resources/pi-resources-ipc.js";
+import { describeTrust, trustArgsFor } from "../pi-resources/trust-store.js";
 import { PiSupervisor } from "../pi-supervisor.js";
 import { resolveSessionDir } from "../sessions/session-dir.js";
 import { sessionIndex } from "../sessions/session-index.js";
@@ -69,8 +73,41 @@ export function supervisor(): PiSupervisor {
   return supervisorInstance;
 }
 
+/**
+ * 全应用唯一的扩展 UI 挂起表。
+ *
+ * host 适配层刻意在这里而不是在 service 里：service 不该知道 supervisor 与
+ * PiRpcClient 的存在，否则它就没法在没有 Electron 的环境里被驱动，而
+ * timeout / 代际清理 / 定时器泄漏这三件事恰恰只有单测能查。
+ */
+let extUiInstance: ExtensionUiService | null = null;
+
+export function extUi(): ExtensionUiService {
+  if (!extUiInstance) {
+    const host: ExtUiHost = {
+      push: (targetId, channel, payload) => supervisor().push(targetId, channel, payload),
+      responderFor: (targetId) => clients.get(targetId) ?? null,
+    };
+    extUiInstance = new ExtensionUiService(host);
+    supervisor().setUiHook((targetId, generation, request) =>
+      extUiInstance!.track(targetId, generation, request)
+    );
+  }
+  return extUiInstance;
+}
+
+/** 仅供单测：丢弃挂起表与 supervisor 单例之间的绑定。 */
+export function __resetExtUi(): void {
+  extUiInstance = null;
+}
+
 export function disposeClientFor(webContentsId: number): void {
   clients.delete(webContentsId);
+  // 先作废挂起弹窗再停进程：反过来的话，广播 expire 时 supervisor 里已经
+  // 没有这个 target 的记录，信封发不出去，渲染进程会留着一排永远等不到
+  // 回答的框。
+  const generation = supervisor().currentGeneration();
+  extUi().clearGeneration(webContentsId, generation, "runtime-gone");
   supervisor().disposeTarget(webContentsId);
   forgetSender(webContentsId);
   // 窗口没了，之前签发的附件凭证一律作废。
@@ -131,11 +168,26 @@ export function registerPiIpc(): void {
       sessionPath = await assertContained(sessionDir, await resolveSessionPath(opts.sessionId, root));
     }
 
+    // project trust：RPC 模式下 pi 不弹提示（security.md:30），所以决定必须
+    // 由 PiBuddy 问完之后作为一次性参数带下来。已经写进 trust.json 的决定
+    // **不重复表达** —— 让 pi 自己读文件，两处表达同一件事必然有对不上的时候。
+    const trust = await describeTrust({
+      workspaceId: opts.workspaceId,
+      workspaceRoot: root,
+      defaultProjectTrust: "ask",
+    });
+    const trustArgs = trustArgsFor({
+      hasProjectResources: trust.hasProjectResources,
+      saved: trust.saved,
+      decision: sessionTrustFor(opts.workspaceId),
+    });
+
     const spawn = buildPiSpawn({
       packaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
       settings,
       logger: log(),
+      trustArgs,
     });
     verifyRuntimeHandshake(spawn.runtime, log());
 
@@ -175,9 +227,32 @@ export function registerPiIpc(): void {
     disposeClientFor(event.sender.id);
   });
 
+  /**
+   * 回答一条扩展弹窗。
+   *
+   * 改造前这里是一行直写：取到 client 就把响应塞进 stdin。两个后果：
+   *   - 没有 id 校验 —— 上游带 timeout 的 dialog 到期自行 auto-resolve 之后，
+   *     用户点的那个按钮发出的是一个**失效 id**，client.ts 直写 stdin，
+   *     pi 那边找不到对应 pending，静默丢弃；
+   *   - 没有 try/catch —— runtime 已经没了时 clientFor 抛错，而渲染侧的
+   *     调用方只是把那个 promise `void` 掉，于是它变成一条无人认领的
+   *     unhandled rejection。
+   *
+   * 现在两件事都由 ExtensionUiService 兜住，并把结论作为返回值送回渲染
+   * 进程：`ok:false` 时界面要给用户一句解释，而不是假装回答已经送到。
+   */
   registerHandler(CHANNELS.piUiRespond, extensionUiResponseSchema, (response, event) => {
-    clientFor(event.sender.id).respondUi(response);
+    const result = extUi().respond(event.sender.id, response);
+    if (!result.ok) {
+      log().warn("ext_ui_respond_rejected", { reason: result.reason, id: response.id });
+    }
+    return result;
   });
+
+  /** 窗口 reload 后的恢复快照。挂起表在主进程，reload 不该让它们凭空消失。 */
+  registerHandler(CHANNELS.piUiPending, voidRequestSchema, (_p, event) =>
+    extUi().snapshot(event.sender.id)
+  );
 
   // ------------------------------------------------------- 产品动作窄通道
   //

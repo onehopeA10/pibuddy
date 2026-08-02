@@ -10,8 +10,17 @@
  * 与 pi 平级：它们同样属于 pi 运行时，但不是用户能表达的「产品意图」，
  * 混在一层里会让「pi 上有哪些动作」这个问题失去确定答案。
  */
-import { CHANNELS } from "@pibuddy/contract/channels";
-import type { PiEnvelope, PiExitPayload, PiStartParams, StartResult } from "@pibuddy/contract";
+import { CHANNELS, PUSH_CHANNELS } from "@pibuddy/contract/channels";
+import type {
+  ExtUiSnapshotWire,
+  ExtensionUiRespondResult,
+  PiEnvelope,
+  PiExitPayload,
+  PiStartParams,
+  PiUiExpireAllPayload,
+  PiUiExpirePayload,
+  StartResult,
+} from "@pibuddy/contract";
 // pi 协议自身的形状归 pi-sdk 的 types.ts 所有；契约包刻意不复制一份同名类型
 // （check-contract-uniqueness 会把那算作漂移）。类型导入编译期就消失，
 // 不会给 sandbox preload 的产物带进任何运行时依赖。
@@ -92,17 +101,35 @@ export const pi = {
     stop: () => invoke<void>(CHANNELS.piStop),
   },
 
-  /** 三个通道传的都是完整的 PiEnvelope，由渲染进程 parseEnvelope 后解包。 */
+  /** 五个通道传的都是完整的 PiEnvelope，由渲染进程 parseEnvelope 后解包。 */
   events: {
     onEvent: (cb: (e: PiEnvelope<AgentEvent>) => void) =>
-      subscribe("pi:event", cb as (p: unknown) => void),
+      subscribe(PUSH_CHANNELS.piEvent, cb as (p: unknown) => void),
     onUiRequest: (cb: (r: PiEnvelope<ExtensionUiRequest>) => void) =>
-      subscribe("pi:ui-request", cb as (p: unknown) => void),
+      subscribe(PUSH_CHANNELS.piUiRequest, cb as (p: unknown) => void),
     onExit: (cb: (e: PiEnvelope<PiExitPayload>) => void) =>
-      subscribe("pi:exit", cb as (p: unknown) => void),
+      subscribe(PUSH_CHANNELS.piExit, cb as (p: unknown) => void),
+    /**
+     * 某条扩展弹窗已失效。
+     *
+     * 这条订阅是 EXT-101 的落点：上游带 timeout 的 dialog 到期会自行
+     * auto-resolve，此后本地那个 mask-closable:false 的框上每一个按钮都
+     * 已经没人接收 —— 收到它就把框关掉，并告诉用户一句话。
+     */
+    onUiExpire: (cb: (e: PiEnvelope<PiUiExpirePayload>) => void) =>
+      subscribe(PUSH_CHANNELS.piUiExpire, cb as (p: unknown) => void),
+    onUiExpireAll: (cb: (e: PiEnvelope<PiUiExpireAllPayload>) => void) =>
+      subscribe(PUSH_CHANNELS.piUiExpireAll, cb as (p: unknown) => void),
   },
 
   extensionUi: {
-    respond: (response: ExtensionUiResponse) => invoke<void>(CHANNELS.piUiRespond, response),
+    /**
+     * 回答一条弹窗。**返回值必须被检查**：主进程会因为「这条已经过期」
+     * 或「runtime 已经没了」而拒绝转发，改造前这里是 void，失败被静默吞掉。
+     */
+    respond: (response: ExtensionUiResponse) =>
+      invoke<ExtensionUiRespondResult>(CHANNELS.piUiRespond, response),
+    /** 窗口 reload 后取主进程侧的快照（挂起弹窗 / 状态 / widget / 标题）。 */
+    pending: () => invoke<ExtUiSnapshotWire>(CHANNELS.piUiPending),
   },
 };
