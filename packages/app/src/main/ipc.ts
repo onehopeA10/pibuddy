@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, shell, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -14,11 +14,22 @@ import type {
   SttTranscribeRequest,
   SttTranscribeResult,
 } from "@pibuddy/contract";
-import { buildPiSpawn } from "./pi-launcher.js";
+import { buildPiSpawn, assertRuntimeHandshake } from "./pi-launcher.js";
+import { PROTOCOL_VERSION } from "@pibuddy/contract";
+import { createLogger, type Logger } from "./logger.js";
 import { listSessions } from "./sessions-store.js";
 import { loadSettings, saveSettings, type AppSettings } from "./settings.js";
 
 const clients = new Map<number, PiRpcClient>();
+
+/** ipc 层的 logger（与 main/index.ts 写同一个目录下的同一份 JSONL）。 */
+let ipcLogger: Logger | null = null;
+function log(): Logger {
+  if (!ipcLogger) {
+    ipcLogger = createLogger({ dir: path.join(app.getPath("userData"), "logs") });
+  }
+  return ipcLogger;
+}
 
 export function disposeClientFor(webContentsId: number): void {
   const client = clients.get(webContentsId);
@@ -99,8 +110,17 @@ export function registerIpc(): void {
       const wc = event.sender;
       disposeClientFor(wc.id);
 
+      const settings = loadSettings();
+      const spawn = buildPiSpawn({
+        packaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        settings,
+        logger: log(),
+      });
+      verifyRuntime(spawn.runtime);
+
       const client = new PiRpcClient({
-        spawn: buildPiSpawn(),
+        spawn,
         cwd: opts.workspace,
         session: opts.session,
       });
@@ -208,6 +228,36 @@ export function registerIpc(): void {
       return { text: json.text ?? "" };
     }
   );
+}
+
+/**
+ * 启动握手：内置运行时必须与清单声明的版本/协议一致。
+ * 开发形态没有清单（直接跑 node_modules 里的 pi），只记一条日志不做断言。
+ */
+function verifyRuntime(runtime: ReturnType<typeof buildPiSpawn>["runtime"]): void {
+  if (runtime.source !== "bundled" || !runtime.runtimeRoot) {
+    log().info("pi_runtime_handshake_skipped", {
+      selectedRuntime: runtime.source,
+      protocolVersion: PROTOCOL_VERSION,
+    });
+    return;
+  }
+  const pkgPath = path.join(runtime.runtimeRoot, "package.json");
+  const actualVersion = (
+    JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { version?: string }
+  ).version;
+  assertRuntimeHandshake(
+    {
+      runtimeVersion: runtime.bundledVersion ?? "",
+      protocolVersion: runtime.protocolVersion ?? PROTOCOL_VERSION,
+    },
+    { version: actualVersion ?? "", protocolVersion: PROTOCOL_VERSION }
+  );
+  log().info("pi_runtime_handshake_ok", {
+    selectedRuntime: runtime.source,
+    bundledVersion: runtime.bundledVersion,
+    protocolVersion: runtime.protocolVersion,
+  });
 }
 
 function describeFile(filePath: string): PickedFile {

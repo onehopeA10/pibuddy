@@ -11,7 +11,7 @@ release/
 source/
 
 # 运行时下载物
-resources/pi-runtime/
+packages/app/resources/pi-runtime/
 
 # 日志与临时文件
 *.log

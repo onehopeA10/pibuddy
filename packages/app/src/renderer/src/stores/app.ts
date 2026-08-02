@@ -76,7 +76,8 @@ let keySeq = 0;
 export const useAppStore = defineStore("app", () => {
   // ---------- 基础状态 ----------
   const booting = ref(true);
-  const settings = ref<AppSettings>({});
+  // init() 之前的占位：形状与 schema 默认值一致（piRuntimeMode 有默认值，不能是裸 {}）
+  const settings = ref<AppSettings>({ piRuntimeMode: "bundled" });
   const startError = ref("");
 
   // ---------- 运行时状态（按 sessionId 归一化） ----------
@@ -562,6 +563,17 @@ export const useAppStore = defineStore("app", () => {
     settings.value = await window.piBuddy.settings.set(patch);
   }
 
+  /**
+   * 从 external 运行时切回内置。
+   *
+   * 只有用户点这个按钮才写设置 —— external 启动失败本身绝不自动改写
+   * piRuntimeMode，否则用户的显式选择会在一次失败后被悄悄抹掉。
+   */
+  async function switchToBundledRuntime(): Promise<void> {
+    settings.value = await window.piBuddy.settings.set({ piRuntimeMode: "bundled" });
+    await start();
+  }
+
   return {
     booting,
     settings,
@@ -597,6 +609,7 @@ export const useAppStore = defineStore("app", () => {
     newTask,
     openSession,
     setModel,
+    switchToBundledRuntime,
     setThinkingLevel,
     saveSettings,
     respondUi,

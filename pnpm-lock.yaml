@@ -14,9 +14,6 @@ importers:
 
   packages/app:
     dependencies:
-      '@earendil-works/pi-coding-agent':
-        specifier: ^0.83.0
-        version: 0.83.0(ws@8.21.1)(zod@4.4.3)
       '@pibuddy/contract':
         specifier: workspace:*
         version: link:../contract
@@ -39,6 +36,9 @@ importers:
         specifier: ^3.5.13
         version: 3.5.40(typescript@5.9.3)
     devDependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: ^0.83.0
+        version: 0.83.0(ws@8.21.1)(zod@4.4.3)
       '@types/markdown-it':
         specifier: ^14.1.2
         version: 14.1.2

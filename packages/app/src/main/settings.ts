@@ -13,7 +13,8 @@ export function loadSettings(): AppSettings {
   try {
     return parseAppSettings(JSON.parse(fs.readFileSync(settingsPath(), "utf8")));
   } catch {
-    return {};
+    // 文件不存在 / 读不动：交给 schema 生成一份带默认值的设置
+    return parseAppSettings({});
   }
 }
 

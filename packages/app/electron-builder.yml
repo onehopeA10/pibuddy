@@ -6,11 +6,24 @@ directories:
 files:
   - out/**
   - package.json
+  # runtime 通过 extraResources 单独投递，不要再被打进 asar 一份
+  - "!resources/**"
 
-# pi 智能体在运行时会用 Node 直接执行 node_modules 里的 cli.js、
-# 动态加载扩展/技能文件，放进 asar 会破坏这些路径，直接不打 asar
-asar: false
+# 应用主代码打进 asar；pi 运行时不在 asar 内，而是由
+# scripts/prepare-pi-runtime.mjs 产出后经 extraResources 原样投递到
+# process.resourcesPath/pi-runtime，主进程只按 runtime-manifest.json 定位。
+# 这样 pi 动态加载扩展/技能文件的路径全部落在普通文件系统上，
+# 不再需要为了它牺牲整个产物的 asar 保护。
+asar: true
 npmRebuild: false
+
+extraResources:
+  - from: resources/pi-runtime
+    to: pi-runtime
+
+# extraResources 会跳过被复制目录里的 node_modules（显式 filter 也无效），
+# 依赖必须由 afterPack 手动补齐，否则打包后 pi 启动即 ERR_MODULE_NOT_FOUND。
+afterPack: scripts/after-pack.cjs
 
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

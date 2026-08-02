@@ -67,6 +67,12 @@ function onDrop(): void {
           <h1>😥 启动失败</h1>
           <p style="white-space: pre-wrap; max-width: 640px">{{ store.startError }}</p>
           <n-button type="primary" @click="store.start()">重试</n-button>
+          <n-button
+            v-if="store.settings.piRuntimeMode === 'external'"
+            @click="store.switchToBundledRuntime()"
+          >
+            切回内置
+          </n-button>
           <n-button quaternary @click="store.chooseWorkspace()">换个文件夹</n-button>
         </div>
       </template>

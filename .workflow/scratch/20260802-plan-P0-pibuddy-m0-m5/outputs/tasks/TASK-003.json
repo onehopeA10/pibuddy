@@ -8,8 +8,8 @@
   "priority": "high",
   "effort": "large",
   "action": "重写 packages/app/src/main/pi-launcher.ts：删除 createRequire 全部用法，dev 分支改用 fileURLToPath(import.meta.resolve(\"@earendil-works/pi-coding-agent\")) 得到 dist/index.js 后取同级 cli.js；packaged 分支只读 path.join(process.resourcesPath, \"pi-runtime\", \"runtime-manifest.json\") 并按其中 entry 字段定位；新增 const ENV_ALLOWLIST = [\"PATH\",\"HOME\",\"USERPROFILE\",\"APPDATA\",\"LOCALAPPDATA\",\"TMP\",\"TEMP\",\"SystemRoot\",\"ComSpec\",\"LANG\",\"LC_ALL\",\"PI_CODING_AGENT_DIR\",\"PI_CODING_AGENT_SESSION_DIR\",\"HTTP_PROXY\",\"HTTPS_PROXY\",\"NO_PROXY\"] 并显式只补 ELECTRON_RUN_AS_NODE:\"1\"；删除第 28 行的 shell: isWin 改为全 argv + shell:false；新建 packages/app/scripts/prepare-pi-runtime.mjs 用 fs.cp(realpath, dest, {recursive:true, dereference:true}) 产出 packages/app/resources/pi-runtime/ 与 runtime-manifest.json {name, version, entry:\"dist/cli.js\", builtAt, protocolVersion:1, capabilities, sha256}；electron-builder.yml 把 asar:false 改为 asar:true 并用 extraResources 投递 pi-runtime。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed_with_deviations",
+  "completed_at": "2026-08-02T12:12:19.017Z",
   "actual_duration": null,
   "scope": "packages/app/src/main/pi-launcher.ts + 构建流水线",
   "focus_paths": [

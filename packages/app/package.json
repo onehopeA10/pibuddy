@@ -10,11 +10,11 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "dist": "electron-vite build && electron-builder",
+    "prepare:runtime": "node scripts/prepare-pi-runtime.mjs",
+    "dist": "node scripts/prepare-pi-runtime.mjs && electron-vite build && electron-builder",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.83.0",
     "@pibuddy/contract": "workspace:*",
     "@pibuddy/pi-sdk": "workspace:*",
     "highlight.js": "^11.10.0",
@@ -24,6 +24,7 @@
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.83.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.10.0",
     "@vitejs/plugin-vue": "^6.0.0",
