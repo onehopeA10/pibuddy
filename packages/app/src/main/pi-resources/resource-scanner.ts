@@ -360,17 +360,29 @@ async function scanSettingsArrays(
       diagnostics.push("已在设置中声明，但安装目录不存在（pi 会在下次启动时补装）");
     }
 
+    // 读一次包自己的 package.json：真名与版本号都在那里，只看目录名会把
+    // `pibuddy-probe-pkg` 显示成 `probe-pkg`。读不到就退回按目录名来。
+    const manifest =
+      (await readJsonFile(path.join(parsed.installDir, "package.json"), ctx)) ?? {};
+    const realName = typeof manifest.name === "string" ? manifest.name : parsed.name;
+    const version = typeof manifest.version === "string" ? manifest.version : undefined;
+
     ctx.add({
       kind: "package",
-      name: parsed.name,
-      version: undefined,
+      name: realName,
+      version,
       source: args.source,
       path: parsed.installDir,
       diagnostics,
       spec,
       pinned: parsed.pinned,
-      disabled: isDisabled(args.disabled, parsed.name, parsed.installDir),
+      disabled: isDisabled(args.disabled, realName, parsed.installDir),
     });
+
+    // 设置里声明的包同样会把自己的技能 / 扩展带进 pi。不在这里展开的话，
+    // 用户装完一个本地路径包，「包」那一组多了一条、技能一条不变 ——
+    // 真机实测就是这个表现，用户只能盲发 `/skill:xxx` 试。
+    await scanPackageOwnedResources(ctx, parsed.installDir, manifest, args.disabled);
   }
 
   // extensions / skills：条目是文件或目录路径。
@@ -524,6 +536,54 @@ async function scanFlatDir(
 }
 
 /**
+ * 枚举一个 pi 包自己带的资源（skills / extensions / prompts / themes）。
+ *
+ * 目录来源有两处，都要认（packages.md「Package Structure」）：
+ *   1. `package.json` 的 `pi` 键显式声明的相对路径；
+ *   2. 约定目录（同名目录直接放在包根下）。
+ *
+ * 这些资源的 source 记为 `package` —— 它们既不是用户手写的，也不属于项目，
+ * 用户对它们的处置方式是「卸载这个包」而不是「删掉这个文件」。
+ */
+async function scanPackageOwnedResources(
+  ctx: ScanContext,
+  packageDir: string,
+  manifest: Record<string, unknown>,
+  disabled: Set<string>
+): Promise<void> {
+  const piField = (manifest.pi ?? {}) as Record<string, unknown>;
+
+  const declared = (key: string): string[] => {
+    const value = piField[key];
+    if (typeof value === "string") return [value];
+    if (Array.isArray(value)) return value.map(String);
+    return [];
+  };
+
+  const dirsFor = (key: string): string[] => {
+    const set = new Set<string>([...declared(key), key]);
+    return [...set].map((rel) => path.resolve(packageDir, rel));
+  };
+
+  for (const dir of dirsFor("skills")) {
+    if (!(await isDirectory(dir))) continue;
+    await scanSkillDir(ctx, { dir, source: "package", disabled, allowRootMarkdown: true });
+  }
+
+  const flat: { key: string; kind: PiResourceKind; extensions: string[] }[] = [
+    { key: "extensions", kind: "extension", extensions: [".ts", ".js", ".mjs"] },
+    { key: "prompts", kind: "prompt", extensions: [".md"] },
+    { key: "themes", kind: "theme", extensions: [".json"] },
+  ];
+  for (const { key, kind, extensions } of flat) {
+    for (const dir of dirsFor(key)) {
+      if (!(await isDirectory(dir))) continue;
+      await scanFlatDir(ctx, { dir, kind, extensions, source: "package", disabled });
+    }
+  }
+}
+
+/**
  * 这个 package.json 描述的是一个 pi 包吗？
  *
  * 判据来自 pi docs/packages.md「Creating a Pi Package」：包用 `package.json`
@@ -602,6 +662,11 @@ async function scanPackageTree(
         pinned: false,
         disabled: isDisabled(disabled, name, dir),
       });
+      // 包**带进来的资源**同样要列出来。真机上抓到的缺口：装完一个带技能的
+      // 包，「包」那一组多了一条，而「技能」那一组一条不变 —— 用户看不到
+      // 自己刚装的技能，只能靠盲发 `/skill:xxx` 试。skills.md 明确 pi 从
+      // 包的 `skills/` 目录或 `package.json` 的 `pi.skills` 里加载技能。
+      await scanPackageOwnedResources(ctx, dir, manifest, disabled);
     }
     return;
   }

@@ -8,9 +8,9 @@
   "priority": "high",
   "effort": "large",
   "action": "在 packages/app/src/main/extension-ui/ext-ui-service.ts 新建 `class ExtensionUiService`，持有 `Map<string, { request: ExtensionUiRequest; runtimeGeneration: number; timer: NodeJS.Timeout | null }>`；收到带 `timeout` 的 dialog 请求时 `setTimeout(() => this.expire(id), request.timeout)`，到期向 renderer 发 `pi:ui-expire` 并从表中删除；`respond(id, payload)` 先校验 id 是否仍在表中，不在则返回 `{ ok: false, reason: 'expired' }` 而不是直写 stdin；runtime 重启或 session 切换时按 generation 清空整表并广播 `pi:ui-expire-all`。packages/pi-sdk/src/types.ts 的 AgentEvent 联合类型补上 `{ type: 'summarization_retry_scheduled'; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }`、`{ type: 'summarization_retry_attempt_start'; source: 'compaction' | 'branchSummary'; reason?: string }`、`{ type: 'summarization_retry_finished' }`。ExtensionUiRequest 的 widgetKey/widgetLines/widgetPlacement/title 走新增的 widget 与 title 处理分支。",
-  "status": "pending",
-  "completed_at": null,
-  "actual_duration": null,
+  "status": "completed",
+  "completed_at": "2026-08-03T03:25:00+08:00",
+  "actual_duration": "约 1.5h（含真机验证与三处回归修复）",
   "scope": "packages/pi-sdk/src, packages/app/src/main/extension-ui, packages/app/src/main/pi-resources, packages/app/src/renderer/src/components",
   "focus_paths": [
     "packages/pi-sdk/src/",

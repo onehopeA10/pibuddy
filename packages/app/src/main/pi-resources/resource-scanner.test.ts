@@ -266,3 +266,41 @@ describe("只登记真正的 pi 包，不登记传递依赖", () => {
     await fs.rm(ws, { recursive: true, force: true });
   });
 });
+
+/**
+ * 真机上抓到的缺口：装完一个带技能的包，「包」那一组多了一条，而「技能」
+ * 那一组一条不变 —— 用户看不到自己刚装的技能，只能盲发 `/skill:xxx` 试。
+ * skills.md 明确 pi 会从包的 `skills/` 目录或 `pi.skills` 声明里加载技能。
+ */
+describe("包自带的资源也要列出来", () => {
+  it("包里的 skills/ 与 extensions/ 以 source=package 出现在列表里", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "pibuddy-owned-"));
+    const pkg = path.join(home, ".pi", "agent", "npm", "node_modules", "with-stuff");
+    await fs.mkdir(path.join(pkg, "skills", "packed-skill"), { recursive: true });
+    await fs.mkdir(path.join(pkg, "extensions"), { recursive: true });
+    await fs.writeFile(
+      path.join(pkg, "package.json"),
+      JSON.stringify({ name: "with-stuff", version: "2.0.0", pi: { skills: ["skills"] } }),
+      "utf8"
+    );
+    await fs.writeFile(
+      path.join(pkg, "skills", "packed-skill", "SKILL.md"),
+      "---\nname: packed-skill\n---\n",
+      "utf8"
+    );
+    await fs.writeFile(path.join(pkg, "extensions", "packed-ext.ts"), "export default () => {};", "utf8");
+
+    const ws = await fs.mkdtemp(path.join(os.tmpdir(), "pibuddy-ws2-"));
+    const result = await scanResources({ workspaceRoot: ws, workspaceId: "ws", homeDir: home });
+
+    const skill = result.resources.find((r) => r.kind === "skill" && r.name === "packed-skill");
+    const ext = result.resources.find((r) => r.kind === "extension" && r.name.includes("packed-ext"));
+    expect(skill).toBeTruthy();
+    expect(skill?.source).toBe("package");
+    expect(ext).toBeTruthy();
+    expect(ext?.source).toBe("package");
+
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(ws, { recursive: true, force: true });
+  });
+});
