@@ -41,6 +41,20 @@ task 原文要求 0 行；用户指令明确覆盖为「远端已建 https://git
 $ git ls-files | grep -c "^source/"
 0
 ```
+推送结果：
+```
+$ git push -u origin main
+branch 'main' set up to track 'origin/main'.
+ * [new branch]      main -> main
+push exit=0
+$ git rev-parse origin/main
+7c69e708eaba735ab3baebd987c85900db68ad03
+```
+**协议由 ssh 改为 https**：用户指令说明 git 协议为 ssh，但 `git@github.com` 实测被拦截
+（`Connection closed by 198.18.0.21 port 22` —— 198.18.0.0/15 是基准测试保留段，
+说明本机有代理/VPN 劫持了 22 端口）。改用 `https://github.com/onehopeA10/pibuddy.git`
++ `gh auth setup-git` 的 credential helper 推送成功。若要恢复 ssh，可改走 443 端口
+（`ssh.github.com`）或调整代理规则。
 
 ### C3 `rev-list --count HEAD >= 1` 且 `status --porcelain` 为空 — PASS
 ```
@@ -255,3 +269,19 @@ $ rg -c 'grep -rc' doc/baseline-2026-08-02.md
 4. **CI 从未真实运行过**：workflow 文件已推送但本轮未触发/观察 GitHub Actions 的实际结果。ubuntu runner 上 `pnpm build`（electron-vite build）能否顺利下载 Electron 二进制、`.npmrc` 里的 `electron_mirror=https://npmmirror.com/mirrors/electron/` 在 GitHub 网络下是否可达，都是未验证项。**下一个碰 CI 的 task 应先看一次 Actions 运行记录。**
 
 5. `packages/pi-sdk.zip` 与 `packages/app/tsconfig.web.zip` 是仓库里遗留的两个 zip 产物（共 134 KB），已随基线 commit 进入历史。不属于本任务 scope，未删除。
+
+6. **第 1 个 commit（基线快照）里的 `pnpm-lock.yaml` 已经含 vitest**，因为 `pnpm install` 发生在 `git init` 之前，而同一 commit 的 `package.json` 是还原后的旧版。后果：在 commit `38bcfac` 上跑 `pnpm install --frozen-lockfile` 会失败。HEAD (`7c69e70`) 上已实测通过：
+```
+$ pnpm install --frozen-lockfile
+Done in 1s using pnpm v10.30.3
+frozen exit=0
+```
+CI 只在 HEAD 及之后的提交上运行，不受影响；但**不要把 `38bcfac` 单独 checkout 出来当可构建快照用**。
+
+7. **最终收尾三连的真实输出**（`origin/main` = `7c69e70`，`git status --porcelain` 为空）：
+```
+$ pnpm typecheck   -> exit 0  (pi-sdk Done + app Done)
+$ pnpm -w test     -> exit 0  (10 passed (10))
+$ pnpm build       -> exit 0  (renderer 2929 modules, built in 7.36s)
+$ node scripts/check-test-discovery.mjs -> exit 0 (discovered 1 / onDisk 1)
+```
