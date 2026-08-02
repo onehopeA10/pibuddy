@@ -12,16 +12,28 @@ import fs from "node:fs";
 import path from "node:path";
 
 export function writeJsonAtomic(filePath: string, value: unknown): void {
+  writeFileAtomic(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/**
+ * 同一条写入序列的字节形态（FS-101 的文件保存走这里）。
+ *
+ * 用户的源文件比设置文件更经不起半截写：编辑器保存到一半掉电，留下的是
+ * 一个被截断的 .ts。writeJsonAtomic 委托到本函数，全仓仍然只有这一条
+ * 「写文件」的实现。
+ */
+export function writeFileAtomic(filePath: string, data: string | Uint8Array): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
 
   const tmpPath = `${filePath}.tmp`;
-  const text = `${JSON.stringify(value, null, 2)}\n`;
+  const text = data;
 
   let fd: number | null = null;
   try {
     fd = fs.openSync(tmpPath, "w");
-    fs.writeFileSync(fd, text, "utf8");
+    if (typeof text === "string") fs.writeFileSync(fd, text, "utf8");
+    else fs.writeFileSync(fd, text);
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fd = null;

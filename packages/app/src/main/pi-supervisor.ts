@@ -39,6 +39,7 @@ import {
   type ForwarderTarget,
 } from "./pi/event-forwarder.js";
 import { agentActivity } from "./lifecycle/graceful-shutdown.js";
+import { observeToolEvent } from "./changeset/tool-watch.js";
 
 /** 转发目标同时要能被按 id 索引（生产即 Electron 的 WebContents.id）。 */
 export interface SupervisorTarget extends ForwarderTarget {
@@ -160,6 +161,15 @@ export class PiSupervisor implements PiRuntimeSupervisor {
       // 更新安装拦在门外。
       if (e.type === "agent_start") agentActivity.markBusy(client.runtimeId);
       else if (e.type === "agent_settled") agentActivity.markSettled(client.runtimeId);
+      // 文件类工具的执行登记成待审阅变更（FS-102）。放在转发**之前**：
+      // before 快照必须在工具动手之前抓到，而 tool_execution_start 到达这里
+      // 与到达渲染进程之间没有别的同步点。observeToolEvent 自己吞掉全部异常，
+      // 一次记账失败不会让对话停下来。
+      void observeToolEvent(e, {
+        workspaceId: record.ctx.workspaceId,
+        sessionId: record.ctx.sessionId,
+        turnId: `${record.ctx.runtimeId}#${record.ctx.generation}`,
+      });
       forwarder.push(this.nextEnvelope(record, e));
     });
     client.on("ui_request", (r: ExtensionUiRequest) => {

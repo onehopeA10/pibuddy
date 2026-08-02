@@ -16,6 +16,9 @@ import ProjectTrustDialog from "./ProjectTrustDialog.vue";
 import OnboardingWizard from "./OnboardingWizard.vue";
 import ProviderCenter from "./ProviderCenter.vue";
 import UsagePanel from "./UsagePanel.vue";
+import FileTreePanel from "./FileTreePanel.vue";
+import FileEditorPane from "./FileEditorPane.vue";
+import ChangesetPanel from "./ChangesetPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -55,6 +58,15 @@ watch(
 );
 
 const dragging = ref(0);
+
+/**
+ * 三栏的可折叠开关（FS-101 / FS-102）。
+ *
+ * 默认都关着：绝大多数会话里用户只是想说句话，一进来就被文件树和变更
+ * 面板挤掉一半聊天区不是帮忙。两个开关都放在顶栏右侧，随手可开。
+ */
+const filesOpen = ref(false);
+const changesOpen = ref(false);
 
 onMounted(() => {
   void store.init();
@@ -127,7 +139,10 @@ function onDrop(): void {
          是「什么被关了、我现在能做什么」，而不是又一条更新提示。 -->
     <slot name="banner"><SafeModeBanner /><UpdateBanner /></slot>
 
-    <slot name="sidebar"><Sidebar /></slot>
+    <slot name="sidebar">
+      <Sidebar />
+      <FileTreePanel v-if="filesOpen" />
+    </slot>
     <div class="main-col">
       <TopBar />
 
@@ -160,7 +175,27 @@ function onDrop(): void {
       </template>
       <template v-else>
         <slot name="main">
+          <div class="workspace-toggles">
+            <n-button
+              size="tiny"
+              :type="filesOpen ? 'primary' : 'default'"
+              quaternary
+              @click="filesOpen = !filesOpen"
+            >
+              📁 文件
+            </n-button>
+            <n-button
+              size="tiny"
+              :type="changesOpen ? 'primary' : 'default'"
+              quaternary
+              @click="changesOpen = !changesOpen"
+            >
+              🔀 改动
+            </n-button>
+          </div>
           <ChatView />
+          <FileEditorPane v-if="filesOpen" />
+          <ChangesetPanel v-if="changesOpen" />
           <InputBar />
         </slot>
       </template>

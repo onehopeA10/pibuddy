@@ -18,6 +18,7 @@
  *   shell     用系统程序打开 / 定位（入参只有凭证）
  *   stt       语音转写
  *   update    应用自更新（状态快照 + 九个动作 + 事件订阅）
+ *   workspace 工作区文件服务（树 / 搜索 / 读写 / 变更集），只认相对路径
  */
 import { pi } from "./pi.js";
 import { piResources } from "./piResources.js";
@@ -30,6 +31,7 @@ import { shell } from "./shell.js";
 import { stt } from "./stt.js";
 import { update } from "./update.js";
 import { diagnostics } from "./diagnostics.js";
+import { workspace } from "./workspace.js";
 
 export const api = {
   pi,
@@ -44,6 +46,8 @@ export const api = {
   stt,
   update,
   diagnostics,
+  /** 工作区文件服务与 Agent 变更集（FS-101 / FS-102）。出入参一律相对路径 */
+  workspace,
 };
 
 export type PiBuddyApi = typeof api;

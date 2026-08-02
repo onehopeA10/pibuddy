@@ -187,3 +187,46 @@ describe("放行语义（CT-18 · 全计划唯一口径）", () => {
     expect(resolved.isFile).toBe(true);
   });
 });
+
+/**
+ * TASK-015 追加：FS-101 让「解析工作区里的一条路径」变成一个每次列目录、
+ * 每次保存都要走的高频动作，因此这几条边界必须在同一个 spec 里钉住 ——
+ * 收容原语全计划只有 resolveInWorkspace 一个实现（CT-18），它的判定漂了，
+ * 文件树、编辑器、搜索、变更集会一起漂。
+ */
+describe("CT-18 追加：junction 与含中文空格的合法路径", () => {
+  it("Windows junction 指向工作区外时被拒（realpath 会穿透 junction）", async () => {
+    if (process.platform !== "win32") return;
+    const reg = await freshRegistry();
+    const id = reg.registerWorkspace(workspaceDir).workspaceId;
+
+    const outside = path.join(tmpRoot, "outside-dir");
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, "loot.txt"), "x", "utf8");
+
+    const junction = path.join(workspaceDir, "linked");
+    try {
+      fs.symlinkSync(outside, junction, "junction");
+    } catch {
+      // 建不了 junction 就跳过，而不是假装通过
+      return;
+    }
+    await expect(reg.resolveInWorkspace(id, "linked/loot.txt")).rejects.toThrow(
+      /PATH_ESCAPES_WORKSPACE/
+    );
+  });
+
+  it("路径里含中文与空格的合法文件照常放行", async () => {
+    const reg = await freshRegistry();
+    const id = reg.registerWorkspace(workspaceDir).workspaceId;
+    const dir = path.join(workspaceDir, "我的 文档");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "读我 说明.txt"), "ok", "utf8");
+
+    const resolved = await reg.resolveInWorkspace(id, "我的 文档/读我 说明.txt", {
+      requireFile: true,
+    });
+    expect(resolved.isFile).toBe(true);
+    expect(resolved.relativePath.split("\\").join("/")).toBe("我的 文档/读我 说明.txt");
+  });
+});

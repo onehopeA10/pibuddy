@@ -37,7 +37,8 @@ describe("api 聚合对象", () => {
     // update 是 UPD-001 加进来的第八个命名空间（九个动作 + 一个事件订阅）；
     // piResources 是 EXT-102（资源中心 + project trust）；
     // diagnostics 是 OBS-101（诊断包预览 / 导出 / 健康报告）；
-    // providers 是 PROV-101（Provider 与模型中心 + 用量统计）。
+    // providers 是 PROV-101（Provider 与模型中心 + 用量统计）；
+    // workspace 是 FS-101 / FS-102（文件树 / 搜索 / 读写 / Agent 变更集）。
     // 新增命名空间 = 新增 api/<ns>.ts + 在 index.ts 加一行 + 在这里加一行，
     // 三处对不上就说明有人绕过了那条唯一的接口面定义。
     expect(Object.keys(api).sort()).toEqual([
@@ -52,6 +53,7 @@ describe("api 聚合对象", () => {
       "shell",
       "stt",
       "update",
+      "workspace",
     ]);
   });
 

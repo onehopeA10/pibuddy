@@ -95,6 +95,32 @@ export const CHANNELS = {
   shellShowInFolder: "shell:show-in-folder",
   attachmentRevokeAll: "attachment:revoke-all",
 
+  // ---- Workspace 文件服务（FS-101，恰 8 条） ----
+  //
+  // 八条通道的入参与返回**只有 relativePath**：canonical root 与文件的
+  // 真实位置只活在主进程，渲染进程拿到一个相对路径既推断不出磁盘布局，
+  // 也表达不出「读工作区外面的东西」这个意图。收容判定由 main 侧的
+  // resolveInWorkspace 唯一实现（CT-18）。
+  workspaceTreeList: "workspace:tree-list",
+  workspaceTreeWatch: "workspace:tree-watch",
+  workspaceSearch: "workspace:search",
+  workspaceSearchCancel: "workspace:search-cancel",
+  workspaceFileRead: "workspace:file-read",
+  workspaceFileSave: "workspace:file-save",
+  workspaceFileMutate: "workspace:file-mutate",
+  /** 工作区内的文件 → 结构化附件引用（八字段，标识恒为 token） */
+  workspaceAttachmentCreate: "workspace:attachment-create",
+
+  // ---- Agent 变更集（FS-102，恰 4 条） ----
+  //
+  // 接受一条变更是**唯一**会由渲染进程触发的、对用户文件的写入。因此它
+  // 只接受一个不透明的 changeset id：写什么内容、写到哪个文件，全部由
+  // 主进程按 id 查出来，渲染进程一个字节都决定不了。
+  changesetQuery: "changeset:query",
+  changesetAccept: "changeset:accept",
+  changesetReject: "changeset:reject",
+  changesetAcceptBatch: "changeset:accept-batch",
+
   // ---- 语音 ----
   sttTranscribe: "stt:transcribe",
 
@@ -183,6 +209,14 @@ export const PUSH_CHANNELS = {
   piUiExpireAll: "pi:ui-expire-all",
   /** 更新状态变更；payload 是 UpdateEnvelope（不是 PiEnvelope，语义不同） */
   updateEvent: "update:event",
+  /**
+   * 某个目录的内容变了（FS-101）。
+   *
+   * 载荷只有 `{workspaceId, relativePath}`：告诉渲染进程「这一层脏了，
+   * 你要的话再来 list 一次」，而不是把整层条目推过去 —— 推整层的话，
+   * 一次 `npm install` 会在几秒内推出几万条消息。
+   */
+  workspaceTreeEvent: "workspace:tree-event",
 } as const;
 
 export type InvokeChannel = (typeof CHANNELS)[keyof typeof CHANNELS];

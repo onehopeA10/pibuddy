@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { registerIpc, disposeClientFor } from "./ipc.js";
+import { disposeAllWorkspaceResources } from "./workspace/workspace-ipc.js";
 import { configureLogging, createLogger, type Logger } from "./logger.js";
 import { runPostUpdateHealthCheck } from "./health/startup-health.js";
 import { applyWindowPolicy } from "./security/window-policy.js";
@@ -43,7 +44,13 @@ function createWindow(): void {
   applyWindowPolicy(win, { logger: mainLogger() });
 
   const wcId = win.webContents.id;
-  win.on("closed", () => disposeClientFor(wcId));
+  win.on("closed", () => {
+    disposeClientFor(wcId);
+    // 文件树 watcher 与搜索子进程都是**看不见的**泄漏：前者的表现是几小时后
+    // 文件树停止刷新，后者的表现是任务管理器里越攒越多的子进程。两者都不
+    // 报错，只能靠在这里显式收掉。
+    disposeAllWorkspaceResources();
+  });
 
   // 主窗口可交互之后才排更新检查（30s 后首检，见 UpdateService）。
   // 不在 whenReady 里排：那会儿主线程正忙着渲染首屏，一次网络请求足以
@@ -115,6 +122,7 @@ if (!gotLock) {
     // 更新检查的定时器已经 unref 过，这里再显式拆一次：崩溃现场里
     // 「进程退不掉」的原因往往就是某个没人清的 timer。
     disposeUpdateService();
+    disposeAllWorkspaceResources();
     app.quit();
   });
 }

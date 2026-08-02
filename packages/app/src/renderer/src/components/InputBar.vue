@@ -86,6 +86,23 @@ function onDraftChanged(): void {
  */
 watch([() => store.editorText, images, files], onDraftChanged, { deep: true });
 
+/**
+ * 取走文件树推过来的附件。
+ *
+ * `immediate: true` 是必需的：用户完全可能在 InputBar 挂载之前就从文件树
+ * 点了「加入输入框附件」（面板是可折叠的，挂载顺序不固定）。少了它，
+ * 那一次点击会静默丢失 —— 三大门禁全绿，只有真机点一遍才看得出来。
+ */
+watch(
+  () => store.inboundAttachments,
+  (list) => {
+    if (list.length === 0) return;
+    files.value = [...files.value, ...list];
+    store.inboundAttachments = [];
+  },
+  { immediate: true, deep: true }
+);
+
 // ---------- 附件 ----------
 
 function addImageFromFile(file: File): void {
@@ -292,7 +309,9 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
         </span>
         <span v-for="(f, i) in files" :key="`file-${i}`" class="attach-chip">
           <span>{{ f.kind === "video" ? "🎬" : "📎" }}</span>
-          <span class="name">{{ f.name }}</span>
+          <!-- 有相对路径就显示相对路径：同名文件靠它区分，而绝对路径
+               从主进程起就没有出口 -->
+          <span class="name" :title="f.relativePath ?? f.name">{{ f.relativePath ?? f.name }}</span>
           <span class="close" @click="files.splice(i, 1)">✕</span>
         </span>
       </div>

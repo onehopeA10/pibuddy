@@ -266,12 +266,18 @@ export function registerPiIpc(): void {
     let message = payload.message;
     const tokens = payload.attachmentTokens ?? [];
     if (tokens.length > 0) {
-      const paths: string[] = [];
+      // 结构化附件清单（FS-101）：工作区内的附件按 **relativePath** 呈现 ——
+      // pi 的工作目录就是工作区 root，相对路径它解得开，而绝对路径一旦进了
+      // 提示词，就等于把本机磁盘布局连同用户名一起送给了模型。
+      // 工作区外的单文件授权（用户经系统对话框亲手选的）没有 root 可相对，
+      // 只能给绝对路径 —— 那是一次显式手势的结果，不是渲染进程能构造的。
+      const lines: string[] = [];
       for (const token of tokens) {
-        paths.push(await attachments.resolvePath(token, { capability: "read" }));
+        const record = await attachments.resolveAttachment(token, { capability: "read" });
+        const shown = record.workspaceId ? record.relativePath : record.canonicalPath;
+        lines.push(`- ${shown}（${record.mimeType}，${record.size} 字节）`);
       }
-      const block = paths.map((p) => `- ${p}`).join("\n");
-      message = `${message}\n\n[用户提供的文件]\n${block}`.trim();
+      message = `${message}\n\n[附件]\n${lines.join("\n")}`.trim();
     }
     return client.send({
       type: "prompt",

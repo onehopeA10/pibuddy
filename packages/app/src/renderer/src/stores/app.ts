@@ -184,8 +184,9 @@ export interface SendOptions {
    * 非图片附件的能力凭证。
    *
    * 早先这里是 `files: PickedFile[]`，渲染进程拿着绝对路径自己往提示词里
-   * 拼「[用户提供的文件]」块。现在只传 token，路径由主进程换回来后拼接 ——
-   * 渲染进程从头到尾不知道这些文件在磁盘上的哪里。
+   * 拼附件清单。现在只传 token：清单由主进程按结构化引用生成，工作区内的
+   * 附件一律以 relativePath 呈现 —— 渲染进程从头到尾不知道这些文件在磁盘
+   * 上的哪里，模型也拿不到本机的目录结构。
    */
   attachments?: AttachmentRef[];
   /**
@@ -1240,6 +1241,16 @@ export const useAppStore = defineStore("app", () => {
   /** 草稿里的附件条目（能力凭证，不含路径）。由 InputBar 同步过来。 */
   const draftAttachments = ref<unknown[]>([]);
 
+  /**
+   * 从文件树「加入输入框附件」推过来的结构化引用，由 InputBar 取走后清空。
+   *
+   * 走一个中转队列而不是让文件树直接写 InputBar 的局部 `files`：跨组件
+   * 直接改对方的 ref 会让「附件到底归谁所有」变成一个要读两个文件才能
+   * 回答的问题，而那种所有权含糊的状态最后一定会出现「清空了一边、另一边
+   * 还留着」的不一致。
+   */
+  const inboundAttachments = ref<AttachmentRef[]>([]);
+
   /** 上一次草稿写入失败的原因；不展示给用户，只用于诊断与单测。 */
   const lastDraftError = ref("");
 
@@ -1417,6 +1428,7 @@ export const useAppStore = defineStore("app", () => {
     queue,
     localQueue,
     draftAttachments,
+    inboundAttachments,
     statusTexts,
     uiRequests,
     editorText,

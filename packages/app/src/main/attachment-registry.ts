@@ -23,8 +23,8 @@
  * 重新嗅探 magic bytes，声明的类型与实际字节不符即拒绝。
  */
 import { shell } from "electron";
-import type { AttachmentRef } from "@pibuddy/contract";
-import { randomBytes } from "node:crypto";
+import type { AttachmentDescriptor, AttachmentRef } from "@pibuddy/contract";
+import { createHash, randomBytes } from "node:crypto";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
@@ -39,6 +39,20 @@ export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 /** 附件能力：读成 base64 内联给模型 / 用系统默认程序打开 / 在文件管理器里定位。 */
 export type AttachmentCapability = "read" | "open" | "reveal";
 
+/**
+ * 访问级别（FS-101 的结构化附件）。
+ *
+ * 与上面的 `capabilities` 是两个正交的轴：capabilities 说「能拿它做哪几
+ * 类动作」（读成 base64 / 打开 / 定位），access 说「能不能往回写」。
+ * 分开是因为「读一张图给模型看」和「让 Agent 改这个文件」是完全不同的
+ * 授权 —— 用一个数组同时表达两件事，迟早有人把 write 加进那个数组里。
+ *
+ * **签发即校验**：`resolveAttachment({ access: "read-write" })` 在记录是
+ * `read` 时直接拒。只签发不校验的能力字段等于没有能力控制，而且不会有
+ * 任何报错 —— 那种字段的存在本身就是误导。
+ */
+export type AttachmentAccess = "read" | "read-write";
+
 /** 附件类型直接取自契约，避免 main 侧另立一套同名枚举而与渲染侧漂移。 */
 export type AttachmentKind = AttachmentRef["kind"];
 
@@ -50,6 +64,16 @@ export interface AttachmentRecord {
   size: number;
   kind: AttachmentKind;
   capabilities: AttachmentCapability[];
+  /** 读 / 读写。写请求经 resolveAttachment({access:"read-write"}) 校验 */
+  access: AttachmentAccess;
+  /** 相对工作区 root 的路径；工作区外的单文件授权取文件名 */
+  relativePath: string;
+  /** 用于界面显示的来源名（= basename），与 relativePath 分开是为了让
+   *  附件条在窄侧栏里也有东西可显示 */
+  sourceName: string;
+  mimeType: string;
+  /** 签发时刻的全文件 sha256，供变更集与冲突检测比对 */
+  sha256: string;
   /** 归属工作区；为 null 表示由用户经系统文件对话框显式授权的单文件 */
   workspaceId: string | null;
   /** 归属会话；会话切换时按它批量撤销 */
@@ -84,6 +108,40 @@ export function kindOf(filePath: string): AttachmentKind {
   if (IMAGE_EXT.has(ext)) return "image";
   if (VIDEO_EXT.has(ext)) return "video";
   return "other";
+}
+
+/**
+ * 按扩展名给出声明 MIME。
+ *
+ * 声明值只是给 UI 显示与给模型做提示用的：图片的**真实**类型由 readImage
+ * 里的 magic bytes 判定，那里才是有安全含义的那一处。这里不做嗅探是
+ * 刻意的 —— 为了填一个显示字段去把每个附件读一遍首字节不划算。
+ */
+const MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".svg": "image/svg+xml",
+  ".pdf": "application/pdf",
+  ".json": "application/json",
+  ".md": "text/markdown",
+  ".txt": "text/plain",
+  ".csv": "text/csv",
+  ".html": "text/html",
+  ".css": "text/css",
+  ".js": "text/javascript",
+  ".ts": "text/plain",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".zip": "application/zip",
+};
+
+export function mimeTypeOf(filePath: string): string {
+  return MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? "application/octet-stream";
 }
 
 // ---------------------------------------------------------------- magic bytes
@@ -140,7 +198,15 @@ export interface IssueOptions {
   workspaceId?: string | null;
   sessionId?: string | null;
   capabilities?: AttachmentCapability[];
+  /** 默认 read。给 Agent 用来落盘的附件才需要 read-write */
+  access?: AttachmentAccess;
   now?: number;
+}
+
+/** 全文件 sha256。附件都是用户亲手选的单个文件，整读一遍是可接受的代价。 */
+async function hashFile(absPath: string): Promise<string> {
+  const buffer = await fsp.readFile(absPath);
+  return createHash("sha256").update(buffer).digest("hex");
 }
 
 /**
@@ -159,10 +225,14 @@ export async function issue(
   if (!stat.isFile()) throw new Error(`ATTACHMENT_NOT_A_FILE: ${absPath}`);
 
   const workspaceId = options.workspaceId ?? null;
+  // 工作区外的单文件授权（系统文件对话框 / 拖拽）没有 root 可相对，
+  // relativePath 退化成文件名 —— 渲染进程仍然拿不到任何目录信息。
+  let relativePath = path.basename(canonicalPath);
   if (workspaceId) {
     const record = lookupWorkspace(workspaceId);
     if (!record) throw new Error(`WORKSPACE_UNKNOWN: ${workspaceId}`);
     await assertContained(record.root, canonicalPath);
+    relativePath = path.relative(record.root, canonicalPath).split(path.sep).join("/");
   }
 
   const token = randomBytes(24).toString("base64url");
@@ -173,6 +243,11 @@ export async function issue(
     size: stat.size,
     kind: kindOf(canonicalPath),
     capabilities: options.capabilities ?? ["read", "open", "reveal"],
+    access: options.access ?? "read",
+    relativePath,
+    sourceName: path.basename(canonicalPath),
+    mimeType: mimeTypeOf(canonicalPath),
+    sha256: await hashFile(canonicalPath),
     workspaceId,
     sessionId: options.sessionId ?? null,
     expiresAt: now + ATTACHMENT_TTL_MS,
@@ -181,10 +256,41 @@ export async function issue(
   return entry;
 }
 
+/**
+ * 结构化附件引用（裁定2）—— **取代「把绝对路径当可信输入」的旧形态**。
+ *
+ * 返回对象恰好八个字段，标识恒为 `token`。这里刻意不返回 AttachmentRecord
+ * 本身：那上面挂着 canonicalPath，一次「顺手把整条记录 return 出去」就把
+ * 收敛掉的绝对路径又送回渲染进程了。
+ */
+export async function createAttachment(
+  absPath: string,
+  options: IssueOptions = {}
+): Promise<AttachmentDescriptor> {
+  const record = await issue(absPath, options);
+  return toDescriptor(record);
+}
+
+/** 记录 → 八字段结构化引用。转换收在这里，各 handler 就没机会多带字段。 */
+export function toDescriptor(record: AttachmentRecord): AttachmentDescriptor {
+  return {
+    token: record.token,
+    capability: record.access,
+    relativePath: record.relativePath,
+    sourceName: record.sourceName,
+    mimeType: record.mimeType,
+    sizeBytes: record.size,
+    sha256: record.sha256,
+    expiresAt: record.expiresAt,
+  };
+}
+
 // ---------------------------------------------------------------- 兑付
 
 export interface ResolveOptions {
   capability?: AttachmentCapability;
+  /** 声明本次是不是写请求。read 记录遇上 read-write 请求直接拒 */
+  access?: AttachmentAccess;
   now?: number;
 }
 
@@ -194,7 +300,7 @@ export interface ResolveOptions {
  * 这里刻意不信任签发时记下的任何东西 —— canonicalPath 也要重新 realpath
  * 一遍并与记录比对，因为符号链接可以在签发之后被指向别处。
  */
-export async function resolve(
+export async function resolveAttachment(
   token: string,
   options: ResolveOptions = {}
 ): Promise<AttachmentRecord> {
@@ -210,6 +316,10 @@ export async function resolve(
   const capability = options.capability;
   if (capability && !record.capabilities.includes(capability)) {
     throw new Error(`ATTACHMENT_CAPABILITY_DENIED: ${capability}`);
+  }
+  // 写请求撞上只读凭证：拒。这一句就是 capability 字段全部的意义所在。
+  if (options.access === "read-write" && record.access !== "read-write") {
+    throw new Error("ATTACHMENT_ACCESS_DENIED: read-write");
   }
 
   const real = await fsp.realpath(record.canonicalPath);
@@ -232,7 +342,7 @@ export async function resolve(
 
 /** 兑付后返回**主进程内部使用**的绝对路径（拼接给模型的文件引用块）。 */
 export async function resolvePath(token: string, options: ResolveOptions = {}): Promise<string> {
-  return (await resolve(token, options)).canonicalPath;
+  return (await resolveAttachment(token, options)).canonicalPath;
 }
 
 export interface AttachmentImage {
@@ -250,7 +360,7 @@ export async function readImage(
   token: string,
   options: ResolveOptions = {}
 ): Promise<AttachmentImage> {
-  const record = await resolve(token, { ...options, capability: "read" });
+  const record = await resolveAttachment(token, { ...options, capability: "read" });
   if (record.size > MAX_IMAGE_BYTES) {
     throw new Error(`ATTACHMENT_TOO_LARGE: ${record.size} > ${MAX_IMAGE_BYTES}`);
   }
@@ -265,7 +375,7 @@ export async function openAttachment(
   token: string,
   options: ResolveOptions = {}
 ): Promise<string> {
-  const record = await resolve(token, { ...options, capability: "open" });
+  const record = await resolveAttachment(token, { ...options, capability: "open" });
   return shell.openPath(record.canonicalPath);
 }
 
@@ -274,7 +384,7 @@ export async function revealAttachment(
   token: string,
   options: ResolveOptions = {}
 ): Promise<void> {
-  const record = await resolve(token, { ...options, capability: "reveal" });
+  const record = await resolveAttachment(token, { ...options, capability: "reveal" });
   shell.showItemInFolder(record.canonicalPath);
 }
 
@@ -311,6 +421,9 @@ export function toAttachmentRef(record: AttachmentRecord): AttachmentRef {
     name: record.name,
     size: record.size,
     kind: record.kind,
+    // 工作区内的附件带上相对路径供界面显示；工作区外的没有 root 可相对，
+    // 此处留空 —— 绝对路径在任何情况下都不会从这里出去。
+    ...(record.workspaceId ? { relativePath: record.relativePath } : {}),
   };
 }
 

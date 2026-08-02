@@ -77,11 +77,11 @@ describe("TTL 30 分钟滑动过期（裁定2）", () => {
     const { token } = await reg.issue(file, { now: t0 });
 
     const at29 = t0 + 29 * 60_000;
-    await expect(reg.resolve(token, { now: at29 })).resolves.toBeTruthy();
+    await expect(reg.resolveAttachment(token, { now: at29 })).resolves.toBeTruthy();
 
     // 距签发已 50 分钟（> TTL），但距上一次访问只有 21 分钟 → 仍然有效
     const at50 = t0 + 50 * 60_000;
-    await expect(reg.resolve(token, { now: at50 })).resolves.toBeTruthy();
+    await expect(reg.resolveAttachment(token, { now: at50 })).resolves.toBeTruthy();
   });
 
   it("签发后静置 31 分钟 → 失效", async () => {
@@ -91,7 +91,7 @@ describe("TTL 30 分钟滑动过期（裁定2）", () => {
 
     const t0 = 1_000_000_000;
     const { token } = await reg.issue(file, { now: t0 });
-    await expect(reg.resolve(token, { now: t0 + 31 * 60_000 })).rejects.toThrow(
+    await expect(reg.resolveAttachment(token, { now: t0 + 31 * 60_000 })).rejects.toThrow(
       /ATTACHMENT_TOKEN_(EXPIRED|INVALID)/
     );
   });
@@ -110,8 +110,8 @@ describe("撤销", () => {
 
     expect(reg.revokeAll()).toBe(2);
     expect(reg.outstandingCount()).toBe(0);
-    await expect(reg.resolve(t1)).rejects.toThrow(/ATTACHMENT_TOKEN_INVALID/);
-    await expect(reg.resolve(t2)).rejects.toThrow(/ATTACHMENT_TOKEN_INVALID/);
+    await expect(reg.resolveAttachment(t1)).rejects.toThrow(/ATTACHMENT_TOKEN_INVALID/);
+    await expect(reg.resolveAttachment(t2)).rejects.toThrow(/ATTACHMENT_TOKEN_INVALID/);
   });
 
   it("revokeAllForSession 只撤销该会话的凭证", async () => {
@@ -124,8 +124,8 @@ describe("撤销", () => {
     const other = (await reg.issue(f2, { sessionId: "s2" })).token;
 
     expect(reg.revokeAllForSession("s1")).toBe(1);
-    await expect(reg.resolve(mine)).rejects.toThrow(/ATTACHMENT_TOKEN_INVALID/);
-    await expect(reg.resolve(other)).resolves.toBeTruthy();
+    await expect(reg.resolveAttachment(mine)).rejects.toThrow(/ATTACHMENT_TOKEN_INVALID/);
+    await expect(reg.resolveAttachment(other)).resolves.toBeTruthy();
   });
 });
 
@@ -216,5 +216,73 @@ describe("大小与收容", () => {
     await expect(reg.openAttachment(token)).rejects.toThrow(
       /ATTACHMENT_CAPABILITY_DENIED/
     );
+  });
+});
+
+describe("结构化附件引用（裁定2 · FS-101）", () => {
+  it("createAttachment 恰好返回八个字段，标识字段名是 token", async () => {
+    const { reg, ws } = await freshModules();
+    ws.__setWorkspaceDataDir(userDataDir);
+    const workspaceId = ws.registerWorkspace(workspaceDir).workspaceId;
+    const file = path.join(workspaceDir, "doc.md");
+    fs.writeFileSync(file, "# hi" + String.fromCharCode(10), "utf8");
+
+    const result = await reg.createAttachment(file, { workspaceId });
+    expect(Object.keys(result).sort()).toEqual(
+      [
+        "capability",
+        "expiresAt",
+        "mimeType",
+        "relativePath",
+        "sha256",
+        "sizeBytes",
+        "sourceName",
+        "token",
+      ].sort()
+    );
+    // 标识恒为 token —— 全计划统一称谓，没有 id，也没有 attachmentId
+    expect(typeof result.token).toBe("string");
+    expect(result.relativePath).toBe("doc.md");
+    expect(result.mimeType).toBe("text/markdown");
+    expect(result.capability).toBe("read");
+    // 结构化引用里没有任何字段承载绝对路径
+    expect(JSON.stringify(result)).not.toContain(ws.requireWorkspaceRoot(workspaceId));
+  });
+
+  it("capability='read' 的凭证用于写请求时被拒，'read-write' 放行", async () => {
+    const { reg, ws } = await freshModules();
+    ws.__setWorkspaceDataDir(userDataDir);
+    const workspaceId = ws.registerWorkspace(workspaceDir).workspaceId;
+    const file = path.join(workspaceDir, "doc.md");
+    fs.writeFileSync(file, "# hi" + String.fromCharCode(10), "utf8");
+
+    const readOnly = await reg.createAttachment(file, { workspaceId });
+    // 只签发不校验的能力字段等于没有能力控制，而且不会有任何报错
+    await expect(
+      reg.resolveAttachment(readOnly.token, { access: "read-write" })
+    ).rejects.toThrow(/ATTACHMENT_ACCESS_DENIED/);
+    // 读请求照常放行
+    await expect(reg.resolveAttachment(readOnly.token)).resolves.toBeTruthy();
+
+    const writable = await reg.createAttachment(file, {
+      workspaceId,
+      access: "read-write",
+    });
+    await expect(
+      reg.resolveAttachment(writable.token, { access: "read-write" })
+    ).resolves.toBeTruthy();
+  });
+
+  it("刚签发的 token 可直接被后续 handler 解析（CT-17：预览与附件同一句柄）", async () => {
+    const { reg, ws } = await freshModules();
+    ws.__setWorkspaceDataDir(userDataDir);
+    const workspaceId = ws.registerWorkspace(workspaceDir).workspaceId;
+    const file = path.join(workspaceDir, "doc.md");
+    fs.writeFileSync(file, "# hi" + String.fromCharCode(10), "utf8");
+
+    const descriptor = await reg.createAttachment(file, { workspaceId });
+    const record = await reg.resolveAttachment(descriptor.token, { capability: "open" });
+    expect(record.token).toBe(descriptor.token);
+    expect(record.sha256).toBe(descriptor.sha256);
   });
 });

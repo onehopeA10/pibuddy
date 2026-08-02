@@ -7,6 +7,18 @@ export default defineConfig({
     // pi-sdk / contract 是源码形式的 workspace 包，必须随主进程一起打包；
     // 漏加会构建通过但运行时报「无法解析的 external」
     plugins: [externalizeDepsPlugin({ exclude: ["@pibuddy/pi-sdk", "@pibuddy/contract"] })],
+    build: {
+      rollupOptions: {
+        // search-entry 是 utility process 的入口（FS-101 的内容搜索）。
+        // 它必须是**独立的产物文件**：utilityProcess.fork 收的是一个磁盘上
+        // 的 js 路径，不声明成第二个 input 的话，它会被打进 index.js 里，
+        // fork 时报「找不到 search-entry.js」——而那是运行时才暴露的。
+        input: {
+          index: resolve(__dirname, "src/main/index.ts"),
+          "search-entry": resolve(__dirname, "src/main/workspace/search-entry.ts"),
+        },
+      },
+    },
   },
   preload: {
     // 与 main 同理，且在 preload 上更致命：sandbox:true 的 preload 里 require

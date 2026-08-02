@@ -25,11 +25,22 @@ import { fileURLToPath } from "node:url";
 const APP_DIR = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const ROOT = resolve(APP_DIR, "..", "..");
 
-/** 必须锁死的三个包，以及它们各自住在 package.json 的哪个字段里。 */
+/**
+ * 必须锁死的包，以及它们各自住在 package.json 的哪个字段里。
+ *
+ * 前三个是自更新链路（UPD-001）；后四个是 CodeMirror（FS-101）——
+ * 编辑器是唯一直接往用户源文件里写字节的东西，一次 patch 版本里的
+ * 换行/编码行为变化就足以在用户不知情的情况下改坏文件，而浮动版本
+ * 意味着那份代码从来没有人验证过。
+ */
 const PINNED = [
   { name: "electron-updater", field: "dependencies" },
   { name: "electron-log", field: "dependencies" },
   { name: "electron-builder", field: "devDependencies" },
+  { name: "codemirror", field: "dependencies" },
+  { name: "@codemirror/state", field: "dependencies" },
+  { name: "@codemirror/view", field: "dependencies" },
+  { name: "@codemirror/commands", field: "dependencies" },
 ];
 
 const pkg = JSON.parse(readFileSync(join(APP_DIR, "package.json"), "utf8"));
@@ -42,9 +53,12 @@ const lock = readFileSync(join(ROOT, "pnpm-lock.yaml"), "utf8").split(/\r?\n/);
  * 为一个校验脚本引一个依赖不划算。
  */
 function lockEntry(name) {
-  const head = `      ${name}:`;
+  // 作用域包在 lockfile 里带单引号（'@codemirror/state':），非作用域的不带。
+  // 两种都要认，否则新增一个 @scope/pkg 会被报成「lockfile 里找不到」，
+  // 而那时人的第一反应是去跑 pnpm install —— 跑完还是同样的错。
+  const heads = [`      ${name}:`, `      '${name}':`];
   for (let i = 0; i < lock.length; i++) {
-    if (lock[i] !== head) continue;
+    if (!heads.includes(lock[i])) continue;
     const spec = /^\s*specifier:\s*(.+)$/.exec(lock[i + 1] ?? "");
     const ver = /^\s*version:\s*(.+)$/.exec(lock[i + 2] ?? "");
     if (spec && ver) {

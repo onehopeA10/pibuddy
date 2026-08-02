@@ -72,6 +72,29 @@ import {
   updateStateSchema,
   updateToggleRequestSchema,
 } from "./update.js";
+import {
+  attachmentCreateRequestSchema,
+  attachmentDescriptorSchema,
+  changesetApplyResultSchema,
+  changesetBatchRequestSchema,
+  changesetBatchResultSchema,
+  changesetIdRequestSchema,
+  changesetQueryRequestSchema,
+  changesetQueryResultSchema,
+  fileMutateRequestSchema,
+  fileMutateResultSchema,
+  fileReadRequestSchema,
+  fileReadResultSchema,
+  fileSaveRequestSchema,
+  fileSaveResultSchema,
+  fileTreePageSchema,
+  treeListRequestSchema,
+  treeWatchRequestSchema,
+  workspaceSearchCancelSchema,
+  workspaceSearchPageSchema,
+  workspaceSearchRequestSchema,
+  workspaceTreeEventSchema,
+} from "./workspace.js";
 
 // 通道名常量住在 channels.ts（那个文件不依赖 zod，preload 可以单独引它）。
 
@@ -139,6 +162,15 @@ export const attachmentRefSchema = z.object({
   name: z.string(),
   size: z.number().nonnegative(),
   kind: z.enum(["image", "video", "other"]),
+  /**
+   * 相对工作区 root 的路径（工作区内的附件才有）。
+   *
+   * 加它是为了让附件条显示「src/main/index.ts」而不是光秃秃一个
+   * 「index.ts」—— 用户同时拖三个 index.ts 进来时，只有文件名的界面
+   * 完全没法分辨。**它仍然不是绝对路径**：工作区外的单文件授权没有
+   * root 可相对，这个字段就是 undefined。
+   */
+  relativePath: z.string().optional(),
 });
 export type AttachmentRef = z.infer<typeof attachmentRefSchema>;
 
@@ -214,8 +246,9 @@ export type SecretDescriptor = z.infer<typeof secretDescriptorSchema>;
  * error，而原生 steer 命令不接受扩展参数）。把它当成可有可无的可选字段
  * 删掉，插话会静默失败成一条被拒绝的普通 prompt。
  *
- * `attachmentTokens` 而不是路径：非图片附件的「[用户提供的文件]」提示块
- * 由主进程用 token 换回真实路径后拼接，渲染进程全程接触不到路径。
+ * `attachmentTokens` 而不是路径：非图片附件的「[附件]」提示块由主进程按
+ * 结构化引用生成（工作区内一律呈现 relativePath），渲染进程与模型都拿不到
+ * 本机的绝对路径。
  */
 export const piPromptRequestSchema = z.object({
   message: z.string(),
@@ -508,6 +541,58 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   [CHANNELS.shellShowInFolder]: { request: tokenRequestSchema, response: z.void() },
   [CHANNELS.attachmentRevokeAll]: { request: voidRequestSchema, response: z.void() },
 
+  // ---- Workspace 文件服务（FS-101，8 条） ----
+  [CHANNELS.workspaceTreeList]: {
+    request: treeListRequestSchema,
+    response: fileTreePageSchema,
+  },
+  [CHANNELS.workspaceTreeWatch]: {
+    request: treeWatchRequestSchema,
+    response: z.void(),
+  },
+  [CHANNELS.workspaceSearch]: {
+    request: workspaceSearchRequestSchema,
+    response: workspaceSearchPageSchema,
+  },
+  [CHANNELS.workspaceSearchCancel]: {
+    request: workspaceSearchCancelSchema,
+    response: z.void(),
+  },
+  [CHANNELS.workspaceFileRead]: {
+    request: fileReadRequestSchema,
+    response: fileReadResultSchema,
+  },
+  [CHANNELS.workspaceFileSave]: {
+    request: fileSaveRequestSchema,
+    response: fileSaveResultSchema,
+  },
+  [CHANNELS.workspaceFileMutate]: {
+    request: fileMutateRequestSchema,
+    response: fileMutateResultSchema,
+  },
+  [CHANNELS.workspaceAttachmentCreate]: {
+    request: attachmentCreateRequestSchema,
+    response: attachmentDescriptorSchema,
+  },
+
+  // ---- Agent 变更集（FS-102，4 条） ----
+  [CHANNELS.changesetQuery]: {
+    request: changesetQueryRequestSchema,
+    response: changesetQueryResultSchema,
+  },
+  [CHANNELS.changesetAccept]: {
+    request: changesetIdRequestSchema,
+    response: changesetApplyResultSchema,
+  },
+  [CHANNELS.changesetReject]: {
+    request: changesetIdRequestSchema,
+    response: changesetApplyResultSchema,
+  },
+  [CHANNELS.changesetAcceptBatch]: {
+    request: changesetBatchRequestSchema,
+    response: changesetBatchResultSchema,
+  },
+
   // ---- 语音 ----
   [CHANNELS.sttTranscribe]: {
     request: sttTranscribeRequestSchema,
@@ -673,6 +758,7 @@ export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   // update:event 推的是完整信封（不是裸 payload）：代际与序号必须送到渲染
   // 进程才能用来丢弃陈旧帧，在中途剥壳等于把丢弃判据扔了。
   [PUSH_CHANNELS.updateEvent]: updateEnvelopeSchema,
+  [PUSH_CHANNELS.workspaceTreeEvent]: workspaceTreeEventSchema,
 };
 
 /** channel 名是否在白名单内。ipc-guard 的第一道闸。 */

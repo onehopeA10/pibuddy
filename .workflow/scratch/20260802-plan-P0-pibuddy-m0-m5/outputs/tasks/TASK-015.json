@@ -8,8 +8,8 @@
   "priority": "high",
   "effort": "large",
   "action": "新建 packages/app/src/main/workspace/workspace-store.ts，workspace record 字段固定为 `{ id: string; canonicalRoot: string; displayName: string; trust: 'trusted'|'untrusted'|'unknown'; createdAt: number; lastOpenedAt: number; ignorePolicy: string[]; defaultModel: string | null; permissionRules: PermissionRule[] }`，canonicalRoot 用 `fs.realpathSync.native(root)` 求出；不新建 path-guard.ts、不引入 assertInsideRoot：收容判定一律复用 TASK-007 的 packages/app/src/main/workspace-registry.ts 的 `resolveInWorkspace`（CT-18 —— 原设计的 assertInsideRoot 以 `rel === ''` 额外拒绝 root 自身，与 resolveInWorkspace 对同一输入的判定相反，两套原语各带一套独立测试，必然长期漂移）。所有返回 renderer 的路径一律是 relativePath，禁止返回绝对路径；不新建第二套注册表：在 TASK-007 的 packages/app/src/main/attachment-registry.ts 上扩结构化字段（裁定2），`createAttachment(absPath): { token: string; capability: 'read'|'read-write'; relativePath: string; sourceName: string; mimeType: string; sizeBytes: number; sha256: string; expiresAt: number }` —— 标识字段名统一为 `token`（不是 id / attachmentId），TTL 沿用 ATTACHMENT_TTL_MS = 1800000 的 30 分钟滑动过期，不另设 24h，并把 stores/app.ts 中 `message += \"\\n\\n[用户提供的文件]\\n\" + refs.map((f) => \\`- ${f.path}\\`).join(\"\\n\")` 替换为按 relativePath 呈现的结构化附件清单；新建 workspace/file-editor.ts，`saveFile({ relativePath, content, baseMtimeMs, baseSha256 })` 在写入前重新 stat + hash，任一不匹配即返回 `{ conflict: true, current: { mtimeMs, sha256, preview } }` 而不是覆盖。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed",
+  "completed_at": "2026-08-03T05:56:27",
   "actual_duration": null,
   "scope": "packages/app/src/main/workspace, packages/app/src/main/changeset, packages/app/src/renderer/src/components/workspace",
   "focus_paths": [
