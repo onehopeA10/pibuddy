@@ -55,6 +55,37 @@
       "note": "本轮仅产出计划，未写任何产品代码。M0-M5 出口门禁均未达成。"
     }
   ],
+  "artifacts_exc": [
+    {
+      "id": "EXC-001",
+      "type": "execution",
+      "plan_ref": "PLN-001",
+      "milestone": "MS-001",
+      "status": "partial",
+      "waves_completed": [1, 2, 3, 4, 5, 6, 7],
+      "waves_pending": [8, 9, 10, 11, 12, 13],
+      "completed_tasks": [
+        "TASK-001", "TASK-002", "TASK-003", "TASK-004",
+        "TASK-005", "TASK-006", "TASK-007", "TASK-008"
+      ],
+      "pending_tasks": [
+        "TASK-009", "TASK-010", "TASK-011", "TASK-012",
+        "TASK-013", "TASK-014", "TASK-015", "TASK-016"
+      ],
+      "milestones_done": ["M0", "M1", "M2"],
+      "milestones_pending": ["M3", "M4", "M5"],
+      "evidence": {
+        "tests": "179 passed / 19 files",
+        "typecheck": "exit 0",
+        "build": "exit 0",
+        "packaged_smoke": "win-unpacked 启动成功，runtimeSource=bundled，无错误无明文密钥泄漏",
+        "structural_assertion": "守卫外 ipcMain 调用点 = 0（改造前 13）"
+      },
+      "git_remote": "https://github.com/onehopeA10/pibuddy",
+      "head": "5eadc7f",
+      "created_at": "2026-08-02"
+    }
+  ],
   "last_updated": "2026-08-02",
   "accumulated_context": {
     "key_decisions": [
