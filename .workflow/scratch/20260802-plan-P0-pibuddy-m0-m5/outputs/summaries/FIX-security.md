@@ -290,3 +290,16 @@ pnpm --filter @pibuddy/app dist → PiBuddy-Setup-0.1.0.exe + win-unpacked
 5. 共享文件（`channels.ts` / `ipc-contract.ts` / `preload/api/*`）只增不改
    他人条目：`settingsSetPiRuntime` 与另一 agent 的 `workspaceRelease` 并存
    无冲突。
+
+   **第一次提交（b90c42d）在这里出了错，已由 bfce710 修正**：为了让
+   `ipc-contract.ts` 编得过，`git add` 连带把另一 agent 尚未提交的
+   `workspaceRelease` 契约定义一起带上了。但注册它的 `workspace-ipc.ts`
+   还没进来，于是**单看那一个提交**，`test/pi-resources-ipc.spec.ts:68` 与
+   `test/sessions-ipc.spec.ts:80` 的「CHANNELS 里的每一条都必须在 ipc-guard
+   注册表里」会红 —— 编得过、跑不过。bfce710 把三处契约定义退回基线
+   （工作区文件保持原样，由那位 agent 连同注册一并提交），提交树里已无任何
+   `workspaceRelease` 引用。
+
+   教训：并行改共享文件时，`git add <file>` 是整文件粒度的，「只增不改他人
+   条目」这条纪律在暂存那一步会自动失效，必须显式核对提交树的自洽性
+   （`git show HEAD:<file>` + 反向断言），不能只看工作区跑绿。
