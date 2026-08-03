@@ -18,6 +18,7 @@ import { gitCapability } from "./manifests/git.manifest.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
+import { tasksCapability } from "./manifests/tasks.manifest.js";
 
 /**
  * 全部内置能力，按装配顺序。
@@ -36,6 +37,7 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // 第一个垂直能力包（coding tier）。它默认只进「编码」Profile，因此排在
   // common 能力之后——被依赖的 common.workspace-review 已在前面注册。
   gitCapability,
+  tasksCapability,
 ];
 
 /**
@@ -64,6 +66,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.session-tree",
       "common.memory",
       "common.mcp",
+      "common.tasks",
     ],
   },
   {
@@ -83,6 +86,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.memory",
       "common.mcp",
       "coding.git",
+      "common.tasks",
     ],
   },
   {

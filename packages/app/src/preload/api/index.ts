@@ -43,6 +43,7 @@ import { mcp } from "./mcp.js";
 import { memory } from "./memory.js";
 import { agentPool } from "./agentPool.js";
 import { git } from "./git.js";
+import { tasks } from "./tasks.js";
 
 export const api = {
   pi,
@@ -75,6 +76,8 @@ export const api = {
   agentPool,
   /** Git 编码能力包（coding.git）。九个意图，无 argv 入口，每条通道要 process.git */
   git,
+  /** 持久定时任务（common.tasks）。调度 headless，触发的是已落盘任务里冻结的配置 */
+  tasks,
 };
 
 export type PiBuddyApi = typeof api;

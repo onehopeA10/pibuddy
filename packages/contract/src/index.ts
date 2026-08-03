@@ -23,5 +23,6 @@ export * from "./diagnostics.js";
 export * from "./workspace.js";
 export * from "./preview.js";
 export * from "./artifacts.js";
+export * from "./tasks.js";
 export * from "./ipc-contract.js";
 export * from "./ports.js";

@@ -30,6 +30,8 @@ import { disposeMcpResources, registerMcpIpc } from "../mcp/mcp-ipc.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { disposeGitResources, registerGitIpc } from "../git/git-ipc.js";
 import { gitCapability } from "./manifests/git.manifest.js";
+import { disposeTasksResources, registerTasksIpc } from "../tasks/tasks-ipc.js";
+import { tasksCapability } from "./manifests/tasks.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -95,6 +97,11 @@ capabilityRegistry.register({
   manifest: gitCapability,
   activate: registerGitIpc,
   deactivate: disposeGitResources,
+});
+capabilityRegistry.register({
+  manifest: tasksCapability,
+  activate: registerTasksIpc,
+  deactivate: disposeTasksResources,
 });
 capabilityRegistry.seal();
 

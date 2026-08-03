@@ -24,11 +24,13 @@ import MemoryPanel from "./MemoryPanel.vue";
 import PreviewPane from "./PreviewPane.vue";
 import SessionTreePanel from "./SessionTreePanel.vue";
 import GitPanel from "./GitPanel.vue";
+import TasksPanel from "./TasksPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
 import { useArtifactsStore } from "../stores/artifacts";
 import { useMemoryStore } from "../stores/memory";
+import { useTasksStore } from "../stores/tasks";
 import { useCapabilitiesStore } from "../stores/capabilities";
 import {
   createDirtyDialog,
@@ -43,6 +45,7 @@ const piRes = usePiResourcesStore();
 const providers = useProvidersStore();
 const artifacts = useArtifactsStore();
 const memory = useMemoryStore();
+const tasks = useTasksStore();
 const capabilities = useCapabilitiesStore();
 const message = useMessage();
 const dialog = useDialog();
@@ -145,6 +148,7 @@ const sessionTreeEnabled = computed(() => capabilities.isEnabled("common.session
 // coding.git 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
 // 它默认只在「编码」Profile 启用，因此在「通用办公」下这个开关与面板都不出现。
 const gitEnabled = computed(() => capabilities.isEnabled("coding.git"));
+const tasksEnabled = computed(() => capabilities.isEnabled("common.tasks"));
 
 onMounted(() => {
   void store.init();
@@ -310,6 +314,13 @@ function onDrop(): void {
               @click="gitOpen = !gitOpen"
             >
               🌿 Git
+              v-if="tasksEnabled"
+              size="tiny"
+              :type="tasks.panelOpen ? 'primary' : 'default'"
+              quaternary
+              @click="tasks.panelOpen = !tasks.panelOpen"
+            >
+              ⏰ 定时
             </n-button>
           </div>
           <ChatView />
@@ -342,6 +353,7 @@ function onDrop(): void {
       <UsagePanel />
       <ArtifactLibrary v-if="artifactsEnabled" />
       <MemoryPanel v-if="memoryEnabled" />
+      <TasksPanel v-if="tasksEnabled" />
     </slot>
   </div>
 </template>

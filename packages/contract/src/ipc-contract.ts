@@ -55,6 +55,7 @@ import { memoryContractShard } from "./memory.js";
 import { mcpContractShard } from "./mcp.js";
 import { previewContractShard } from "./preview.js";
 import { sessionTreeContractShard } from "./session-tree.js";
+import { tasksContractShard } from "./tasks.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -781,6 +782,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   sessionTreeContractShard,
   agentPoolContractShard,
   gitContractShard,
+  tasksContractShard,
 ];
 
 /**
