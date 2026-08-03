@@ -50,6 +50,7 @@ import { agentPoolContractShard, poolSnapshotSchema } from "./agent-pool.js";
 import { childAgentContractShard, childTopologySnapshotSchema } from "./child-agent.js";
 import { artifactContractShard } from "./artifacts.js";
 import { capabilitiesContractShard } from "./capability.js";
+import { connectorContractShard } from "./connector.js";
 import { gitContractShard } from "./git.js";
 import { permissionContractShard } from "./permission.js";
 import { memoryContractShard } from "./memory.js";
@@ -785,6 +786,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   childAgentContractShard,
   gitContractShard,
   tasksContractShard,
+  connectorContractShard,
 ];
 
 /**

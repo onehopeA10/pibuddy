@@ -47,7 +47,8 @@ export type LogScope =
   | "updater"
   | "session-index"
   | "permission"
-  | "tasks";
+  | "tasks"
+  | "connector";
 
 export interface LoggerOptions {
   /** 日志目录，通常是 app.getPath("userData")/logs */

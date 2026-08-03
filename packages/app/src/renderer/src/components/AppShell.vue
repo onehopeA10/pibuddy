@@ -26,6 +26,7 @@ import SessionTreePanel from "./SessionTreePanel.vue";
 import GitPanel from "./GitPanel.vue";
 import TasksPanel from "./TasksPanel.vue";
 import ChildAgentPanel from "./ChildAgentPanel.vue";
+import ConnectorPanel from "./ConnectorPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -132,6 +133,9 @@ const gitOpen = ref(false);
 // 子 Agent 编排面板（common.child-agent）的开合。独立成 ref：它是自己一个
 // 能力域（父子拓扑 / 结构化消息 / cancel 传播），与其它面板互不牵连。
 const childAgentOpen = ref(false);
+// 连接器面板（connector.webhook）的开合。独立成 ref：它是第一个 connector
+// 能力域，与其它面板互不牵连。
+const connectorOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -155,6 +159,9 @@ const gitEnabled = computed(() => capabilities.isEnabled("coding.git"));
 const tasksEnabled = computed(() => capabilities.isEnabled("common.tasks"));
 // 子 Agent 编排的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
 const childAgentEnabled = computed(() => capabilities.isEnabled("common.child-agent"));
+// connector.webhook 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道
+// 已注册）。默认进「通用办公」与「编码」两个 Profile，「精简」下不出现。
+const connectorEnabled = computed(() => capabilities.isEnabled("connector.webhook"));
 
 onMounted(() => {
   void store.init();
@@ -337,6 +344,15 @@ function onDrop(): void {
             >
               ⏰ 定时
             </n-button>
+            <n-button
+              v-if="connectorEnabled"
+              size="tiny"
+              :type="connectorOpen ? 'primary' : 'default'"
+              quaternary
+              @click="connectorOpen = !connectorOpen"
+            >
+              🔌 连接器
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -353,6 +369,7 @@ function onDrop(): void {
           <SessionTreePanel v-if="sessionTreeOpen && sessionTreeEnabled" />
           <GitPanel v-if="gitOpen && gitEnabled" />
           <ChildAgentPanel v-if="childAgentOpen && childAgentEnabled" />
+          <ConnectorPanel v-if="connectorOpen && connectorEnabled" />
           <InputBar />
         </slot>
       </template>
