@@ -235,6 +235,48 @@ function consume(acc: ParseAccum, line: string): void {
   }
 }
 
+/**
+ * 会话文件头部记录的 cwd —— **归属判据的唯一来源**。
+ *
+ * pi 写下的第一行恒是 `{"type":"session","version":3,"id":...,"cwd":...}`
+ * （source/pi packages/coding-agent/src/core/session-manager.ts 的
+ * SessionHeader）。默认布局下会话目录名由 cwd 编码而来，这一行只是复述；
+ * 但 `settings.sessionDir` 允许多个工作区共用同一个目录，此时目录名什么都
+ * 证明不了 —— 头部的 cwd 是唯一能说清「这份会话属于谁」的东西。
+ *
+ * 返回 null 表示头部没写 cwd（v1 会话就没有 version 字段，更早的也可能缺
+ * cwd）。此时**按当前工作区收下**：拿不准归属就沿用旧行为，绝不因为一个
+ * 读不出来的字段把用户的历史会话整批藏起来。
+ */
+function headerCwd(head: Buffer): string | null {
+  const nl = head.indexOf(0x0a);
+  const line = (nl >= 0 ? head.subarray(0, nl) : head).toString("utf8").trim();
+  if (!line) return null;
+  try {
+    const entry = JSON.parse(line) as { type?: unknown; cwd?: unknown };
+    if (entry.type !== "session") return null;
+    return typeof entry.cwd === "string" && entry.cwd ? entry.cwd : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 两个绝对路径是否指同一个目录。
+ *
+ * Windows 的路径大小写不敏感，而 pi 记下的 cwd 是用户敲进命令行的那个形态
+ * （`d:\proj`），我们的 workspaceRoot 是 realpath 归一化过的（`D:\proj`）。
+ * 逐字比较会把它们判成两个目录，表现是「历史会话一条都列不出来」——
+ * 与 workspaceIdFor 用同一套归一化口径，这里才不会各说各话。
+ */
+function samePath(a: string, b: string): boolean {
+  const norm = (p: string): string => {
+    const resolved = path.resolve(p);
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+  return norm(a) === norm(b);
+}
+
 /** 按字节区间读取，返回 Buffer。全部 I/O 走流，不整文件读入。 */
 function readRange(file: string, start: number, end: number): Promise<Buffer> {
   if (end < start) return Promise.resolve(Buffer.alloc(0));
@@ -383,6 +425,15 @@ export class SessionIndex {
 
     const head = await readRange(file, 0, Math.min(HASH_HEAD_BYTES, st.size) - 1);
     const contentHash = createHash("sha256").update(head).digest("hex").slice(0, 32);
+
+    // 归属判定（SES-2）。**必须在算出任何一行之前**：settings.sessionDir 允许
+    // 多个工作区共用一个会话目录，而下面这一整段是无条件把 workspaceId 写成
+    // 「本次同步的那个工作区」——于是 A 工作区每同步一次，就把 B 的会话全部
+    // 重标成自己的，B 那边再同步一次又抢回去。用户看到的是「历史会话时有时无」。
+    //
+    // 头部的 cwd 不属于本工作区就整份跳过：既不重标，也不改它的任何统计。
+    const cwd = headerCwd(head);
+    if (cwd && !samePath(cwd, workspaceRoot)) return null;
 
     // 闸 2：头部哈希变了 = 文件被外部截断或重写，之前算出来的偏移与统计
     // 全部作废，只能从头再来。
@@ -556,13 +607,24 @@ export class SessionIndex {
   }
 
   /**
-   * sessionId → 索引行。跨进程边界只有 sessionId，真实路径在这里才被解出来。
-   * 同一 sessionId 理论上唯一；真撞上了取最近修改的那个。
+   * (workspaceId, sessionId) → 索引行。跨进程边界只有这两个不透明标识，
+   * 真实路径在这里才被解出来。
+   *
+   * **workspaceId 必填**。sessionId 只在一个工作区之内唯一：复制一份 .jsonl、
+   * 从备份里恢复、或两个工作区共用一个自定义 session-dir，都会让同一个 id
+   * 在表里出现两行。早先这里是全局「取最近修改的那行」，于是重命名 / 归档 /
+   * purge / 草稿读写都可能落到另一个工作区的会话上 —— purge 那一条不可逆。
+   *
+   * 同一工作区内仍可能撞 id（同一份文件被复制到子目录）；那种情况下取最近
+   * 修改的那个，与用户「刚才在用的那个」一致。
    */
-  bySessionId(sessionId: string): IndexedSession | null {
+  bySessionId(sessionId: string, workspaceId: string): IndexedSession | null {
     const row = this.db
-      .prepare("SELECT * FROM sessions WHERE session_id = ? ORDER BY mtime_ms DESC LIMIT 1")
-      .get(sessionId) as Record<string, unknown> | undefined;
+      .prepare(
+        `SELECT * FROM sessions WHERE session_id = ? AND workspace_id = ?
+         ORDER BY mtime_ms DESC LIMIT 1`
+      )
+      .get(sessionId, workspaceId) as Record<string, unknown> | undefined;
     return row ? fromDbRow(row) : null;
   }
 

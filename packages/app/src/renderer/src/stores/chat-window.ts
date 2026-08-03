@@ -29,6 +29,15 @@ export const PAGE_SIZE = 60;
 /** 回到底部后，未读分界线保留多久再消失（毫秒）。 */
 export const UNREAD_LINGER_MS = 1000;
 
+/**
+ * 一次「查看更早的消息」最多往前追几页。
+ *
+ * 只有「整页消息都已经在内存里」时才会用到（首屏 beforeOffset = 文件长度，
+ * 与 get_messages 填出来的那一段必然重叠）。给上限是为了让一次点击的代价
+ * 有界：压缩过的长会话里，重叠段可能有好几页。
+ */
+export const MAX_OVERLAP_PAGES = 5;
+
 export interface ChatWindow {
   /** 已向前加载出来的更早条目（原始 JSONL 记录，最早的在前）。 */
   earlier: Ref<unknown[]>;
@@ -46,6 +55,14 @@ export interface ChatWindow {
   requestCount: Ref<number>;
 
   reset(initialBeforeOffset: number): void;
+  /**
+   * 补一个更靠后的字节上界（会话文件在索引里刚被读到 / 刚变长）。
+   *
+   * 与 reset 分开是因为语义不同：reset 是「换会话，一切从头」，这个是
+   * 「上界比原先知道的更大」。已经翻过页之后一律忽略 —— 那时游标代表的是
+   * 用户真实的阅读进度，被文件末尾覆盖掉就等于把翻页成果清零。
+   */
+  adoptOffset(offset: number): void;
   loadEarlier(): Promise<void>;
   retry(): Promise<void>;
   onIncoming(messageKey: number): void;
@@ -83,9 +100,17 @@ export function useChatWindow(): ChatWindow {
     }
   }
 
+  function adoptOffset(offset: number): void {
+    if (requestCount.value > 0) return;
+    if (offset <= (nextBeforeOffset.value ?? 0)) return;
+    nextBeforeOffset.value = offset;
+    reachedTop.value = false;
+  }
+
   async function fetchPage(beforeOffset: number): Promise<SessionHistoryPage> {
     requestCount.value++;
     return window.piBuddy.sessions.readHistoryBefore({
+      workspaceId: store.workspaceId,
       sessionId: store.currentSessionId,
       beforeOffset,
       limit: PAGE_SIZE,
@@ -100,28 +125,42 @@ export function useChatWindow(): ChatWindow {
    */
   async function loadEarlier(): Promise<void> {
     if (loading.value || reachedTop.value) return;
-    const offset = nextBeforeOffset.value;
-    if (offset === null || offset <= 0) {
-      reachedTop.value = true;
-      return;
-    }
     loading.value = true;
     loadError.value = "";
     try {
-      let page = await fetchPage(offset);
-      if (page.stale) {
-        // 索引与磁盘对不上（会话在两次调用之间被追加过）。先同步一次索引，
-        // 再**只重试一次** —— 会话正在流式写入时无限重试会把界面钉死。
-        await window.piBuddy.sessions.query(store.workspaceId);
-        page = await fetchPage(offset);
+      // 首屏的 beforeOffset 就是文件长度，而 store.items 已经由 pi 的
+      // get_messages 填满 —— 第一页磁盘数据与内存里的必然是同一批消息，
+      // prependMessages 会把它们整批去重掉。此时若直接返回，用户点了一次
+      // 「查看更早的消息」而界面纹丝不动。因此**整页都是重复**时再往前一页，
+      // 上限 MAX_OVERLAP_PAGES 页 —— 无上限的话，一次点击可能把整个文件读完。
+      for (let i = 0; i < MAX_OVERLAP_PAGES; i++) {
+        const offset = nextBeforeOffset.value;
+        if (offset === null || offset <= 0) {
+          reachedTop.value = true;
+          break;
+        }
+        let page = await fetchPage(offset);
+        if (page.stale) {
+          // 索引与磁盘对不上（会话在两次调用之间被追加过）。先同步一次索引，
+          // 再**只重试一次** —— 会话正在流式写入时无限重试会把界面钉死。
+          await window.piBuddy.sessions.query(store.workspaceId);
+          page = await fetchPage(offset);
+        }
+        earlier.value = [...page.entries, ...earlier.value];
+        // **必须接进 items**：ChatView 渲染的是 store.items，`earlier` 全项目
+        // 再无第二处引用。只填 earlier 的话，磁盘读了、游标前进了、requestCount
+        // 也加了，而界面上一条消息都不会多 —— 不报错、不失败类型检查，纯静默。
+        const messages = store.entriesToMessages(page.entries);
+        const added = store.prependMessages(messages);
+        nextBeforeOffset.value = page.nextBeforeOffset;
+        if (page.nextBeforeOffset === null) {
+          reachedTop.value = true;
+          break;
+        }
+        // 这一页本来就没有消息条目（全是 model_change 之类）：那是一页正常的
+        // 数据，不算「重叠」，不再往前追。
+        if (messages.length === 0 || added > 0) break;
       }
-      earlier.value = [...page.entries, ...earlier.value];
-      // **必须接进 items**：ChatView 渲染的是 store.items，`earlier` 全项目
-      // 再无第二处引用。只填 earlier 的话，磁盘读了、游标前进了、requestCount
-      // 也加了，而界面上一条消息都不会多 —— 不报错、不失败类型检查，纯静默。
-      store.prependMessages(store.entriesToMessages(page.entries));
-      nextBeforeOffset.value = page.nextBeforeOffset;
-      if (page.nextBeforeOffset === null) reachedTop.value = true;
     } catch (err) {
       loadError.value = err instanceof Error ? err.message : "加载更早的消息失败";
     } finally {
@@ -180,6 +219,7 @@ export function useChatWindow(): ChatWindow {
     unreadDivider,
     requestCount,
     reset,
+    adoptOffset,
     loadEarlier,
     retry,
     onIncoming,

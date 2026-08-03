@@ -28,10 +28,24 @@ watch(
   () => store.currentSessionId,
   () => {
     visibleCount.value = INITIAL_WINDOW;
-    // sizeBytes 首屏用 0：真正的字节上界由 SessionListPanel 打开会话时给出，
-    // 这里只保证换会话后不会带着上一会话的游标继续翻页。
-    win.reset(0);
+    // **必须传真实的 sizeBytes**。写死 0 的话 chat-window 在 reset 那一刻就
+    // 判定 reachedTop（`initialBeforeOffset <= 0`），整条 JSONL 反向分页从此
+    // 永不执行 —— 压缩过的长会话里，pi 的 get_messages 只返回压缩后的上下文，
+    // 更早的消息只能从磁盘读，而那条路被这一个 0 关死了。
+    win.reset(store.currentSessionBytes);
   }
+);
+
+/**
+ * 字节上界迟到时补一次。
+ *
+ * 开机直接恢复上一个会话时，currentSessionId 先变、字节数要等会话索引刷新
+ * 完才知道。adoptOffset 只在「还没翻过页」时生效，因此它补得上首屏，又不会
+ * 把用户已经翻出来的进度清零。
+ */
+watch(
+  () => store.currentSessionBytes,
+  (bytes) => win.adoptOffset(bytes)
 );
 
 const hiddenCount = computed(() =>

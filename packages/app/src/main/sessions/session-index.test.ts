@@ -53,12 +53,17 @@ function messageLine(id: string, role: "user" | "assistant", text: string): stri
   return `${JSON.stringify({ type: "message", id, parentId: null, message })}\n`;
 }
 
-function sessionHeader(id: string): string {
-  return `${JSON.stringify({ type: "session", version: 3, id, cwd: "C:\\\\w" })}\n`;
+/**
+ * pi 写下的会话头部。`cwd` 是**归属判据**（session-index 的 headerCwd）：
+ * 多个工作区共用一个 settings.sessionDir 时，目录名什么都证明不了，只有这
+ * 一行说得清这份会话属于谁。默认取当前用例的工作目录。
+ */
+function sessionHeader(id: string, cwd = workspaceDir): string {
+  return `${JSON.stringify({ type: "session", version: 3, id, cwd })}\n`;
 }
 
-async function makeSession(id: string, messages = 2): Promise<string> {
-  let text = sessionHeader(id);
+async function makeSession(id: string, messages = 2, cwd = workspaceDir): Promise<string> {
+  let text = sessionHeader(id, cwd);
   text += `${JSON.stringify({ type: "session_info", name: `会话 ${id}` })}\n`;
   for (let i = 0; i < messages; i++) {
     text += messageLine(`${id}-m${i}`, i % 2 === 0 ? "user" : "assistant", `内容 ${id} ${i}`);
@@ -294,5 +299,108 @@ describe("草稿", () => {
     };
     expect(index.saveDraft(file, draft)).toBe(true);
     expect(index.getDraft(file)).toEqual(draft);
+  });
+});
+
+/**
+ * 共享自定义 sessionDir 的归属（SES-2）。
+ *
+ * `settings.sessionDir` 允许多个工作区共用同一个会话目录 —— 此时目录名什么
+ * 都证明不了，而同步是无条件把 workspace_id 写成「本次同步的那个工作区」。
+ * 表现是两个工作区互相抢会话：A 同步一次，B 的历史全变成 A 的；B 再同步
+ * 一次又抢回去。用户看到的是「历史会话时有时无」，日志里一行错都没有。
+ *
+ * 判据只能是 JSONL 头部的 cwd —— 那是 pi 自己写下的归属。
+ */
+describe("共享 sessionDir 的会话归属（SES-2）", () => {
+  let otherWorkspace = "";
+
+  beforeEach(async () => {
+    otherWorkspace = path.join(tmpRoot, "work-2");
+    await mkdir(otherWorkspace, { recursive: true });
+  });
+
+  it("同一个会话目录被两个工作区共用时，各自只看得到自己的会话", async () => {
+    await makeSession("mine");
+    await makeSession("theirs", 2, otherWorkspace);
+
+    await index.syncWorkspace(workspaceDir, settings);
+    await index.syncWorkspace(otherWorkspace, settings);
+
+    const mine = index
+      .query({ workspaceId: workspaceIdFor(workspaceDir) })
+      .map((r) => r.sessionId);
+    const theirs = index
+      .query({ workspaceId: workspaceIdFor(otherWorkspace) })
+      .map((r) => r.sessionId);
+
+    expect(mine).toEqual(["mine"]);
+    expect(theirs).toEqual(["theirs"]);
+  });
+
+  it("对方的会话被追加内容后，本工作区再同步也不会把它重标成自己的", async () => {
+    const theirs = await makeSession("theirs", 2, otherWorkspace);
+    await index.syncWorkspace(otherWorkspace, settings);
+    expect(index.bySourcePath(theirs)!.workspaceId).toBe(workspaceIdFor(otherWorkspace));
+
+    // 追加内容 → mtime/size 都变了，本工作区的下一次同步一定会重新解析它。
+    // 这正是「无条件重标」发作的时刻。
+    await appendFile(theirs, messageLine("theirs-m9", "user", "对方的新消息"), "utf8");
+    const result = await index.syncWorkspace(workspaceDir, settings);
+
+    expect(result.reparsed).toBe(0);
+    expect(index.bySourcePath(theirs)!.workspaceId).toBe(workspaceIdFor(otherWorkspace));
+    expect(index.query({ workspaceId: workspaceIdFor(workspaceDir) })).toEqual([]);
+  });
+
+  it("头部没写 cwd 的老会话按当前工作区收下（不能因为读不出字段就把历史藏起来）", async () => {
+    const file = path.join(sessionDir, "legacy.jsonl");
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: "session", id: "legacy" })}\n${messageLine("legacy-m0", "user", "老会话")}`,
+      "utf8"
+    );
+
+    await index.syncWorkspace(workspaceDir, settings);
+
+    expect(
+      index.query({ workspaceId: workspaceIdFor(workspaceDir) }).map((r) => r.sessionId)
+    ).toContain("legacy");
+  });
+});
+
+/**
+ * 同 id 会话跨工作区（SES-4）。
+ *
+ * sessionId 由 pi 写在 JSONL 头部，复制一份会话文件、从备份里恢复、或两个
+ * 工作区共用一个 session-dir，都能让同一个 id 出现两行。早先 bySessionId 是
+ * 全局「取最近修改的那行」—— 于是重命名 / 归档 / **彻底删除** / 草稿读写都
+ * 可能落到另一个工作区的会话上。
+ */
+describe("同 id 会话按工作区限定（SES-4）", () => {
+  it("bySessionId 解出的是本工作区那一份，哪怕另一个工作区的更新", async () => {
+    const otherWorkspace = path.join(tmpRoot, "work-2");
+    const otherSessionDir = path.join(tmpRoot, "sessions-2");
+    await mkdir(otherWorkspace, { recursive: true });
+    await mkdir(otherSessionDir, { recursive: true });
+    const otherSettings = { ...settings, sessionDir: otherSessionDir } as typeof settings;
+
+    // 先写本工作区那份，再写另一个工作区的同 id 会话 —— 后者 mtime 更新，
+    // 全局「取最近修改的那行」一定会命中它。
+    const mine = await makeSession("dup");
+    await index.syncWorkspace(workspaceDir, settings);
+
+    const theirs = path.join(otherSessionDir, "dup.jsonl");
+    await writeFile(
+      theirs,
+      `${JSON.stringify({ type: "session", version: 3, id: "dup", cwd: otherWorkspace })}\n${messageLine("dup-m0", "user", "另一个工作区的同 id 会话")}`,
+      "utf8"
+    );
+    await index.syncWorkspace(otherWorkspace, otherSettings);
+
+    expect(index.bySessionId("dup", workspaceIdFor(workspaceDir))!.sourcePath).toBe(mine);
+    expect(index.bySessionId("dup", workspaceIdFor(otherWorkspace))!.sourcePath).toBe(theirs);
+    // 没注册过的工作区一条都查不到，而不是退化成全局查询
+    expect(index.bySessionId("dup", "not-a-workspace")).toBe(null);
   });
 });

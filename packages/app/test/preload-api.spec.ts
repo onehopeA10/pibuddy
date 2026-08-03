@@ -62,19 +62,24 @@ describe("api 聚合对象", () => {
 
   it("sessions 命名空间覆盖全部 9 条通道，一条不漏", async () => {
     await api.sessions.query("ws");
-    await api.sessions.rename("s", "n");
-    await api.sessions.setPinned("s", true);
-    await api.sessions.setStatus("s", "archived");
-    await api.sessions.purge("s");
-    await api.sessions.getDraft("s");
-    await api.sessions.saveDraft("s", {
+    await api.sessions.rename("ws", "s", "n");
+    await api.sessions.setPinned("ws", "s", true);
+    await api.sessions.setStatus("ws", "s", "archived");
+    await api.sessions.purge("ws", "s");
+    await api.sessions.getDraft("ws", "s");
+    await api.sessions.saveDraft("ws", "s", {
       text: "",
       attachments: [],
       queue: { steering: [], followUp: [] },
       updatedAt: 0,
     });
-    await api.sessions.exportHtml("s");
-    await api.sessions.readHistoryBefore({ sessionId: "s", beforeOffset: 10, limit: 5 });
+    await api.sessions.exportHtml("ws", "s");
+    await api.sessions.readHistoryBefore({
+      workspaceId: "ws",
+      sessionId: "s",
+      beforeOffset: 10,
+      limit: 5,
+    });
 
     expect(invoked.sort()).toEqual(
       [

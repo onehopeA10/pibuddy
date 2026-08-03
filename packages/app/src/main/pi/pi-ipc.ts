@@ -43,7 +43,7 @@ import { PiSupervisor } from "../pi-supervisor.js";
 import { resolveSessionDir } from "../sessions/session-dir.js";
 import { sessionIndex } from "../sessions/session-index.js";
 import { loadSettings } from "../settings.js";
-import { assertContained, requireWorkspaceRoot } from "../workspace-registry.js";
+import { assertContained, requireWorkspaceRoot, workspaceIdFor } from "../workspace-registry.js";
 
 /**
  * webContents id → 当前 runtime 的 client。
@@ -140,10 +140,13 @@ export function tryClientFor(webContentsId: number): PiRpcClient | null {
  */
 async function resolveSessionPath(sessionId: string, workspaceRoot: string): Promise<string> {
   const index = sessionIndex();
-  let row = index.bySessionId(sessionId);
+  // 按 (workspaceId, sessionId) 联合定位：sessionId 只在一个工作区之内唯一，
+  // 全局取「最近修改的那行」会在同 id 撞车时打开另一个工作区的会话文件。
+  const workspaceId = workspaceIdFor(workspaceRoot);
+  let row = index.bySessionId(sessionId, workspaceId);
   if (!row) {
     await index.syncWorkspace(workspaceRoot, loadSettings());
-    row = index.bySessionId(sessionId);
+    row = index.bySessionId(sessionId, workspaceId);
   }
   if (!row) throw new Error(`SESSION_UNKNOWN: ${sessionId}`);
   return row.sourcePath;

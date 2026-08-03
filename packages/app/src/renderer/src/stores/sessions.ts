@@ -119,30 +119,44 @@ export const useSessionsStore = defineStore("sessions", () => {
   // 排序、归档会把条目移出当前列表，本地猜一个结果再被服务端纠正，视觉上
   // 是一次闪烁；而这些动作都不在热路径上。
 
+  /**
+   * 整理动作的工作区。
+   *
+   * 恒取 `lastWorkspaceId` —— 也就是这份列表**是从哪个工作区查出来的**。
+   * 主进程按 (workspaceId, sessionId) 联合定位会话文件：sessionId 只在一个
+   * 工作区之内唯一，复制会话文件或共用自定义 session-dir 都能让同一个 id
+   * 出现两份，少了工作区限定，重命名 / 归档 / **彻底删除** 都可能落到另一
+   * 个工作区的会话上。
+   */
+  function scope(): string {
+    if (!lastWorkspaceId.value) throw new Error("WORKSPACE_UNKNOWN: 会话列表尚未加载");
+    return lastWorkspaceId.value;
+  }
+
   async function rename(sessionId: string, name: string): Promise<void> {
-    await window.piBuddy.sessions.rename(sessionId, name);
+    await window.piBuddy.sessions.rename(scope(), sessionId, name);
     await refresh();
   }
 
   async function setPinned(sessionId: string, value: boolean): Promise<void> {
-    await window.piBuddy.sessions.setPinned(sessionId, value);
+    await window.piBuddy.sessions.setPinned(scope(), sessionId, value);
     await refresh();
   }
 
   /** 归档 / 移入回收站 / 恢复为活动。**不会删除会话文件。** */
   async function moveTo(sessionId: string, status: SessionStatus): Promise<void> {
-    await window.piBuddy.sessions.setStatus(sessionId, status);
+    await window.piBuddy.sessions.setStatus(scope(), sessionId, status);
     await refresh();
   }
 
   /** 彻底删除：会话文件被送进系统回收站。 */
   async function purge(sessionId: string): Promise<void> {
-    await window.piBuddy.sessions.purge(sessionId);
+    await window.piBuddy.sessions.purge(scope(), sessionId);
     await refresh();
   }
 
   async function exportHtml(sessionId: string): Promise<string | null> {
-    const resp = await window.piBuddy.sessions.exportHtml(sessionId);
+    const resp = await window.piBuddy.sessions.exportHtml(scope(), sessionId);
     if (!resp.success) throw new Error(resp.error ?? "导出失败");
     return resp.data?.path ?? null;
   }
@@ -158,10 +172,11 @@ export const useSessionsStore = defineStore("sessions", () => {
   ): Promise<{ done: string[]; failed: { sessionId: string; reason: string }[] }> {
     const done: string[] = [];
     const failed: { sessionId: string; reason: string }[] = [];
+    const workspaceId = scope();
     for (const id of sessionIds) {
       if (shouldCancel?.()) break;
       try {
-        await window.piBuddy.sessions.setStatus(id, status);
+        await window.piBuddy.sessions.setStatus(workspaceId, id, status);
         done.push(id);
       } catch (err) {
         failed.push({ sessionId: id, reason: err instanceof Error ? err.message : "未知错误" });

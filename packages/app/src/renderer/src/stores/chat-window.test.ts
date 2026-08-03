@@ -99,11 +99,14 @@ describe("useChatWindow · 向更早翻页", () => {
   it("请求参数是字节 offset，不是 entryId", async () => {
     readHistoryBefore.mockResolvedValueOnce(page([], null));
     const store = useAppStore();
+    store.workspaceId = "ws-1";
     store.currentSessionId = "sess-9";
     const win = useChatWindow();
     win.reset(4096);
     await win.loadEarlier();
+    // workspaceId 与 sessionId 成对下发：sessionId 只在一个工作区之内唯一
     expect(readHistoryBefore).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
       sessionId: "sess-9",
       beforeOffset: 4096,
       limit: 60,
@@ -181,5 +184,113 @@ describe("useChatWindow · 翻页结果接入渲染", () => {
     // 顺序：更早的在前，且原有那条仍在最后
     expect((app.items[0].message as { content: unknown }).content).toBe("更早的提问");
     expect(app.items[2].key).toBe(999);
+  });
+});
+
+/**
+ * 磁盘反向分页的开关就是 sizeBytes（SES-3）。
+ *
+ * `reset(0)` 会让 `reachedTop` 在那一刻就为 true —— 设计里那条 JSONL 反向
+ * 分页从此一次都不会执行。它不报错、不失败类型检查，表现只是「压缩过的长
+ * 会话，更早的消息怎么点都出不来」。
+ */
+describe("useChatWindow · 字节上界", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    readHistoryBefore = vi.fn();
+    query = vi.fn(async () => []);
+    installBridge();
+  });
+
+  it("reset(0) 即判定到顶，一次请求都不会发", async () => {
+    const win = useChatWindow();
+    win.reset(0);
+    expect(win.reachedTop.value).toBe(true);
+    await win.loadEarlier();
+    expect(readHistoryBefore).not.toHaveBeenCalled();
+  });
+
+  it("reset(真实字节数) 之后翻页真的读得到磁盘", async () => {
+    readHistoryBefore.mockResolvedValueOnce(page([{ type: "x" }], null));
+    const win = useChatWindow();
+    win.reset(4096);
+    expect(win.reachedTop.value).toBe(false);
+    await win.loadEarlier();
+    expect(readHistoryBefore).toHaveBeenCalledTimes(1);
+  });
+
+  it("字节数迟到时 adoptOffset 补得上；翻过页之后不再覆盖阅读进度", async () => {
+    readHistoryBefore.mockResolvedValueOnce(page([{ type: "x" }], 300));
+    const win = useChatWindow();
+    // 开机恢复会话：currentSessionId 先变，字节数要等索引刷新完才知道
+    win.reset(0);
+    expect(win.reachedTop.value).toBe(true);
+
+    win.adoptOffset(4096);
+    expect(win.reachedTop.value).toBe(false);
+    expect(win.nextBeforeOffset.value).toBe(4096);
+
+    await win.loadEarlier();
+    expect(win.nextBeforeOffset.value).toBe(300);
+
+    // 会话又变长了：已经翻过页，游标代表阅读进度，不能被文件末尾顶回去
+    win.adoptOffset(8192);
+    expect(win.nextBeforeOffset.value).toBe(300);
+  });
+});
+
+/**
+ * 两条取数路径的重叠（SES-3）。
+ *
+ * `store.items` 由 pi 的 get_messages 填充，而首屏的 beforeOffset 就是文件
+ * 长度 —— 第一页磁盘数据必然与内存里已有的那一段是同一批消息。不去重就是
+ * 同一条消息在界面上出现两遍，而且「点一次多一份」。
+ */
+describe("useChatWindow · 与内存数据的重叠", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    readHistoryBefore = vi.fn();
+    query = vi.fn(async () => []);
+    installBridge();
+  });
+
+  function messageEntry(text: string, timestamp: number): unknown {
+    return { type: "message", message: { role: "user", content: text, timestamp } };
+  }
+
+  it("整页都是内存里已有的消息时去重，并自动再往前取一页", async () => {
+    const app = useAppStore();
+    app.items = [
+      { key: 1, message: { role: "user", content: "已经在内存里", timestamp: 111 } },
+    ] as never;
+
+    readHistoryBefore
+      .mockResolvedValueOnce(page([messageEntry("已经在内存里", 111)], 500))
+      .mockResolvedValueOnce(page([messageEntry("真正更早的一条", 50)], null));
+
+    const win = useChatWindow();
+    win.reset(1000);
+    await win.loadEarlier();
+
+    // 重复的那条没有被再插一遍
+    expect(app.items).toHaveLength(2);
+    expect((app.items[0].message as { content: unknown }).content).toBe("真正更早的一条");
+    expect(win.requestCount.value).toBe(2);
+  });
+
+  it("同一页读两次也只接上一次（重入不会把消息插重）", async () => {
+    const app = useAppStore();
+    app.items = [] as never;
+    readHistoryBefore
+      .mockResolvedValueOnce(page([messageEntry("更早的一条", 50)], null))
+      .mockResolvedValueOnce(page([messageEntry("更早的一条", 50)], null));
+
+    const win = useChatWindow();
+    win.reset(1000);
+    await win.loadEarlier();
+    win.reset(1000);
+    await win.loadEarlier();
+
+    expect(app.items).toHaveLength(1);
   });
 });

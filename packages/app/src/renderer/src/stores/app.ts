@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, reactive, ref, shallowRef } from "vue";
+import { computed, reactive, ref, shallowRef, watch } from "vue";
 import type {
   AgentEvent,
   AgentMessage,
@@ -78,6 +78,35 @@ const PENDING_SCOPE_KEY = "";
 
 function emptyScope(): RuntimeScope {
   return { started: false, streaming: false, runtimeId: "", generation: 0 };
+}
+
+/** 输入区里的一张图（ImageContent + 供界面显示的文件名）。 */
+export interface ComposerImage extends ImageContent {
+  name: string;
+}
+
+/**
+ * 输入区（composer）的**完整**状态，按 sessionId 归一化。
+ *
+ * 四样东西缺一不可：正文、图片、非图片附件、本地未发送队列。早先它们分居
+ * 三处 —— 正文与队列是 store 上的全局 ref，图片与附件是 InputBar 的组件级
+ * `ref([])`，而换会话时一处都不清。表现是：在 A 会话打了一半的字、贴的图、
+ * 拖进来的文件，切到 B 之后原样还在输入框里，一按发送就发进了 B。
+ *
+ * 修法不是「切会话时清空」而是**按会话存**：清空会把用户没发完的内容直接
+ * 丢掉，而按会话存既不串写，切回去还能接着写。草稿落盘同理 —— 防抖任务
+ * 捕获发起时的 sessionId，到点从**那个** session 的 composer 取数，因此
+ * 「A 打完字立刻切到 B，500ms 后定时器才触发」这条时序写下的是 A 的草稿。
+ */
+export interface ComposerState {
+  text: string;
+  images: ComposerImage[];
+  attachments: AttachmentRef[];
+  queue: LocalQueueItem[];
+}
+
+function emptyComposer(): ComposerState {
+  return { text: "", images: [], attachments: [], queue: [] };
 }
 
 export type Notifier = {
@@ -329,6 +358,18 @@ export const useAppStore = defineStore("app", () => {
   const switchingSessionId = ref<string | null>(null);
 
   /**
+   * 当前会话 .jsonl 的字节数 —— **向前翻页的初始游标**。
+   *
+   * 磁盘反向分页的唯一入口是「从文件末尾往回读」，因此这个数就是那条路的
+   * 开关：为 0 时 chat-window 的 `reachedTop` 在 reset 那一刻就是 true，
+   * 整条 JSONL 反向分页从此永不执行 —— 不报错、不失败类型检查，表现只是
+   * 「压缩过的长会话，更早的消息怎么点都出不来」。
+   *
+   * 取数来自会话索引（列表行里本来就有 sizeBytes），不为它单开 IPC。
+   */
+  const currentSessionBytes = ref(0);
+
+  /**
    * 最近一次被图片能力守卫拦下的判定（PROV-101）。
    *
    * 非空时 InputBar 把附件条目标成 `aria-disabled="true"`、禁用发送按钮，
@@ -368,6 +409,41 @@ export const useAppStore = defineStore("app", () => {
   }
 
   /**
+   * 输入区状态，按 sessionId 归一化（见 ComposerState 的注释）。
+   *
+   * 换工作区时整表清空（adoptWorkspace）：不清的话，两个工作区里恰好同 id
+   * 的会话会共用同一格 —— 而 sessionId 只在一个工作区之内唯一。
+   */
+  const composers = reactive<Record<string, ComposerState>>({
+    [PENDING_SCOPE_KEY]: emptyComposer(),
+  });
+
+  function composer(sessionId: string = currentSessionId.value): ComposerState {
+    let c = composers[sessionId];
+    if (!c) {
+      c = emptyComposer();
+      composers[sessionId] = c;
+    }
+    return c;
+  }
+
+  /**
+   * 当前会话的格子恒存在。
+   *
+   * 少了这一条，`editorText` 之类的 computed 就得在 **getter 里**建格子 ——
+   * 那是一次「读的时候顺手改了自己依赖的响应式数据」，Vue 会因此多跑一轮
+   * 求值与重渲染。`flush: "sync"` 是必需的：测试与代码里都有直接写
+   * `currentSessionId` 的地方，默认的 pre 刷新要等到下一个 tick 才建格子。
+   */
+  watch(
+    currentSessionId,
+    (id) => {
+      if (!composers[id]) composers[id] = emptyComposer();
+    },
+    { immediate: true, flush: "sync" }
+  );
+
+  /**
    * 会话 ID 变化时把当前 scope 的运行状态搬到新 key 上。
    *
    * 不搬的话 started 会在 refreshState 之后瞬间读到一个全新的空 scope、
@@ -376,9 +452,19 @@ export const useAppStore = defineStore("app", () => {
    */
   function adoptSession(sessionId: string | undefined): void {
     const id = sessionId || PENDING_SCOPE_KEY;
-    if (id === currentSessionId.value) return;
+    const prevKey = currentSessionId.value;
+    if (id === prevKey) return;
     const prev = scope();
     runtimeScope[id] = { ...prev };
+    // 占位 key → 真 id：会话 id 在 start 返回之前是未知的，此前用户在输入框里
+    // 打的字记在占位格上。真 id 一到就整格搬过去，否则那段内容会留在一个再也
+    // 读不到的桶里（界面上表现为「刚打的字自己没了」）。
+    //
+    // **只搬这一种转移**。A → B 是换会话，把 A 的输入区搬到 B 就是串写本身。
+    if (prevKey === PENDING_SCOPE_KEY && id !== PENDING_SCOPE_KEY) {
+      composers[id] = composers[PENDING_SCOPE_KEY] ?? emptyComposer();
+      composers[PENDING_SCOPE_KEY] = emptyComposer();
+    }
     currentSessionId.value = id;
   }
 
@@ -413,8 +499,16 @@ export const useAppStore = defineStore("app", () => {
    * queue_update 只给字符串数组、没有稳定 id，协议里也没有「撤回队列项」
    * 的命令 —— 已提交的东西删不掉是上游能力缺失，不能用一个假的删除按钮
    * 冒充。只有还在这个数组里的条目可以编辑、可以删除。
+   *
+   * 与正文、图片、附件一样住在**当前会话的 composer 格子**里：同名代理让
+   * 既有的 `store.localQueue` 读写点一个字都不用改。
    */
-  const localQueue = ref<LocalQueueItem[]>([]);
+  const localQueue = computed<LocalQueueItem[]>({
+    get: () => composer().queue,
+    set: (v) => {
+      composer().queue = v;
+    },
+  });
   let localQueueSeq = 0;
 
   /**
@@ -425,7 +519,13 @@ export const useAppStore = defineStore("app", () => {
   const extUi = useExtensionUiStore();
   const uiRequests = computed(() => extUi.uiRequests);
   const statusTexts = extUi.statusTexts;
-  const editorText = ref("");
+  /** 输入区正文。同名代理，落在当前会话的 composer 格子上。 */
+  const editorText = computed<string>({
+    get: () => composer().text,
+    set: (v) => {
+      composer().text = v;
+    },
+  });
   const settingsOpen = ref(false);
   /** 每次有会影响聊天区高度的更新时 +1，供 ChatView 轻量监听滚动（避免 deep watch） */
   const activityTick = ref(0);
@@ -437,7 +537,10 @@ export const useAppStore = defineStore("app", () => {
     items.value = [];
     for (const key of Object.keys(toolRuns)) delete toolRuns[key];
     queue.value = { steering: [], followUp: [] };
-    localQueue.value = [];
+    // 输入区（正文 / 图片 / 附件 / 本地队列）**不在这里清**：它按 sessionId
+    // 存放，换会话时读到的自然就是新会话那一格。而这个回调是在
+    // currentSessionId **还指着旧会话**的时候跑的（openSession / newTask 都
+    // 先 reset 再 refreshState），在这里清等于把用户刚打的字从旧会话里抹掉。
     // statusTexts / uiRequests 的清空由 extensionUi store 自己注册的那一条
     // 回调负责（CT-25）：状态归谁所有，清空就归谁写。
     liveAssistant.value = null;
@@ -471,7 +574,14 @@ export const useAppStore = defineStore("app", () => {
   const workspace = computed(() => displayPath.value);
 
   function adoptWorkspace(ref_: { workspaceId: string; displayPath: string } | null): void {
-    workspaceId.value = ref_?.workspaceId ?? "";
+    const nextId = ref_?.workspaceId ?? "";
+    // 换工作区 = 输入区整表作废。sessionId 只在一个工作区之内唯一，留着上一个
+    // 工作区的格子，两边恰好同 id 的会话就会共用同一份草稿。
+    if (nextId !== workspaceId.value) {
+      for (const key of Object.keys(composers)) delete composers[key];
+      composers[PENDING_SCOPE_KEY] = emptyComposer();
+    }
+    workspaceId.value = nextId;
     displayPath.value = ref_?.displayPath ?? "";
   }
   const currentModel = computed(() => agentState.value?.model ?? null);
@@ -1016,21 +1126,46 @@ export const useAppStore = defineStore("app", () => {
   }
 
   /**
+   * 一条消息的去重签名。
+   *
+   * 只用 role + timestamp + 正文前缀：这三样在同一个会话文件里已经足够区分，
+   * 而 JSON.stringify 整条消息会把 pi 与磁盘两条路径上**同一条消息**的字段
+   * 顺序差异算成两条不同的消息。
+   */
+  function messageSignature(msg: AgentMessage): string {
+    const ts = (msg as { timestamp?: number }).timestamp ?? 0;
+    const content = (msg as { content?: unknown }).content;
+    const text =
+      typeof content === "string" ? content : textOf(content as { type: string }[] | undefined);
+    return `${msg.role}|${ts}|${text.slice(0, 200)}`;
+  }
+
+  /**
    * 把更早的消息**接在前面**（向前翻页用）。
    *
    * 改造前 chat-window 把读到的条目塞进自己的 `earlier` 数组，而 ChatView
    * 渲染的是 `items` —— 全项目没有第二处引用 `earlier`。结果是：内存里的铺
    * 完之后再点「查看更早的消息」，磁盘确实读了、游标确实前进了，**界面上
    * 一条都不会多出来**。不报错、不失败类型检查，纯粹静默。
+   *
+   * 返回**真正接上去**的条数。两条取数路径会重叠：`items` 由 pi 的
+   * get_messages 填充，而首屏的 beforeOffset 就是文件长度，于是第一页磁盘
+   * 数据必然与内存里已有的那一段是同一批消息。不去重就是同一条消息在界面上
+   * 出现两遍 —— 而且是「点一次多一份」，越点越多。
    */
   function prependMessages(messages: AgentMessage[]): number {
+    const seen = new Set(items.value.map((i) => messageSignature(i.message)));
     const prepended: ChatItem[] = [];
     for (const msg of messages) {
-      if (msg.role === "user" || msg.role === "assistant") {
-        prepended.push({ key: ++keySeq, message: msg });
-      } else if (msg.role === "toolResult") {
+      if (msg.role === "toolResult") {
         recordToolResult(msg as ToolResultMessage);
+        continue;
       }
+      if (msg.role !== "user" && msg.role !== "assistant") continue;
+      const sig = messageSignature(msg);
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      prepended.push({ key: ++keySeq, message: msg });
     }
     if (prepended.length > 0) items.value = [...prepended, ...items.value];
     return prepended.length;
@@ -1041,6 +1176,8 @@ export const useAppStore = defineStore("app", () => {
     sessionLoadError.value = "";
     started.value = false;
     streaming.value = false;
+    // 字节上界由收尾处的 refreshSessions → adoptSessionBytes 从索引里补齐。
+    currentSessionBytes.value = 0;
     resetSessionScopedState();
     try {
       const result = await window.piBuddy.pi.runtime.start({
@@ -1193,6 +1330,20 @@ export const useAppStore = defineStore("app", () => {
   async function refreshSessions(): Promise<void> {
     if (!workspaceId.value) return;
     await useSessionsStore().refresh(workspaceId.value);
+    adoptSessionBytes();
+  }
+
+  /**
+   * 从刚刷新的会话索引里取当前会话的字节数。
+   *
+   * 挂在 refreshSessions 之后是唯一必要的落点：开机恢复上一个会话、新建
+   * 会话写下第一条消息、agent_settled 之后文件变长 —— 三条路径全都以一次
+   * refreshSessions 收尾。少了这一步，只有「从列表里点开」的会话才有字节
+   * 上界，开机直接进来的那个会话永远翻不了页。
+   */
+  function adoptSessionBytes(): void {
+    const row = useSessionsStore().rowOf(currentSessionId.value);
+    if (row) currentSessionBytes.value = row.sizeBytes;
   }
 
   let refreshSessionsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1247,6 +1398,8 @@ export const useAppStore = defineStore("app", () => {
     sessionLoadError.value = "";
     resetSessionScopedState();
     stats.value = null;
+    // 新会话磁盘上还没有文件，更谈不上「更早的消息」。
+    currentSessionBytes.value = 0;
     await refreshState();
     void refreshSessions();
   }
@@ -1273,6 +1426,9 @@ export const useAppStore = defineStore("app", () => {
     if (switchingSessionId.value !== null) return;
 
     switchingSessionId.value = target.sessionId;
+    // 先于 currentSessionId 变化写入：ChatView 在 currentSessionId 一变就
+    // 用它 reset 翻页游标，晚一步写就等于用 0 去 reset（= 直接判定已到文件头）。
+    currentSessionBytes.value = target.sizeBytes ?? 0;
     try {
       // 先用本地 JSONL 把内容铺出来（10ms 级），不等 pi。
       //
@@ -1320,6 +1476,7 @@ export const useAppStore = defineStore("app", () => {
     if (typeof sizeBytes !== "number" || sizeBytes <= 0) return;
     try {
       const page = await window.piBuddy.sessions.readHistoryBefore({
+        workspaceId: workspaceId.value,
         sessionId,
         beforeOffset: sizeBytes,
         limit: 60,
@@ -1373,8 +1530,25 @@ export const useAppStore = defineStore("app", () => {
     scheduleSaveDraft();
   }
 
-  /** 草稿里的附件条目（能力凭证，不含路径）。由 InputBar 同步过来。 */
-  const draftAttachments = ref<unknown[]>([]);
+  /**
+   * 草稿里的附件条目（能力凭证，不含路径）与图片。
+   *
+   * 早先这两样是 InputBar 的组件级 `ref([])` —— 组件不随会话重建，于是切走
+   * 之后图片和文件原样留在输入框里，下一次发送就把它们发进了另一个会话。
+   * 现在归 composer 所有，InputBar 只作同名代理。
+   */
+  const draftAttachments = computed<AttachmentRef[]>({
+    get: () => composer().attachments,
+    set: (v) => {
+      composer().attachments = v;
+    },
+  });
+  const draftImages = computed<ComposerImage[]>({
+    get: () => composer().images,
+    set: (v) => {
+      composer().images = v;
+    },
+  });
 
   /**
    * 从文件树「加入输入框附件」推过来的结构化引用，由 InputBar 取走后清空。
@@ -1402,36 +1576,57 @@ export const useAppStore = defineStore("app", () => {
   }
 
   const DRAFT_DEBOUNCE_MS = 500;
-  let draftTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * 每个会话一个防抖句柄。
+   *
+   * 单个全局句柄有两处会错：在 A 打完字立刻切到 B 再打字，B 的 schedule 会
+   * `clearTimeout` 掉 A 那一次，A 的草稿从此再也不写；而如果不清，到点的
+   * 回调又是**触发时**才读 currentSessionId —— 那时已经是 B，于是 A 的正文
+   * 被写进 B 的草稿。按会话各记各的，两条都不成立。
+   */
+  const draftTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /**
    * 尾沿防抖 500ms 写草稿。
    *
    * 不防抖的话长输入是「每按一个键一次 IPC + 一次 SQLite 写」，UI 上没有
    * 任何征兆，只有主进程在闷头刷盘。
+   *
+   * **在这里捕获 sessionId**，落盘时按捕获到的那个会话取数 —— 定时器触发
+   * 时才读「当前会话」正是跨会话串写的根因。
    */
   function scheduleSaveDraft(): void {
-    if (draftTimer) clearTimeout(draftTimer);
-    draftTimer = setTimeout(() => {
-      draftTimer = null;
-      void saveDraftNow();
-    }, DRAFT_DEBOUNCE_MS);
-  }
-
-  async function saveDraftNow(): Promise<void> {
     const sessionId = currentSessionId.value;
     if (!sessionId) return;
+    const pending = draftTimers.get(sessionId);
+    if (pending) clearTimeout(pending);
+    draftTimers.set(
+      sessionId,
+      setTimeout(() => {
+        draftTimers.delete(sessionId);
+        void saveDraftNow(sessionId);
+      }, DRAFT_DEBOUNCE_MS)
+    );
+  }
+
+  async function saveDraftNow(sessionId: string = currentSessionId.value): Promise<void> {
+    if (!sessionId) return;
+    // 按**捕获到的会话**取数，不是「当前会话」。这一格在 composers 里存在与否
+    // 就是判据：不存在说明这个会话从没被编辑过，此时写一份空草稿只会把磁盘上
+    // 已有的那份抹掉。
+    const c = composers[sessionId];
+    if (!c) return;
     const draft: DraftRecord = {
-      text: editorText.value,
-      attachments: draftAttachments.value,
+      text: c.text,
+      attachments: c.attachments,
       queue: {
-        steering: localQueue.value.filter((i) => i.mode === "steer").map((i) => i.text),
-        followUp: localQueue.value.filter((i) => i.mode === "followUp").map((i) => i.text),
+        steering: c.queue.filter((i) => i.mode === "steer").map((i) => i.text),
+        followUp: c.queue.filter((i) => i.mode === "followUp").map((i) => i.text),
       },
       updatedAt: Date.now(),
     };
     try {
-      await window.piBuddy.sessions.saveDraft(sessionId, plainCopy(draft));
+      await window.piBuddy.sessions.saveDraft(workspaceId.value, sessionId, plainCopy(draft));
     } catch (err) {
       // 草稿写失败不该打断输入（下一次输入会再试一次），但**不能静默**：
       // 空 catch 会让「草稿一直存不下来」变成一个查不出原因的现象。
@@ -1452,14 +1647,19 @@ export const useAppStore = defineStore("app", () => {
     if (!useSessionsStore().rows.some((r) => r.sessionId === sessionId)) return;
     let draft: DraftRecord | null = null;
     try {
-      draft = await window.piBuddy.sessions.getDraft(sessionId);
+      draft = await window.piBuddy.sessions.getDraft(workspaceId.value, sessionId);
     } catch {
       return;
     }
     if (!draft) return;
-    editorText.value = draft.text ?? "";
-    draftAttachments.value = draft.attachments ?? [];
-    localQueue.value = [
+    // 写进**发起这次恢复的那个会话**的格子，而不是「现在打开的那个」：
+    // getDraft 是一次 IPC 往返，期间用户完全可能又切走了。
+    const c = composer(sessionId);
+    c.text = draft.text ?? "";
+    // attachments 在契约里是 unknown[]（DraftRecord 不解释凭证的形状），
+    // 到这一层才收窄回 AttachmentRef[] —— 它就是 InputBar 存进去的那批。
+    c.attachments = (draft.attachments ?? []) as AttachmentRef[];
+    c.queue = [
       ...(draft.queue?.steering ?? []).map((text) => ({
         id: ++localQueueSeq,
         text,
@@ -1564,10 +1764,12 @@ export const useAppStore = defineStore("app", () => {
     startError,
     sessionLoadError,
     switchingSessionId,
+    currentSessionBytes,
     entriesToMessages,
     prependMessages,
     currentSessionId,
     runtimeScope,
+    composers,
     currentRuntimeId,
     currentGeneration,
     lastSequence,
@@ -1583,6 +1785,7 @@ export const useAppStore = defineStore("app", () => {
     queue,
     localQueue,
     draftAttachments,
+    draftImages,
     inboundAttachments,
     statusTexts,
     uiRequests,
@@ -1592,6 +1795,7 @@ export const useAppStore = defineStore("app", () => {
     workspace,
     workspaceId,
     displayPath,
+    adoptWorkspace,
     currentModel,
     busyStatus,
     extStatus,

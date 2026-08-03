@@ -1,9 +1,12 @@
 /**
  * `window.piBuddy.sessions` —— 会话中心（SES-101）。
  *
- * 每个方法都只接受**不透明 sessionId**：JSONL 的绝对路径是主进程内部标识，
- * 由索引表在 main 侧反查（CT-15）。这条边界一旦松掉，渲染进程就能据路径
- * 推断出磁盘布局，capability 化也就白做了。
+ * 每个方法都只接受**不透明标识**（workspaceId + sessionId）：JSONL 的绝对
+ * 路径是主进程内部标识，由索引表在 main 侧反查（CT-15）。这条边界一旦松掉，
+ * 渲染进程就能据路径推断出磁盘布局，capability 化也就白做了。
+ *
+ * workspaceId 恒为首参且必填：sessionId 只在**一个工作区之内**唯一，复制
+ * 会话文件或共用自定义 session-dir 都能让同一个 id 出现两份。
  */
 import { CHANNELS } from "@pibuddy/contract/channels";
 import type {
@@ -26,24 +29,25 @@ export const sessions = {
   query: (workspaceId: string, filter: Omit<SessionQuery, "workspaceId"> = {}) =>
     invoke<SessionRow[]>(CHANNELS.sessionsQuery, { ...filter, workspaceId }),
   /** 会话是当前打开的那个时，同时经 set_session_name 落到会话文件里。 */
-  rename: (sessionId: string, name: string) =>
-    invoke<void>(CHANNELS.sessionsRename, { sessionId, name }),
-  setPinned: (sessionId: string, pinned: boolean) =>
-    invoke<void>(CHANNELS.sessionsSetPinned, { sessionId, pinned }),
+  rename: (workspaceId: string, sessionId: string, name: string) =>
+    invoke<void>(CHANNELS.sessionsRename, { workspaceId, sessionId, name }),
+  setPinned: (workspaceId: string, sessionId: string, pinned: boolean) =>
+    invoke<void>(CHANNELS.sessionsSetPinned, { workspaceId, sessionId, pinned }),
   /** 归档 / 移入回收站 / 恢复。**不动 .jsonl**，只改索引里的状态列。 */
-  setStatus: (sessionId: string, status: SessionStatus) =>
-    invoke<void>(CHANNELS.sessionsSetStatus, { sessionId, status }),
+  setStatus: (workspaceId: string, sessionId: string, status: SessionStatus) =>
+    invoke<void>(CHANNELS.sessionsSetStatus, { workspaceId, sessionId, status }),
   /** 彻底删除：会话文件被送进**系统回收站**，还有一次挽回机会。 */
-  purge: (sessionId: string) => invoke<void>(CHANNELS.sessionsPurge, { sessionId }),
-  getDraft: (sessionId: string) =>
-    invoke<DraftRecord | null>(CHANNELS.sessionsGetDraft, { sessionId }),
+  purge: (workspaceId: string, sessionId: string) =>
+    invoke<void>(CHANNELS.sessionsPurge, { workspaceId, sessionId }),
+  getDraft: (workspaceId: string, sessionId: string) =>
+    invoke<DraftRecord | null>(CHANNELS.sessionsGetDraft, { workspaceId, sessionId }),
   /** 目标会话不在索引里时返回 false，不会静默造出一条孤儿草稿。 */
-  saveDraft: (sessionId: string, draft: DraftRecord) =>
-    invoke<boolean>(CHANNELS.sessionsSaveDraft, { sessionId, draft }),
-  exportHtml: (sessionId: string) =>
+  saveDraft: (workspaceId: string, sessionId: string, draft: DraftRecord) =>
+    invoke<boolean>(CHANNELS.sessionsSaveDraft, { workspaceId, sessionId, draft }),
+  exportHtml: (workspaceId: string, sessionId: string) =>
     invoke<{ success: boolean; error?: string; data?: { path: string } }>(
       CHANNELS.sessionsExportHtml,
-      { sessionId }
+      { workspaceId, sessionId }
     ),
   /**
    * 向**更早**翻一页。
@@ -56,6 +60,10 @@ export const sessions = {
    * 返回 `stale: true` 表示会话在两次调用之间被追加过，main 已自动同步并
    * 重试了一次；仍为 true 时调用方原样再请求一次即可。
    */
-  readHistoryBefore: (args: { sessionId: string; beforeOffset: number; limit: number }) =>
-    invoke<SessionHistoryPage>(CHANNELS.sessionsReadHistory, args),
+  readHistoryBefore: (args: {
+    workspaceId: string;
+    sessionId: string;
+    beforeOffset: number;
+    limit: number;
+  }) => invoke<SessionHistoryPage>(CHANNELS.sessionsReadHistory, args),
 };

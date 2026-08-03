@@ -86,14 +86,38 @@ describe("registerAllIpc 之后的注册面（裁定1）", () => {
   });
 });
 
-describe("CT-15：跨进程只有不透明 sessionId", () => {
-  it("sessions:read-history 的 schema 恰有 beforeOffset / limit / sessionId 三个键", async () => {
+describe("CT-15：跨进程只有不透明标识", () => {
+  it("sessions:read-history 的 schema 恰有 beforeOffset / limit / sessionId / workspaceId 四个键", async () => {
     const { readHistoryRequestSchema } = await import("@pibuddy/contract");
     expect(Object.keys(readHistoryRequestSchema.shape).sort()).toEqual([
       "beforeOffset",
       "limit",
       "sessionId",
+      "workspaceId",
     ]);
+  });
+
+  /**
+   * sessionId 只在一个工作区之内唯一。复制一份 .jsonl、从备份恢复、或两个
+   * 工作区共用一个自定义 session-dir，都能让同一个 id 在索引里出现两行 ——
+   * 少了 workspaceId，rename / set-status / purge / 草稿读写就可能落到另一个
+   * 工作区的会话上，而 purge 那一条不可逆。
+   */
+  it("会动到具体会话的通道，入参一律带 workspaceId", async () => {
+    const contract = await import("@pibuddy/contract");
+    const scoped = [
+      contract.sessionRenameRequestSchema,
+      contract.sessionSetPinnedRequestSchema,
+      contract.sessionSetStatusRequestSchema,
+      contract.sessionIdRequestSchema,
+      contract.sessionSaveDraftRequestSchema,
+      contract.readHistoryRequestSchema,
+    ];
+    for (const schema of scoped) {
+      expect(Object.keys(schema.shape)).toContain("workspaceId");
+      // 必填而不是可选：漏传要在编译/校验期就炸，不能等到会话被改到别处
+      expect(schema.safeParse({ sessionId: "s", name: "n" }).success).toBe(false);
+    }
   });
 
   it("pi:switch-session 也只收 sessionId，不再收路径", async () => {

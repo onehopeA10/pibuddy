@@ -1,23 +1,34 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { NButton, NInput, NSpin, useMessage } from "naive-ui";
-import type { ImageContent } from "@sdk";
-import type { AttachmentRef } from "@contract";
-import { useAppStore, type SendMode } from "../stores/app";
+import { useAppStore, type ComposerImage, type SendMode } from "../stores/app";
 import { imageCapableModels, supportsImage } from "../stores/model-capability";
 import { VoiceRecorder } from "../stt";
 import QueuePanel from "./QueuePanel.vue";
 import ExtensionWidgetHost from "./ExtensionWidgetHost.vue";
 
-interface ImageAttachment extends ImageContent {
-  name: string;
-}
-
 const store = useAppStore();
 const message = useMessage();
 
-const images = ref<ImageAttachment[]>([]);
-const files = ref<AttachmentRef[]>([]);
+/**
+ * 图片与文件附件**归 store 的 composer 所有**，这里只是同名代理。
+ *
+ * 早先它们是组件级 `ref([])`。组件不随会话重建 —— 在 A 会话贴的图、拖进来
+ * 的文件，切到 B 之后原样留在输入框里，一按发送就发进了 B。改成按会话存放
+ * 之后，切走再切回来内容还在，切到别的会话则一张都不会跟过去。
+ */
+const images = computed<ComposerImage[]>({
+  get: () => store.draftImages,
+  set: (v) => {
+    store.draftImages = v;
+  },
+});
+const files = computed({
+  get: () => store.draftAttachments,
+  set: (v) => {
+    store.draftAttachments = v;
+  },
+});
 const sending = ref(false);
 
 /**
@@ -74,7 +85,9 @@ async function switchToImageModel(provider: string, modelId: string): Promise<vo
  * 任何征兆。
  */
 function onDraftChanged(): void {
-  store.draftAttachments = [...files.value];
+  // 附件已经直接住在 composer 里，这里不再往回搬一次 —— 早先那句
+  // `store.draftAttachments = [...files.value]` 是两处状态互相同步的接缝，
+  // 而正是它让「组件里还留着上一会话的附件」被原样写进新会话的草稿。
   store.scheduleSaveDraft();
 }
 

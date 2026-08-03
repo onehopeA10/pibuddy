@@ -106,12 +106,18 @@ export const draftRecordSchema = z.object({
 export type DraftRecord = z.infer<typeof draftRecordSchema>;
 
 /**
- * sessions:read-history 的入参（CT-15：三个键，一个都不能多）。
+ * sessions:read-history 的入参（CT-15：四个键，一个都不能多 —— 而且**没有一个
+ * 是路径**）。
  *
  * `beforeOffset` 是 JSONL 文件的**字节**上界，由上一页的 `nextBeforeOffset`
  * 递推；首屏用 `SessionRow.sizeBytes`。
+ *
+ * `workspaceId` 与 sessionId 成对出现：sessionId 不是全局唯一的（见
+ * ipc-contract.ts 里 workspaceScoped 的注释），少了它就可能读到另一个工作区
+ * 里同 id 的那份会话文件。
  */
 export const readHistoryRequestSchema = z.object({
+  workspaceId: z.string().min(1),
   sessionId: z.string().min(1),
   beforeOffset: z.number().int().nonnegative(),
   limit: z.number().int().positive().max(500),

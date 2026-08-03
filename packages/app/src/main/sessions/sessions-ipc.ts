@@ -50,29 +50,38 @@ export const SESSIONS_CHANNELS: InvokeChannel[] = [
 ];
 
 /**
- * sessionId → 索引行。
+ * (workspaceId, sessionId) → 索引行。
  *
  * **查不到时先同步一次再查**：pi 在启动时会立刻创建一个新的会话文件，而
  * 那多半发生在上一次 syncWorkspace 之后 —— 于是「开一个新任务，随手给它
  * 改个名字」这条最常见的路径会直接报 SESSION_UNKNOWN。同步一次是廉价的
  * （mtime+size 双命中的文件一个字节都不读）。
  *
+ * 工作区取自入参而不是 `loadSettings().workspace`：后者是「上一次选过的
+ * 目录」，多窗口开着两个工作区时它只对其中一个成立，另一个窗口的整理动作
+ * 会去同步别人的目录。
+ *
  * 同步之后仍然查不到才抛：拿不到路径的动作绝不能静默变成 no-op。
  */
-async function tryRow(sessionId: string): Promise<IndexedSession | null> {
+async function tryRow(
+  workspaceId: string,
+  sessionId: string
+): Promise<IndexedSession | null> {
   const index = sessionIndex();
-  const hit = index.bySessionId(sessionId);
+  const hit = index.bySessionId(sessionId, workspaceId);
   if (hit) return hit;
 
-  const root = loadSettings().workspace;
-  if (!root) return null;
+  const root = requireWorkspaceRoot(workspaceId);
   await index.syncWorkspace(root, loadSettings());
-  return index.bySessionId(sessionId);
+  return index.bySessionId(sessionId, workspaceId);
 }
 
 /** 同上，但查不到就抛 —— 拿不到路径的动作绝不能静默变成 no-op。 */
-async function requireRow(sessionId: string): Promise<IndexedSession> {
-  const row = await tryRow(sessionId);
+async function requireRow(
+  workspaceId: string,
+  sessionId: string
+): Promise<IndexedSession> {
+  const row = await tryRow(workspaceId, sessionId);
   if (!row) throw new Error(`SESSION_UNKNOWN: ${sessionId}`);
   return row;
 }
@@ -108,7 +117,7 @@ export function registerSessionsIpc(): void {
     }
     // 索引里查不到是**正常情况**（新建会话在发出第一条消息前没有文件），
     // 因此这里用 tryRow 而不是 requireRow：当前会话照样能经 RPC 改名。
-    const row = await tryRow(payload.sessionId);
+    const row = await tryRow(payload.workspaceId, payload.sessionId);
     if (!row && !isActive) throw new Error(`SESSION_UNKNOWN: ${payload.sessionId}`);
     await renameSession({
       index: sessionIndex(),
@@ -120,30 +129,33 @@ export function registerSessionsIpc(): void {
   });
 
   registerHandler(CHANNELS.sessionsSetPinned, sessionSetPinnedRequestSchema, async (payload) => {
-    const row = await requireRow(payload.sessionId);
+    const row = await requireRow(payload.workspaceId, payload.sessionId);
     sessionIndex().setPinned(row.sourcePath, payload.pinned);
   });
 
   registerHandler(CHANNELS.sessionsSetStatus, sessionSetStatusRequestSchema, async (payload) => {
     // 归档 / 回收站 / 恢复都只改索引里的状态列，.jsonl 一个字节都不动。
-    const row = await requireRow(payload.sessionId);
+    const row = await requireRow(payload.workspaceId, payload.sessionId);
     sessionIndex().setStatus(row.sourcePath, payload.status);
   });
 
   registerHandler(CHANNELS.sessionsPurge, sessionIdRequestSchema, async (payload) => {
     // 只有这一条会真正动到会话文件，而且是交给系统回收站，不是 unlink。
-    const row = await requireRow(payload.sessionId);
+    // 也正因为不可逆，(workspaceId, sessionId) 联合定位在这条上最要紧。
+    const row = await requireRow(payload.workspaceId, payload.sessionId);
     await sessionIndex().purge(row.sourcePath);
   });
 
   // ------------------------------------------------------------ 草稿
 
   registerHandler(CHANNELS.sessionsGetDraft, sessionIdRequestSchema, async (payload) =>
-    sessionIndex().getDraft((await requireRow(payload.sessionId)).sourcePath)
+    sessionIndex().getDraft(
+      (await requireRow(payload.workspaceId, payload.sessionId)).sourcePath
+    )
   );
 
   registerHandler(CHANNELS.sessionsSaveDraft, sessionSaveDraftRequestSchema, (payload) => {
-    const row = sessionIndex().bySessionId(payload.sessionId);
+    const row = sessionIndex().bySessionId(payload.sessionId, payload.workspaceId);
     // 会话不在索引里：返回 false，绝不 upsert 出一条没有会话文件的孤儿行。
     if (!row) return false;
     return sessionIndex().saveDraft(row.sourcePath, payload.draft);
@@ -177,7 +189,7 @@ export function registerSessionsIpc(): void {
     readHistoryRequestSchema,
     async (payload): Promise<SessionHistoryPage> => {
       const index = sessionIndex();
-      let row = await requireRow(payload.sessionId);
+      let row = await requireRow(payload.workspaceId, payload.sessionId);
       const first = await readEntriesBefore({
         sourcePath: row.sourcePath,
         beforeOffset: payload.beforeOffset,
@@ -189,7 +201,7 @@ export function registerSessionsIpc(): void {
       // 索引过期：同步一次再**重试一次**（只一次 —— 会话正在流式写入时，
       // 无限重试会把主进程钉在这里）。
       await index.syncWorkspace(row.workspaceRoot, loadSettings());
-      row = await requireRow(payload.sessionId);
+      row = await requireRow(payload.workspaceId, payload.sessionId);
       return readEntriesBefore({
         sourcePath: row.sourcePath,
         beforeOffset: payload.beforeOffset,

@@ -320,28 +320,43 @@ export const piForkRequestSchema = z.object({
 
 // ---------- 会话中心（SES-101） ----------
 
+/**
+ * 会话通道的公共入参：**workspaceId 与 sessionId 必须成对出现**。
+ *
+ * sessionId 不是全局唯一的。它由 pi 写在 JSONL 头部，复制一份会话文件、从
+ * 备份里恢复、或两个工作区共用一个自定义 session-dir，都会让同一个 id 在
+ * 索引里出现两行。少了 workspaceId 时主进程只能「按 id 取最近修改的那行」，
+ * 于是重命名、归档、彻底删除、草稿读写都可能落到**另一个工作区**的会话上 ——
+ * purge 那一条是不可逆的。
+ *
+ * 因此这里把它做成必填而不是可选：漏传就编译不过，而不是等到用户的会话被
+ * 改到别处才发现。
+ */
+const workspaceScoped = {
+  workspaceId: z.string().min(1),
+  sessionId: z.string().min(1),
+};
+
 /** sessions:rename 的入参。sessionId 是不透明标识，不是文件路径。 */
 export const sessionRenameRequestSchema = z.object({
-  sessionId: z.string().min(1),
+  ...workspaceScoped,
   name: z.string().min(1),
 });
 
 export const sessionSetPinnedRequestSchema = z.object({
-  sessionId: z.string().min(1),
+  ...workspaceScoped,
   pinned: z.boolean(),
 });
 
 export const sessionSetStatusRequestSchema = z.object({
-  sessionId: z.string().min(1),
+  ...workspaceScoped,
   status: sessionStatusSchema,
 });
 
-export const sessionIdRequestSchema = z.object({
-  sessionId: z.string().min(1),
-});
+export const sessionIdRequestSchema = z.object({ ...workspaceScoped });
 
 export const sessionSaveDraftRequestSchema = z.object({
-  sessionId: z.string().min(1),
+  ...workspaceScoped,
   draft: draftRecordSchema,
 });
 

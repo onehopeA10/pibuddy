@@ -24,6 +24,7 @@ vi.mock("naive-ui", () => ({
   useMessage: () => ({ info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() }),
 }));
 
+import { nextTick } from "vue";
 import InputBar from "./InputBar.vue";
 import { useAppStore } from "../stores/app";
 
@@ -84,7 +85,9 @@ describe("InputBar", () => {
     vi.advanceTimersByTime(500);
     await Promise.resolve();
     expect(saveDraft).toHaveBeenCalledTimes(1);
-    expect(saveDraft.mock.calls[0][1]).toMatchObject({ text: "字".repeat(10) });
+    // saveDraft(workspaceId, sessionId, draft)：会话 id 只在工作区内唯一
+    expect(saveDraft.mock.calls[0][1]).toBe("sess-1");
+    expect(saveDraft.mock.calls[0][2]).toMatchObject({ text: "字".repeat(10) });
     vi.useRealTimers();
   });
 
@@ -100,7 +103,7 @@ describe("InputBar", () => {
     vi.advanceTimersByTime(600);
     await Promise.resolve();
 
-    const payload = saveDraft.mock.calls.at(-1)![1];
+    const payload = saveDraft.mock.calls.at(-1)![2];
     // Electron 的 IPC 用结构化克隆，响应式代理会以
     // "An object could not be cloned." 失败 —— 而这个异常只在 await 处冒出来，
     // 界面上没有任何征兆，表现就是「草稿永远存不上」。
@@ -110,5 +113,39 @@ describe("InputBar", () => {
     expect(() => structuredClone(payload)).not.toThrow();
     expect(payload.queue.followUp).toEqual(["先攒着的一条"]);
     vi.useRealTimers();
+  });
+
+  /**
+   * 图片与文件附件早先是 InputBar 的组件级 `ref([])`。组件不随会话重建 ——
+   * 在 A 会话贴的图、拖进来的文件切到 B 之后原样留在输入框里，一按发送就
+   * 发进了 B。这条用例的判据落在真实 DOM 上：附件条目要真的消失。
+   */
+  it("切走之后上一会话的图片与附件不留在输入框里，切回来又原样在", async () => {
+    const store = useAppStore();
+    store.workspaceId = "ws-1";
+    store.currentSessionId = "sess-A";
+    store.started = true;
+    const wrapper = mount(InputBar);
+
+    store.draftImages = [
+      { type: "image", data: "AAAA", mimeType: "image/png", name: "截图.png" },
+    ];
+    store.draftAttachments = [
+      { token: "tok-1", name: "报表.xlsx", size: 10, kind: "other" },
+    ];
+    await nextTick();
+    expect(wrapper.findAll('[data-testid="image-attachment"]')).toHaveLength(1);
+    expect(wrapper.text()).toContain("报表.xlsx");
+
+    store.currentSessionId = "sess-B";
+    await nextTick();
+    expect(wrapper.findAll('[data-testid="image-attachment"]')).toHaveLength(0);
+    expect(wrapper.text()).not.toContain("报表.xlsx");
+
+    // 按会话存放而不是一刀清空：回到 A 内容还在
+    store.currentSessionId = "sess-A";
+    await nextTick();
+    expect(wrapper.findAll('[data-testid="image-attachment"]')).toHaveLength(1);
+    expect(wrapper.text()).toContain("报表.xlsx");
   });
 });
