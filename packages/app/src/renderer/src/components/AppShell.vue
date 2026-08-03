@@ -25,6 +25,7 @@ import PreviewPane from "./PreviewPane.vue";
 import SessionTreePanel from "./SessionTreePanel.vue";
 import GitPanel from "./GitPanel.vue";
 import TasksPanel from "./TasksPanel.vue";
+import ConnectorPanel from "./ConnectorPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -128,6 +129,9 @@ const sessionTreeOpen = ref(false);
 // Git 面板（coding.git 垂直能力包）的开合。同样独立成 ref：它是第一个垂直
 // 能力域，默认只在「编码」Profile 里可见。
 const gitOpen = ref(false);
+// 连接器面板（connector.webhook）的开合。独立成 ref：它是第一个 connector
+// 能力域，与其它面板互不牵连。
+const connectorOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -149,6 +153,9 @@ const sessionTreeEnabled = computed(() => capabilities.isEnabled("common.session
 // 它默认只在「编码」Profile 启用，因此在「通用办公」下这个开关与面板都不出现。
 const gitEnabled = computed(() => capabilities.isEnabled("coding.git"));
 const tasksEnabled = computed(() => capabilities.isEnabled("common.tasks"));
+// connector.webhook 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道
+// 已注册）。默认进「通用办公」与「编码」两个 Profile，「精简」下不出现。
+const connectorEnabled = computed(() => capabilities.isEnabled("connector.webhook"));
 
 onMounted(() => {
   void store.init();
@@ -322,6 +329,15 @@ function onDrop(): void {
             >
               ⏰ 定时
             </n-button>
+            <n-button
+              v-if="connectorEnabled"
+              size="tiny"
+              :type="connectorOpen ? 'primary' : 'default'"
+              quaternary
+              @click="connectorOpen = !connectorOpen"
+            >
+              🔌 连接器
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -337,6 +353,7 @@ function onDrop(): void {
           <ChangesetPanel v-if="changesOpen && reviewEnabled" />
           <SessionTreePanel v-if="sessionTreeOpen && sessionTreeEnabled" />
           <GitPanel v-if="gitOpen && gitEnabled" />
+          <ConnectorPanel v-if="connectorOpen && connectorEnabled" />
           <InputBar />
         </slot>
       </template>

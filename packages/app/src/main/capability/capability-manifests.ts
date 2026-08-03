@@ -14,6 +14,7 @@ import { artifactsCapability } from "../artifacts/artifacts.capability.js";
 import { workspaceReviewCapability } from "../changeset/workspace-review.capability.js";
 import { previewCapability } from "../preview/preview.capability.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
+import { connectorWebhookCapability } from "./manifests/connector-webhook.manifest.js";
 import { gitCapability } from "./manifests/git.manifest.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
@@ -38,6 +39,9 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // common 能力之后——被依赖的 common.workspace-review 已在前面注册。
   gitCapability,
   tasksCapability,
+  // 第一个 connector tier 能力包。排在最后——它不被任何 common 能力依赖，
+  // 且默认进「通用办公」与「编码」两个 Profile（连接器是可组合的可选项）。
+  connectorWebhookCapability,
 ];
 
 /**
@@ -67,6 +71,9 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.memory",
       "common.mcp",
       "common.tasks",
+      // 第一个 connector tier 能力包。连接器是可组合的可选项（ADR-0002：
+      // 「通用文档 + 财务分析 + 飞书连接器」），默认进「通用办公」，可随时关掉。
+      "connector.webhook",
     ],
   },
   {
@@ -87,6 +94,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.mcp",
       "coding.git",
       "common.tasks",
+      "connector.webhook",
     ],
   },
   {

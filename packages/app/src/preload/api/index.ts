@@ -44,6 +44,7 @@ import { memory } from "./memory.js";
 import { agentPool } from "./agentPool.js";
 import { git } from "./git.js";
 import { tasks } from "./tasks.js";
+import { connector } from "./connector.js";
 
 export const api = {
   pi,
@@ -78,6 +79,8 @@ export const api = {
   git,
   /** 持久定时任务（common.tasks）。调度 headless，触发的是已落盘任务里冻结的配置 */
   tasks,
+  /** Webhook 连接器（connector.webhook）。凭证只进不出，出站逐域名经权限授权 + safeFetch */
+  connector,
 };
 
 export type PiBuddyApi = typeof api;

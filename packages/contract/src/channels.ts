@@ -360,6 +360,24 @@ export const CHANNELS = {
   tasksCancelRun: "tasks:cancel-run",
   tasksRetryRun: "tasks:retry-run",
   tasksDuplicate: "tasks:duplicate",
+  // ---- 连接器 v1（Webhook，能力包 connector.webhook，恰 7 条） ----
+  //
+  // 四层边界里风险最高的一层：连接器是唯一会把消息**送出本机**的能力。七条
+  // 通道的入参一律不透明 connectorId + workspaceId + 文本，**没有任何绝对
+  // URL 出口**：完整 webhook URL 是密令，只活在主进程（经 secret-store 加密），
+  // 渲染进程能看到的极限是 {domain, configured, last4}。出站目标域名限定在
+  // manifest 声明的 network:<domain> 白名单内，且每个 workspace 要经权限引擎
+  // 单独授权——未授权域名被拒、内网地址被出站守卫（safeFetch）挡下。
+  connectorList: "connector:list",
+  connectorCreate: "connector:create",
+  /** 改名与 / 或轮换凭证（凭证管理）；url 省略时只改名，保留原密令 */
+  connectorUpdate: "connector:update",
+  connectorRemove: "connector:remove",
+  connectorSetEnabled: "connector:set-enabled",
+  /** 连接自检：向配置的 webhook 发一次最小请求，需该域名已被 workspace 授权 */
+  connectorTest: "connector:test",
+  /** Agent 主动推送一条文本到外部平台 */
+  connectorSend: "connector:send",
 } as const;
 
 /** 主进程单向推送通道（7 个）。 */

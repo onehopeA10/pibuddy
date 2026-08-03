@@ -32,6 +32,11 @@ import { disposeGitResources, registerGitIpc } from "../git/git-ipc.js";
 import { gitCapability } from "./manifests/git.manifest.js";
 import { disposeTasksResources, registerTasksIpc } from "../tasks/tasks-ipc.js";
 import { tasksCapability } from "./manifests/tasks.manifest.js";
+import {
+  disposeConnectorResources,
+  registerConnectorIpc,
+} from "../connector/connector-ipc.js";
+import { connectorWebhookCapability } from "./manifests/connector-webhook.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -102,6 +107,14 @@ capabilityRegistry.register({
   manifest: tasksCapability,
   activate: registerTasksIpc,
   deactivate: disposeTasksResources,
+});
+// 第一个 connector tier 能力包（connector.webhook）。默认在「通用办公」与
+// 「编码」Profile 启用，未启用时 activate 一次都不调用 —— 它的七条通道因此
+// 不会进 ipc-guard 的注册表（feature gate 的主进程侧）。
+capabilityRegistry.register({
+  manifest: connectorWebhookCapability,
+  activate: registerConnectorIpc,
+  deactivate: disposeConnectorResources,
 });
 capabilityRegistry.seal();
 
