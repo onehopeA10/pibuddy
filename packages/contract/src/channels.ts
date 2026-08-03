@@ -109,7 +109,7 @@ export const CHANNELS = {
   shellShowInFolder: "shell:show-in-folder",
   attachmentRevokeAll: "attachment:revoke-all",
 
-  // ---- Workspace 文件服务（FS-101，恰 9 条） ----
+  // ---- Workspace 文件服务（FS-101，恰 8 条） ----
   //
   // 八条通道的入参与返回**只有 relativePath**：canonical root 与文件的
   // 真实位置只活在主进程，渲染进程拿到一个相对路径既推断不出磁盘布局，
@@ -124,13 +124,6 @@ export const CHANNELS = {
   workspaceFileMutate: "workspace:file-mutate",
   /** 工作区内的文件 → 结构化附件引用（八字段，标识恒为 token） */
   workspaceAttachmentCreate: "workspace:attachment-create",
-  /**
-   * 释放某个工作区在主进程侧占用的 watcher 与搜索子进程。
-   *
-   * 切换工作区时由渲染进程发一次。main 侧早就有释放函数，缺的一直是这条
-   * 「谁来叫它」的通道 —— 泄漏在功能上完全无声，只有句柄数会一路往上走。
-   */
-  workspaceRelease: "workspace:release",
 
   // ---- Agent 变更集（FS-102，恰 4 条） ----
   //

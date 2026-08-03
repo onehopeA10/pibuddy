@@ -91,17 +91,6 @@ export const treeWatchRequestSchema = z.object({
   watching: z.boolean(),
 });
 
-/**
- * 释放一个工作区在主进程侧占用的资源（watcher + 搜索子进程）。
- *
- * 切换工作区时必须发一次：不发的话 fs.watch 句柄与 utility process 会随
- * 切换次数线性累积，而两者都**不会报错** —— 前者的表现是几小时后文件树
- * 停止刷新，后者的表现是任务管理器里越攒越多的子进程。
- */
-export const workspaceReleaseRequestSchema = z.object({
-  workspaceId: z.string().min(1),
-});
-
 // ---------------------------------------------------------------- 搜索
 
 export const workspaceSearchHitSchema = z.object({
