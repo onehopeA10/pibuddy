@@ -61,29 +61,39 @@
       "type": "execution",
       "plan_ref": "PLN-001",
       "milestone": "MS-001",
-      "status": "partial",
-      "waves_completed": [1, 2, 3, 4, 5, 6, 7],
-      "waves_pending": [8, 9, 10, 11, 12, 13],
+      "status": "completed",
+      "waves_completed": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+      "waves_pending": [],
       "completed_tasks": [
         "TASK-001", "TASK-002", "TASK-003", "TASK-004",
-        "TASK-005", "TASK-006", "TASK-007", "TASK-008"
-      ],
-      "pending_tasks": [
+        "TASK-005", "TASK-006", "TASK-007", "TASK-008",
         "TASK-009", "TASK-010", "TASK-011", "TASK-012",
         "TASK-013", "TASK-014", "TASK-015", "TASK-016"
       ],
-      "milestones_done": ["M0", "M1", "M2"],
-      "milestones_pending": ["M3", "M4", "M5"],
+      "pending_tasks": [],
+      "milestones_done": ["M0", "M1", "M2", "M3", "M5"],
+      "milestones_partial": ["M4"],
       "evidence": {
-        "tests": "179 passed / 19 files",
+        "tests": "748 passed / 88 files（起点 0）",
         "typecheck": "exit 0",
         "build": "exit 0",
-        "packaged_smoke": "win-unpacked 启动成功，runtimeSource=bundled，无错误无明文密钥泄漏",
-        "structural_assertion": "守卫外 ipcMain 调用点 = 0（改造前 13）"
+        "dist": "PiBuddy-Setup-0.1.0.exe 135MB，pi-runtime 19371 文件，asar 生效",
+        "packaged_launch": "8 个关键事件（app_ready / window_ready / startup_health / pi_runtime_handshake_ok 等），0 错误 0 明文密钥泄漏 0 条 error 级日志",
+        "structural_assertions": "守卫外 ipcMain=0（改造前 13）、守卫外 fetch=0、全局 pi 回退=0、startsWith(root 违规=0、main/ipc/ 残留=0",
+        "gate_scripts": "check-contract-uniqueness / check-test-discovery / check-respond-ui-guard / check-pure-js-deps / check-update-deps 全部 PASS"
       },
+      "unverified": [
+        "M4 签名/公证/真实 N→N+1 更新闭环 —— blocked-by-credential（用户已确认接受）",
+        "clean VM packaged E2E —— 无干净机器，全部记 packaged-smoke",
+        "macOS / Linux 全平台 —— 无对应设备",
+        "SES-101 会话树/分叉可视化 UI —— 用户已确认裁剪，M3 出口门禁「分叉」仅达成数据面",
+        "MCP 管理（CRUD/启停/连接测试/OAuth/tool 列表）—— TASK-012 如实标注未实现",
+        "语音转写端到端 —— 链路验证到真实 TLS，缺可用 STT 凭据"
+      ],
       "git_remote": "https://github.com/onehopeA10/pibuddy",
-      "head": "5eadc7f",
-      "created_at": "2026-08-02"
+      "head": "1c9069c",
+      "created_at": "2026-08-02",
+      "completed_at": "2026-08-03"
     }
   ],
   "last_updated": "2026-08-02",
