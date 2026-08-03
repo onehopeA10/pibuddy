@@ -61,6 +61,7 @@ export default defineConfig({
             "**/dist/**",
             "**/out/**",
             "**/*.bench.test.ts",
+            "**/*.perf.test.ts",
             "**/pi-resources/resource-scanner.test.ts",
           ],
         },
@@ -71,11 +72,16 @@ export default defineConfig({
           name: "perf",
           include: [
             "packages/*/src/**/*.bench.test.ts",
+            "packages/*/src/**/*.perf.test.ts",
             "packages/app/src/main/pi-resources/resource-scanner.test.ts",
           ],
           exclude: ["**/node_modules/**", "source/**", "**/dist/**", "**/out/**"],
           // 独占：不与其它文件抢 CPU，墙钟断言才代表被测代码本身
           fileParallelism: false,
+          // 超时只是外壳，真正要判的是里面的墙钟断言（如 setImmediate < 50ms）。
+          // 卡在 20s 超时会让断言根本没机会执行，看到的红灯说明不了任何问题。
+          testTimeout: 90000,
+          hookTimeout: 90000,
         },
       },
     ],

@@ -316,6 +316,16 @@ export const useAppStore = defineStore("app", () => {
   const sessionLoadError = ref("");
 
   /**
+   * 正在切入的会话 id；null 表示没有切换在进行。
+   *
+   * pi 的 `switch_session` 要把整个 JSONL 读进来重建上下文，**耗时由文件大小
+   * 决定而不是可见消息数** —— 1.7MB 的会话实测 4679ms（裸 pi 进程直测，与本
+   * 应用无关）。这段等待消不掉，但必须让用户看见：改造前点下去 5 秒内界面
+   * 毫无反应，用户会以为没点上而反复点，每一下都再排队 5 秒。
+   */
+  const switchingSessionId = ref<string | null>(null);
+
+  /**
    * 最近一次被图片能力守卫拦下的判定（PROV-101）。
    *
    * 非空时 InputBar 把附件条目标成 `aria-disabled="true"`、禁用发送按钮，
@@ -1203,23 +1213,34 @@ export const useAppStore = defineStore("app", () => {
       notify("warning", "请先停止当前任务，再切换历史会话");
       return;
     }
-    const resp = await window.piBuddy.pi.switchSession(target.sessionId);
-    if (!resp.success) {
-      notify("error", resp.error ?? "打开会话失败");
-      return;
+    // 已经在这个会话里：pi 那边照样要重读整个文件，白等好几秒换来同样的界面
+    if (target.sessionId === currentSessionId.value) return;
+    // 一次只切一个。少了这道闸，用户在 5 秒空窗里连点几下，就会排起几个
+    // 各自 5 秒的切换，最后落在哪个会话上取决于返回顺序。
+    if (switchingSessionId.value !== null) return;
+
+    switchingSessionId.value = target.sessionId;
+    try {
+      const resp = await window.piBuddy.pi.switchSession(target.sessionId);
+      if (!resp.success) {
+        notify("error", resp.error ?? "打开会话失败");
+        return;
+      }
+      // 同 new_session：扩展否决时保持原样，不能拿一个空会话冒充切换成功。
+      if (resp.data?.cancelled === true) {
+        notify("warning", "扩展取消了会话切换，当前会话保持不变");
+        return;
+      }
+      // 切换已经生效：旧会话的消息、工具卡片、扩展弹窗全部作废。哪怕下面
+      // 拉消息失败，也绝不能把旧消息留在界面上冒充新会话的内容。
+      resetSessionScopedState();
+      await reloadMessages();
+      await refreshState();
+      void restoreDraft();
+      void refreshStats();
+    } finally {
+      switchingSessionId.value = null;
     }
-    // 同 new_session：扩展否决时保持原样，不能拿一个空会话冒充切换成功。
-    if (resp.data?.cancelled === true) {
-      notify("warning", "扩展取消了会话切换，当前会话保持不变");
-      return;
-    }
-    // 切换已经生效：旧会话的消息、工具卡片、扩展弹窗全部作废。哪怕下面
-    // 拉消息失败，也绝不能把旧消息留在界面上冒充新会话的内容。
-    resetSessionScopedState();
-    await reloadMessages();
-    await refreshState();
-    void restoreDraft();
-    void refreshStats();
   }
 
   /**
@@ -1435,6 +1456,7 @@ export const useAppStore = defineStore("app", () => {
     started,
     startError,
     sessionLoadError,
+    switchingSessionId,
     currentSessionId,
     runtimeScope,
     currentRuntimeId,

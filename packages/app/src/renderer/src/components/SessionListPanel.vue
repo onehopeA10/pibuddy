@@ -163,10 +163,20 @@ async function commitRename(row: SessionRow): Promise<void> {
           v-for="s in store.rows"
           :key="s.sessionId"
           class="session-item"
-          :class="{ active: currentSessionId === s.sessionId }"
+          :class="{
+            active: currentSessionId === s.sessionId,
+            opening: app.switchingSessionId === s.sessionId,
+            waiting: app.switchingSessionId !== null && app.switchingSessionId !== s.sessionId,
+          }"
           @click="app.openSession({ sessionId: s.sessionId })"
         >
           <div class="title">
+            <!--
+              pi 读整个 JSONL 重建上下文要好几秒（由文件大小决定，不是消息数）。
+              这段等待消不掉，但不能让它表现为「点了没反应」—— 那样用户只会
+              反复点，把等待叠加成好几倍。
+            -->
+            <n-spin v-if="app.switchingSessionId === s.sessionId" :size="12" />
             <span v-if="s.pinned" class="pin" title="已置顶">📌</span>
             <n-input
               v-if="renaming === s.sessionId"
@@ -244,6 +254,20 @@ async function commitRename(row: SessionRow): Promise<void> {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+/*
+ * 切换中的两种状态。
+ *
+ * pi 重建上下文要好几秒，这段时间界面必须表态：正在开的那条高亮 + 转圈，
+ * 其余变灰且不接受点击 —— 否则用户在空窗期连点，会排起好几个各自数秒的
+ * 切换，最终停在哪个会话取决于返回顺序。
+ */
+.session-item.opening {
+  background: rgba(99, 102, 241, 0.1);
+}
+.session-item.waiting {
+  opacity: 0.45;
+  pointer-events: none;
 }
 .session-item .more {
   float: right;
