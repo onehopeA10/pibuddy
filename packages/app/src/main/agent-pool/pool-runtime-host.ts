@@ -113,6 +113,9 @@ export interface PoolHostSink {
 /** 子 Agent 结构化事件汇聚（仅 origin:"child" 的会话；由 child 编排注册）。 */
 export type ChildEventSink = (sessionId: string, event: AgentEvent) => void;
 
+/** 子 runtime 就绪通知（仅 origin:"child"；child 编排据此下发目标提示词）。 */
+export type ChildReadySink = (sessionId: string) => void;
+
 /** 把不透明 workspaceId 解成真实工作目录（可注入，便于单测）。 */
 export type WorkspaceResolver = (workspaceId: string | null) => { cwd: string; sessionDir: string };
 
@@ -135,6 +138,7 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
   private generationCounter = 0;
   private sink: PoolHostSink | null = null;
   private childEventSink: ChildEventSink | null = null;
+  private childReadySink: ChildReadySink | null = null;
   private readonly clientFactory: PoolRuntimeClientFactory;
   private readonly resolveWorkspace: WorkspaceResolver;
 
@@ -151,6 +155,11 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
   /** child 编排注册结构化事件汇聚（只收 origin:"child" 的会话事件）。 */
   setChildEventSink(sink: ChildEventSink | null): void {
     this.childEventSink = sink;
+  }
+
+  /** child 编排注册子 runtime 就绪通知（据此下发目标提示词）。 */
+  setChildReadySink(sink: ChildReadySink | null): void {
+    this.childReadySink = sink;
   }
 
   /**
@@ -240,6 +249,7 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
         await client.getState();
         if (this.runtimes.get(req.sessionId) !== record) return;
         this.sink?.onReady(req.sessionId, { runtimeId: client.runtimeId, generation });
+        if (record.origin === "child") this.childReadySink?.(req.sessionId);
       } catch (err) {
         log().warn("agent_pool_runtime_handshake_failed", {
           sessionId: req.sessionId,

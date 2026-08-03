@@ -14,6 +14,7 @@ import { artifactsCapability } from "../artifacts/artifacts.capability.js";
 import { workspaceReviewCapability } from "../changeset/workspace-review.capability.js";
 import { previewCapability } from "../preview/preview.capability.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
+import { childAgentCapability } from "./manifests/child-agent.manifest.js";
 import { gitCapability } from "./manifests/git.manifest.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
@@ -38,6 +39,9 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // common 能力之后——被依赖的 common.workspace-review 已在前面注册。
   gitCapability,
   tasksCapability,
+  // 子 Agent 编排（common tier，可关闭）。排在末尾——它调用后台池（内核）与
+  // 权限引擎（内核），不依赖任何其它可选能力，装配顺序上无前置。
+  childAgentCapability,
 ];
 
 /**
@@ -67,6 +71,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.memory",
       "common.mcp",
       "common.tasks",
+      "common.child-agent",
     ],
   },
   {
@@ -87,6 +92,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.mcp",
       "coding.git",
       "common.tasks",
+      "common.child-agent",
     ],
   },
   {
