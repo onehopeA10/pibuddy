@@ -53,7 +53,7 @@ afterEach(() => {
 });
 
 describe("完整时序：保存 → 命中注入 → 删除 → 零命中", () => {
-  it("走完一整轮，每一步都对得上", () => {
+  it("走完一整轮，每一步都对得上", async () => {
     const saved = memoryStore().save({
       workspaceId: WS,
       content: "后端用 PostgreSQL",
@@ -64,19 +64,19 @@ describe("完整时序：保存 → 命中注入 → 删除 → 零命中", () =
     const id = saved.record!.id;
 
     // 1) 命中注入：message 被改写、包含记忆正文、命中记录落下
-    const injected = injectMemory(PROMPT, WS);
+    const injected = await injectMemory(PROMPT, WS);
     expect(injected).not.toBe(PROMPT);
     expect(injected).toContain("后端用 PostgreSQL");
     expect(injected).toContain(PROMPT);
     const hitsAfterInject = memoryHitsFor(WS);
     expect(hitsAfterInject.map((h) => h.id)).toContain(id);
 
-    // 2) 删除：主表 + FTS（store）+ 命中 cache（inject）一起清
+    // 2) 删除：主表 + FTS + 向量（store）+ 命中 cache（inject）一起清
     memoryStore().delete(id);
     clearHitsForMemory(id);
 
     // 3) 再注入：原样返回，什么都不加
-    const afterDelete = injectMemory(PROMPT, WS);
+    const afterDelete = await injectMemory(PROMPT, WS);
     expect(afterDelete).toBe(PROMPT);
 
     // 4) 命中记录里也没有它了
@@ -88,40 +88,40 @@ describe("完整时序：保存 → 命中注入 → 删除 → 零命中", () =
 });
 
 describe("零成本门：能力未启用时原样返回、不落命中", () => {
-  it("库里有会命中的记忆，但能力关着 → 注入不发生", () => {
+  it("库里有会命中的记忆，但能力关着 → 注入不发生", async () => {
     memoryStore().save({ workspaceId: WS, content: "后端用 PostgreSQL", type: "fact", scope: "workspace" });
     // 关掉记忆能力
     applyCapabilityResolution([]);
-    const out = injectMemory(PROMPT, WS);
+    const out = await injectMemory(PROMPT, WS);
     expect(out).toBe(PROMPT);
     expect(memoryHitsFor(WS)).toEqual([]);
   });
 });
 
 describe("注入总开关", () => {
-  it("关掉工作区注入 → 即便有命中也不注入", () => {
+  it("关掉工作区注入 → 即便有命中也不注入", async () => {
     memoryStore().save({ workspaceId: WS, content: "后端用 PostgreSQL", type: "fact", scope: "workspace" });
     memoryStore().setInjection(WS, "workspace", false);
-    expect(injectMemory(PROMPT, WS)).toBe(PROMPT);
+    expect(await injectMemory(PROMPT, WS)).toBe(PROMPT);
     expect(memoryHitsFor(WS)).toEqual([]);
   });
 
-  it("关掉全局注入 → 任何工作区都不注入", () => {
+  it("关掉全局注入 → 任何工作区都不注入", async () => {
     memoryStore().save({ workspaceId: WS, content: "后端用 PostgreSQL", type: "fact", scope: "workspace" });
     memoryStore().setInjection(WS, "global", false);
-    expect(injectMemory(PROMPT, WS)).toBe(PROMPT);
+    expect(await injectMemory(PROMPT, WS)).toBe(PROMPT);
   });
 });
 
 describe("敏感记忆不注入、不进命中", () => {
-  it("sensitive 记忆既不改写 message，也不出现在命中记录里", () => {
+  it("sensitive 记忆既不改写 message，也不出现在命中记录里", async () => {
     memoryStore().save({
       workspaceId: WS,
       content: "我的私钥在 ~/.ssh/id_rsa 数据库凭证",
       type: "fact",
       scope: "workspace",
     });
-    const out = injectMemory("数据库 私钥在哪", WS);
+    const out = await injectMemory("数据库 私钥在哪", WS);
     expect(out).toBe("数据库 私钥在哪");
     expect(memoryHitsFor(WS)).toEqual([]);
   });

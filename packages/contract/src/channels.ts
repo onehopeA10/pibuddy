@@ -297,6 +297,30 @@ export const CHANNELS = {
   /** 开关注入（当前工作区 / 全局），不删任何记忆 */
   memorySetInjection: "memory:set-injection",
 
+  // ---- 长期记忆 第二版：语义检索 + 知识库 + 有限抽取（MEM-101 v2，common.memory，9 条） ----
+  //
+  // 与第一版同一能力包、同一分区规则。语义检索（memory:search）在 FTS 之上叠加
+  // 向量余弦做混合排序；知识库（memory:kb-*）是带来源引用的文档 / 片段；抽取
+  // （memory:extract）从会话里抽候选事实、恒标 inferred + 低置信、保留证据链。
+  /** 混合语义检索（FTS + 向量），按相关度排序，返回命中来源分解 */
+  memorySearch: "memory:search",
+  /** 嵌入状态：后端 / 模型 / 维度 / 已嵌入占比（供 UI 与「重嵌」判断） */
+  memoryEmbedStatus: "memory:embed-status",
+  /** 重嵌：为缺向量 / 换了 embedder 的记录（含 v1 迁移上来的）补算向量 */
+  memoryReembed: "memory:reembed",
+  /** 从一段会话里抽候选事实存入记忆（origin=inferred，保留证据链，可改可删） */
+  memoryExtract: "memory:extract",
+  /** 知识库：加入一条文档 / 片段（带来源引用） */
+  memoryKnowledgeAdd: "memory:kb-add",
+  /** 知识库：混合语义检索，命中带引用（来源文件 / 会话 / 轮次） */
+  memoryKnowledgeSearch: "memory:kb-search",
+  /** 知识库：列出某工作区的全部片段 */
+  memoryKnowledgeList: "memory:kb-list",
+  /** 知识库：取一条片段的全文与来源 */
+  memoryKnowledgeGet: "memory:kb-get",
+  /** 知识库：删除一条片段（同时清 FTS + 向量） */
+  memoryKnowledgeDelete: "memory:kb-delete",
+
   // ---- 诊断与健康（OBS-101，恰 3 条） ----
   //
   // 三条都**不接受路径**：诊断包的落盘位置由主进程的保存对话框决定，
