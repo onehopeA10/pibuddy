@@ -308,9 +308,24 @@ export const CHANNELS = {
   diagnosticsExportBundle: "diagnostics:export-bundle",
   /** 启动健康检查结果 + safe mode 态 + 上一稳定版本 */
   diagnosticsGetReport: "diagnostics:get-report",
+
+  // ---- 后台多会话池（AGT-101，平台内核，恰 4 条） ----
+  //
+  // 池是**平台内核**设施（四层边界表第一行「会话 / runtime」，不可关闭），四条
+  // 恒注册。入参一律不透明 sessionId 或一份资源上界；渲染进程既表达不出「让某
+  // 进程跑这条命令」，也塞不进一个新会话规格——新建会话仍走 `pi:start`，池只做
+  // 观测与调度（聚焦 / 停止 / 上界）。
+  /** 取整池快照（会话列表、进程态、列表态、资源占用、统一权限 inbox）。 */
+  agentPoolDescribe: "agent-pool:describe",
+  /** 聚焦到某个会话（= 把它置 focused，前一个 focused 降为 background）。 */
+  agentPoolFocus: "agent-pool:focus",
+  /** 用户主动停掉某个会话进程（窗口关闭不会走这里——窗口关闭 ≠ 停止）。 */
+  agentPoolStop: "agent-pool:stop",
+  /** 设置资源上界（全局/每 workspace 并发、内存、成本）。 */
+  agentPoolSetCaps: "agent-pool:set-caps",
 } as const;
 
-/** 主进程单向推送通道（6 个）。 */
+/** 主进程单向推送通道（7 个）。 */
 export const PUSH_CHANNELS = {
   piEvent: "pi:event",
   piUiRequest: "pi:ui-request",
@@ -336,6 +351,14 @@ export const PUSH_CHANNELS = {
    * 一次 `npm install` 会在几秒内推出几万条消息。
    */
   workspaceTreeEvent: "workspace:tree-event",
+  /**
+   * 后台会话池快照变更（AGT-101）。
+   *
+   * 载荷是 `PiEnvelope<PoolSnapshot>`：复用与 `pi:event` 同一套信封，渲染侧
+   * 因此能用现成的 sequence（按本通道单调判）+ generation（全局判）丢弃规则
+   * 对齐快照，不必另写一份序号比较。快照是全量的，晚到的旧快照被序号闸门丢弃。
+   */
+  agentPoolEvent: "agent-pool:event",
 } as const;
 
 export type InvokeChannel = (typeof CHANNELS)[keyof typeof CHANNELS];

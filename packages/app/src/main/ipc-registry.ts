@@ -15,6 +15,7 @@
  * pi-ipc 持有的 client 索引取当前 runtime，虽然那是运行期才解引用的，但把
  * 「谁持有 client」这件事在注册顺序上也表达一次，日后读代码少绕一圈。
  */
+import { registerAgentPoolIpc } from "./agent-pool/agent-pool-ipc.js";
 import { assembleCapabilities, capabilityRegistry } from "./capability/capability-catalog.js";
 import { registerCapabilityIpc } from "./capability/capability-ipc.js";
 import { registerDiagnosticsIpc } from "./diagnostics/diagnostics-ipc.js";
@@ -37,6 +38,9 @@ export function registerAllIpc(): void {
   registerUpdateIpc();
   registerDiagnosticsIpc();
   registerCapabilityIpc();
+  // 后台会话池：内核设施（会话 / runtime），恒注册。挂到 supervisor 上观测当前
+  // 会话，并起维护节拍。放在 pi-ipc 之后——池观测的是 supervisor 的生命周期。
+  registerAgentPoolIpc();
   // 权限决策：内核设施，恒注册。它内部 setPermissionGate 装上第五道闸——
   // 装在这里（任何能力 activate 之前）保证从第一条 invoke 起就已生效。
   registerPermissionIpc();

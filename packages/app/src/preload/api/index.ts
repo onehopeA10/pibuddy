@@ -41,6 +41,7 @@ import { capabilities } from "./capabilities.js";
 import { permission } from "./permission.js";
 import { mcp } from "./mcp.js";
 import { memory } from "./memory.js";
+import { agentPool } from "./agentPool.js";
 
 export const api = {
   pi,
@@ -69,6 +70,8 @@ export const api = {
   memory,
   /** MCP 服务器管理（common.mcp）。启停 / 测试收不透明 id，spawn 只在主进程 */
   mcp,
+  /** 后台会话池（AGT-101）。观测与调度，入参只有不透明 sessionId / 资源上界 */
+  agentPool,
 };
 
 export type PiBuddyApi = typeof api;

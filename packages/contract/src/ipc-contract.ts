@@ -46,6 +46,7 @@ import {
   usageRecordRequestSchema,
   usageRowSchema,
 } from "./providers.js";
+import { agentPoolContractShard, poolSnapshotSchema } from "./agent-pool.js";
 import { artifactContractShard } from "./artifacts.js";
 import { capabilitiesContractShard } from "./capability.js";
 import { permissionContractShard } from "./permission.js";
@@ -777,6 +778,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   memoryContractShard,
   mcpContractShard,
   sessionTreeContractShard,
+  agentPoolContractShard,
 ];
 
 /**
@@ -820,6 +822,9 @@ export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   // 进程才能用来丢弃陈旧帧，在中途剥壳等于把丢弃判据扔了。
   [PUSH_CHANNELS.updateEvent]: updateEnvelopeSchema,
   [PUSH_CHANNELS.workspaceTreeEvent]: workspaceTreeEventSchema,
+  // agent-pool:event 推的是 PiEnvelope<PoolSnapshot>；这里校验的是信封的
+  // payload 位（整份快照）。
+  [PUSH_CHANNELS.agentPoolEvent]: poolSnapshotSchema,
 };
 
 /** channel 名是否在白名单内。ipc-guard 的第一道闸。 */

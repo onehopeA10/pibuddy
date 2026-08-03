@@ -44,6 +44,7 @@ describe("api 聚合对象", () => {
     // 三处对不上就说明有人绕过了那条唯一的接口面定义。
     // capabilities 是 ADR-0002 第一阶段（能力包与 Profile）。
     expect(Object.keys(api).sort()).toEqual([
+      "agentPool",
       "artifacts",
       "capabilities",
       "diagnostics",

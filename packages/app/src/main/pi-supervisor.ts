@@ -40,6 +40,7 @@ import {
 } from "./pi/event-forwarder.js";
 import { agentActivity } from "./lifecycle/graceful-shutdown.js";
 import { observeToolEvent } from "./changeset/tool-watch.js";
+import type { PoolObserver } from "./agent-pool/pool-core.js";
 
 /** 转发目标同时要能被按 id 索引（生产即 Electron 的 WebContents.id）。 */
 export interface SupervisorTarget extends ForwarderTarget {
@@ -65,6 +66,19 @@ export interface SupervisorLogger {
   warn: (event: string, fields?: Record<string, unknown>) => void;
 }
 
+/**
+ * 后台会话池的观测挂钩（AGT-101）。
+ *
+ * 与 `uiHook` 同一手法：supervisor 不持有池、也不主动 import 它的实现，只
+ * `import type` 一个观测者形状（依赖方向 pi → kernel），在三个生命周期点回调
+ * 一个可注入的观测者。默认为 null——**不装时行为与从前一字不差**，这是单会话
+ * 零回归的落点。装上后，池才据此把当前会话纳入监督面。
+ *
+ * 观测者的形状定义在内核侧（`agent-pool/pool-core.ts`），此处只 `import type`
+ * 并原样再导出——依赖方向 pi → kernel，两边永不漂移。
+ */
+export type { PoolObserver } from "./agent-pool/pool-core.js";
+
 const NOOP_LOGGER: SupervisorLogger = { info: () => {}, warn: () => {} };
 
 export class PiSupervisor implements PiRuntimeSupervisor {
@@ -86,12 +100,19 @@ export class PiSupervisor implements PiRuntimeSupervisor {
   private uiHook: ((targetId: number, generation: number, request: ExtensionUiRequest) => void) | null =
     null;
 
+  /** 后台会话池观测者（AGT-101）。默认 null：不装时行为一字不变。 */
+  private poolObserver: PoolObserver | null = null;
+
   constructor(private readonly logger: SupervisorLogger = NOOP_LOGGER) {}
 
   setUiHook(
     hook: (targetId: number, generation: number, request: ExtensionUiRequest) => void
   ): void {
     this.uiHook = hook;
+  }
+
+  setPoolObserver(observer: PoolObserver | null): void {
+    this.poolObserver = observer;
   }
 
   /**
@@ -170,7 +191,11 @@ export class PiSupervisor implements PiRuntimeSupervisor {
         sessionId: record.ctx.sessionId,
         turnId: `${record.ctx.runtimeId}#${record.ctx.generation}`,
       });
-      forwarder.push(this.nextEnvelope(record, e));
+      // 信封只生成一次：先喂给池观测者派生列表态，再原样转发。序号仍由
+      // nextEnvelope 单调自增一次，转发行为与从前逐字节一致（AGT-101）。
+      const env = this.nextEnvelope(record, e);
+      this.poolObserver?.onEvent(env);
+      forwarder.push(env);
     });
     client.on("ui_request", (r: ExtensionUiRequest) => {
       if (!this.isCurrent(record) || target.isDestroyed()) return;
@@ -207,6 +232,9 @@ export class PiSupervisor implements PiRuntimeSupervisor {
           ...(meta.error ? { error: meta.error } : {}),
         })
       );
+      // 池观测：当前代际退出。reason 区分主动停止与崩溃，由池自行判定
+      // 是否计入崩溃预算。放在 forget 之前——forget 会摘索引，之后 ctx 还在。
+      this.poolObserver?.onExit({ sessionId: record.ctx.sessionId, reason: meta.reason });
       this.forget(record);
     });
 
@@ -234,6 +262,14 @@ export class PiSupervisor implements PiRuntimeSupervisor {
     if (!record) return;
     record.ctx.sessionId = sessionId;
     if (this.latest?.runtimeId === runtimeId) this.latest.sessionId = sessionId;
+    // 真实 sessionId 到手才登记进池：此前 ctx.sessionId 还是占位（runtimeId /
+    // sessionPath），用它做池的键会与后续事件的键对不上。
+    this.poolObserver?.onAdopt({
+      sessionId,
+      workspaceId: record.ctx.workspaceId,
+      runtimeId: record.ctx.runtimeId,
+      generation: record.ctx.generation,
+    });
   }
 
   async start(options: PiRuntimeStartOptions & { spawn?: PiSpawn }): Promise<PiRuntimeHandle> {
