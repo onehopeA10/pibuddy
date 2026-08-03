@@ -30,12 +30,54 @@ export default defineConfig({
     },
   },
   test: {
-    include: [
-      "packages/*/src/**/*.{test,spec}.ts",
-      "packages/*/test/**/*.{test,spec}.ts",
-    ],
-    exclude: ["**/node_modules/**", "source/**", "**/dist/**", "**/out/**"],
     testTimeout: 20000,
     hookTimeout: 20000,
+    /**
+     * 两个 project，仍在**同一个配置文件**里（CT-21：全仓只有这一份配置）。
+     *
+     * 分开的原因：`perf` 里那两个文件断言的是**墙钟时间**（首屏 query
+     * < 200ms、setImmediate 回调 < 50ms）。和另外 86 个测试文件并发跑时，
+     * 它们测到的是整机争用而不是被测代码 —— 单独跑 1.4s / 2.5s，混在全量
+     * 里并发跑直接撞 20s 超时。
+     *
+     * 时绿时红的性能测试比没有更糟：会被当成「又抽风了」忽略掉，还顺带训练
+     * 所有人无视红灯。让它独占执行，测出来的数才有意义。
+     *
+     * 两个 project 都被 `vitest run` 执行，因此 check-test-discovery 的
+     * 「发现数 ⊇ 磁盘数」不变 —— 没有任何 spec 因此脱离范围。
+     */
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          include: [
+            "packages/*/src/**/*.{test,spec}.ts",
+            "packages/*/test/**/*.{test,spec}.ts",
+          ],
+          exclude: [
+            "**/node_modules/**",
+            "source/**",
+            "**/dist/**",
+            "**/out/**",
+            "**/*.bench.test.ts",
+            "**/pi-resources/resource-scanner.test.ts",
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "perf",
+          include: [
+            "packages/*/src/**/*.bench.test.ts",
+            "packages/app/src/main/pi-resources/resource-scanner.test.ts",
+          ],
+          exclude: ["**/node_modules/**", "source/**", "**/dist/**", "**/out/**"],
+          // 独占：不与其它文件抢 CPU，墙钟断言才代表被测代码本身
+          fileParallelism: false,
+        },
+      },
+    ],
   },
 });

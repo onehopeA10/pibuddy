@@ -41,18 +41,51 @@ const visibleItems = computed(() =>
   hiddenCount.value > 0 ? store.items.slice(hiddenCount.value) : store.items
 );
 
+/**
+ * 向前扩窗的重入闸。
+ *
+ * 这道闸不能省：showEarlier 是 async 且会**写回 scrollTop**，而写 scrollTop
+ * 又会再触发一次 scroll 事件。没有闸的话，滚到顶部会并发跑起好几份
+ * showEarlier，每份都拿着自己那一刻的 prevHeight 去补偿，同一段高度差被
+ * 重复加好几次，视口就来回弹 —— 表现就是「一直在抖」。
+ */
+const expanding = ref(false);
+
+/** 内存里还没铺完，或磁盘上还有更早的字节 —— 两者都没有就别再扩了。 */
+const canShowEarlier = computed(
+  () => hiddenCount.value > 0 || !win.reachedTop.value
+);
+
 async function showEarlier(): Promise<void> {
+  if (expanding.value || !canShowEarlier.value) return;
+  expanding.value = true;
   const el = scrollEl.value;
   const prevHeight = el?.scrollHeight ?? 0;
-  win.onLeaveBottom();
-  visibleCount.value += 100;
-  // 内存里的还没铺完就先铺内存里的；铺完了才向主进程要更早的字节。
-  if (hiddenCount.value === 0) await win.loadEarlier();
-  await nextTick();
-  // 扩窗后补偿滚动位置，视口停留在原来看到的消息上
-  if (el) el.scrollTop += el.scrollHeight - prevHeight;
+  try {
+    win.onLeaveBottom();
+    // 上界钉在真实条数上：早先是无条件 +100，全部铺完后仍一路涨，
+    // 于是 hiddenCount 恒为 0 而扩窗永远「成功」，闸门就形同虚设。
+    visibleCount.value = Math.min(
+      visibleCount.value + 100,
+      Math.max(store.items.length, INITIAL_WINDOW)
+    );
+    // 内存里的还没铺完就先铺内存里的；铺完了才向主进程要更早的字节。
+    if (hiddenCount.value === 0) await win.loadEarlier();
+    await nextTick();
+    // 扩窗后补偿滚动位置，视口停留在原来看到的消息上。
+    // 高度没变就一个字节都不写：写 scrollTop 会再触发 scroll，白白多一轮。
+    const grown = (el?.scrollHeight ?? 0) - prevHeight;
+    if (el && grown > 0) el.scrollTop += grown;
+  } finally {
+    expanding.value = false;
+  }
 }
 
+/**
+ * 贴底判定必须**同步**更新：它驱动未读分界线与「跳到底部」按钮，慢一帧就
+ * 会出现「已经在底部了按钮还亮着」。真正需要节流的是会写回 scrollTop 的
+ * 扩窗动作 —— 那才是抖动的来源，由 showEarlier 自己的重入闸拦住。
+ */
 function onScroll(): void {
   const el = scrollEl.value;
   if (!el) return;
@@ -124,10 +157,7 @@ function resend(text: string): void {
           重试
         </n-button>
       </div>
-      <div
-        v-else-if="hiddenCount > 0 || !win.reachedTop.value"
-        style="text-align: center; margin-bottom: 16px"
-      >
+      <div v-else-if="canShowEarlier" style="text-align: center; margin-bottom: 16px">
         <n-button
           size="tiny"
           quaternary

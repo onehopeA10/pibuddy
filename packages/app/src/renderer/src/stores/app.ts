@@ -115,6 +115,14 @@ let streamContentIndex = 0;
 let streamKind: "text" | "thinking" = "text";
 let rafId: number | null = null;
 
+/**
+ * 已经弹过提示的出错扩展名。
+ *
+ * 快速切换会话时每次都会新建 runtime、把用户级扩展重新加载一遍，同一个坏
+ * 扩展会连报好几次；逐条弹提示会直接刷屏盖住界面。
+ */
+const reportedExtensionErrors = new Set<string>();
+
 /** 仅供单测：rAF 句柄与缓冲区当前值。 */
 export function __streamState(): { rafId: number | null; streamBuffer: string } {
   return { rafId, streamBuffer };
@@ -716,9 +724,25 @@ export const useAppStore = defineStore("app", () => {
         extUi.setLocalStatus("summarization", "");
         break;
 
-      case "extension_error":
-        notify("warning", "扩展出现问题，但不影响继续使用");
+      case "extension_error": {
+        // 早先这里只说「扩展出现问题」，既不说哪个扩展也不说什么错 ——
+        // 用户既判断不了该不该管，也没有任何线索去修。至少把扩展名报出来。
+        const ev = e as Extract<AgentEvent, { type: "extension_error" }>;
+        const name =
+          (ev.extensionPath ?? "").split(/[\\/]/).pop()?.replace(/\.[tj]s$/, "") ||
+          "未知扩展";
+        // 同一个扩展在快速切换会话时会连报多次（每次新建 runtime 都重新加载
+        // 一遍），逐条弹提示会刷屏。同名只提示一次，后续只记日志。
+        if (!reportedExtensionErrors.has(name)) {
+          reportedExtensionErrors.add(name);
+          notify(
+            "warning",
+            `扩展「${name}」出错了，不影响继续使用；可在「🧩 资源」里停用它`
+          );
+        }
+        console.warn("[extension_error]", ev.extensionPath, ev.event, ev.error);
         break;
+      }
       // `unknown` 是 pi-sdk 对未建模事件的归一化形式；default 兜住那些连
       // 归一化都没经过的（比如直接投喂进来的原始对象）。
       case "unknown":

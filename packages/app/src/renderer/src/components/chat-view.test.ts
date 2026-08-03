@@ -101,4 +101,59 @@ describe("ChatView", () => {
     expect(wrapper.findAll("[data-unread-divider]")).toHaveLength(0);
     vi.useRealTimers();
   });
+
+  /**
+   * 抖动回归。
+   *
+   * showEarlier 会写回 scrollTop，而写 scrollTop 又触发 scroll 事件。少了
+   * 重入闸，滚到顶部会并发跑起好几份 showEarlier，各自拿着自己那一刻的
+   * prevHeight 去补偿，同一段高度差被重复加，视口来回弹 —— 界面上就是
+   * 「一直在抖」。停在顶部时尤其明显：scrollTop < 40 恒成立，循环停不下来。
+   */
+  it("停在顶部连发 scroll：扩窗不重入，scrollTop 不被反复补偿", async () => {
+    const store = useAppStore();
+    // 200 条 > INITIAL_WINDOW(60) → hiddenCount > 0，每次扩窗都会真的多渲染
+    store.items = Array.from({ length: 200 }, (_, i) => ({
+      key: i + 1,
+      message: userMessage(`第 ${i + 1} 条`),
+    }));
+    const readHistoryBefore = vi.fn(async () => ({
+      entries: [],
+      nextBeforeOffset: null,
+      stale: false,
+    }));
+    (window as unknown as { piBuddy: { sessions: unknown } }).piBuddy.sessions = {
+      readHistoryBefore,
+      query: vi.fn(async () => []),
+    };
+
+    const wrapper = mountView();
+    const el = wrapper.find(".chat-scroll").element as HTMLElement;
+    // scrollHeight 跟随实际渲染条数增长，这样「扩窗 → 高度变大 → 补偿
+    // scrollTop」这条真实链路才会在测试里发生。写死常量的话 grown 恒为 0，
+    // 补偿写的是 +0，有没有重入闸都测不出来 —— 那种断言是恒真的。
+    Object.defineProperty(el, "scrollHeight", {
+      get: () => wrapper.findAll("message-item-stub").length * 100 + 600,
+      configurable: true,
+    });
+    Object.defineProperty(el, "clientHeight", { value: 600, configurable: true });
+    el.scrollTop = 10; // 顶部，< 40
+
+    // **同步**连发 20 次，中间一次 await 都不能有。
+    // 用 trigger() 逐个 await 会把调用串行化，每份 showEarlier 都跑完了下一次
+    // 才开始 —— 并发根本不会发生，断言在有 bug 的代码上照样通过（恒真）。
+    // 真实浏览器就是这样一帧内连发一串 scroll 的。
+    for (let i = 0; i < 20; i++) {
+      el.dispatchEvent(new Event("scroll"));
+    }
+    await flushPromises();
+    await flushPromises();
+
+    // 200 条全部铺完后窗口就该停住；旧代码无条件 +100，20 次并发会涨到 2000+
+    expect(wrapper.findAll("message-item-stub").length).toBeLessThanOrEqual(200);
+    // 每次扩窗只补偿一次高度差。旧代码里 20 份 showEarlier 各自拿着同一个
+    // 陈旧的 prevHeight 重复补偿，scrollTop 会被推到远超实际内容高度的位置。
+    const contentHeight = wrapper.findAll("message-item-stub").length * 100 + 600;
+    expect(el.scrollTop).toBeLessThanOrEqual(contentHeight);
+  });
 });
