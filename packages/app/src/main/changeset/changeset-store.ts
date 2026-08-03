@@ -19,6 +19,22 @@
  * `unverified`：它在批量接受里被**硬跳过**并在返回值里列出来。否则一次
  * 「全部接受」会用一份来历不明的内容盖掉磁盘上真实存在的东西，而 UI 上
  * 只是一个进度条走完了。
+ *
+ * ## 全链路走字节，不走字符串
+ *
+ * 快照 / 入库 / 还原 / 落盘一律 Buffer。只要中间有一次
+ * `readFileSync(p, "utf8")` → `writeFileAtomic(p, str)` 的往返，PNG、PDF、
+ * XLSX、ZIP 里任何一个非法 UTF-8 序列都会被替换字符 U+FFFD 吃掉，而且**不
+ * 可逆** —— 原字节在解码那一刻就没了，之后写回去的是一份看起来正常、实际
+ * 已经打不开的文件。
+ *
+ * 这条路径上最要命的一处不是「接受」，是 record() 里的**还原**：它为了让
+ * 「拒绝」有意义，会在登记时就把磁盘改回 before。字符串化的 before 意味着
+ * 用户还没看见审阅面板，文件就已经坏了 —— 于是连「拒绝」都会留下失真字节。
+ *
+ * 反过来说，只做「识别二进制并拒绝入库」是不够的：不还原就等于把工具的写入
+ * 留在磁盘上且再也回不去，那是拿损坏换永久丢失。二进制识别在这里只负责
+ * **降级视图**（不逐行 diff、不许逐 hunk 接受），保真由 Buffer 负责。
  */
 import { app } from "electron";
 import type {
@@ -37,10 +53,15 @@ import { writeFileAtomic } from "../fs-atomic.js";
 import { requireWorkspaceRoot, resolveInWorkspace } from "../workspace-registry.js";
 
 /** 表结构代际。改 DDL 必须 +1 并在 migrate() 里补分支。 */
-export const CHANGESET_SCHEMA_VERSION = 1;
+export const CHANGESET_SCHEMA_VERSION = 2;
 
 /** 参与 diff 渲染的单文件字节上限；超过它 UI 只显示摘要。 */
 export const CHANGESET_DIFF_MAX_BYTES = 512 * 1024;
+
+/** 探测 NUL 字节的前缀长度；整份扫大文件不值得，头部足够判定。 */
+const BINARY_PROBE_BYTES = 8 * 1024;
+
+const EMPTY = Buffer.alloc(0);
 
 const DDL = `CREATE TABLE IF NOT EXISTS changesets (
   id TEXT PRIMARY KEY,
@@ -53,8 +74,8 @@ const DDL = `CREATE TABLE IF NOT EXISTS changesets (
   relative_path TEXT NOT NULL,
   before_sha256 TEXT NOT NULL,
   after_sha256 TEXT NOT NULL,
-  before_content TEXT,
-  after_content TEXT,
+  before_content BLOB,
+  after_content BLOB,
   status TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   size_bytes INTEGER NOT NULL DEFAULT 0,
@@ -83,8 +104,40 @@ export function backupDir(): string {
   return path.join(changesetDataDir(), "changeset-backup");
 }
 
+/** 内容 hash 的唯一实现 —— 对**字节**取，不对解码后的字符串取。 */
+export function sha256Bytes(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** 文本入口的便利包装；字节路径一律直接用 sha256Bytes。 */
 export function sha256Text(text: string): string {
-  return createHash("sha256").update(text, "utf8").digest("hex");
+  return sha256Bytes(Buffer.from(text, "utf8"));
+}
+
+/**
+ * 这份内容能不能逐行审阅。
+ *
+ * 两个判据缺一不可：
+ *   - 含 NUL 字节 —— 经典二进制标记（PNG / ZIP / XLSX 头部就有）；
+ *   - 不是合法 UTF-8 —— 没有 NUL 也可能解不出来（如 latin-1 正文、JPEG
+ *     的 0xFF 段）。这种内容一旦被 toString("utf8") decode 就会掉进
+ *     U+FFFD，再 encode 回去就是一份坏文件。
+ *
+ * 判 true 的后果只是**降级显示**（不渲染 diff、不许逐 hunk 接受），内容本身
+ * 仍然以原字节完整存着，整体接受 / 整体还原照常可用。
+ */
+export function looksBinary(bytes: Uint8Array): boolean {
+  if (bytes.subarray(0, BINARY_PROBE_BYTES).includes(0)) return true;
+  // 超过 diff 上限的内容本来就只显示摘要（tooLarge 同样封掉逐 hunk 接受），
+  // 不值得为一份永远不会渲染的 diff 去解码整个文件。
+  if (bytes.byteLength > CHANGESET_DIFF_MAX_BYTES) return false;
+  // 合法性必须整份判：截断一段再验，尾部半个多字节序列会被误判成非法
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 // ---------------------------------------------------------------- diff
@@ -137,8 +190,23 @@ export function diffLines(before: string[], after: string[]): ChangesetHunk[] {
 
 export interface ChangesetRecord extends ChangesetEntry {
   workspaceId: string;
-  beforeContent: string | null;
-  afterContent: string | null;
+  /** 改动前的原始字节；null = 快照没抓到（条目为 unverified） */
+  beforeBytes: Buffer | null;
+  /** 工具打算写成的原始字节 */
+  afterBytes: Buffer | null;
+}
+
+/**
+ * 列值 → 字节。
+ *
+ * 代际 1 把正文存成 TEXT，读出来是 string；代际 2 起存 BLOB，读出来是
+ * Uint8Array。老行按 utf8 还原 —— 它们当年就是这么写进去的，这里不做也
+ * 补不回已经丢掉的字节，只保证读得出来、不炸。
+ */
+function toBytes(value: unknown): Buffer | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return Buffer.from(value, "utf8");
+  return Buffer.from(value as Uint8Array);
 }
 
 function rowToRecord(row: Record<string, unknown>): ChangesetRecord {
@@ -158,8 +226,8 @@ function rowToRecord(row: Record<string, unknown>): ChangesetRecord {
     sizeBytes: Number(row.size_bytes),
     binary: Number(row.binary) === 1,
     tooLarge: Number(row.too_large) === 1,
-    beforeContent: row.before_content === null ? null : String(row.before_content),
-    afterContent: row.after_content === null ? null : String(row.after_content),
+    beforeBytes: toBytes(row.before_content),
+    afterBytes: toBytes(row.after_content),
   };
 }
 
@@ -172,9 +240,9 @@ export interface RecordChangeParams {
   kind: ChangesetKind;
   relativePath: string;
   /** tool_execution_start 时抓到的快照；null = 没抓到，条目将被标 unverified */
-  beforeContent: string | null;
-  /** 工具打算写成的内容；delete 传空串 */
-  afterContent: string;
+  beforeBytes: Uint8Array | null;
+  /** 工具打算写成的字节；delete 传空 Buffer */
+  afterBytes: Uint8Array;
   now?: number;
 }
 
@@ -203,6 +271,11 @@ export class ChangesetStore {
     const current = Number(row?.user_version ?? 0);
     if (current === CHANGESET_SCHEMA_VERSION) return;
     if (current > CHANGESET_SCHEMA_VERSION) return;
+    // 代际 1 → 2：正文列由 TEXT 改为 BLOB，**不重写既有数据**。
+    // SQLite 是动态类型的，BLOB 值存进 TEXT 亲和列仍按 BLOB 存储类保留原
+    // 字节（已实测），因此老库无需 ALTER 就能接住新写入；老行仍是 TEXT，
+    // 由 toBytes() 按 utf8 读回。那些行当年就是转码后写进去的，重写一遍
+    // 既补不回丢掉的字节，还要把整张表搬一次 —— 不做。
     this.db.exec(`PRAGMA user_version = ${CHANGESET_SCHEMA_VERSION}`);
   }
 
@@ -220,27 +293,33 @@ export class ChangesetStore {
   async record(params: RecordChangeParams): Promise<ChangesetRecord> {
     const now = params.now ?? Date.now();
     const id = randomBytes(12).toString("hex");
-    const afterSha = sha256Text(params.afterContent);
-    const beforeSha = params.beforeContent === null ? "" : sha256Text(params.beforeContent);
-    const status: ChangesetStatus = params.beforeContent === null ? "unverified" : "pending";
+    const afterBytes = Buffer.from(params.afterBytes);
+    const beforeBytes = params.beforeBytes === null ? null : Buffer.from(params.beforeBytes);
+    const afterSha = sha256Bytes(afterBytes);
+    const beforeSha = beforeBytes === null ? "" : sha256Bytes(beforeBytes);
+    const status: ChangesetStatus = beforeBytes === null ? "unverified" : "pending";
 
-    if (params.beforeContent !== null) {
-      // 工具已经落盘的话，先还原成 before，把 after 留给用户审阅
+    if (beforeBytes !== null) {
+      // 工具已经落盘的话，先还原成 before，把 after 留给用户审阅。
+      // 读写都走字节：这一步是整条链路上最早接触磁盘的写入，一旦在这里
+      // 转码，用户还没打开审阅面板文件就已经坏了，连拒绝都救不回来。
       try {
         const resolved = await resolveInWorkspace(params.workspaceId, params.relativePath);
-        const disk = fs.readFileSync(resolved.realPath, "utf8");
-        if (sha256Text(disk) === afterSha && afterSha !== beforeSha) {
-          writeFileAtomic(resolved.realPath, params.beforeContent);
+        const disk = fs.readFileSync(resolved.realPath);
+        if (sha256Bytes(disk) === afterSha && afterSha !== beforeSha) {
+          writeFileAtomic(resolved.realPath, beforeBytes);
         }
       } catch {
         // 文件不存在（新建类变更）或读不动：不还原，accept 时的 hash 复核会兜住
       }
     }
 
-    const sizeBytes = Buffer.byteLength(params.afterContent, "utf8");
+    const sizeBytes = afterBytes.byteLength;
     const tooLarge = sizeBytes > CHANGESET_DIFF_MAX_BYTES;
-    // NUL 字符 = 二进制内容；对它做逐行 diff 只会渲染出一屏乱码
-    const binary = params.afterContent.includes(String.fromCharCode(0));
+    // before / after 任一侧不可逐行渲染就整条降级：只看 after 的话，
+    // 「二进制被改成文本」这类变更会拿一份 decode 坏了的 before 去算 diff，
+    // 而逐 hunk 接受正是从 before 的行拼出落盘内容的。
+    const binary = looksBinary(afterBytes) || (beforeBytes !== null && looksBinary(beforeBytes));
 
     this.db
       .prepare(
@@ -261,8 +340,8 @@ export class ChangesetStore {
         params.relativePath,
         beforeSha,
         afterSha,
-        params.beforeContent,
-        params.afterContent,
+        beforeBytes,
+        afterBytes,
         status,
         now,
         sizeBytes,
@@ -343,8 +422,10 @@ export function diffOf(record: ChangesetRecord): ChangesetDiff {
       degraded: `文件过大（${Math.round(record.sizeBytes / 1024)}KB），只显示摘要`,
     };
   }
-  const before = (record.beforeContent ?? "").split("\n");
-  const after = (record.afterContent ?? "").split("\n");
+  // 走到这里已经排除了 binary，两侧都是合法 UTF-8 —— decode 无损，
+  // 逐 hunk 接受时再 encode 回去拿到的就是原字节。
+  const before = (record.beforeBytes ?? EMPTY).toString("utf8").split("\n");
+  const after = (record.afterBytes ?? EMPTY).toString("utf8").split("\n");
   return {
     id: record.id,
     relativePath: record.relativePath,

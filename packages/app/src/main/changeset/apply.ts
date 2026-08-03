@@ -34,9 +34,11 @@ import {
   backupDir,
   changesetStore,
   diffOf,
-  sha256Text,
+  sha256Bytes,
   type ChangesetRecord,
 } from "./changeset-store.js";
+
+const EMPTY = Buffer.alloc(0);
 
 /**
  * 变更的目标绝对路径。
@@ -57,13 +59,19 @@ function targetPathOf(record: ChangesetRecord): string {
   return abs;
 }
 
-/** 磁盘当前内容与它的 hash；文件不存在时内容为空串、hash 为空串。 */
-function readDisk(abs: string): { text: string; sha256: string; mtimeMs: number } {
+/**
+ * 磁盘当前内容与它的 hash；文件不存在时内容为空、hash 为空串。
+ *
+ * 按字节读：hash 要对得上登记时的 before_sha256（那也是对字节取的），
+ * 而二进制文件经 utf8 解码后再取 hash 永远对不上，结果是每一条二进制变更
+ * 都被误判成 conflict。
+ */
+function readDisk(abs: string): { bytes: Buffer; sha256: string; mtimeMs: number } {
   try {
-    const text = fs.readFileSync(abs, "utf8");
-    return { text, sha256: sha256Text(text), mtimeMs: fs.statSync(abs).mtimeMs };
+    const bytes = fs.readFileSync(abs);
+    return { bytes, sha256: sha256Bytes(bytes), mtimeMs: fs.statSync(abs).mtimeMs };
   } catch {
-    return { text: "", sha256: "", mtimeMs: 0 };
+    return { bytes: EMPTY, sha256: "", mtimeMs: 0 };
   }
 }
 
@@ -95,6 +103,18 @@ export async function acceptChange(
     };
   }
 
+  // 逐 hunk 接受要求内容能按行切开。二进制 / 超大条目没有可信的 hunk 列表
+  // （diffOf 对它们返回空数组），照旧往下走会拼出一份只剩 before 的内容并
+  // 当成「用户选中的结果」写下去 —— 那是一次静默的整文件回退。
+  if (hunkIndexes && hunkIndexes.length > 0 && (record.binary || record.tooLarge)) {
+    return {
+      ok: false,
+      message: record.binary
+        ? "这个文件是二进制，不支持逐行审阅；请选择整体保留或整体还原"
+        : "这个文件过大，未逐行比对；请选择整体保留或整体还原",
+    };
+  }
+
   const abs = targetPathOf(record);
   const disk = readDisk(abs);
   // 唯一权威是内容 hash：磁盘已经不是登记时的 before，就一个字节都不写
@@ -106,24 +126,27 @@ export async function acceptChange(
       current: {
         mtimeMs: disk.mtimeMs,
         sha256: disk.sha256,
-        preview: disk.text.slice(0, CONFLICT_PREVIEW_CHARS),
+        // 仅供界面预览，永远不会被写回磁盘 —— 因此这里容许有损解码
+        preview: disk.bytes.toString("utf8").slice(0, CONFLICT_PREVIEW_CHARS),
       },
     };
   }
 
-  const nextText = composeAccepted(record, hunkIndexes);
+  const nextBytes = composeAccepted(record, hunkIndexes);
 
   try {
     // 备份先于写入：写到一半失败时备份必须已经在
     fs.mkdirSync(backupDir(), { recursive: true });
-    writeFileAtomic(path.join(backupDir(), record.id), record.beforeContent ?? "");
+    // 备份也走字节：一份被转码过的备份等于没有备份 —— 「撤销」会把用户的
+    // 二进制文件还原成一份打不开的东西，而按钮看起来是成功的
+    writeFileAtomic(path.join(backupDir(), record.id), record.beforeBytes ?? EMPTY);
 
-    if (record.kind === "delete" && nextText === "") {
+    if (record.kind === "delete" && nextBytes.byteLength === 0) {
       // 删除走系统回收站，不做不可逆的 unlink
       const result = await shell.trashItem(abs);
       void result;
     } else {
-      writeFileAtomic(abs, nextText);
+      writeFileAtomic(abs, nextBytes);
     }
   } catch (err) {
     return { ok: false, ...classifyWriteError(err) };
@@ -134,16 +157,20 @@ export async function acceptChange(
 }
 
 /**
- * 按选中的 hunk 拼出要落盘的内容。
+ * 按选中的 hunk 拼出要落盘的字节。
  *
- * 不传 hunkIndexes = 整文件接受，直接用 after。传了就逐段拼：选中的段取
- * after 侧的行，没选中的段保留 before 侧的行。
+ * 不传 hunkIndexes = 整文件接受，**原样返回 after 的字节** —— 这条路径不
+ * 碰字符串，因此二进制文件的整体接受是逐字节保真的。
+ *
+ * 传了就逐段拼：选中的段取 after 侧的行，没选中的段保留 before 侧的行。
+ * 这条路径必然经过 decode/encode，所以调用方（acceptChange）先挡掉了
+ * binary / tooLarge；剩下的都是合法 UTF-8，往返无损。
  */
-export function composeAccepted(record: ChangesetRecord, hunkIndexes?: number[]): string {
-  const after = record.afterContent ?? "";
+export function composeAccepted(record: ChangesetRecord, hunkIndexes?: number[]): Buffer {
+  const after = record.afterBytes ?? EMPTY;
   if (!hunkIndexes || hunkIndexes.length === 0) return after;
 
-  const beforeLines = (record.beforeContent ?? "").split("\n");
+  const beforeLines = (record.beforeBytes ?? EMPTY).toString("utf8").split("\n");
   const picked = new Set(hunkIndexes);
   // 复用 changeset-store 的 diff：两处各算一次 diff 会让「界面上选的那段」
   // 和「实际写下去的那段」对不上，而那种错位是用户完全看不出来的。
@@ -158,7 +185,7 @@ export function composeAccepted(record: ChangesetRecord, hunkIndexes?: number[])
     cursor = hunk.beforeStart + hunk.beforeLines.length;
   }
   while (cursor < beforeLines.length) out.push(beforeLines[cursor++]);
-  return out.join("\n");
+  return Buffer.from(out.join("\n"), "utf8");
 }
 
 /**

@@ -33,6 +33,8 @@ const WRITE_RE = /write|create|append/i;
 const EDIT_RE = /edit|replace|patch|modify|update/i;
 const DELETE_RE = /delete|remove|unlink|rm/i;
 
+const EMPTY = Buffer.alloc(0);
+
 /** 工具名 → 变更种类；不像文件写入的返回 null。 */
 export function kindForTool(toolName: string): ChangesetKind | null {
   if (DELETE_RE.test(toolName)) return "delete";
@@ -67,7 +69,7 @@ interface PendingSnapshot {
   relativePath: string;
   kind: ChangesetKind;
   /** null = 没能读到原样，成品条目将被标 unverified */
-  beforeContent: string | null;
+  beforeBytes: Buffer | null;
 }
 
 /** toolCallId → start 时抓到的快照。end 时消费掉。 */
@@ -85,12 +87,19 @@ export interface ToolWatchContext {
   turnId: string;
 }
 
-function readOrNull(abs: string): string | null {
+/**
+ * 快照必须是**字节**。
+ *
+ * 带 "utf8" 读进来的话，被工具改到的 PNG / PDF / XLSX / ZIP 里每一个非法
+ * UTF-8 序列都会在这一行变成 U+FFFD，而原字节此后再也取不回来 —— 这份坏
+ * 掉的 before 接着会被 record() 写回磁盘。损坏就是从这里开始的。
+ */
+function readOrNull(abs: string): Buffer | null {
   try {
-    return fs.readFileSync(abs, "utf8");
+    return fs.readFileSync(abs);
   } catch (err) {
     // 文件不存在 = 这是一次新建，原样就是空 —— 这不是「抓不到」
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return EMPTY;
     return null;
   }
 }
@@ -115,7 +124,7 @@ export async function observeToolEvent(
       pending.set(event.toolCallId, {
         relativePath,
         kind,
-        beforeContent: readOrNull(path.resolve(root, relativePath)),
+        beforeBytes: readOrNull(path.resolve(root, relativePath)),
       });
       // 产物库同步插一条 generating（ART-102）。删除类工具不算产物 ——
       // 「做出来的东西」和「删掉的东西」放同一个库里只会互相干扰。
@@ -143,10 +152,11 @@ export async function observeToolEvent(
 
     const root = requireWorkspaceRoot(ctx.workspaceId);
     const abs = path.resolve(root, snapshot.relativePath);
-    const afterContent = snapshot.kind === "delete" ? "" : (readOrNull(abs) ?? "");
+    const afterBytes = snapshot.kind === "delete" ? EMPTY : (readOrNull(abs) ?? EMPTY);
 
-    // 内容没变（工具跑了但什么也没改）就不登记
-    if (snapshot.beforeContent !== null && snapshot.beforeContent === afterContent) return;
+    // 内容没变（工具跑了但什么也没改）就不登记。按字节比 —— 字符串比较下
+    // 两份不同的坏字节可能都塌成同一串 U+FFFD，真实改动会被判成「没变」。
+    if (snapshot.beforeBytes !== null && snapshot.beforeBytes.equals(afterBytes)) return;
 
     await changesetStore().record({
       workspaceId: ctx.workspaceId,
@@ -156,8 +166,8 @@ export async function observeToolEvent(
       toolName: event.toolName,
       kind: snapshot.kind,
       relativePath: snapshot.relativePath,
-      beforeContent: snapshot.beforeContent,
-      afterContent,
+      beforeBytes: snapshot.beforeBytes,
+      afterBytes,
     });
   } catch {
     // 见函数注释：记账失败不打断对话
