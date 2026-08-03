@@ -47,6 +47,7 @@ import {
   usageRowSchema,
 } from "./providers.js";
 import { agentPoolContractShard, poolSnapshotSchema } from "./agent-pool.js";
+import { childAgentContractShard, childTopologySnapshotSchema } from "./child-agent.js";
 import { artifactContractShard } from "./artifacts.js";
 import { capabilitiesContractShard } from "./capability.js";
 import { gitContractShard } from "./git.js";
@@ -781,6 +782,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   mcpContractShard,
   sessionTreeContractShard,
   agentPoolContractShard,
+  childAgentContractShard,
   gitContractShard,
   tasksContractShard,
 ];
@@ -829,6 +831,9 @@ export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   // agent-pool:event 推的是 PiEnvelope<PoolSnapshot>；这里校验的是信封的
   // payload 位（整份快照）。
   [PUSH_CHANNELS.agentPoolEvent]: poolSnapshotSchema,
+  // child-agent:event 推的是 PiEnvelope<ChildTopologySnapshot>；这里校验的是
+  // 信封的 payload 位（整棵拓扑快照）。
+  [PUSH_CHANNELS.childAgentEvent]: childTopologySnapshotSchema,
 };
 
 /** channel 名是否在白名单内。ipc-guard 的第一道闸。 */

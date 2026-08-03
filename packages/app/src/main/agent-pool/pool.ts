@@ -18,7 +18,9 @@ import { BrowserWindow } from "electron";
 import { PUSH_CHANNELS, type PoolCaps, type PoolSnapshot } from "@pibuddy/contract";
 
 import { log } from "../log.js";
-import { AgentPoolCore, type PoolObserver, type PoolRuntimeHost } from "./pool-core.js";
+import { decidePermission } from "../permission/permission-store.js";
+import { AgentPoolCore, type PoolObserver } from "./pool-core.js";
+import { PoolRuntimeHostImpl } from "./pool-runtime-host.js";
 
 let instance: AgentPoolCore | null = null;
 let tickTimer: NodeJS.Timeout | null = null;
@@ -35,26 +37,29 @@ function broadcastSnapshot(_snapshot: PoolSnapshot): void {
   }
 }
 
-const host: PoolRuntimeHost = {
-  launch(req) {
-    // 本批：前台会话由既有 pi:start 启动，池经 adoptRunning 纳入，不从这里派生。
-    // 后台派生 / child 编排落地时在此调 supervisor.launch(...)。记一条账便于追踪。
-    log().info("agent_pool_launch_requested", {
-      sessionId: req.sessionId,
-      workspaceId: req.workspaceId,
-      origin: req.origin,
-    });
-  },
-  stop(sessionId) {
-    // 停一个会话进程。当前 supervisor 按 runtimeId / webContents 索引，按 sessionId
-    // 的直接停法随后台派生一起落地。这里记账，真实 stop 由接线在后台派生落地时补。
-    log().info("agent_pool_stop_requested", { sessionId });
-  },
-};
+/**
+ * 真实后台派生 host（AGT-101 §7 第一个接线点落地）。
+ *
+ * `bind` 把池内核的三个回调接上——放在这里而不是构造函数里，是为了打破
+ * host ↔ pool 的构造期循环：回调体在**事件到达时**才调 `agentPool()`，那时
+ * 单例早已就绪。后台会话事件因此直接喂进池内核的列表态 / 成本 / 崩溃预算，
+ * 与前台 supervisor 那条路各喂各的、互不串台。
+ */
+const runtimeHost = new PoolRuntimeHostImpl();
+runtimeHost.bind({
+  onReady: (sessionId, info) => agentPool().onRuntimeReady(sessionId, info),
+  onEvent: (envelope) => agentPool().observeEnvelope(envelope),
+  onExit: (sessionId, reason) => agentPool().handleExit(sessionId, reason, Date.now()),
+});
+
+/** 供 child 编排接线（注册结构化事件汇聚 / 下发提示词）。 */
+export function poolRuntimeHost(): PoolRuntimeHostImpl {
+  return runtimeHost;
+}
 
 export function agentPool(): AgentPoolCore {
   if (!instance) {
-    instance = new AgentPoolCore({ host, onChange: broadcastSnapshot });
+    instance = new AgentPoolCore({ host: runtimeHost, onChange: broadcastSnapshot });
   }
   return instance;
 }
@@ -84,13 +89,26 @@ export function startPoolMaintenance(): void {
   if (!tickTimer) {
     tickTimer = setInterval(() => {
       const expired = pool.tick(Date.now());
-      // 超时的权限待办：本批只记审计（绝不自动允许）。真实 deny 落库在 Git 包 /
-      // 连接器带来真实副作用时经 decidePermission(deny) 收口。
+      // 超时的权限待办（AGT-101 §7 第二个接线点落地）：经 `decidePermission(deny)`
+      // 把超时收口到权限引擎——不再只记审计。**绝不自动允许**：这里恒传
+      // `disposition:"deny"`，核心根本没有 allow 路径，超时唯一的去向就是拒绝。
       for (const item of expired) {
         log().warn("agent_pool_permission_timeout_denied", {
           sessionId: item.sessionId,
           capabilityId: item.capabilityId,
           permission: item.permission,
+        });
+        void decidePermission({
+          capabilityId: item.capabilityId,
+          permission: item.permission,
+          resource: item.resource,
+          disposition: "deny",
+          workspaceId: item.workspaceId,
+        }).catch((err) => {
+          log().warn("agent_pool_permission_deny_failed", {
+            sessionId: item.sessionId,
+            detail: err instanceof Error ? err.message : String(err),
+          });
         });
       }
     }, TICK_INTERVAL_MS);

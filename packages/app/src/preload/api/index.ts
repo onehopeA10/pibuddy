@@ -42,6 +42,7 @@ import { permission } from "./permission.js";
 import { mcp } from "./mcp.js";
 import { memory } from "./memory.js";
 import { agentPool } from "./agentPool.js";
+import { childAgent } from "./childAgent.js";
 import { git } from "./git.js";
 import { tasks } from "./tasks.js";
 
@@ -74,6 +75,8 @@ export const api = {
   mcp,
   /** 后台会话池（AGT-101）。观测与调度，入参只有不透明 sessionId / 资源上界 */
   agentPool,
+  /** 子 Agent 编排（common.child-agent）。父子拓扑 / 结构化消息 / cancel 传播 */
+  childAgent,
   /** Git 编码能力包（coding.git）。九个意图，无 argv 入口，每条通道要 process.git */
   git,
   /** 持久定时任务（common.tasks）。调度 headless，触发的是已落盘任务里冻结的配置 */

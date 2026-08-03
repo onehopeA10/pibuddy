@@ -25,6 +25,7 @@ import PreviewPane from "./PreviewPane.vue";
 import SessionTreePanel from "./SessionTreePanel.vue";
 import GitPanel from "./GitPanel.vue";
 import TasksPanel from "./TasksPanel.vue";
+import ChildAgentPanel from "./ChildAgentPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -128,6 +129,9 @@ const sessionTreeOpen = ref(false);
 // Git 面板（coding.git 垂直能力包）的开合。同样独立成 ref：它是第一个垂直
 // 能力域，默认只在「编码」Profile 里可见。
 const gitOpen = ref(false);
+// 子 Agent 编排面板（common.child-agent）的开合。独立成 ref：它是自己一个
+// 能力域（父子拓扑 / 结构化消息 / cancel 传播），与其它面板互不牵连。
+const childAgentOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -149,6 +153,8 @@ const sessionTreeEnabled = computed(() => capabilities.isEnabled("common.session
 // 它默认只在「编码」Profile 启用，因此在「通用办公」下这个开关与面板都不出现。
 const gitEnabled = computed(() => capabilities.isEnabled("coding.git"));
 const tasksEnabled = computed(() => capabilities.isEnabled("common.tasks"));
+// 子 Agent 编排的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
+const childAgentEnabled = computed(() => capabilities.isEnabled("common.child-agent"));
 
 onMounted(() => {
   void store.init();
@@ -307,6 +313,15 @@ function onDrop(): void {
               🌳 会话树
             </n-button>
             <n-button
+              v-if="childAgentEnabled"
+              size="tiny"
+              :type="childAgentOpen ? 'primary' : 'default'"
+              quaternary
+              @click="childAgentOpen = !childAgentOpen"
+            >
+              🤖 子 Agent
+            </n-button>
+            <n-button
               v-if="gitEnabled"
               size="tiny"
               :type="gitOpen ? 'primary' : 'default'"
@@ -337,6 +352,7 @@ function onDrop(): void {
           <ChangesetPanel v-if="changesOpen && reviewEnabled" />
           <SessionTreePanel v-if="sessionTreeOpen && sessionTreeEnabled" />
           <GitPanel v-if="gitOpen && gitEnabled" />
+          <ChildAgentPanel v-if="childAgentOpen && childAgentEnabled" />
           <InputBar />
         </slot>
       </template>

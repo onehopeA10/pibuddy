@@ -32,6 +32,11 @@ import { disposeGitResources, registerGitIpc } from "../git/git-ipc.js";
 import { gitCapability } from "./manifests/git.manifest.js";
 import { disposeTasksResources, registerTasksIpc } from "../tasks/tasks-ipc.js";
 import { tasksCapability } from "./manifests/tasks.manifest.js";
+import {
+  disposeChildAgentResources,
+  registerChildAgentIpc,
+} from "../child-agent/child-agent-ipc.js";
+import { childAgentCapability } from "./manifests/child-agent.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -102,6 +107,13 @@ capabilityRegistry.register({
   manifest: tasksCapability,
   activate: registerTasksIpc,
   deactivate: disposeTasksResources,
+});
+// 子 Agent 编排（common tier）。它 activate 时装配结构化事件汇聚 + 超时节拍，
+// deactivate 时摘掉它们（编排数据留在内存不动）。
+capabilityRegistry.register({
+  manifest: childAgentCapability,
+  activate: registerChildAgentIpc,
+  deactivate: disposeChildAgentResources,
 });
 capabilityRegistry.seal();
 
