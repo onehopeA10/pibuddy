@@ -41,6 +41,7 @@ import { capabilities } from "./capabilities.js";
 import { permission } from "./permission.js";
 import { mcp } from "./mcp.js";
 import { memory } from "./memory.js";
+import { tasks } from "./tasks.js";
 
 export const api = {
   pi,
@@ -69,6 +70,8 @@ export const api = {
   memory,
   /** MCP 服务器管理（common.mcp）。启停 / 测试收不透明 id，spawn 只在主进程 */
   mcp,
+  /** 持久定时任务（common.tasks）。调度 headless，触发的是已落盘任务里冻结的配置 */
+  tasks,
 };
 
 export type PiBuddyApi = typeof api;

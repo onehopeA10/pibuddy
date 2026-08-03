@@ -17,6 +17,7 @@ import { workspaceFilesCapability } from "../workspace/workspace-files.capabilit
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
+import { tasksCapability } from "./manifests/tasks.manifest.js";
 
 /**
  * 全部内置能力，按装配顺序。
@@ -32,6 +33,7 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   sessionTreeCapability,
   memoryCapability,
   mcpCapability,
+  tasksCapability,
 ];
 
 /**
@@ -60,6 +62,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.session-tree",
       "common.memory",
       "common.mcp",
+      "common.tasks",
     ],
   },
   {
@@ -74,6 +77,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.session-tree",
       "common.memory",
       "common.mcp",
+      "common.tasks",
     ],
   },
   {

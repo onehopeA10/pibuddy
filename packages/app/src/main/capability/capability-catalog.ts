@@ -28,6 +28,8 @@ import { registerSessionTreeIpc } from "../session-tree/session-tree-ipc.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
 import { disposeMcpResources, registerMcpIpc } from "../mcp/mcp-ipc.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
+import { disposeTasksResources, registerTasksIpc } from "../tasks/tasks-ipc.js";
+import { tasksCapability } from "./manifests/tasks.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -86,6 +88,11 @@ capabilityRegistry.register({
   manifest: mcpCapability,
   activate: registerMcpIpc,
   deactivate: disposeMcpResources,
+});
+capabilityRegistry.register({
+  manifest: tasksCapability,
+  activate: registerTasksIpc,
+  deactivate: disposeTasksResources,
 });
 capabilityRegistry.seal();
 

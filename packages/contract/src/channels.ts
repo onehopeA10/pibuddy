@@ -308,6 +308,26 @@ export const CHANNELS = {
   diagnosticsExportBundle: "diagnostics:export-bundle",
   /** 启动健康检查结果 + safe mode 态 + 上一稳定版本 */
   diagnosticsGetReport: "diagnostics:get-report",
+
+  // ---- 持久定时任务（Durable Tasks，能力包 common.tasks，恰 11 条） ----
+  //
+  // 全部以不透明 workspaceId + taskId / runId 为入参：任务按 workspaceId 分区
+  // （数据分区键就是 sha256(realpath) 派生的 workspaceId），渲染进程既指定不了
+  // 别的工作区的任务，也表达不出「触发一次任意 Agent run」——触发的是某条已
+  // 落盘任务里冻结的配置，渲染进程一个字节都改不了。每个动作的返回都是权威
+  // 快照（列表或任务详情），与 providers / update 同一口径。
+  tasksList: "tasks:list",
+  tasksGet: "tasks:get",
+  tasksCreate: "tasks:create",
+  tasksUpdate: "tasks:update",
+  tasksDelete: "tasks:delete",
+  tasksPause: "tasks:pause",
+  tasksResume: "tasks:resume",
+  /** 立即触发一次（不改计划，独立 run，带 run-now 的 idempotency key） */
+  tasksRunNow: "tasks:run-now",
+  tasksCancelRun: "tasks:cancel-run",
+  tasksRetryRun: "tasks:retry-run",
+  tasksDuplicate: "tasks:duplicate",
 } as const;
 
 /** 主进程单向推送通道（6 个）。 */

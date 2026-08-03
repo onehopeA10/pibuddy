@@ -60,6 +60,7 @@ describe("api 聚合对象", () => {
       "settings",
       "shell",
       "stt",
+      "tasks",
       "update",
       "workspace",
     ]);

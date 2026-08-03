@@ -23,11 +23,13 @@ import ArtifactLibrary from "./ArtifactLibrary.vue";
 import MemoryPanel from "./MemoryPanel.vue";
 import PreviewPane from "./PreviewPane.vue";
 import SessionTreePanel from "./SessionTreePanel.vue";
+import TasksPanel from "./TasksPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
 import { useArtifactsStore } from "../stores/artifacts";
 import { useMemoryStore } from "../stores/memory";
+import { useTasksStore } from "../stores/tasks";
 import { useCapabilitiesStore } from "../stores/capabilities";
 import {
   createDirtyDialog,
@@ -42,6 +44,7 @@ const piRes = usePiResourcesStore();
 const providers = useProvidersStore();
 const artifacts = useArtifactsStore();
 const memory = useMemoryStore();
+const tasks = useTasksStore();
 const capabilities = useCapabilitiesStore();
 const message = useMessage();
 const dialog = useDialog();
@@ -138,6 +141,7 @@ const previewEnabled = computed(() => capabilities.isEnabled("common.preview"));
 const artifactsEnabled = computed(() => capabilities.isEnabled("common.artifacts"));
 const memoryEnabled = computed(() => capabilities.isEnabled("common.memory"));
 const sessionTreeEnabled = computed(() => capabilities.isEnabled("common.session-tree"));
+const tasksEnabled = computed(() => capabilities.isEnabled("common.tasks"));
 
 onMounted(() => {
   void store.init();
@@ -295,6 +299,15 @@ function onDrop(): void {
             >
               🌳 会话树
             </n-button>
+            <n-button
+              v-if="tasksEnabled"
+              size="tiny"
+              :type="tasks.panelOpen ? 'primary' : 'default'"
+              quaternary
+              @click="tasks.panelOpen = !tasks.panelOpen"
+            >
+              ⏰ 定时
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -325,6 +338,7 @@ function onDrop(): void {
       <UsagePanel />
       <ArtifactLibrary v-if="artifactsEnabled" />
       <MemoryPanel v-if="memoryEnabled" />
+      <TasksPanel v-if="tasksEnabled" />
     </slot>
   </div>
 </template>

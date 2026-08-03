@@ -41,7 +41,13 @@ export const MAX_LOG_FILES = 7;
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /** 日志作用域。新增一个域就在这里加一个字面量，便于按域过滤。 */
-export type LogScope = "main" | "pi-runtime" | "updater" | "session-index" | "permission";
+export type LogScope =
+  | "main"
+  | "pi-runtime"
+  | "updater"
+  | "session-index"
+  | "permission"
+  | "tasks";
 
 export interface LoggerOptions {
   /** 日志目录，通常是 app.getPath("userData")/logs */
