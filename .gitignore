@@ -19,6 +19,9 @@ packages/app/resources/pi-runtime/
 .workflow/embedding*
 .workflow/*.zvec
 .workflow/search-cache.json
+# 探查工具的中间产物：每次调用重新生成，留存无意义
+.workflow/explore/
+.workflow/search-daemon.json
 
 # 系统
 .DS_Store
