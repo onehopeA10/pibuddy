@@ -168,7 +168,7 @@ async function commitRename(row: SessionRow): Promise<void> {
             opening: app.switchingSessionId === s.sessionId,
             waiting: app.switchingSessionId !== null && app.switchingSessionId !== s.sessionId,
           }"
-          @click="app.openSession({ sessionId: s.sessionId })"
+          @click="app.openSession({ sessionId: s.sessionId, sizeBytes: s.sizeBytes })"
         >
           <div class="title">
             <!--

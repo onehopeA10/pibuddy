@@ -994,6 +994,45 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
+  /**
+   * 原始 JSONL 条目 → AgentMessage[]。
+   *
+   * 会话文件里除了 message 还有 model_change / thinking_level_change /
+   * session_info / compaction 等条目，取数时一并读了出来，这里只挑消息。
+   * 形状见 pi 的 docs/session-format.md：`{type:"message", message:{role,...}}`。
+   */
+  function entriesToMessages(entries: unknown[]): AgentMessage[] {
+    const out: AgentMessage[] = [];
+    for (const raw of entries) {
+      if (!raw || typeof raw !== "object") continue;
+      const e = raw as { type?: string; message?: AgentMessage };
+      if (e.type !== "message" || !e.message) continue;
+      out.push(e.message);
+    }
+    return out;
+  }
+
+  /**
+   * 把更早的消息**接在前面**（向前翻页用）。
+   *
+   * 改造前 chat-window 把读到的条目塞进自己的 `earlier` 数组，而 ChatView
+   * 渲染的是 `items` —— 全项目没有第二处引用 `earlier`。结果是：内存里的铺
+   * 完之后再点「查看更早的消息」，磁盘确实读了、游标确实前进了，**界面上
+   * 一条都不会多出来**。不报错、不失败类型检查，纯粹静默。
+   */
+  function prependMessages(messages: AgentMessage[]): number {
+    const prepended: ChatItem[] = [];
+    for (const msg of messages) {
+      if (msg.role === "user" || msg.role === "assistant") {
+        prepended.push({ key: ++keySeq, message: msg });
+      } else if (msg.role === "toolResult") {
+        recordToolResult(msg as ToolResultMessage);
+      }
+    }
+    if (prepended.length > 0) items.value = [...prepended, ...items.value];
+    return prepended.length;
+  }
+
   async function start(sessionId?: string): Promise<void> {
     startError.value = "";
     sessionLoadError.value = "";
@@ -1208,7 +1247,11 @@ export const useAppStore = defineStore("app", () => {
    * 入参是**不透明 sessionId**：JSONL 的绝对路径全程留在主进程，由会话索引
    * 反查（CT-15）。渲染进程连一个路径字符串都拿不到，也就无从伪造。
    */
-  async function openSession(target: { sessionId: string }): Promise<void> {
+  async function openSession(target: {
+    sessionId: string;
+    /** 会话文件字节数，用于本地抢先渲染；列表行里本来就有 */
+    sizeBytes?: number;
+  }): Promise<void> {
     if (streaming.value) {
       notify("warning", "请先停止当前任务，再切换历史会话");
       return;
@@ -1221,6 +1264,14 @@ export const useAppStore = defineStore("app", () => {
 
     switchingSessionId.value = target.sessionId;
     try {
+      // 先用本地 JSONL 把内容铺出来（10ms 级），不等 pi。
+      //
+      // pi 的 switch_session 要重建整个上下文，实测 1.7MB 会话 4679ms，且耗
+      // 时由文件大小决定而非消息数。那段等待消不掉，但没有理由让用户连"这
+      // 个会话里有什么"都看不到 —— 消息内容就在磁盘上，我们自己的索引按字节
+      // offset 读它只要几毫秒。pi 那边跑完之前只是不能发新消息而已。
+      void previewSessionLocally(target.sessionId, target.sizeBytes);
+
       const resp = await window.piBuddy.pi.switchSession(target.sessionId);
       if (!resp.success) {
         notify("error", resp.error ?? "打开会话失败");
@@ -1240,6 +1291,35 @@ export const useAppStore = defineStore("app", () => {
       void refreshStats();
     } finally {
       switchingSessionId.value = null;
+    }
+  }
+
+  /**
+   * 切换会话时的**本地抢先渲染**。
+   *
+   * 直接按 JSONL 字节 offset 读会话尾部若干条渲染出来，不经 pi。等 pi 的
+   * switch_session 回来后 reloadMessages 会用权威数据整体覆盖，因此这里读到
+   * 的哪怕不完整也无妨 —— 它的唯一职责是把「点开后好几秒的空白」变成
+   * 「立刻能看到这个会话聊过什么」。
+   *
+   * 失败一律吞掉：这是锦上添花的路径，出问题不该盖住真正的切换流程。
+   */
+  async function previewSessionLocally(sessionId: string, sizeBytes?: number): Promise<void> {
+    // sizeBytes 由调用方从已加载的会话行里带过来：列表本来就有这个字段，
+    // 为它单开一条 IPC 通道既多一次往返，也多一处要校验的接口面。
+    if (typeof sizeBytes !== "number" || sizeBytes <= 0) return;
+    try {
+      const page = await window.piBuddy.sessions.readHistoryBefore({
+        sessionId,
+        beforeOffset: sizeBytes,
+        limit: 60,
+      });
+      // 期间用户可能又切走了：过期结果绝不能盖到新会话头上
+      if (switchingSessionId.value !== sessionId) return;
+      const msgs = entriesToMessages(page.entries);
+      if (msgs.length > 0) loadMessages(msgs);
+    } catch {
+      /* 抢先渲染失败就等 pi 的权威数据，不打扰用户 */
     }
   }
 
@@ -1457,6 +1537,8 @@ export const useAppStore = defineStore("app", () => {
     startError,
     sessionLoadError,
     switchingSessionId,
+    entriesToMessages,
+    prependMessages,
     currentSessionId,
     runtimeScope,
     currentRuntimeId,

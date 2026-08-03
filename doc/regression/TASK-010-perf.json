@@ -1,6 +1,6 @@
 {
   "task": "TASK-010",
-  "recordedAt": "2026-08-03T02:33:07.690Z",
+  "recordedAt": "2026-08-03T03:07:19.445Z",
   "budgetMs": 200,
   "messageCount": 800,
   "streamFrames": 200,
@@ -8,51 +8,51 @@
   "entries": [
     {
       "name": "load",
-      "duration": 101.41070000000036
+      "duration": 153.04669999999896
     },
     {
       "name": "scroll-to-top#0",
-      "duration": 90.24369999999908
+      "duration": 112.96459999999934
     },
     {
       "name": "scroll-to-top#1",
-      "duration": 68.30259999999907
+      "duration": 66.38570000000072
     },
     {
       "name": "scroll-to-top#2",
-      "duration": 110.41759999999886
+      "duration": 84.32650000000103
     },
     {
       "name": "scroll-to-top#3",
-      "duration": 74.1846999999998
+      "duration": 51.30829999999878
     },
     {
       "name": "scroll-to-top#4",
-      "duration": 86.48559999999998
+      "duration": 66.32799999999952
     },
     {
       "name": "scroll-to-top#5",
-      "duration": 56.102499999999054
+      "duration": 59.0586000000003
     },
     {
       "name": "scroll-to-top#6",
-      "duration": 102.7551999999996
+      "duration": 96.73199999999997
     },
     {
       "name": "scroll-to-top#7",
-      "duration": 52.29869999999937
+      "duration": 42.78870000000097
     },
     {
       "name": "scroll-to-top#8",
-      "duration": 32.602100000000064
+      "duration": 21.550999999999476
     },
     {
       "name": "scroll-to-top#9",
-      "duration": 0.38739999999961583
+      "duration": 0.2834999999995489
     },
     {
       "name": "stream-200-frames",
-      "duration": 39.296699999998964
+      "duration": 58.83519999999953
     }
   ]
 }

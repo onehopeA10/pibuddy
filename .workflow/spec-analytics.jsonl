@@ -3,3 +3,15 @@
 {"type":"cli","id":"CLI-1785718106252-1","timestamp":"2026-08-03T00:48:26.252Z","command":"load","args":{"type":"spec","id":"spec:project:quality-rules"}}
 {"type":"cli","id":"CLI-1785718106265-1","timestamp":"2026-08-03T00:48:26.265Z","command":"load","args":{"type":"spec","id":"spec:project:review-standards"}}
 {"type":"cli","id":"CLI-1785718106276-1","timestamp":"2026-08-03T00:48:26.276Z","command":"load","args":{"type":"spec","id":"spec:project:architecture-constraints"}}
+{"type":"cli","id":"CLI-1785726016958-1","timestamp":"2026-08-03T03:00:16.958Z","command":"load","args":{"type":"spec","id":"spec:project:architecture-constraints"}}
+{"type":"cli","id":"CLI-1785726307094-1","timestamp":"2026-08-03T03:05:07.094Z","command":"load","args":{"type":"knowhow","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-014"}}
+{"type":"cli","id":"CLI-1785726310306-1","timestamp":"2026-08-03T03:05:10.306Z","command":"load","args":{"type":"session","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-018"}}
+{"type":"cli","id":"CLI-1785726310332-1","timestamp":"2026-08-03T03:05:10.332Z","command":"load","args":{"type":"session","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-015"}}
+{"type":"cli","id":"CLI-1785726310359-1","timestamp":"2026-08-03T03:05:10.359Z","command":"load","args":{"type":"spec","id":"spec:project:architecture-constraints"}}
+{"type":"cli","id":"CLI-1785726311548-1","timestamp":"2026-08-03T03:05:11.548Z","command":"load","args":{"type":"session","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-015"}}
+{"type":"cli","id":"CLI-1785726311672-1","timestamp":"2026-08-03T03:05:11.673Z","command":"load","args":{"type":"spec","id":"spec:project:architecture-constraints"}}
+{"type":"cli","id":"CLI-1785726311704-1","timestamp":"2026-08-03T03:05:11.704Z","command":"load","args":{"type":"session","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-021"}}
+{"type":"cli","id":"CLI-1785726328778-1","timestamp":"2026-08-03T03:05:28.778Z","command":"load","args":{"type":"knowhow","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-015"}}
+{"type":"cli","id":"CLI-1785726328798-1","timestamp":"2026-08-03T03:05:28.798Z","command":"load","args":{"type":"knowhow","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-020"}}
+{"type":"cli","id":"CLI-1785726328847-1","timestamp":"2026-08-03T03:05:28.847Z","command":"load","args":{"type":"knowhow","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-002"}}
+{"type":"cli","id":"CLI-1785726328915-1","timestamp":"2026-08-03T03:05:28.915Z","command":"load","args":{"type":"spec","id":"spec:project:architecture-constraints"}}

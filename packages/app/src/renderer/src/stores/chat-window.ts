@@ -116,6 +116,10 @@ export function useChatWindow(): ChatWindow {
         page = await fetchPage(offset);
       }
       earlier.value = [...page.entries, ...earlier.value];
+      // **必须接进 items**：ChatView 渲染的是 store.items，`earlier` 全项目
+      // 再无第二处引用。只填 earlier 的话，磁盘读了、游标前进了、requestCount
+      // 也加了，而界面上一条消息都不会多 —— 不报错、不失败类型检查，纯静默。
+      store.prependMessages(store.entriesToMessages(page.entries));
       nextBeforeOffset.value = page.nextBeforeOffset;
       if (page.nextBeforeOffset === null) reachedTop.value = true;
     } catch (err) {

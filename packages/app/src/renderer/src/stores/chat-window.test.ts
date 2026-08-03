@@ -140,3 +140,46 @@ describe("useChatWindow · 未读分界线", () => {
     vi.useRealTimers();
   });
 });
+
+/**
+ * 翻页读到的消息必须真的出现在界面上。
+ *
+ * 改造前 loadEarlier 只把条目塞进自己的 `earlier` 数组，而 ChatView 渲染的
+ * 是 store.items —— 全项目再无第二处引用 `earlier`。表现是：磁盘读了、游标
+ * 前进了、requestCount 也加了，**界面上一条都不会多**。三大门禁全绿。
+ */
+describe("useChatWindow · 翻页结果接入渲染", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    readHistoryBefore = vi.fn();
+    query = vi.fn(async () => []);
+    installBridge();
+  });
+
+  it("读到的 message 条目被接到 store.items 前面，非 message 条目被忽略", async () => {
+    const app = useAppStore();
+    app.items = [{ key: 999, message: { role: "user", content: "现有的一条" } }] as never;
+
+    readHistoryBefore.mockResolvedValueOnce(
+      page(
+        [
+          // 会话文件里混着非消息条目，不能当成消息渲染
+          { type: "model_change", provider: "openai", modelId: "gpt-5.6" },
+          { type: "message", message: { role: "user", content: "更早的提问" } },
+          { type: "message", message: { role: "assistant", content: [{ type: "text", text: "更早的回答" }] } },
+        ],
+        null
+      )
+    );
+
+    const win = useChatWindow();
+    win.reset(5000);
+    await win.loadEarlier();
+
+    // 2 条更早的 + 原有 1 条
+    expect(app.items).toHaveLength(3);
+    // 顺序：更早的在前，且原有那条仍在最后
+    expect((app.items[0].message as { content: unknown }).content).toBe("更早的提问");
+    expect(app.items[2].key).toBe(999);
+  });
+});
