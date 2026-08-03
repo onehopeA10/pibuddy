@@ -32,7 +32,7 @@
  */
 import { app, shell } from "electron";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, realpathSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -262,19 +262,50 @@ function headerCwd(head: Buffer): string | null {
 }
 
 /**
+ * 路径规范化的结果缓存。
+ *
+ * samePath 会在「遍历目录里每一个会话文件」的循环里被调用，而
+ * realpathSync.native 是一次真实的系统调用。同一个 workspaceRoot 在一轮同步
+ * 里会被问上几十次，缓存掉。
+ */
+const canonicalCache = new Map<string, string>();
+
+/**
+ * 把绝对路径收敛成可比较的形态。
+ *
+ * **必须走 `realpathSync.native`**：Windows 上 `C:\Users\RUNNER~1\proj` 与
+ * `C:\Users\runneradmin\proj` 是同一个目录的两种写法（8.3 短名），而
+ * `path.resolve` 只做词法处理，认不出这件事 —— 只有操作系统能。
+ * `workspace-registry.ts` 算 workspaceId 时用的正是 native 版；这里若用词法
+ * 版，两边对「同一个目录」的判断就会不一致，表现是**历史会话一条都列不出
+ * 来**（CI 的 Windows runner 上恰好是短名路径，因此只在 CI 红）。
+ *
+ * 路径不存在时（会话头部记的 cwd 指向已被删掉的目录）退回词法归一化 ——
+ * 那种情况下没有操作系统答案可问，词法比较是唯一能做的事。
+ */
+function canonicalize(p: string): string {
+  const cached = canonicalCache.get(p);
+  if (cached !== undefined) return cached;
+  let out: string;
+  try {
+    out = realpathSync.native(p);
+  } catch {
+    out = path.resolve(p);
+  }
+  if (process.platform === "win32") out = out.toLowerCase();
+  canonicalCache.set(p, out);
+  return out;
+}
+
+/**
  * 两个绝对路径是否指同一个目录。
  *
- * Windows 的路径大小写不敏感，而 pi 记下的 cwd 是用户敲进命令行的那个形态
- * （`d:\proj`），我们的 workspaceRoot 是 realpath 归一化过的（`D:\proj`）。
- * 逐字比较会把它们判成两个目录，表现是「历史会话一条都列不出来」——
- * 与 workspaceIdFor 用同一套归一化口径，这里才不会各说各话。
+ * Windows 路径大小写不敏感，而 pi 记下的 cwd 是用户敲进命令行的那个形态
+ * （`d:\proj`、甚至 8.3 短名），我们的 workspaceRoot 是 realpath 归一化过的。
+ * 逐字比较会把它们判成两个目录。
  */
 function samePath(a: string, b: string): boolean {
-  const norm = (p: string): string => {
-    const resolved = path.resolve(p);
-    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-  };
-  return norm(a) === norm(b);
+  return canonicalize(a) === canonicalize(b);
 }
 
 /** 按字节区间读取，返回 Buffer。全部 I/O 走流，不整文件读入。 */

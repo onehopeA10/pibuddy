@@ -25,8 +25,29 @@
 import { shell } from "electron";
 import type { AttachmentDescriptor, AttachmentRef } from "@pibuddy/contract";
 import { createHash, randomBytes } from "node:crypto";
+import nodeFs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+
+/**
+ * 原生 realpath。
+ *
+ * `fs/promises` 的 realpath **没有 `.native`**，只有回调版与同步版才有，
+ * 所以这里包一层（`pi-resources/trust-store.ts` 用的是同一手法）。
+ *
+ * 必须用 native：Windows 上普通 realpath 解析符号链接，却**不展开 8.3 短名**
+ * —— `C:\Users\RUNNER~1\x` 与 `C:\Users\runneradmin\x` 是同一个文件的两种
+ * 写法，词法比较认不出来，凭证兑付时的收容校验会因此对不上。只有操作系统
+ * 认得这件事。
+ */
+function realpathNative(p: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    nodeFs.realpath.native(p, (err, resolved) => {
+      if (err) reject(err);
+      else resolve(resolved);
+    });
+  });
+}
 
 import { assertContained, lookupWorkspace } from "./workspace-registry.js";
 
@@ -220,7 +241,7 @@ export async function issue(
   options: IssueOptions = {}
 ): Promise<AttachmentRecord> {
   const now = options.now ?? Date.now();
-  const canonicalPath = await fsp.realpath(absPath);
+  const canonicalPath = await realpathNative(absPath);
   const stat = await fsp.stat(canonicalPath);
   if (!stat.isFile()) throw new Error(`ATTACHMENT_NOT_A_FILE: ${absPath}`);
 
@@ -322,7 +343,7 @@ export async function resolveAttachment(
     throw new Error("ATTACHMENT_ACCESS_DENIED: read-write");
   }
 
-  const real = await fsp.realpath(record.canonicalPath);
+  const real = await realpathNative(record.canonicalPath);
   if (real !== record.canonicalPath) {
     tokens.delete(token);
     throw new Error("ATTACHMENT_TARGET_MOVED");
