@@ -25,7 +25,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { registerHandler } from "../ipc-guard.js";
-import { artifactStore } from "./artifact-store.js";
+import { artifactStore, closeArtifactStore } from "./artifact-store.js";
+import { disposeArtifactTracking } from "./artifact-tracker.js";
 
 /** 本域注册的全部通道。单测据它断言逐一出现在 ipc-guard 的注册表里。 */
 export const ARTIFACT_CHANNELS: InvokeChannel[] = [
@@ -157,4 +158,16 @@ export function registerArtifactIpc(): void {
     artifactCompareRequestSchema,
     (request) => artifactStore().compare(request.id, request.otherId)
   );
+}
+
+/**
+ * 拆卸本能力的运行期资源（ADR-0002 D4 规则 4）。
+ *
+ * 在途跟踪表 + sqlite 句柄。**artifacts.db 里的记录与磁盘上的产物文件一个
+ * 都不动** —— 规则 5：卸载与删数据是两个动作。禁用产物库之后再启用，用户
+ * 应该原样看到他之前的东西。
+ */
+export function disposeArtifactResources(): void {
+  disposeArtifactTracking();
+  closeArtifactStore();
 }

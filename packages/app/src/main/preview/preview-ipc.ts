@@ -29,7 +29,7 @@ import { registerHandler } from "../ipc-guard.js";
 import { resolveInWorkspace } from "../workspace-registry.js";
 import { convert } from "./convert-host.js";
 import { SUGGESTION } from "./convert-worker.js";
-import { closePreviewWindow, openPreviewWindow } from "./preview-window.js";
+import { closeAllPreviewWindows, closePreviewWindow, openPreviewWindow } from "./preview-window.js";
 
 /** 本域注册的全部通道。单测据它断言逐一出现在 ipc-guard 的注册表里。 */
 export const PREVIEW_CHANNELS: InvokeChannel[] = [
@@ -164,4 +164,15 @@ export function registerPreviewIpc(): void {
       closePreviewWindow(payload.previewId);
     }
   );
+}
+
+/**
+ * 拆卸本能力的运行期资源（ADR-0002 D4 规则 4）。
+ *
+ * 预览窗口是独立的 BrowserWindow：不收的话，禁用之后用户看到的是「设置里
+ * 说已关闭，桌面上那个预览窗口还开着」。转换缓存目录**不动** —— 那是磁盘
+ * 上的产物，删它属于「卸载」而不是「禁用」（规则 5）。
+ */
+export function disposePreviewResources(): void {
+  closeAllPreviewWindows();
 }

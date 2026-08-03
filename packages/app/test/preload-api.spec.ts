@@ -42,8 +42,10 @@ describe("api 聚合对象", () => {
     // preview 与 artifacts 是 ART-101 / ART-102（沙箱预览 + 产物库）。
     // 新增命名空间 = 新增 api/<ns>.ts + 在 index.ts 加一行 + 在这里加一行，
     // 三处对不上就说明有人绕过了那条唯一的接口面定义。
+    // capabilities 是 ADR-0002 第一阶段（能力包与 Profile）。
     expect(Object.keys(api).sort()).toEqual([
       "artifacts",
+      "capabilities",
       "diagnostics",
       "dialog",
       "file",

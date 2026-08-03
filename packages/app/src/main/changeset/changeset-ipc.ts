@@ -19,6 +19,7 @@ import {
 import { registerHandler } from "../ipc-guard.js";
 import { acceptBatch, acceptChange, rejectChange } from "./apply.js";
 import { changesetStore, diffOf, toChangesetEntry } from "./changeset-store.js";
+import { disposeToolWatch } from "./tool-watch.js";
 
 /** 本域注册的全部通道。单测据它断言注册面。 */
 export const CHANGESET_CHANNELS: InvokeChannel[] = [
@@ -54,4 +55,15 @@ export function registerChangesetIpc(): void {
   registerHandler(CHANNELS.changesetAcceptBatch, changesetBatchRequestSchema, (payload) =>
     acceptBatch(payload.ids)
   );
+}
+
+/**
+ * 拆卸本能力的运行期资源（ADR-0002 D4 规则 4）。
+ *
+ * 只收「还在跑/还占着内存」的东西：tool-watch 在 start→end 之间持有整份
+ * 文件的 before 字节。**changesets.db 一行不动** —— 规则 5：卸载与删数据
+ * 是两个动作，用户禁用一个面板不等于同意丢掉他还没审阅完的变更。
+ */
+export function disposeChangesetResources(): void {
+  disposeToolWatch();
 }

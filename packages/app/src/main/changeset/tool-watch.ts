@@ -23,8 +23,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { trackToolEnd, trackToolStart } from "../artifacts/artifact-tracker.js";
+import { isCapabilityEnabled } from "../capability/capability-state.js";
 import { requireWorkspaceRoot } from "../workspace-registry.js";
 import { changesetStore } from "./changeset-store.js";
+import { WORKSPACE_REVIEW_CAPABILITY_ID } from "./workspace-review.capability.js";
 
 /** 参数里可能承载路径的键名。按顺序取第一个是字符串的。 */
 const PATH_KEYS = ["path", "file_path", "filePath", "filename", "file", "target_file"];
@@ -76,8 +78,19 @@ interface PendingSnapshot {
 const pending = new Map<string, PendingSnapshot>();
 
 /** 仅供单测：清空未消费的快照。 */
-export function __resetToolWatch(): void {
+/**
+ * 丢弃全部在途快照（禁用能力 / 会话切换 / 单测）。
+ *
+ * 这张表在 start→end 之间持有**整份文件的字节**，是一块按文件大小增长的
+ * 内存 —— 禁用审阅时不清它，等于关掉了面板却留着它的成本。
+ */
+export function disposeToolWatch(): void {
   pending.clear();
+}
+
+/** 仅供单测：历史名字，转调 disposeToolWatch。 */
+export function __resetToolWatch(): void {
+  disposeToolWatch();
 }
 
 export interface ToolWatchContext {
@@ -121,11 +134,17 @@ export async function observeToolEvent(
       const root = requireWorkspaceRoot(ctx.workspaceId);
       const relativePath = relativeFromArgs(event.args ?? {}, root);
       if (!relativePath) return;
-      pending.set(event.toolCallId, {
-        relativePath,
-        kind,
-        beforeBytes: readOrNull(path.resolve(root, relativePath)),
-      });
+      // FEATURE GATE（ADR-0002 D4 规则 4）：审阅能力未启用时不抓快照。
+      // 快照是**整份文件的字节**，而它唯一的消费者是变更面板 —— 面板都不
+      // 存在的时候还照抓，就是「禁用了但成本还在」。产物跟踪不受这条影响：
+      // 它是另一个能力，自己在 trackToolStart 里门控。
+      if (isCapabilityEnabled(WORKSPACE_REVIEW_CAPABILITY_ID)) {
+        pending.set(event.toolCallId, {
+          relativePath,
+          kind,
+          beforeBytes: readOrNull(path.resolve(root, relativePath)),
+        });
+      }
       // 产物库同步插一条 generating（ART-102）。删除类工具不算产物 ——
       // 「做出来的东西」和「删掉的东西」放同一个库里只会互相干扰。
       if (kind !== "delete") {

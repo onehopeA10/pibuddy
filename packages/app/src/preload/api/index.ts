@@ -21,6 +21,7 @@
  *   workspace 工作区文件服务（树 / 搜索 / 读写 / 变更集），只认相对路径
  *   preview   安全预览（沙箱窗口 + 受限转换进程）
  *   artifacts 产物库（版本链 / 回收站 / 导出 / 版本比较）
+ *   capabilities 能力包与 Profile（描述 / 换 Profile / 单个开关）
  */
 import { pi } from "./pi.js";
 import { piResources } from "./piResources.js";
@@ -36,6 +37,7 @@ import { diagnostics } from "./diagnostics.js";
 import { workspace } from "./workspace.js";
 import { preview } from "./preview.js";
 import { artifacts } from "./artifacts.js";
+import { capabilities } from "./capabilities.js";
 
 export const api = {
   pi,
@@ -56,6 +58,8 @@ export const api = {
   preview,
   /** 产物库（ART-102）。入参一律不透明 artifactId，没有路径字段 */
   artifacts,
+  /** 能力包与 Profile（ADR-0002）。只能在已封口的表上勾选，没有注册入口 */
+  capabilities,
 };
 
 export type PiBuddyApi = typeof api;

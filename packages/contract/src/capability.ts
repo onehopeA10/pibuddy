@@ -1,0 +1,582 @@
+/**
+ * 能力包契约（ADR-0002 第一阶段）。
+ *
+ * ## 这个文件在回答什么
+ *
+ * 「一个能力包对外声明了什么」——通道、工具、UI 贡献、配置键、数据代际、
+ * 它**申请**哪些权限、它的资产怎么装。声明是一份纯数据，因此它可以被
+ * 校验、被 diff、被 grep；而「运行期注册」的东西只能在崩溃时被发现。
+ * ADR-0002 的贯穿性观察就是这一条：凡有「声明 → 校验 → 投影」三段结构的
+ * 地方，冲突静态可查。
+ *
+ * ## 为什么 manifest 里没有、也不能有「已授予」
+ *
+ * ADR-0002 D3：**能力只能申请权限，不能自行授予**。如果 manifest 里存在
+ * 任何形态的 `granted` / `autoGrant` / `permissionsGranted`，那么「谁批准的」
+ * 这件事的答案就变成了「它自己」——权限模型在第一行就塌了。这里用两道
+ * 结构性手段挡住：
+ *
+ *   1. `capabilityManifestSchema` 全链路 `.strict()`，多一个键直接抛错；
+ *   2. `CAPABILITY_GRANT_FORBIDDEN_KEYS` 显式点名一批授予语义的键名，
+ *      `validateCapabilityManifest` 逐层扫描，命中即报错。
+ *
+ * 第 2 条不是第 1 条的冗余：strict 只能挡住**已知形状**上的多余键，而一个
+ * 新加的嵌套对象（比如日后某人给 `runtime` 加一段 `runtime.grants`）会在
+ * schema 演进时被顺手放行。点名黑名单是那种情况下唯一还在岗的判据。
+ *
+ * ## 为什么 tier 里没有 kernel
+ *
+ * 平台内核不可关闭（ADR-0002 四层边界表）。让它成为一个「能力」，就等于
+ * 承认存在一份「禁用内核」的配置——那份配置的行为没有任何人定义过。
+ */
+import { z } from "zod";
+
+import { defineContractShard } from "./channel-contract.js";
+import { CHANNELS, PUSH_CHANNELS } from "./channels.js";
+
+/** manifest 结构自身的代际。改字段语义要 +1 并在宿主侧补兼容分支。 */
+export const CAPABILITY_MANIFEST_VERSION = 1;
+
+/**
+ * 宿主向能力包承诺的契约代际。
+ *
+ * 能力包用 `compatibility.contract` 声明它能接受的区间；宿主在装配期比对。
+ * 与 `CAPABILITY_MANIFEST_VERSION` 分开：manifest 的形状和宿主暴露的
+ * 通道/事件面是两件会各自演进的事。
+ */
+export const CAPABILITY_HOST_CONTRACT_VERSION = 1;
+
+// ---------------------------------------------------------------- 权限
+
+/**
+ * 无参权限（ADR-0002 D3 初始集）。
+ *
+ * 这里**只有申请动作的名字**，没有任何「已批准」的位置。授权决策由核心
+ * PermissionEngine 按 workspace / agent / profile 做，不在 manifest 里。
+ */
+export const CAPABILITY_PERMISSION_ATOMS = [
+  "workspace.read",
+  "workspace.write",
+  "process.git",
+  "process.shell",
+  "external.open",
+] as const;
+export type CapabilityPermissionAtom = (typeof CAPABILITY_PERMISSION_ATOMS)[number];
+
+/** 带参数的权限前缀：`network:<domain>` 与 `secret:<slot>`。 */
+export const CAPABILITY_PERMISSION_PREFIXES = ["network", "secret"] as const;
+export type CapabilityPermissionPrefix = (typeof CAPABILITY_PERMISSION_PREFIXES)[number];
+
+/**
+ * 一条权限申请的字符串形态（`workspace.read` / `network:api.openai.com`）。
+ *
+ * ## 与 `PermissionRule`（ipc-contract.ts:97）不是同一件事
+ *
+ * 那个类型是**单条 IPC 通道的准入配额**（channel / maxBytes / windowMs /
+ * maxPerWindow），`ipc-guard` 的 CHANNEL_MAX_BYTES 与 RateLimiter 是它的运行时
+ * 投影；`workspace-store.ts:57` 落盘的 `permissionRules` 存的就是它，DDL 在 `:69`。
+ *
+ * 本类型是**能力级的权限申请**（ADR-0002 D3），轴完全不同：前者回答「这条通道
+ * 一次能收多大、10 秒能来几次」，后者回答「这个能力被允许做哪一类事」。
+ *
+ * 因此本轮**不把 `permissionRules` 接成能力权限的决策数据源** —— 那会把一张
+ * 按 channel 索引的配额表当成按 capability 索引的授权表来读，两边的键都对不上，
+ * 接起来只能靠一层猜测性的映射。真正的接法是在 PermissionEngine 落地时，
+ * 让 `WorkspaceProfile` 多一张按 capabilityId 索引的授权表，与现有的
+ * `permissionRules` 并列而不是复用它。那属于「权限引擎的实际决策逻辑」，
+ * 本轮明确不做（只做声明与校验）。
+ */
+export type CapabilityPermission = string;
+
+export interface ParsedCapabilityPermission {
+  /** 无参权限为其自身；带参权限为前缀 */
+  kind: CapabilityPermissionAtom | CapabilityPermissionPrefix;
+  /** 带参权限的参数（域名 / 槽位名）；无参权限为 null */
+  argument: string | null;
+}
+
+/**
+ * 域名 / 槽位名的字符形态。
+ *
+ * `network:*` 这种通配一律不接受：一条通配等于「任意出站」，而 main 侧
+ * 唯一的出站原语 `net/outbound-guard.ts` 的全部意义就是不存在这种东西。
+ */
+const PERMISSION_ARGUMENT_RE = /^[a-z0-9][a-z0-9.-]*$/i;
+
+/** 解析一条权限申请；非法形态返回 null（而不是抛错——校验器要收集全部错误）。 */
+export function parseCapabilityPermission(raw: string): ParsedCapabilityPermission | null {
+  if ((CAPABILITY_PERMISSION_ATOMS as readonly string[]).includes(raw)) {
+    return { kind: raw as CapabilityPermissionAtom, argument: null };
+  }
+  const sep = raw.indexOf(":");
+  if (sep <= 0) return null;
+  const prefix = raw.slice(0, sep);
+  const argument = raw.slice(sep + 1);
+  if (!(CAPABILITY_PERMISSION_PREFIXES as readonly string[]).includes(prefix)) return null;
+  if (!PERMISSION_ARGUMENT_RE.test(argument)) return null;
+  return { kind: prefix as CapabilityPermissionPrefix, argument };
+}
+
+export function isCapabilityPermission(raw: string): boolean {
+  return parseCapabilityPermission(raw) !== null;
+}
+
+// ---------------------------------------------------------------- UI 插槽
+
+/**
+ * 固定插槽集合（ADR-0002 D5）。
+ *
+ * 是枚举而不是自由字符串：自由字符串意味着一个拼错的插槽名表现为
+ * 「这块 UI 就是不出现」，没有任何报错——那正是 pi 的 `ctx.ui.*` 现状。
+ */
+export const CAPABILITY_UI_SLOTS = [
+  "sidebar.section",
+  "drawer.tab",
+  "composer.action",
+  "composer.suggestion",
+  "composer.attachment-type",
+  "message.renderer",
+  "extension.widget",
+  "settings.section",
+  "command",
+  "workflow.template",
+] as const;
+export type CapabilityUiSlot = (typeof CAPABILITY_UI_SLOTS)[number];
+
+// ---------------------------------------------------------------- 子结构
+
+/**
+ * 版本兼容区间。
+ *
+ * 用 `{min,max}` 而不是 semver range 字符串：range 语法需要一个解析器，
+ * 而契约包目前一个运行时依赖都没有（除 zod）。数字段比较足够表达
+ * 「>=x 且 <y」，且读的人不需要记住 `^` 与 `~` 的区别。
+ */
+export const capabilityCompatibilitySchema = z
+  .object({
+    /** 最低宿主应用版本（含） */
+    appMin: z.string().min(1),
+    /** 最高宿主应用版本（不含）；省略表示无上界 */
+    appBelow: z.string().min(1).optional(),
+    /** 可接受的宿主契约代际区间（闭区间） */
+    contractMin: z.number().int().nonnegative(),
+    contractMax: z.number().int().nonnegative(),
+  })
+  .strict();
+export type CapabilityCompatibility = z.infer<typeof capabilityCompatibilitySchema>;
+
+/**
+ * 一个能被 LLM 调用的工具的声明。
+ *
+ * `name` 必须带 capabilityId 前缀（D4 规则 6）。这条规则的代价是实测过的：
+ * pi 的裸 `Map.set` 无命名空间，同名 Tool 冲突让 RPC 直接启动失败，而宿主
+ * 只能用三条硬编码关键词猜是哪两个在打架。
+ */
+export const capabilityToolSchema = z
+  .object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+    /** 该工具运行时会用到的权限，必须是 manifest.permissions 的子集 */
+    permissions: z.array(z.string()).readonly().default([]),
+  })
+  .strict();
+export type CapabilityTool = z.infer<typeof capabilityToolSchema>;
+
+/**
+ * 一条 UI 贡献。
+ *
+ * `module` / `host` 不是文档，是 **drift test 的 grep 目标**：module 是实现
+ * 该贡献的组件文件，host 是挂载它的宿主文件。手法与 CodePilot
+ * `capability-contract.ts:178-217` 的 `exposure.module/factory` 相同——
+ * 声明与实现之间必须有一条机器能走的路，否则声明就是注释。
+ */
+export const capabilityUiContributionSchema = z
+  .object({
+    slot: z.enum(CAPABILITY_UI_SLOTS),
+    /** 贡献 id，必须带 capabilityId 前缀（D4 规则 6） */
+    id: z.string().min(1),
+    title: z.string().min(1),
+    /** 实现模块，相对 packages/app/src 的 posix 路径 */
+    module: z.string().min(1),
+    /** 挂载点模块，相对 packages/app/src 的 posix 路径 */
+    host: z.string().min(1),
+  })
+  .strict();
+export type CapabilityUiContribution = z.infer<typeof capabilityUiContributionSchema>;
+
+/** 一个配置项的声明。`key` 必须带 capabilityId 前缀（D4 规则 6）。 */
+export const capabilitySettingSchema = z
+  .object({
+    key: z.string().min(1),
+    type: z.enum(["boolean", "number", "string", "enum"]),
+    description: z.string().min(1),
+    /** enum 类型的取值集合 */
+    options: z.array(z.string()).readonly().optional(),
+  })
+  .strict();
+export type CapabilitySetting = z.infer<typeof capabilitySettingSchema>;
+
+/**
+ * 禁用时必须被拆掉的运行期资源种类（D4 规则 4）。
+ *
+ * 声明它的意义是：禁用路径上「什么都不用做」与「忘了做」在代码里长得
+ * 一模一样。写出来之后，前者是 `teardown: []`，后者是一条可以被质问的
+ * 声明。**数据不在此列**——规则 5：卸载与删数据是两个动作。
+ */
+export const CAPABILITY_TEARDOWN_KINDS = [
+  "worker",
+  "listener",
+  "watcher",
+  "child-process",
+] as const;
+export type CapabilityTeardownKind = (typeof CAPABILITY_TEARDOWN_KINDS)[number];
+
+/**
+ * 资产装配方式（ADR-0002 D2）。
+ *
+ * D2 允许能力包携带自己的重依赖（编码包已获准单独引入 monaco-editor），
+ * 前提是三条连带约束，其中两条钉在这里：
+ *
+ *   - **必须懒加载**：带重依赖就必须 `loading: "lazy"` 且给出 `entry`，
+ *     未启用不得进包；
+ *   - **必须有预算**：允许重依赖不等于允许无上界，`bundleBudgetKb` 必填。
+ *
+ * 这两条由 `validateCapabilityManifest` 强制，不是靠人自觉。
+ */
+export const capabilityRuntimeSchema = z
+  .object({
+    /** inline = 随内核 bundle 一起装；lazy = 独立 chunk，启用时才加载 */
+    loading: z.enum(["inline", "lazy"]),
+    /** lazy 时的动态 import 入口，相对 packages/app/src 的 posix 路径 */
+    entry: z.string().min(1).optional(),
+    /** 该 chunk 的字节预算（KB）。带重依赖时必填，做成可断言闸门 */
+    bundleBudgetKb: z.number().int().positive().optional(),
+    /** 本包独占的重依赖（如 monaco-editor）。为空表示只用内核已有的依赖 */
+    heavyDependencies: z.array(z.string()).readonly().default([]),
+    /** 禁用时必须拆掉的运行期资源 */
+    teardown: z.array(z.enum(CAPABILITY_TEARDOWN_KINDS)).readonly().default([]),
+  })
+  .strict();
+export type CapabilityRuntime = z.infer<typeof capabilityRuntimeSchema>;
+
+/**
+ * 主进程侧暴露点。
+ *
+ * 同样是 drift test 的 grep 目标：`register` 是装配期被调用的注册函数名，
+ * drift test 据它去 `module` 里数「这个函数体里到底注册了哪几条通道」，
+ * 再和 `manifest.channels` 对账。没有这一段的话，「manifest 说它有 9 条
+ * 通道」就只是一句话。
+ */
+export const capabilityExposureSchema = z
+  .object({
+    /** 注册函数所在模块，相对 packages/app/src 的 posix 路径 */
+    module: z.string().min(1),
+    /** 注册函数名 */
+    register: z.string().min(1),
+    /** 禁用 / 退出时的拆卸函数名；`runtime.teardown` 非空时必填 */
+    dispose: z.string().min(1).optional(),
+  })
+  .strict();
+export type CapabilityExposure = z.infer<typeof capabilityExposureSchema>;
+
+// ---------------------------------------------------------------- manifest
+
+/** capabilityId 形态：`<namespace>.<name>`，两段都是小写短横线命名。 */
+export const CAPABILITY_ID_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/** 版本号形态：三段数字。 */
+const VERSION_RE = /^\d+\.\d+\.\d+$/;
+
+/**
+ * 授予语义的键名黑名单。
+ *
+ * 见文件头：strict schema 挡不住「日后新增的嵌套对象里混进一个授予字段」，
+ * 这张表是那种情况下唯一还在岗的判据。命中即报错，不做「警告」——警告
+ * 在 CI 里等于没有。
+ */
+export const CAPABILITY_GRANT_FORBIDDEN_KEYS = [
+  "granted",
+  "grants",
+  "grant",
+  "grantedpermissions",
+  "autogrant",
+  "permissionsgranted",
+  "approved",
+  "authorized",
+] as const;
+
+export const capabilityManifestSchema = z
+  .object({
+    manifestVersion: z.number().int().positive(),
+    id: z.string().min(1),
+    version: z.string().min(1),
+    /** 四层边界里可关闭的三层。kernel 不在此列——它不可关闭 */
+    tier: z.enum(["common", "vertical", "connector"]),
+    displayName: z.string().min(1),
+    description: z.string().min(1),
+    compatibility: capabilityCompatibilitySchema,
+    /** 依赖的其它 capabilityId。不满足时**拒绝启用**，不静默降级 */
+    dependencies: z.array(z.string()).readonly().default([]),
+    /** 申请的权限。只是申请 */
+    permissions: z.array(z.string()).readonly().default([]),
+    /** 该能力注册的 invoke 通道 */
+    channels: z.array(z.string()).readonly().default([]),
+    /** 该能力使用的推送通道 */
+    pushChannels: z.array(z.string()).readonly().default([]),
+    tools: z.array(capabilityToolSchema).readonly().default([]),
+    uiContributions: z.array(capabilityUiContributionSchema).readonly().default([]),
+    settingsSchema: z.array(capabilitySettingSchema).readonly().default([]),
+    /**
+     * 该能力自有数据的代际（D4 规则 3：数据按 capabilityId + workspaceId +
+     * agentId 分区）。升级时按它决定要不要迁移；禁用不动数据，卸载才谈删。
+     */
+    dataSchemaVersion: z.number().int().nonnegative(),
+    runtime: capabilityRuntimeSchema,
+    exposure: capabilityExposureSchema,
+  })
+  .strict();
+
+export type CapabilityManifest = z.infer<typeof capabilityManifestSchema>;
+
+/** 递归扫描一个纯数据对象里有没有授予语义的键名。 */
+function findGrantKeys(value: unknown, path: string, out: string[], depth = 0): void {
+  if (depth > 8 || value === null || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    value.forEach((item, i) => findGrantKeys(item, `${path}[${i}]`, out, depth + 1));
+    return;
+  }
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const lowered = key.toLowerCase();
+    if ((CAPABILITY_GRANT_FORBIDDEN_KEYS as readonly string[]).includes(lowered)) {
+      out.push(`${path}.${key}`);
+    }
+    findGrantKeys(item, `${path}.${key}`, out, depth + 1);
+  }
+}
+
+const KNOWN_INVOKE_CHANNELS = new Set<string>(Object.values(CHANNELS));
+const KNOWN_PUSH_CHANNELS = new Set<string>(Object.values(PUSH_CHANNELS));
+
+/**
+ * 装配期校验。返回**全部**错误（不是第一条）——一次改完好过改一条跑一遍。
+ *
+ * 校验的是声明自身的自洽性；跨能力的冲突（重复 id、通道被两个能力抢）
+ * 由 `CapabilityRegistry` 负责，那需要看到全集。
+ */
+export function validateCapabilityManifest(manifest: CapabilityManifest): string[] {
+  const errors: string[] = [];
+  const { id } = manifest;
+
+  if (manifest.manifestVersion !== CAPABILITY_MANIFEST_VERSION) {
+    errors.push(
+      `manifestVersion 必须是 ${CAPABILITY_MANIFEST_VERSION}，实际 ${manifest.manifestVersion}`
+    );
+  }
+  if (!CAPABILITY_ID_RE.test(id)) {
+    errors.push(`id "${id}" 不是 <namespace>.<name> 形态`);
+  }
+  if (!VERSION_RE.test(manifest.version)) {
+    errors.push(`version "${manifest.version}" 不是 x.y.z 形态`);
+  }
+
+  // ---- 依赖
+  const seenDeps = new Set<string>();
+  for (const dep of manifest.dependencies) {
+    if (dep === id) errors.push(`dependencies 不得包含自身 "${id}"`);
+    if (seenDeps.has(dep)) errors.push(`dependencies 重复声明 "${dep}"`);
+    seenDeps.add(dep);
+    if (!CAPABILITY_ID_RE.test(dep)) errors.push(`dependencies "${dep}" 不是合法 capabilityId`);
+  }
+
+  // ---- 权限：只申请，不授予
+  const seenPerms = new Set<string>();
+  for (const perm of manifest.permissions) {
+    if (!isCapabilityPermission(perm)) errors.push(`permissions "${perm}" 不是合法的权限申请`);
+    if (seenPerms.has(perm)) errors.push(`permissions 重复声明 "${perm}"`);
+    seenPerms.add(perm);
+  }
+  const grantKeys: string[] = [];
+  findGrantKeys(manifest, "manifest", grantKeys);
+  for (const key of grantKeys) {
+    errors.push(`${key} 带有授予语义（ADR-0002 D3：能力只能申请，不能自行授予）`);
+  }
+
+  // ---- 通道
+  const seenChannels = new Set<string>();
+  for (const channel of manifest.channels) {
+    if (!KNOWN_INVOKE_CHANNELS.has(channel)) errors.push(`channels "${channel}" 不是已声明的通道`);
+    if (seenChannels.has(channel)) errors.push(`channels 重复声明 "${channel}"`);
+    seenChannels.add(channel);
+  }
+  for (const channel of manifest.pushChannels) {
+    if (!KNOWN_PUSH_CHANNELS.has(channel)) {
+      errors.push(`pushChannels "${channel}" 不是已声明的推送通道`);
+    }
+  }
+
+  // ---- 命名空间强制（D4 规则 6）
+  for (const tool of manifest.tools) {
+    if (!tool.name.startsWith(`${id}.`)) {
+      errors.push(`tools "${tool.name}" 缺少 capabilityId 前缀 "${id}."`);
+    }
+    for (const perm of tool.permissions) {
+      if (!manifest.permissions.includes(perm)) {
+        errors.push(`tools "${tool.name}" 用到未申请的权限 "${perm}"`);
+      }
+    }
+  }
+  for (const contribution of manifest.uiContributions) {
+    if (!contribution.id.startsWith(`${id}.`)) {
+      errors.push(`uiContributions "${contribution.id}" 缺少 capabilityId 前缀 "${id}."`);
+    }
+  }
+  for (const setting of manifest.settingsSchema) {
+    if (!setting.key.startsWith(`${id}.`)) {
+      errors.push(`settingsSchema "${setting.key}" 缺少 capabilityId 前缀 "${id}."`);
+    }
+    if (setting.type === "enum" && (setting.options?.length ?? 0) === 0) {
+      errors.push(`settingsSchema "${setting.key}" 是 enum 但没有 options`);
+    }
+  }
+
+  // ---- 兼容区间
+  const { compatibility: compat } = manifest;
+  if (compat.contractMin > compat.contractMax) {
+    errors.push(`compatibility 契约区间倒挂：${compat.contractMin} > ${compat.contractMax}`);
+  }
+
+  // ---- 资产装配（D2 的两条连带约束）
+  const { runtime } = manifest;
+  if (runtime.heavyDependencies.length > 0) {
+    if (runtime.loading !== "lazy") {
+      errors.push(
+        `runtime 带重依赖 [${runtime.heavyDependencies.join(", ")}] 却不是 lazy（D2：必须懒加载）`
+      );
+    }
+    if (runtime.bundleBudgetKb === undefined) {
+      errors.push("runtime 带重依赖却没有 bundleBudgetKb（D2：允许重依赖不等于允许无上界）");
+    }
+  }
+  if (runtime.loading === "lazy" && runtime.entry === undefined) {
+    errors.push("runtime.loading 为 lazy 却没有 entry：没有入口就无从懒加载");
+  }
+  if (runtime.loading === "inline" && runtime.entry !== undefined) {
+    errors.push("runtime.loading 为 inline 却给了 entry：inline 资产没有独立入口");
+  }
+  if (runtime.teardown.length > 0 && manifest.exposure.dispose === undefined) {
+    errors.push(
+      `runtime.teardown 声明了 [${runtime.teardown.join(", ")}] 却没有 exposure.dispose（D4 规则 4）`
+    );
+  }
+
+  return errors;
+}
+
+/** 校验并抛错的形态，给装配期用。 */
+export function assertValidCapabilityManifest(manifest: CapabilityManifest): void {
+  const errors = validateCapabilityManifest(manifest);
+  if (errors.length > 0) {
+    throw new Error(`CAPABILITY_MANIFEST_INVALID: ${manifest.id}\n  - ${errors.join("\n  - ")}`);
+  }
+}
+
+/**
+ * 定义一个 manifest。
+ *
+ * 走一遍 `capabilityManifestSchema.parse` 而不是直接 `as const`：strict 的
+ * 拒绝多余键这件事只有在真的 parse 过一次之后才发生。类型层的 satisfies
+ * 挡不住一个 `granted: true`——多余属性检查在对象字面量以外的位置不生效。
+ */
+export function defineCapability(manifest: unknown): CapabilityManifest {
+  const parsed = capabilityManifestSchema.parse(manifest);
+  assertValidCapabilityManifest(parsed);
+  return Object.freeze(parsed);
+}
+
+// ---------------------------------------------------------------- Profile
+
+/**
+ * 一组能力的具名集合（ADR-0002：「编码模式」「财务模式」是 Profile，
+ * 不是互相隔离的独立应用）。
+ *
+ * 切换 Profile = 改变启用集合。用户可以在 Profile 之上再逐个开关，
+ * 那部分是 overrides，不属于 Profile 自身。
+ */
+export const agentProfileSchema = z
+  .object({
+    id: z.string().min(1),
+    displayName: z.string().min(1),
+    description: z.string().min(1),
+    /** 本 Profile 默认启用的 capabilityId 集合 */
+    capabilityIds: z.array(z.string()).readonly(),
+  })
+  .strict();
+export type AgentProfile = z.infer<typeof agentProfileSchema>;
+
+// ---------------------------------------------------------------- 对外快照
+
+/**
+ * 下发给渲染进程的能力描述。
+ *
+ * 逐字段挑出来而不是把 manifest 整个外发：`exposure` 是主进程的模块路径与
+ * 符号名，那是实现细节，没有任何理由送到渲染进程去。
+ */
+export const capabilityDescriptorSchema = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  description: z.string(),
+  tier: z.enum(["common", "vertical", "connector"]),
+  version: z.string(),
+  /** 本次进程装配时是否启用 */
+  enabled: z.boolean(),
+  /** 未启用的原因（依赖不满足 / 兼容区间不符 / 用户关闭）；启用时为 null */
+  reason: z.string().nullable(),
+  permissions: z.array(z.string()),
+  dependencies: z.array(z.string()),
+  uiContributions: z.array(
+    z.object({ slot: z.enum(CAPABILITY_UI_SLOTS), id: z.string(), title: z.string() })
+  ),
+});
+export type CapabilityDescriptor = z.infer<typeof capabilityDescriptorSchema>;
+
+export const capabilityStateSchema = z.object({
+  activeProfileId: z.string(),
+  profiles: z.array(agentProfileSchema),
+  capabilities: z.array(capabilityDescriptorSchema),
+  /**
+   * 主进程侧的启用集合与当前偏好是否已经对不上。
+   *
+   * 通道注册发生在启动装配期，运行期改偏好**不会**凭空补注册一条通道——
+   * 那需要在 `ipcMain.handle` 已经绑过的名字上再绑一次，Electron 直接抛错。
+   * 因此这里如实告诉界面「要重启才生效」，而不是假装已经生效。
+   */
+  restartRequired: z.boolean(),
+});
+export type CapabilityState = z.infer<typeof capabilityStateSchema>;
+
+export const capabilityProfileRequestSchema = z.object({ profileId: z.string().min(1) }).strict();
+export const capabilityToggleRequestSchema = z
+  .object({ capabilityId: z.string().min(1), enabled: z.boolean() })
+  .strict();
+export type CapabilityProfileRequest = z.infer<typeof capabilityProfileRequestSchema>;
+export type CapabilityToggleRequest = z.infer<typeof capabilityToggleRequestSchema>;
+
+// ---------- 通道契约分片（ADR-0002：各分片各自声明，宿主合并时封口） ----------
+//
+// 能力注册表本身属**平台内核**（四层边界表第一行），因此这三条通道恒注册，
+// 不受任何能力开关影响——否则「把能力包全关掉」会连带关掉那个用来把它们
+// 打开的入口，而那种状态在界面上只表现为一个再也点不开的开关。
+export const capabilitiesContractShard = defineContractShard("kernel-capabilities", {
+  [CHANNELS.capabilitiesDescribe]: {
+    request: z.void(),
+    response: capabilityStateSchema,
+  },
+  [CHANNELS.capabilitiesSetProfile]: {
+    request: capabilityProfileRequestSchema,
+    response: capabilityStateSchema,
+  },
+  [CHANNELS.capabilitiesSetEnabled]: {
+    request: capabilityToggleRequestSchema,
+    response: capabilityStateSchema,
+  },
+});

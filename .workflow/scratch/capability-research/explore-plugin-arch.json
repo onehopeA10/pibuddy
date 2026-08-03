@@ -1,0 +1,1164 @@
+{
+  "meta": {
+    "angle": "architecture",
+    "generated_at": "2026-08-03",
+    "scope_note": "PiDeck 的扩展宿主实际是 pi CLI（源码在 D:\\selftool\\pi-ui\\source\\pi\\packages\\coding-agent）。该目录不在任务 SCOPE 内，但 PiDeck 的扩展契约完全由它定义，因此凡引用 pi 源码的证据均以 path 前缀 source/pi/ 标注，供区分。",
+    "projects": [
+      {
+        "id": "CodePilot",
+        "root": "D:\\selftool\\pi-ui\\source\\CodePilot",
+        "stack": "Next.js 15 + React + TypeScript + Electron 壳，Claude Agent SDK / AI SDK / Codex app-server 三 Runtime"
+      },
+      {
+        "id": "PiDeck",
+        "root": "D:\\selftool\\pi-ui\\source\\PiDeck",
+        "stack": "Electron (main/preload/renderer) + electron-vite，通过 RPC 驱动外部 pi CLI 子进程"
+      },
+      {
+        "id": "PiDeck-maestro",
+        "root": "D:\\selftool\\pi-ui\\source\\PiDeck-maestro",
+        "stack": "PiDeck 的分支变体，扩展架构与 PiDeck 同构（ExtensionManager 568 行 vs 603 行，resources/extensions 多一个 pi-deck-fast-tier.ts）"
+      }
+    ],
+    "evidence_convention": "所有 file:line 均为只读观察结果，未修改任何文件。"
+  },
+  "A_manifest_design": {
+    "summary": "两个项目都不存在『自研插件 manifest』——它们各自复用上游宿主的既有清单格式。CodePilot 读 Claude 官方 .claude-plugin/plugin.json（字段极少）与 SKILL.md frontmatter；PiDeck 读 pi 的 package.json#pi 字段与裸 .ts 文件。真正接近 CapabilityManifest 的东西在 CodePilot 内部：capability-contract.ts + harness-home/contracts.ts，那是宿主自己声明能力，不是第三方插件声明。",
+    "CodePilot": {
+      "plugin_manifest": {
+        "format": "<pluginDir>/.claude-plugin/plugin.json（Claude Code 官方格式，CodePilot 只读不写）",
+        "reader": "CodePilot/src/lib/plugin-discovery.ts:247-257",
+        "type_decl": "CodePilot/src/lib/plugin-discovery.ts:29-36",
+        "fields": {
+          "id": "absent —— 无 id 字段。运行期身份由 `${manifest.name}@${marketplace}` 拼出（plugin-discovery.ts:361），marketplace 来自目录名而非清单",
+          "name": "present, string, 必填但有兜底（缺失时用目录名，plugin-discovery.ts:284）",
+          "description": "present, string?, 缺失时生成 `Plugin: ${name}`（:285）",
+          "author": "present, `{ name: string; url?: string }`（:32）",
+          "version": "absent —— PluginManifest 未声明 version 字段",
+          "compatibility": "absent",
+          "dependencies": "absent",
+          "permissions": "absent —— 清单里没有任何权限声明位",
+          "tools": "absent —— 无工具声明；只有 commands/skills/agents 三个 unknown 类型的占位字段（:33-35），且实际判定不读它们，而是探测目录是否存在（:294-296 fs.existsSync(pluginDir/'commands'|'skills'|'agents')）",
+          "ui_contributions": "absent",
+          "settings_schema": "absent",
+          "data_schema_version": "absent",
+          "runtime_requirements": "absent"
+        },
+        "real_sample_verbatim": {
+          "path": "C:\\Users\\yehh\\.claude\\plugins\\marketplaces\\claude-plugins-official\\external_plugins\\context7\\.claude-plugin\\plugin.json",
+          "content": "{\n  \"name\": \"context7\",\n  \"description\": \"Upstash Context7 MCP server for up-to-date documentation lookup. Pull version-specific documentation and code examples directly from source repositories into your LLM context.\",\n  \"author\": {\n    \"name\": \"Upstash\"\n  }\n}"
+        },
+        "derived_runtime_shape": {
+          "decl": "CodePilot/src/lib/plugin-discovery.ts:46-56 (DiscoveredPlugin)",
+          "fields": "name / description / author / path / marketplace / location('plugins'|'external_plugins') / hasCommands / hasSkills / hasAgents",
+          "note": "hasCommands/hasSkills/hasAgents 是目录探测结果，不是清单声明"
+        }
+      },
+      "skill_manifest": {
+        "format": "SKILL.md YAML frontmatter",
+        "parser": "CodePilot/src/lib/skill-parser.ts:43-58",
+        "type_decl": "CodePilot/src/lib/skill-parser.ts:9-38",
+        "fields": {
+          "name": "present",
+          "description": "present",
+          "allowed-tools → allowedTools": "present, string[]；支持 inline YAML array 或逗号分隔（skill-parser.ts:50,102-105）；空数组语义 = 允许全部工具（:16-17 注释）",
+          "when_to_use / when-to-use → whenToUse": "present",
+          "context": "present, 'fork' | 'inline'（默认 inline）",
+          "arguments": "present, `{ name, description, required }[]`（skill-parser.ts:34-38）",
+          "model": "present",
+          "effort": "present",
+          "user-invocable → userInvocable": "present, boolean, 默认 true",
+          "version": "absent —— 解析器不读 version，manifest 级版本号未实现（skill-parser.ts:46-57）",
+          "permissions": "absent（allowedTools 是工具白名单，不是权限枚举）",
+          "data_schema_version": "absent"
+        },
+        "integrity_field": {
+          "contentHash": "CodePilot/src/app/api/skills/route.ts:212,221 —— 安装后计算内容哈希，用于同名 skill 去重与冲突判定（:254 uniqueHashes），不是签名校验",
+          "installedSource": "CodePilot/src/app/api/skills/route.ts:36 —— 记录安装来源"
+        }
+      },
+      "internal_capability_contract": {
+        "note": "这是 CodePilot 最接近 CapabilityManifest 的结构，但声明者是宿主自己，不是第三方。",
+        "type_decl": "CodePilot/src/lib/harness/capability-contract.ts:178-217 (CapabilityContract)",
+        "fields": {
+          "id": "string（:179）",
+          "displayName": "string（:180）",
+          "status": "'live' | 'deferred' | 'unsupported'（:102-132，语义严格：live 要求每个 runtime exposure 都可执行，不允许任何 unsupported）",
+          "deferredReason": "string?，status !== 'live' 时必填（:182-184）",
+          "toolNames": "readonly string[]（:185-188），live 时必须与实际注册的工具名逐一对应，由 drift test 强制",
+          "exposure": "`{ claudecode_sdk: RuntimeExposure; native: RuntimeExposure; codex_proxy: RuntimeExposure }`（:189-193）",
+          "RuntimeExposure": "`{ kind: RuntimeExposureKind; module?: string; factory?: string; notes?: string }`（:152-162）—— module/factory 指向真实源码文件与导出符号，供 drift test grep",
+          "RuntimeExposureKind": "'mcp_server' | 'ai_sdk_tool' | 'bridge_executable' | 'bridge_passthrough' | 'unsupported'（:134-150）",
+          "systemPromptFragment": "string（:194-197）—— 三个 runtime 必须逐字注入同一段 prompt，禁止 paraphrase",
+          "toolResultShape": "'text' | 'media' | 'mixed'（:198-201）",
+          "canonicalEventTypes": "('tool_started'|'tool_completed'|'file_changed'|'usage_updated')[]（:202-207）",
+          "uiRenderPath": "string（:208-212）—— 明确写出哪个组件消费该能力的产物",
+          "artifactContract": "`{ fenceLanguage, canonicalJson, requiredFields }`?（:164-176,213-216）—— canonicalJson 必须能被 JSON.parse 后喂给渲染器，测试强制"
+        },
+        "real_sample_verbatim": {
+          "path": "CodePilot/src/lib/harness/capability-contract.ts:223-257",
+          "content": "const widget: CapabilityContract = {\n  id: 'widget',\n  displayName: 'Generative UI widgets',\n  status: 'live',\n  toolNames: ['codepilot_load_widget_guidelines'],\n  exposure: {\n    claudecode_sdk: {\n      kind: 'mcp_server',\n      module: 'src/lib/widget-guidelines.ts',\n      factory: 'createWidgetMcpServer',\n      notes: 'Authoritative implementation. Owns WIDGET_SYSTEM_PROMPT + WIDGET_WIRE_FORMAT_SPEC.',\n    },\n    native: {\n      kind: 'ai_sdk_tool',\n      module: 'src/lib/builtin-tools/widget-guidelines.ts',\n      factory: 'createWidgetGuidelinesTools',\n      notes: 'Re-exports WIDGET_SYSTEM_PROMPT from the canonical source (slice 7).',\n    },\n    codex_proxy: {\n      kind: 'bridge_executable',\n      module: 'src/lib/codex/proxy/builtin-bridge.ts',\n      factory: 'buildWidgetGuidelinesTool',\n      notes: 'WIDGET_PROMPT = canonical fragment verbatim (slice 7 de-drift).',\n    },\n  },\n  systemPromptFragment: WIDGET_SYSTEM_PROMPT,\n  toolResultShape: 'text',\n  canonicalEventTypes: ['tool_started', 'tool_completed'],\n  uiRenderPath: 'parseAllShowWidgets → PinnableWidget (src/components/chat/MessageItem.tsx); MalformedWidgetNotice for invalid fences (slice 6)',\n  artifactContract: {\n    fenceLanguage: 'show-widget',\n    canonicalJson: CANONICAL_SHOW_WIDGET_JSON,\n    requiredFields: ['title', 'widget_code'],\n  },\n};"
+        }
+      },
+      "runtime_registration_manifest": {
+        "note": "Runtime（宿主执行引擎）的注册清单，编译期常量，显式注册，非动态加载。",
+        "type_decl": "CodePilot/src/lib/runtime/runtime-catalog.ts:18-39 (RuntimeRegistration)",
+        "fields": "id / displayName{zh,en} / integrationLevel('bridge'|'full') / driverId / exposureKey('claudecode_sdk'|'native'|'codex_proxy') / projectionModes(('context'|'mcp_descriptor'|'skill_descriptor'|'asset_reference')[]) / translationKeys{label,description} / icon('anthropic'|'codepilot'|'openai') / packagedRegistration:'explicit'",
+        "instances": "CodePilot/src/lib/runtime/runtime-catalog.ts:41-84 —— claude_code / codepilot_runtime / codex_runtime 三条，`as const satisfies readonly RuntimeRegistration[]`",
+        "derived_descriptor": {
+          "decl": "CodePilot/src/lib/harness-home/registry.ts:73-83 (RuntimeDescriptor)",
+          "fields": "id / displayName / integrationLevel / capabilities: RuntimeCapabilityDeclaration[] / projectionModes / sessionDriverId / eventContract:'canonical-runtime-events-v1' / permissionContract:'canonical-runtime-permissions-v1' / artifactContract:'canonical-artifacts-v1' / packagedRegistration:'explicit'",
+          "capability_declaration": "CodePilot/src/lib/harness-home/registry.ts:60-71 —— `{ id, maturity:'draft'|'stable', referenceStatus:'pending'|'executable'|'rejected', execution:'executable'|'perception_only'|'unavailable'|'undetermined', exposureKind, reason? }`",
+          "builder": "CodePilot/src/lib/harness-home/runtime/descriptor.ts:71-98 —— 由 HARNESS_CAPABILITIES × capabilityMatrixForRuntime 交叉生成，缺任一 matrix cell 直接 throw（:79-83）"
+        }
+      },
+      "harness_home_manifest": {
+        "note": "用户侧数据仓库清单（用户自己的身份/规则/技能/MCP/记忆），带真正的 schemaVersion。",
+        "decl": "CodePilot/src/lib/harness-home/contracts.ts:116-138 (HarnessHomeManifest)",
+        "fields": {
+          "schemaVersion": "字面量常量 1（contracts.ts:8 HARNESS_HOME_SCHEMA_VERSION）",
+          "harnessId": "string",
+          "generation": "number，非负整数，乐观并发用（manifest.ts:75-77 校验）",
+          "writtenAt": "ISO 时间戳（manifest.ts:78-81 校验 Date.parse 有限）",
+          "definition": "HarnessDefinitionIndex —— identityRefs / ruleRefs / skillRefs / mcpRefs / creativeMethodRefs，均为 PortableContentRef[]（contracts.ts:89-96）",
+          "state": "HarnessStateIndex —— memoryRefs / preferenceRefs / feedbackRefs（contracts.ts:98-103）",
+          "assetRefs": "AssetRef[]（contracts.ts:48-53，含 assetId / kind? / contentHash?）",
+          "runtimeOverlays": "Record<opaqueRuntimeId, RuntimeOverlayRecord>（contracts.ts:105-114,124-128）—— 未安装 adapter 的未知 overlay 由解析器原样保留",
+          "secretRefs": "SecretRef[]（contracts.ts:78-87 —— `{ scheme:'secret', namespace:'environment'|'external-owned'|string, key, scope, version }`，只存引用不存материал）"
+        },
+        "PortableContentRef": "CodePilot/src/lib/harness-home/contracts.ts:39-46 —— `{ id, path, contentHash, mediaType?, provenance? }`；path 必须是仓库相对安全路径（manifest.ts:38-41 拒绝绝对路径与 `..`）",
+        "Provenance": "CodePilot/src/lib/harness-home/contracts.ts:63-76 —— sourceKind('user_file'|'host_application'|'external_framework'|'runtime'|'migration'|'generated') / sourceRef / observedAt / contentHash? / runtimeId? / providerId? / modelId? / sessionId? / jobId? / methodRef? / secretMaterial:'absent'|'stripped'"
+      }
+    },
+    "PiDeck": {
+      "extension_manifest": {
+        "format_1_bare_file": {
+          "shape": "~/.pi/agent/extensions/<name>.ts —— 无任何清单，整个『声明』就是文件默认导出的工厂函数",
+          "contract": "source/pi/packages/coding-agent/src/core/extensions/types.ts:1505 —— `export type ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>`",
+          "discovery": "source/pi/packages/coding-agent/src/core/extensions/loader.ts:628-660 discoverExtensionsInDir",
+          "pideck_scan": "PiDeck/src/main/extensions/ExtensionManager.ts:206-251 scanLocalExtensions —— 单文件 .ts 与含 index.ts 的目录都识别"
+        },
+        "format_2_package_json": {
+          "reader": "source/pi/packages/coding-agent/src/core/pi-manifest.ts:16-33 readPiManifest",
+          "type_decl": "source/pi/packages/coding-agent/src/core/pi-manifest.ts:3-8 (PiManifest)",
+          "fields": {
+            "pi.extensions": "string[]? —— 入口文件相对路径列表",
+            "pi.skills": "string[]?",
+            "pi.prompts": "string[]?",
+            "pi.themes": "string[]?",
+            "id": "absent —— 用 npm package name 当身份",
+            "version": "由外层 package.json.version 承担（不在 pi 命名空间内，读取见 ExtensionManager.ts:422-430 readInstalledVersion）",
+            "compatibility": "absent",
+            "dependencies": "由 npm dependencies 承担，宿主不校验",
+            "permissions": "absent",
+            "tools": "absent —— 工具在运行期 registerTool 注册，清单里不声明，因此安装前无法静态知道会注册什么",
+            "ui_contributions": "absent —— 同上，运行期注册",
+            "settings_schema": "absent",
+            "data_schema_version": "absent",
+            "runtime_requirements": "absent"
+          },
+          "validation": "只校验字段是数组且元素全为 string（pi-manifest.ts:26-28），其余字段静默丢弃；解析失败返回 null（:31-32）",
+          "real_sample_verbatim": {
+            "path": "source/pi/packages/coding-agent/examples/extensions/sandbox/package.json",
+            "content": "{\n\t\"name\": \"pi-extension-sandbox\",\n\t\"private\": true,\n\t\"version\": \"1.13.0\",\n\t\"type\": \"module\",\n\t\"scripts\": {\n\t\t\"clean\": \"echo 'nothing to clean'\",\n\t\t\"build\": \"echo 'nothing to build'\",\n\t\t\"check\": \"echo 'nothing to check'\"\n\t},\n\t\"pi\": {\n\t\t\"extensions\": [\n\t\t\t\"./index.ts\"\n\t\t]\n\t},\n\t\"dependencies\": {\n\t\t\"@anthropic-ai/sandbox-runtime\": \"0.0.26\"\n\t}\n}"
+          }
+        },
+        "pideck_runtime_summary_shape": {
+          "decl": "PiDeck/src/main/extensions/ExtensionManager.ts:141-148 与 :241-247 构造点（类型 PiExtensionSummary 在 PiDeck/src/shared/types.ts）",
+          "fields": "id / source / path? / scope('user'|'project'|'unknown') / builtIn? / enabled? / currentVersion? / latestVersion? / hasUpdate? / updateError?",
+          "id_rule": "本地文件扩展 `local:${source}`（:242）；pi list 解析出的包 `${scope}:${source}`（:566）—— 两套 id 规则并存",
+          "version_enrichment": "仅 npm: 前缀的扩展才查版本（ExtensionManager.ts:403-420），本地 .ts 扩展永远无版本号"
+        }
+      }
+    },
+    "cross_project_gaps": [
+      "两个项目的第三方清单都缺 permissions / compatibility / data_schema_version / runtime_requirements 四项，无一例外。",
+      "PiDeck 侧清单不声明 tools 与 UI 贡献，只能在 load 后由 registerTool/ctx.ui.* 运行期得知——因此宿主无法在安装前做静态冲突检测，只能靠 ExtensionManager.ts:586-590 的关键词猜测。",
+      "CodePilot 的 plugin.json 连 version 都没有，enabledPlugins 的 string[] 值被当作『版本约束』透传但从不解析（plugin-discovery.ts:222-228 isEnabledValue 把任何数组一律视为 enabled）。"
+    ]
+  },
+  "B_registration_and_lifecycle": {
+    "CodePilot": {
+      "discovery": {
+        "mechanism": "启动无关的按需文件系统扫描，无注册表进程",
+        "roots": [
+          "~/.claude/plugins/marketplaces/<mkt>/plugins/*/ （plugin-discovery.ts:268-306）",
+          "~/.claude/plugins/external_plugins/*/ （plugin-discovery.ts:308-336）"
+        ],
+        "entry": "CodePilot/src/lib/plugin-discovery.ts:262-342 discoverMarketplacePlugins",
+        "trigger": "HTTP GET /api/plugins（CodePilot/src/app/api/plugins/route.ts:9），即打开插件页时才扫",
+        "cache": "模块级单例 + 60s TTL（plugin-discovery.ts:71-88），isCacheValid/invalidateCache；enable/disable 后 invalidateCache（:448,457）",
+        "error_policy": "每个 marketplace 目录独立 try/catch，单个坏目录不影响其它（:299-305）"
+      },
+      "load_timing": {
+        "answer": "CodePilot 自己完全不加载插件代码。",
+        "evidence": "CodePilot/src/lib/plugin-discovery.ts:16-18 注释：`Plugin loading into SDK sessions is handled by the SDK itself — CodePilot does NOT explicitly inject plugins via queryOptions.plugins.`",
+        "implication": "宿主只负责『发现 + 写开关』，真正的加载时机/宿主进程由 Claude Agent SDK 决定，CodePilot 无法观测也无法拦截"
+      },
+      "runtime_host": {
+        "plugin_code": "不在 CodePilot 任何进程内执行 —— Agent SDK 子进程负责",
+        "mcp_server": "外部 MCP 以独立进程/传输存在，配置读自 ~/.claude/settings.json、~/.claude.json、项目 .mcp.json（CodePilot/src/app/api/plugins/mcp/route.ts:13-20,51-53）",
+        "skill": "无独立进程。inline 模式把 body 拼进 prompt，fork 模式起 sub-agent（CodePilot/src/lib/skill-executor.ts:25-44）",
+        "renderer": "renderer 从不导入插件代码；插件页只渲染 JSON（PluginCard/PluginDetail/PluginList，src/components/plugins/*.tsx 共 257 行，全是展示组件）"
+      },
+      "enable_disable": {
+        "storage": "官方 `enabledPlugins` 配置，key 为 `name@marketplace`（plugin-discovery.ts:361, api/plugins/[id]/route.ts:6-7）",
+        "layers": "user(~/.claude/settings.json) → project(.claude/settings.json) → local(.claude/settings.local.json)，后者覆盖前者（plugin-discovery.ts:143-159 readMergedEnabledPlugins:154）",
+        "layer_rationale": "刻意镜像 SDK 自身的 settingSources 级联（plugin-discovery.ts:5-7 注释）",
+        "write_escalation": {
+          "decl": "CodePilot/src/lib/plugin-discovery.ts:424-459 setPluginEnabled",
+          "algorithm": "先模拟『写到 user 层后重新 merge』（:440-443），若模拟后的生效值 === 期望值就写 user（:445-450）；否则说明高优先层覆盖了 user，升级写到 local 层（:452-458）",
+          "result_shape": "CodePilot/src/lib/plugin-discovery.ts:403-409 `{ success, layer: 'user'|'local', escalated: boolean }`，escalated 透传到 HTTP 响应（api/plugins/[id]/route.ts:90-94）供 UI 提示",
+          "value_preservation": "resolveWriteValue（:389-401）从最高优先层往下找已存在的 string[] 版本约束并原样保留，仅在没有约束时写 true；disable 一律写 false"
+        },
+        "partial_write": "writeEnabledPluginEntry（:165-176）只改目标 key，保留文件里其它设置与其它插件条目",
+        "blocklist": {
+          "path": "~/.claude/plugins/blocklist.json（plugin-discovery.ts:182-184）",
+          "shape": "`{ plugins: [{ plugin: 'name@marketplace' }] }`（:38-44）",
+          "priority": "硬阻断，优先级高于 enabledPlugins（:234-241 isPluginEnabled 先查 blocked 直接 return false）",
+          "api_enforcement": "被 block 的插件启用请求返回 403（api/plugins/[id]/route.ts:81-86）"
+        }
+      },
+      "upgrade": "absent —— 插件侧无升级动作。skills 侧有独立 install/remove（见下）",
+      "uninstall": {
+        "plugin": "absent —— /api/plugins 只有 GET 与 PUT(enabled)，无 DELETE（api/plugins/route.ts 全 17 行；api/plugins/[id]/route.ts 只导出 GET 与 PUT）",
+        "skill": {
+          "install": "POST /api/skills/marketplace/install → `skills add <source> -y --agent claude-code`，isGlobal !== false 时加 -g（CodePilot/src/app/api/skills/marketplace/install/route.ts:8-42）",
+          "remove": "POST /api/skills/marketplace/remove（CodePilot/src/app/api/skills/marketplace/remove/route.ts:1-8）",
+          "exec": "统一走 npx（Windows 下 cmd.exe /c npx.cmd），`shell: false`（CodePilot/src/lib/skills-marketplace-command.ts:121-142）"
+        }
+      },
+      "disable_cleanup": {
+        "worker": "n/a —— 宿主内无 worker",
+        "listener": "n/a",
+        "watcher": "n/a —— 无 fs.watch，纯 TTL 缓存",
+        "child_process": "MCP 子进程生命周期归 SDK / MCP client，CodePilot 只有 /api/plugins/mcp/reconnect 与 /toggle 两个端点（src/app/api/plugins/mcp/reconnect/route.ts, toggle/route.ts）+ invalidateMcpCache（api/plugins/mcp/route.ts:5）",
+        "verdict": "禁用即改配置文件 + 清缓存，下一次会话才生效；不存在『运行中实例的拆卸』这一步"
+      },
+      "uninstall_vs_purge_data": "分离——但只在 skills 侧成立：`enabledPlugins:false` 只是关开关，插件目录仍在磁盘；skills 的 remove 才真正删文件。plugin 侧没有删除动作，所以谈不上两步。"
+    },
+    "PiDeck": {
+      "discovery": {
+        "layer_1_pi_cli": "`pi list` 输出文本解析（PiDeck/src/main/extensions/ExtensionManager.ts:117-118, 544-579 parseListOutput）—— 按 `User packages:` / `Project packages:` 分段，遇到 `npm:|file:|github:|git:|https?:` 前缀行开新条目，下一行是 path",
+        "layer_2_local_scan": "扫 ~/.pi/agent/extensions/ 目录补齐 pi list 看不到的本地文件扩展（ExtensionManager.ts:126, 206-251）",
+        "layer_3_builtin": "把已禁用/文件缺失的内置扩展也塞进列表，保证用户能在 UI 里重新启用（ExtensionManager.ts:137-149）",
+        "builtin_list": "PiDeck/src/main/extensions/ExtensionManager.ts:12-17 BUILT_IN_EXTENSIONS = pi-deck-ask-question.ts / pi-deck-nul-redirect-fix.ts / pi-deck-plan-mode.ts / pi-deck-todo.ts（PiDeck-maestro 同位置另有 pi-deck-fast-tier.ts）",
+        "merge_rule": "pi 安装的条目优先，本地扫描结果按 path 去重后追加（ExtensionManager.ts:128-135）",
+        "cache": {
+          "fields": "listCache / listCacheHasVersionInfo / listInflight / listInflightForce / listCacheGeneration（ExtensionManager.ts:26-38）",
+          "generation_trick": "install/uninstall/toggle 后 invalidateListCache 递增 generation 并断开 inflight（:68-75）；in-flight 请求返回时若 generation 变了就丢弃结果并递归重取（:96-100），避免旧列表回写导致 UI 卡在旧数据",
+          "cost_split": "默认 list 跳过 npm view（慢），只有 forceRefresh 才补版本信息（:119-122）"
+        }
+      },
+      "load_timing": {
+        "answer": "pi 进程启动时全量加载，无懒加载。",
+        "evidence": "source/pi/packages/coding-agent/src/core/extensions/loader.ts:665-713 discoverAndLoadExtensions —— 顺序为 ①项目级 cwd/.pi/extensions ②全局 agentDir/extensions ③显式配置路径，去重后一次性 loadExtensions",
+        "per_extension": "loader.ts:466-492 loadExtension —— jiti.import 拿默认导出工厂（:431），非 function 直接判错（:433-435），随后立刻 `await factory(api)`（:484）执行注册",
+        "no_recursion": "loader.ts:626 —— 目录发现只下探一层，复杂包必须用 package.json manifest",
+        "module_cache": "loader.ts:146-168 —— 模块级 extensionCache，cwd 变更即整体清空（useExtensionCacheCwd:161-168）；createJiti 的 moduleCache 显式关闭（:421）"
+      },
+      "runtime_host": {
+        "answer": "扩展代码运行在 pi CLI 子进程内，与 Electron main/renderer 完全隔离。",
+        "spawn": "PiDeck/src/main/pi/PiProcess.ts:258-260 —— `spawn(invocation.command, finalArgs, { cwd: spawnCwd, stdio: ['pipe','pipe','pipe'] })`，模式 `--mode rpc`（:164）",
+        "per_agent_cwd": "PiDeck/src/main/pi/PiProcess.ts:253 注释 —— 每个 agent 绑定独立 cwd，让 pi 自己发现项目级 AGENTS.md / settings / session 分组",
+        "in_process_isolation": "扩展与 pi 核心同一个 Node realm，无 worker/vm/沙箱；jiti 直接 import（loader.ts:420-431）"
+      },
+      "enable_disable": {
+        "third_party_user_scope": "`pi remove <source>`（ExtensionManager.ts:288-292），project scope 加 -l",
+        "third_party_local_file": "不在 pi package 列表里，pi remove 会报 No matching package，改为直接删文件（ExtensionManager.ts:284-286 → removeLocalExtension:265-275）",
+        "builtin": {
+          "disable_path": "PiDeck/src/main/extensions/ExtensionManager.ts:328-339 disableBuiltIn —— ①写 PiDeck 设置 removedBuiltInExtensions ②删除磁盘文件 ③清缓存",
+          "why_delete_file": "ExtensionManager.ts:298-301 注释：pi 会自动加载 ~/.pi/agent/extensions 下所有 .ts，仅改设置无法阻止加载，与同名三方工具冲突会直接导致 RPC 启动失败",
+          "restore": "ExtensionManager.ts:315-322 restoreBuiltIn —— 只从设置里摘掉记录，文件由调用方 ensurePiDeckExtension 从 resources 重新部署",
+          "guard": "只允许 pi-deck-* 前缀（:281-283,304-306,329-332）"
+        },
+        "project_scope": {
+          "toggle": "PiDeck/src/main/projects/ProjectResourceManager.ts:91-110 —— 写项目 .pi/settings.json 的 disabledExtensions 数组，标识用文件名/目录名（:100-101）",
+          "delete": "ProjectResourceManager.ts:112-118 —— 先在 listExtensions 结果里找到条目，assertInsideProject 后 rm -rf",
+          "ipc": "PiDeck/src/main/index.ts:1448-1461 projectResourcesDeleteExtension / projectResourcesToggleExtension；:1444 注释明确『由 ProjectResourceManager 再次校验路径归属，避免 renderer 传入任意文件路径』"
+        },
+        "conflict_auto_yield": {
+          "table": "PiDeck/src/main/extensions/ExtensionManager.ts:586-590 BUILT_IN_CONFLICT_KEYWORDS = [['pi-deck-todo.ts','todo'],['pi-deck-plan-mode.ts','plan'],['pi-deck-ask-question.ts','ask']]",
+          "matcher": "ExtensionManager.ts:596-603 extensionNameMatches —— 剥掉协议前缀 / .ts 后缀 / @scope/ 后做 includes 子串匹配",
+          "trigger": "list() 内联执行（:161-191）：发现第三方包名含关键词就把对应内置加入 removedBuiltIn 并删文件",
+          "reentrancy_note": "ExtensionManager.ts:159-160 注释——此处刻意不走 disableBuiltIn，因为它会 invalidateListCache，导致 list 请求中途 generation 变化、结果被丢弃后反复重入",
+          "residue_cleanup": "ExtensionManager.ts:193-197 —— 已标记移除但磁盘仍有残留时主动再删一次，修复『UI 已禁用但仍冲突』的历史状态",
+          "extension_side_yield": "PiDeck/resources/extensions/pi-deck-todo.ts:16-21 与 :74-78 isOwnTodo() —— 扩展自己查 getAllTools() 里 todo 工具的 sourceInfo 是否含 'pi-deck-todo'，被覆盖就停 widget、停状态重建、命令转引导"
+        }
+      },
+      "upgrade": {
+        "extensions": "PiDeck/src/main/extensions/ExtensionManager.ts:396-401 updateExtensions → `pi update --extensions`（必须联网，offline:false，:392,397）",
+        "pi_itself": "ExtensionManager.ts:383-394 updatePi → 先 checkPiUpdate（:368-381 比对 npm view @earendil-works/pi-coding-agent version）再 `pi update pi`",
+        "version_compare": "ExtensionManager.ts:462-471 compareVersions —— 手写数字段比较，按 [.-] 切分",
+        "per_extension_check": "ExtensionManager.ts:403-420 enrichExtensionVersion —— 仅 npm: 扩展，并发读本地 package.json version + npm view latest",
+        "host_version_gate": "ExtensionManager.ts:476-485 noApproveSupported —— pi >= 0.79.0 才追加 --no-approve，老版本跳过以免 unknown option 报错；同类门控见 PiProcess.ts:192-201"
+      },
+      "disable_cleanup": {
+        "answer": "无扩展级卸载钩子。清理粒度是整个 pi 进程。",
+        "no_dispose_api": "source/pi/packages/coding-agent/src/core/extensions/types.ts:1193-1431 ExtensionAPI 全表只有 unregisterProvider（:1427）一个反注册方法；registerTool / registerCommand / registerShortcut / registerFlag / registerMessageRenderer / registerEntryRenderer / registerMarkdownTransformer 全部没有对应的 unregister",
+        "runner_side": "source/pi/packages/coding-agent/src/core/extensions/runner.ts:405-410 —— 唯一的 unregister 实现也是 provider 专用",
+        "listener_lifetime": "扩展在工厂函数里 pi.on(...) 注册的 handler 存进 extension.handlers Map（loader.ts:246），随 Extension 对象生命周期存在，无移除入口",
+        "session_hooks": "扩展只能自己监听 session_shutdown（types.ts:1212）做收尾，宿主不强制、不等待、不校验",
+        "reload": "source/pi/packages/coding-agent/src/core/extensions/types.ts:385-386 ExtensionCommandContext.reload() —— 重载 extensions/skills/prompts/themes/context files；PiDeck 注释指出 `/reload` 只重载 extension，不会重读配置文件，必须 restart（PiDeck/src/main/pi/AgentManager.ts:2510）",
+        "hard_kill": "PiDeck 侧禁用 = 删文件/改设置 + 重启 pi 进程；进程退出即回收所有 worker/listener/watcher/子进程"
+      },
+      "uninstall_vs_purge_data": {
+        "answer": "对第三方扩展是同一个动作（删包即删文件）；对内置扩展是刻意的两步。",
+        "builtin_two_step": "『移除』= removedBuiltInExtensions 记录 + 删文件（ExtensionManager.ts:328-339）；『恢复』= 摘记录 + 重新部署（:315-322）—— 设置记录是状态，文件是产物，两者分开",
+        "session_data": "扩展写的会话数据走 pi.appendEntry custom entry（types.ts:1311-1312），存在 session JSONL 内，卸载扩展不删除这些 entry —— 无数据清除动作"
+      }
+    },
+    "comparison": {
+      "load_timing": "CodePilot=不加载（委托 SDK）；PiDeck/pi=进程启动时全量同步加载，无懒加载、无按需",
+      "host": "CodePilot=Agent SDK 子进程 / MCP 独立进程，宿主零执行；PiDeck=pi CLI 子进程内同 realm，Electron 侧零执行",
+      "teardown": "两者都没有『扩展级拆卸』，都靠进程边界兜底",
+      "disable_effect_timing": "CodePilot 写文件后下次会话生效；PiDeck 删文件后需重启 pi 进程生效"
+    }
+  },
+  "C_ui_contribution_slots": {
+    "CodePilot": {
+      "verdict": "absent —— CodePilot 没有任何面向插件的 UI 贡献点注册表。所有 UI 组合点都是应用自有的 React props / Next.js 路由 / 自定义事件，插件无法注入。",
+      "requested_slots": {
+        "sidebar_section": {
+          "status": "absent (closed)",
+          "surface": "CodePilot/src/components/layout/AppShell.tsx:163-164,238 —— WorkspaceSidebar 独占 Git/Widget/Markdown/Artifact/file-preview 的统一 tab 壳",
+          "mechanism": "AppShell 用 `dynamic(() => import('./WorkspaceSidebar'))` 静态挂载（AppShell.tsx:53-55），无扩展 tab 注册入口"
+        },
+        "drawer_tab": {
+          "status": "absent (closed)",
+          "surface": "CodePilot/src/components/layout/AppShell.tsx:624-625 —— 应用内自定义事件 `workspace-tab-open-request` 请求侧栏创建/聚焦一个动态 tab",
+          "mechanism": "内部事件，非导出 API；tab id 是内建固定值，见 CodePilot/src/app/chat/[id]/page.tsx:209,212 `ws.setActiveTab('git' | 'widget')`"
+        },
+        "composer_action": {
+          "status": "absent (props-only)",
+          "surface": "CodePilot/src/components/chat/ChatComposerActionBar.tsx:5-15 —— 只有 `left?: ReactNode` 与 `right?: ReactNode` 两个 ReactNode 插槽",
+          "mechanism": "由宿主直接传 JSX：CodePilot/src/components/chat/ChatView.tsx:1497-1517 与 :1775-1795 静态填充 left（mode/permission/model 控件）与 right（RunCockpit）；无插件动作收集机制",
+          "composer_mount": "CodePilot/src/components/chat/ChatView.tsx:1469, :1739 —— ChatView 直接挂 MessageInput"
+        },
+        "message_renderer": {
+          "status": "absent (local override only)",
+          "surface": "CodePilot/src/components/chat/DevOutputChips.tsx:250-252 —— `<MessageResponse components={DEV_OUTPUT_MARKDOWN_COMPONENTS} remarkPlugins={remarkPlugins} />`",
+          "mechanism": "局部渲染覆盖，直接传 props，不是注册；无 customType → renderer 的注册表",
+          "artifact_alternative": "唯一的『内容驱动渲染』是能力契约里的 fenceLanguage 机制：模型输出指定语言的代码围栏，宿主解析后交给固定组件（CodePilot/src/lib/harness/capability-contract.ts:164-176 artifactContract；widget 实例 :252-256 fenceLanguage:'show-widget' → uiRenderPath 'parseAllShowWidgets → PinnableWidget (src/components/chat/MessageItem.tsx)'）。渲染器是宿主写死的，模型/插件只能选已注册的 fence 语言。"
+        },
+        "settings_section": {
+          "status": "absent (route-based)",
+          "surface": "CodePilot/src/app/settings/layout.tsx:25-28 静态 SETTINGS_NAV_ITEMS + :56-77 Next.js 嵌套路由 children",
+          "mechanism": "每个 section 是独立路由模块直接 import 组件：CodePilot/src/app/settings/appearance/page.tsx:3-6、general/page.tsx:3-6、assistant/page.tsx:3-6、about/page.tsx:3-6、health/page.tsx:3-6"
+        },
+        "command_palette": {
+          "status": "absent (static)",
+          "surface": "CodePilot/src/components/layout/GlobalSearchDialog.tsx:281-389 —— 静态渲染的 CommandDialog",
+          "primitive": "CodePilot/src/components/ui/command.tsx:32-34,179-183 —— 只导出 CommandDialog 等 UI 原语，不提供命令注册"
+        }
+      },
+      "namespace_mechanism": {
+        "ui_slots": "absent —— 没有插槽就没有插槽冲突",
+        "tool_names": "有前缀约定：宿主自有工具统一 `codepilot_*`（capability-contract.ts:227,263,298-303）；MCP 工具由 SDK 命名为 `mcp__<serverKey>__<bareTool>`（CodePilot/src/lib/permission/profile.ts:191-193 toMcpToolName）",
+        "prefix_caveat": "CodePilot/src/lib/permission/profile.ts:96-99 明确警告：`codepilot_*` 前缀曾在 Phase 5e 被用作『允许』判据造成漏洞，现在的 CREDENTIAL_NAME_MARKERS 只用于『限制』，绝不用于放行",
+        "descriptor_registry": {
+          "impl": "CodePilot/src/lib/harness-home/registry.ts:5-47 DescriptorRegistry<T extends IdentifiedDescriptor>",
+          "collision_policy": "重复 id 直接 throw `Descriptor \"${id}\" is already registered.`（:20-22）—— 拒绝而非覆盖",
+          "empty_id": "空 id throw（:17-19）",
+          "seal": "seal() 后再 register 一律 throw（:13-16,26-28）—— 注册窗口在启动期关闭",
+          "usages": "CodePilot/src/lib/harness-home/adapters/registry.ts:7-12（三个 harness adapter，注册后立即 seal）；CodePilot/src/lib/harness-home/runtime/descriptor.ts:100-103（三个 runtime descriptor，注册后立即 seal）",
+          "note": "这是宿主对自身 descriptor 的注册表，第三方无法参与"
+        }
+      }
+    },
+    "PiDeck": {
+      "verdict": "有真正的 UI 贡献 API，但形态是『命令式方法调用』而非『声明式插槽注册』，且插槽名是宿主写死的枚举。跨插件冲突几乎无防护。",
+      "api_surface": {
+        "decl": "source/pi/packages/coding-agent/src/core/extensions/types.ts:131-261 ExtensionUIContext（经 ctx.ui 暴露给每个事件 handler，见 types.ts:307-309）",
+        "slots": [
+          {
+            "name": "ui.select(title, options, opts)",
+            "line": "types.ts:133",
+            "kind": "对话框",
+            "pideck_supported": true
+          },
+          {
+            "name": "ui.confirm(title, message, opts)",
+            "line": "types.ts:136",
+            "kind": "对话框",
+            "pideck_supported": true
+          },
+          {
+            "name": "ui.input(title, placeholder, opts)",
+            "line": "types.ts:139",
+            "kind": "对话框",
+            "pideck_supported": true
+          },
+          {
+            "name": "ui.notify(message, type)",
+            "line": "types.ts:142",
+            "kind": "通知，type='info'|'warning'|'error'",
+            "pideck_supported": true
+          },
+          {
+            "name": "ui.onTerminalInput(handler)",
+            "line": "types.ts:145",
+            "kind": "原始终端输入订阅，返回 unsubscribe",
+            "pideck_supported": false,
+            "note": "interactive/TUI only"
+          },
+          {
+            "name": "ui.setStatus(key, text)",
+            "line": "types.ts:148",
+            "kind": "状态栏文本，按 key 分槽，undefined 清除"
+          },
+          {
+            "name": "ui.setWorkingMessage(message?)",
+            "line": "types.ts:151",
+            "kind": "流式期间的工作提示"
+          },
+          {
+            "name": "ui.setWorkingVisible(visible)",
+            "line": "types.ts:154",
+            "kind": "内建 loader 显隐"
+          },
+          {
+            "name": "ui.setWorkingIndicator(options?)",
+            "line": "types.ts:164",
+            "kind": "自定义 spinner 帧，frames:[] 可完全隐藏"
+          },
+          {
+            "name": "ui.setHiddenThinkingLabel(label?)",
+            "line": "types.ts:167",
+            "kind": "隐藏思考块的标签"
+          },
+          {
+            "name": "ui.setWidget(key, content, options?)",
+            "line": "types.ts:170-175",
+            "kind": "编辑器上/下方 widget，按 key 分槽；重载 1 收 string[]，重载 2 收 (tui,theme)=>Component 工厂",
+            "pideck_supported": "仅 string[] 形态"
+          },
+          {
+            "name": "ui.setFooter(factory)",
+            "line": "types.ts:183-187",
+            "kind": "整体替换底栏组件（工厂接收 ReadonlyFooterDataProvider）",
+            "pideck_supported": false
+          },
+          {
+            "name": "ui.setHeader(factory)",
+            "line": "types.ts:190",
+            "kind": "整体替换页头组件",
+            "pideck_supported": false
+          },
+          {
+            "name": "ui.setTitle(title)",
+            "line": "types.ts:193",
+            "kind": "终端窗口/标签标题"
+          },
+          {
+            "name": "ui.custom(factory, options?)",
+            "line": "types.ts:196-210",
+            "kind": "任意带键盘焦点的自定义组件，支持 overlay / overlayOptions / onHandle",
+            "pideck_supported": false
+          },
+          {
+            "name": "ui.pasteToEditor(text)",
+            "line": "types.ts:213",
+            "kind": "向编辑器粘贴（走大内容折叠处理）"
+          },
+          {
+            "name": "ui.setEditorText(text) / getEditorText()",
+            "line": "types.ts:216,219",
+            "kind": "读写主输入框文本"
+          },
+          {
+            "name": "ui.editor(title, prefill?)",
+            "line": "types.ts:222",
+            "kind": "多行编辑器对话框"
+          },
+          {
+            "name": "ui.addAutocompleteProvider(factory)",
+            "line": "types.ts:225",
+            "kind": "在内建补全之上叠加补全源 —— 全表唯一『叠加』语义的插槽"
+          },
+          {
+            "name": "ui.setEditorComponent(factory)",
+            "line": "types.ts:260",
+            "kind": "整体替换输入编辑器（可继承 CustomEditor 复用 app keybindings）",
+            "pideck_supported": false
+          }
+        ],
+        "non_ui_contribution_points": [
+          {
+            "name": "pi.registerTool(tool)",
+            "line": "types.ts:1246-1248",
+            "note": "LLM 可调用工具"
+          },
+          {
+            "name": "pi.registerCommand(name, options)",
+            "line": "types.ts:1255",
+            "note": "斜杠命令 —— 这是最接近『命令面板』的注册点"
+          },
+          {
+            "name": "pi.registerShortcut(shortcut, options)",
+            "line": "types.ts:1258-1264",
+            "note": "键盘快捷键，KeyId 为键"
+          },
+          {
+            "name": "pi.registerFlag(name, options)",
+            "line": "types.ts:1267-1274",
+            "note": "CLI flag，type 'boolean'|'string'，配套 getFlag(:1277)"
+          },
+          {
+            "name": "pi.registerMessageRenderer(customType, renderer)",
+            "line": "types.ts:1284",
+            "note": "CustomMessageEntry 的自定义渲染器 —— 真正的『消息渲染器』注册点，按 customType 分槽"
+          },
+          {
+            "name": "pi.registerMarkdownTransformer(transformer)",
+            "line": "types.ts:1287",
+            "note": "用户/助手 Markdown 的前置变换器"
+          },
+          {
+            "name": "pi.registerEntryRenderer(customType, renderer)",
+            "line": "types.ts:1290",
+            "note": "CustomEntry 渲染器，此类 entry 不进 LLM 上下文"
+          },
+          {
+            "name": "pi.registerProvider / unregisterProvider",
+            "line": "types.ts:1411-1412,1427",
+            "note": "模型 provider 注册，全表唯一有反注册的"
+          },
+          {
+            "name": "pi.events",
+            "line": "types.ts:1429-1430",
+            "note": "扩展间通信的共享 EventBus —— 无命名空间、无权限、任意扩展可收发"
+          }
+        ]
+      },
+      "namespace_and_conflict": {
+        "verdict": "无命名空间机制。全部注册点用裸 Map.set，后注册静默覆盖先注册，宿主不告警、不拒绝。",
+        "evidence": [
+          "source/pi/packages/coding-agent/src/core/extensions/loader.ts:251 `extension.tools.set(tool.name, {...})`",
+          "loader.ts:260 `extension.commands.set(name, {...})`",
+          "loader.ts:275 `extension.shortcuts.set(shortcut, {...})`",
+          "loader.ts:283 `extension.flags.set(name, {...})`",
+          "loader.ts:291 `extension.messageRenderers.set(customType, renderer)`",
+          "loader.ts:302 `extension.entryRenderers.set(customType, renderer)`",
+          "loader.ts:246 `extension.handlers.set(event, list)`"
+        ],
+        "documented_semantics": "PiDeck/resources/extensions/pi-deck-todo.ts:16-21 注释原文确认：『pi 的 registerTool 对同名工具按 Map.set 覆盖语义（后注册覆盖前注册，不抛错）』",
+        "convention_only_namespacing": {
+          "widget_key": "PiDeck/resources/extensions/pi-deck-todo.ts:53-55 —— WIDGET_KEY / ENTRY_TYPE 统一用 `pi-deck-todo` 前缀，注释直言是为『避免与 plan-mode 冲突』，纯人工约定",
+          "self_marker": "pi-deck-todo.ts:56-57 SELF_MARKER —— 靠 sourceInfo.path/source 是否含标识串判断自己是否被覆盖",
+          "command_name": "pi-deck-todo.ts:6-7 —— `/todo` 用单数命名，注释写明是为了避开 plan-mode 的 `/todos`"
+        },
+        "host_side_mitigation": "PiDeck 只能在宿主层做启发式：ExtensionManager.ts:586-590 三个关键词的子串匹配 + 自动删内置文件让位（见 B 节）。这是对『无命名空间』的补丁，不是机制。",
+        "collision_consequence": "PiDeck/src/main/extensions/ExtensionManager.ts:174-176 注释：同名 Tool 冲突会导致 RPC 启动失败（整个 agent 起不来），所以必须删磁盘文件而非仅改设置"
+      },
+      "desktop_bridge": {
+        "protocol": "扩展的 UI 调用经 pi RPC 以 JSON 消息发到 Electron main，再经 IPC 到 renderer",
+        "main_side": "PiDeck/src/main/pi/AgentManager.ts:3352 `extension_ui_request` / :3356 `extension_error` / :3396 `setWidget` 分支；:3372 注释指出 pi RPC 把 setWidget/dialog 字段放在顶层而非 params",
+        "widget_payload": "AgentManager.ts:3403-3405 —— `{ widgetKey, widgetLines: string[] | undefined, widgetPlacement }`",
+        "no_session_pollution": "AgentManager.ts:3397 注释 —— widget 只走 IPC 状态不落会话消息，避免 JSONL 被进度噪声污染",
+        "response_path": "AgentManager.ts:3462-3475 —— `extension_ui_response` 写回 pi 的 stdin；:1204 注释说明 pi 等待 extension_ui_response 时（如 ask_question）不发 abort 也能处理",
+        "preload": "PiDeck/src/preload/index.ts:1027 onUiRequest —— 显式列出白名单字段 `{ agentId, requestId, method, title, options?, placeholder?, prefill?, allowOther?, completed?, value?, cancelled?, message?, notifyType?, text?, widgetKey?, widgetLines?, widgetPlacement? }`",
+        "renderer_side": "PiDeck/src/renderer/src/App.tsx:525-526 类型；:2447-2452 收到后再次 `Array.isArray(...).filter(line => typeof line === 'string')` 过滤；:7887-7891 按 widgetKey 分组渲染",
+        "render_component": "PiDeck/src/renderer/src/components/app/AppParts.tsx:558-653 —— extension-widget-card，可折叠，折叠状态按 `pid:extension-widget-collapsed:${sessionIdOrPath}:${widgetKey}` 持久化（:561,605-606）；:608-613 把非人类可读的 widgetKey 映射为友好名（TODO/PLAN 等固定表）",
+        "key_property": "渲染的是纯字符串数组，不是组件、不是 HTML —— 扩展永远无法把代码送进 renderer realm。TUI 独有的组件工厂形态（setWidget 重载 2 / setFooter / setHeader / custom / setEditorComponent）在 RPC 模式下不可达。"
+      },
+      "mode_gating": {
+        "decl": "source/pi/packages/coding-agent/src/core/extensions/types.ts:305 `ExtensionMode = 'tui' | 'rpc' | 'json' | 'print'`；:311 ctx.mode；:312-313 ctx.hasUI（TUI 与 RPC 为 true）",
+        "guidance": "types.ts:310 注释要求扩展用 mode==='tui' 守卫终端专属 UI",
+        "enforcement": "absent —— 只是约定，宿主不阻止扩展在 rpc 模式调用 TUI-only API"
+      }
+    },
+    "comparison": {
+      "slot_model": "CodePilot 零插槽（全封闭）；PiDeck/pi 有 ~20 个命令式 UI 方法 + 7 类注册点，但插槽名是宿主枚举，扩展只能选、不能新增",
+      "namespace": "CodePilot 有 DescriptorRegistry 的 duplicate-throw + seal（但只对宿主自身 descriptor）；PiDeck/pi 完全没有，靠命名约定与宿主侧关键词黑名单兜底",
+      "renderer_safety": "PiDeck 的 string[]-only widget 是隔离得最干净的一条边界；CodePilot 的 fenceLanguage artifact 契约是另一种同类做法（内容进、渲染器由宿主定）"
+    }
+  },
+  "D_permission_model": {
+    "critical_finding": "两个项目的**插件/扩展本身都没有权限申请机制**。权限模型存在，但作用对象是『模型调用工具』这一层，不是『插件请求能力』这一层。插件一旦被启用，就以宿主同等身份运行——CodePilot 靠把插件代码完全排除在自己进程外来规避，PiDeck/pi 则是真正的无约束。",
+    "CodePilot": {
+      "layer_1_native_rule_engine": {
+        "file": "CodePilot/src/lib/permission-checker.ts",
+        "modes": {
+          "enum": "PermissionMode = 'explore' | 'normal' | 'trust'（permission-checker.ts:20）",
+          "explore": "只读。Read/Glob/Grep allow；Write/Edit/Bash deny；再用更靠后的规则放行只读 bash（cat/ls/head/tail/wc/git log/git status/git diff/git show）（:38-55）",
+          "normal": "Read/Glob/Grep/Write/Edit allow；Bash 默认 ask；npm/npx/git/node/cat/ls/echo/which/pwd 放行；*.env 与 *.env.* 的 Write/Edit 回落为 ask（:57-79）",
+          "trust": "单条 `{ permission:'*', pattern:'*', action:'allow' }`（:81-83）"
+        },
+        "actions": "PermissionAction = 'allow' | 'deny' | 'ask'（permission-checker.ts:21）",
+        "rule_shape": "PermissionRuleSchema = zod `{ permission: string(工具名或 '*'), pattern: string(glob), action: enum(['allow','deny','ask']) }`（:23-27）",
+        "resolution": "findLast 语义——最后一条匹配的规则获胜，让具体规则覆盖通用规则（:9-10 注释）；用户规则追加在模式默认之后（:127-132 checkPermission 签名 `userRules: PermissionRule[] = []`）",
+        "safety_override": {
+          "dangerous_bash": "CodePilot/src/lib/permission-checker.ts:86-102 DANGEROUS_PATTERNS —— rm -r/-f/--recursive/--force、rm -rf、sudo、kill、killall、chmod [0-7]{3,4}、chown、mkfs、dd、format、fdisk、`> /dev/`、git push --force、git reset --hard、git clean -f；即便 trust 模式也要确认，除非被规则显式允许",
+          "always_ask": "CodePilot/src/lib/permission-checker.ts:125 ALWAYS_ASK_TOOLS = Set(['AskUserQuestion','ExitPlanMode'])，:133-135 在任何模式判定之前先拦截。理由写在 :114-124：这两个工具的目的就是用户交互，trust 模式自动放行会让它们返回空/默认答案，功能自毁"
+        }
+      },
+      "layer_2_enforcement": {
+        "file": "CodePilot/src/lib/agent-tools.ts:236-244",
+        "flow": "每个被包装的原生工具在 execute 内先 emitEvent('tool:pre-use')（:237），再 `checkPermission(name, input, ctx.permissionMode, getSessionRules(ctx.sessionId))`（:238）",
+        "deny_behavior": "直接返回字符串 `Permission denied: ${reason || 'Tool not allowed in current mode'}`，工具体不执行（:240-242）",
+        "ask_behavior": "生成 8 字节 hex 请求 id（:246）+ 5 分钟过期时间（:247），落库后发 permission_request SSE 并挂起等待"
+      },
+      "layer_3_pending_registry": {
+        "file": "CodePilot/src/lib/permission-registry.ts",
+        "timeout": "TIMEOUT_MS = 5 * 60 * 1000（:15）",
+        "timeout_message": "常量 TIMEOUT_MESSAGE = 'Permission request timed out'（:35），注释说明是为了让超时路径与『识别这是超时而非手动拒绝』的地方保持同步",
+        "auto_resolve_event": "PermissionResolvedEventData `{ permissionRequestId, status:'timeout', agentRunId?, childSessionId? }`（:44-48）—— 仅在注册表**无用户动作**自动裁决时发出；abort 是用户自己按的 Stop 所以不推送（:37-43 注释）",
+        "cross_module_map": "刻意挂在 globalThis 上（:20-27），因为 Next.js dev/Turbopack 下不同 API route 可能加载不同模块实例，模块级变量不共享",
+        "finalize": "allow / deny / timeout / aborted 四态统一经 finalizePermission 收敛（:74-119）：清 timer、持久化状态、resolve 内存 waiter、移除 pending 项；DB 持久化失败被吞掉，只为保证内存 waiter 一定被解开"
+      },
+      "layer_4_http_gate": {
+        "file": "CodePilot/src/app/api/chat/permission/route.ts",
+        "required": "permissionRequestId + decision（:13-18）",
+        "checks": "HMAC 审批 token 无效 → 403；请求已过期 → 410；非 pending 状态 → 409；DB 里找不到 → 404（:23-58）",
+        "mapping": "`decision.behavior === 'allow'` → `{ behavior:'allow', updatedPermissions, updatedInput? }`；其余任何分支 → `{ behavior:'deny', message: decision.message || 'User denied permission' }`（:62-76）",
+        "waiter_gone": "内存 waiter 已消失时返回 410 WAITER_GONE",
+        "wire_contract": "CodePilot/src/types/index.ts:1204-1224 PermissionRequestEvent（含 requestId / toolName / input / suggestions / decision 元数据 / 服务端签发的 approval token，必须回传）；:1226-1234 PermissionResponseRequest.decision 联合类型；:1769-1773 UI 态区分 'allow'|'deny'|'timeout'"
+      },
+      "layer_5_session_profile": {
+        "file": "CodePilot/src/lib/permission/profile.ts",
+        "enum": "PERMISSION_PROFILES = ['default','auto_review','full_access']（:23）；DEFAULT_PERMISSION_PROFILE='default'（:27）",
+        "semantics": "profile.ts:8-13 —— default『需要时询问我』；auto_review『替我审批』（把本该问用户的请求交给受限 reviewer，仍受 workspace/sandbox 约束，deny/timeout/reviewer 不可用一律 fail closed，不是无条件放行）；full_access『完全访问』跳过确认",
+        "load_bearing_rule": "profile.ts:15-17 原文：『auto_review is a reviewer, full_access is a bypass. Any code that treats them as the same \"elevated\" bucket is a bug』",
+        "fail_closed_coercion": "normalizePermissionProfile（:38-40）—— 来自 DB/旧客户端/未校验载荷的任何无法识别值一律塌陷到最严格档，而不是继承高权限"
+      },
+      "human_only_categories": {
+        "enum": "HumanOnlyCategory = 'interactive_question' | 'credential' | 'billing' | 'external_publish' | 'high_impact'（CodePilot/src/lib/permission/profile.ts:57-62,64-70）",
+        "rationale": "profile.ts:46-55 —— 这些不是 mutationLevel 意义上的『危险』，而是『用户自己的判断才是目的』：interactive_question 的答案携带语义而非同意；credential 碰密钥永不可委托模型；billing 花用户的钱；external_publish 离开本机难以撤回；high_impact shell/系统级变更爆炸半径大",
+        "explicit_table": "profile.ts:76-92 HUMAN_ONLY_TOOLS —— AskUserQuestion:'interactive_question'；codepilot_generate_image:'billing'；codepilot_cli_tools_install/add/remove/update:'high_impact'；codepilot_notify:'external_publish'",
+        "derivation_order": "profile.ts:103-110 getHumanOnlyCategory —— ①显式表 ②credential 名称标记 ③mutationLevel === 'mutating_external'",
+        "credential_markers": "profile.ts:101 CREDENTIAL_NAME_MARKERS = ['credential','secret','api_key','apikey','token','oauth','password']；:94-99 注释强调只用于**限制**，绝不复活 Phase 5e 那个按前缀**放行**的漏洞"
+      },
+      "canUseTool_limitation": {
+        "finding": "canUseTool 在 permissionMode:'auto' 下不是前置拦截点，宿主因此改用 deny 规则。",
+        "evidence": "CodePilot/src/lib/permission/profile.ts:196-228 —— 作者读了 node_modules/@anthropic-ai/claude-agent-sdk/cli.js (0.2.111) 的 shipped classifier，确认解析顺序为：①deny 规则立即返回 deny，auto 分支只在 'ask' 时进入 ⇒ deny 规则先于分类器；②requiresUserInteraction() 的工具在分类器前返回 'ask'（这是 AskUserQuestion 被保护的原因）；③非 classifierApprovable 的安全检查 → 'ask'；④其余交给模型分类器，批准直接返回 allow 而**从不 prompt**，而 canUseTool 就是那个 prompt，所以永不被调用",
+        "consequence": "profile.ts:217-228 —— CodePilot 的 MCP 工具落在情况④，auto 模式下分类器可能批准 codepilot_generate_image（花钱）或 codepilot_notify（外发）。PermissionRequest hook 也无用，它只在 shouldAvoidPermissionPrompts 分支派发，即分类器已经跑完之后。于是 deny 规则成为 SDK 唯一提供的拦截手段：auto_review 下这些工具直接**不可用**而非可审批。default / full_access 仍正常暴露",
+        "external_mcp_hole": "CodePilot/src/lib/permission/external-mcp.ts:7-15 —— auto 模式下，若某个 credential 形态的外部 MCP 工具在构建 deny 规则时尚未出现，它可能被分类器批准，而 canUseTool 无法拦截（批准后不会被调用）"
+      },
+      "capability_probe_endpoint": {
+        "file": "CodePilot/src/app/api/chat/permission-capability/route.ts",
+        "purpose": "让 composer 读『本 build 真能兑现哪些 profile，兑现不了的原因是什么』，而不是假设 auto_review 可用（:9-15）",
+        "refusal_reasons": "三种独立且remedy不同的拒绝理由（:16-25）：`runtime`（Native AI SDK 没有会话级模型 reviewer）、`sdk_version`（装的 Agent SDK 没有 permissionMode:'auto'，是关于 node_modules 的事实）、`external_mcp`（可能加载外部 MCP，其工具无法在 SDK auto 分类器看到之前被分类）",
+        "deliberate_over_report": "route.ts:27-37 —— 该端点探测**最宽**的 settingSources，只可能高估存在性。方向是刻意的：UI 可能对本来没问题的一轮说『不可用』，但绝不会为一轮会带入未分类外部工具的会话提供『替我审批』。真正的裁决边界是 buildClaudePermissionQueryOptions，本端点只决定显示什么",
+        "codex_axis": "route.ts:52-60 —— Codex 有独立 reviewer 轴不依赖 Claude Agent SDK，但仍做版本门控，因为老 app-server 可能接受未知字段却不生效，无条件 supported:true 会让选择器变成空头支票"
+      },
+      "runtime_degradation": {
+        "file": "CodePilot/src/lib/claude-client.ts:848-875,910",
+        "behavior": "解析出的 runtime 无法兑现 auto review 时（尤其 native），模式 fail-closed 降级，并发出一条**可归因的拒绝性 review 事件**，而不是静默按 normal 模式语义继续跑"
+      },
+      "review_event_states": {
+        "file": "CodePilot/src/lib/permission/review-event.ts:18-45,69-76,102-106",
+        "states": "requested / approved / denied / unavailable / timeout",
+        "sources": "sdk-reviewer / user / rule-engine",
+        "denying_set": "denied、unavailable、timeout 三者都算拒绝，统一 fail-closed"
+      },
+      "plugin_bypass_question": {
+        "question": "插件被启用后能不能绕过权限直接触达文件系统 / shell / 网络？",
+        "answer": "在 CodePilot 进程内——不能，因为插件代码根本不在这里跑（plugin-discovery.ts:16-18）。但这不等于安全：插件在 Agent SDK 子进程内的行为完全不受 CodePilot 的 permission-checker 管辖，CodePilot 既看不见也拦不住。宿主的权限系统只覆盖**它自己实现的工具**（agent-tools.ts:236-244 包装的那批）与它签发的 MCP 工具名 deny 规则。",
+        "external_mcp": "外部 MCP 服务器是独立进程，配置由用户写在 ~/.claude/settings.json / ~/.claude.json / .mcp.json（api/plugins/mcp/route.ts:13-20,51-53），CodePilot 只做读写与 UI，不做能力约束",
+        "scanner_boundary": "CodePilot/src/lib/harness/user-codepilot-extensions.ts:8-18 —— 用户扩展扫描器自我约束：只读绝不写用户文件；只读 MCP 配置元数据（name/command/args）的显式白名单，若配置里有 auth_token / api_key 一律不进 bundle；读错误降级为『该类无扩展』而不是抛错"
+      }
+    },
+    "PiDeck": {
+      "extension_permission_enum": "absent —— ExtensionAPI 全表（source/pi/packages/coding-agent/src/core/extensions/types.ts:1193-1431）没有任何 permission / capability / scope 申请入口；grep requiresApproval|needsApproval|approve 在 types.ts 内零命中",
+      "what_an_extension_gets_unconditionally": [
+        "pi.exec(command, args, options) —— 任意 shell 执行，ExecOptions 仅 `{ signal?, timeout?, cwd? }`（types.ts:1328；ExecOptions 定义 source/pi/packages/coding-agent/src/core/exec.ts:11-18），没有命令白名单、没有确认、没有审计",
+        "完整 Node 内建模块 —— 扩展就是被 jiti import 的 TS 模块，可以 `import * as fs from 'node:fs'`、`import { spawnSync } from 'node:child_process'`。示例扩展本身就这么用：source/pi/packages/coding-agent/examples/extensions/claude-rules.ts:20-21、file-trigger.ts:11、interactive-shell.ts:23、mac-system-theme.ts:8",
+        "pi.setActiveTools(toolNames) —— 直接改写当前激活工具集（types.ts:1336-1337）",
+        "pi.registerProvider / unregisterProvider —— 注册模型 provider，可指定 baseUrl / apiKey / headers / 自定义 streamSimple 处理器（types.ts:1411-1412,1438-1475）。即可以把流量指向任意端点",
+        "pi.sendUserMessage / sendMessage —— 以用户身份注入消息并触发轮次（types.ts:1297-1309）",
+        "on('before_provider_request') / on('before_provider_headers') —— 拦改发往模型的请求与请求头（types.ts:1216-1220）",
+        "on('tool_call') / on('tool_result') —— 拦改任意工具调用与结果（types.ts:1236-1237）",
+        "pi.events 共享 EventBus —— 跨扩展通信，无隔离（types.ts:1429-1430）"
+      ],
+      "the_only_trust_gate": {
+        "name": "project_trust —— 项目级信任，粒度是『整个项目目录』，不是单个扩展",
+        "event": "source/pi/packages/coding-agent/src/core/extensions/types.ts:1198 `on(event: 'project_trust', handler: ProjectTrustHandler)`",
+        "types": "ProjectTrustContext / ProjectTrustEvent / ProjectTrustEventDecision / ProjectTrustEventResult / ProjectTrustHandler，导出于 source/pi/packages/coding-agent/src/core/extensions/index.ts:108-112",
+        "emitter": "source/pi/packages/coding-agent/src/core/extensions/runner.ts:203-207 emitProjectTrustEvent",
+        "context_flag": "types.ts:331-332 `ctx.isProjectTrusted()`；实现 source/pi/packages/coding-agent/src/core/agent-session.ts:2410 `isProjectTrusted: () => this.settingsManager.isProjectTrusted()`",
+        "ctx_factory": "source/pi/packages/coding-agent/src/cli/project-trust.ts:7-12 createProjectTrustContext",
+        "semantics": "决定 pi 是否加载**项目级**资源（.pi/extensions、skills 等）。信任后该项目下所有扩展一并放行，无逐扩展粒度"
+      },
+      "pideck_side_decision_layer": {
+        "location": "决策上移到 Electron main —— PiDeck 自己弹窗，不交给 pi",
+        "evidence": "PiDeck/src/main/pi/PiProcess.ts:162-163 注释：『信任确认由桌面端 AgentManager.ensureProjectTrust 在启动 pi 前完成，不再静默 --approve。pi 在 RPC 模式下 project_trust 事件 hasUI 恒为 false，故信任弹窗由桌面端自行处理』",
+        "override_flags": "PiProcess.ts:190-201 —— trustOverride 'approve'/'no-approve' 映射为 --approve / --no-approve，本次生效不落盘，覆盖 pi 的 trustStore 决策",
+        "version_gate": "PiProcess.ts:192-201 —— 这两个 flag 从 pi 0.79.0 起支持；版本不够时**静默跳过**，而老版本 pi 没有 trust 系统会自动加载所有资源（:201 注释明写）—— 这是一个静默降级为『全信任』的路径",
+        "extension_manager_gate": "PiDeck/src/main/extensions/ExtensionManager.ts:476-485 noApproveSupported —— 同样的 0.79 版本门控，用于 list/install/remove 命令"
+      },
+      "denial_fallback": {
+        "trust_denied": "PiProcess.ts:191-192 —— deny 用 --no-approve 以不信任模式启动，pi 跳过项目级资源加载；agent 仍可用，只是少了项目扩展/技能",
+        "extension_load_failure": "source/pi/packages/coding-agent/src/core/extensions/loader.ts:488-491 —— 单个扩展加载抛错被 catch 成 `{ extension: null, error: 'Failed to load extension: ...' }`，不中断其余扩展；工厂非函数返回 :479 的 error",
+        "runtime_not_bound": "loader.ts:174-183 createExtensionRuntime —— 所有 action 方法初始为 throwing stub『Extension runtime not initialized. Action methods cannot be called during extension loading.』；:179-183 assertActive 在 runtime 变 stale 后继续抛错。这是**加载期**的能力封锁：注册类调用可以，动作类调用不行（注意 refreshTools 是例外，:196 为 no-op 以允许加载期 registerTool）",
+        "pideck_diagnostic_switches": "PiDeck/src/main/pi/PiProcess.ts:170-172 —— 用户可在开发设置里临时 `--no-extensions` / `--no-skills` 重试，注释说明坏扩展/技能有时会拖垮 RPC 初始化"
+      },
+      "bypass_question": {
+        "question": "扩展被启用后能不能绕过权限直接触达文件系统 / shell / 网络？",
+        "answer": "能，且没有任何需要绕过的东西——从设计上就没有约束层。扩展 = 与 pi 核心同 realm 的 Node 模块，pi.exec 是官方 API，node:child_process 是自由 import。唯一的门是『这个项目/这个扩展文件要不要被加载』，一旦加载即全权。",
+        "host_containment": "PiDeck 的实际防线是进程边界与文件层拦截：①扩展跑在 pi 子进程，摸不到 Electron API / renderer；②不兼容扩展在 RPC 生命周期内被 rename 停放（见 F 节）；③路径穿越校验（ExtensionManager.ts:265-275、:346-354；ProjectResourceManager.ts:45,75,83,93,116 assertInsideProject）"
+      }
+    },
+    "comparison": {
+      "who_asks": "两边都没有『插件申请权限』的动作。CodePilot 的权限主体是模型，PiDeck/pi 的权限主体是项目",
+      "decision_layer": "CodePilot 分五层（规则引擎 → 工具包装 → pending 注册表 → HTTP HMAC 网关 → 会话 profile），全部在宿主进程内；PiDeck 一层（Electron main 的 ensureProjectTrust 弹窗），且靠 CLI flag 传达",
+      "fail_closed": "CodePilot 处处 fail-closed（normalizePermissionProfile:38-40、review-event 三态皆拒、claude-client 降级发拒绝事件）；PiDeck 有一处 fail-open：pi < 0.79 时 trust flag 静默跳过 = 全信任（PiProcess.ts:201）",
+      "post_enable_containment": "CodePilot 靠『插件代码不进我的进程』；PiDeck 靠『扩展代码不进我的进程』——两者殊途同归，都是把不可约束的第三方代码推到进程边界之外，而不是在同 realm 内做沙箱"
+    }
+  },
+  "E_data_partition": {
+    "CodePilot": {
+      "plugin_data": {
+        "verdict": "absent —— 插件没有宿主分配的数据区。插件目录本身（~/.claude/plugins/…）由 Claude CLI 拥有，CodePilot 只读清单。",
+        "only_plugin_state": "开关状态，key 为 `name@marketplace`，写在三层 settings 的 enabledPlugins 里（plugin-discovery.ts:361,165-176）—— 按 pluginId 分区，但落在**共享文件的共享对象**内，不是独立命名空间",
+        "blocklist": "~/.claude/plugins/blocklist.json，同样按 `name@marketplace`（plugin-discovery.ts:182-184,38-44）"
+      },
+      "partition_dimensions": {
+        "settings_layers": "user(~/.claude/settings.json) / project(<cwd>/.claude/settings.json) / local(<cwd>/.claude/settings.local.json)，即 用户 × 项目 两维（plugin-discovery.ts:115-125）",
+        "mcp_sources": "settings.json > ~/.claude.json > 项目 .mcp.json，合并时每条打 `_source` 标记供 UI 区分来源（CodePilot/src/app/api/plugins/mcp/route.ts:44-60）",
+        "harness_scope": {
+          "decl": "CodePilot/src/lib/harness-home/contracts.ts:21-37",
+          "base_kinds": "`{ kind:'builtin' }` | `{ kind:'user', userId? }` | `{ kind:'assistant', assistantId }` | `{ kind:'project', projectId, rootRef? }`",
+          "overlay": "`{ kind:'runtime_overlay', runtimeId, base: BaseHarnessScope }` —— runtime 维度是**叠加层**而非并列维度",
+          "precedence": "CodePilot/src/lib/harness-home/scope.ts:20-25 BASE_SCOPE_RANK = builtin:0 < user:10 < assistant:20 < project:30；runtime_overlay 在 base rank 上 +100（:32-35），即永远最后应用",
+          "resolution": "scope.ts:74-86 resolveScopedValues 返回从最不具体到最具体的有序数组，同 rank 时保持插入序稳定；:88-94 highestPrecedenceValue 取最后一个",
+          "matching": "scope.ts:41-55 —— builtin 恒 true；user 的 userId 缺省则匹配任意 user；assistant/project 必须 id 相等；runtime_overlay 需 runtimeId 与 base 同时匹配（:62-65）",
+          "key_design_note": "scope.ts:69-73 注释明确：runtime overlay 最后应用，但**永远不会成为 canonical base value** —— overlay 是投影，不是真值"
+        }
+      },
+      "storage_locations": {
+        "harness_home_repo": {
+          "manifest": "<root>/manifest.json（CodePilot/src/lib/harness-home/repository/paths.ts:4）",
+          "internal": "<root>/.harness-home/（paths.ts:5 HARNESS_INTERNAL_DIR），内含 writer.lock.json（:6）与 transactions/（:7）",
+          "path_safety": "paths.ts:9-25 assertSafeRepositoryPath —— 必须相对路径、normalize 后不得为 `..`/以 `../` 开头/含 `..` 段、不得指向 .harness-home（大小写不敏感比较，:16,21）",
+          "root_escape": "paths.ts:27-35 resolveRepositoryPath 再做一次 resolve 后的前缀校验",
+          "symlink": "paths.ts:41-56 assertNoSymlinkTraversal —— 从 root 到目标逐段 lstat，任一段是符号链接直接抛错；注释：『Canonical writes never follow a user-controlled link outside the root』；ENOENT 视为未创建，直接 return"
+        },
+        "assistant_workspace": {
+          "state": "<workspaceDir>/.assistant/state.json（CodePilot/src/lib/assistant-workspace.ts:15-16 STATE_DIR/STATE_FILE）",
+          "memory": "memory/daily/（:17）",
+          "canonical_files": "assistant-workspace.ts:20-25 FILE_MAP —— 每个逻辑文件有一串候选文件名（小写优先，大写兜底），claude 还接受 AGENTS.md"
+        }
+      },
+      "schema_version_and_migration": {
+        "harness_home": {
+          "version": "HARNESS_HOME_SCHEMA_VERSION = 1（CodePilot/src/lib/harness-home/contracts.ts:8），类型上是字面量 `typeof HARNESS_HOME_SCHEMA_VERSION`（contracts.ts:117）",
+          "strategy": "严格拒绝 —— 版本不等直接 throw `Unsupported Harness Home schema version: X`（CodePilot/src/lib/harness-home/manifest.ts:69-73）。目前只有 v1，无迁移链",
+          "forward_compat": "manifest.ts:63-66 注释：『Unknown top-level, index and Runtime-overlay fields are deliberately preserved』—— 校验已知 schema 并返回 JSON 克隆，未知字段原样保留。未安装 adapter 的 runtime overlay 也保留（contracts.ts:124-127）",
+          "validation_details": "manifest.ts:74-108 —— harnessId 非空串；generation 必须非负安全整数；writtenAt 必须可 Date.parse；definition 的五个 index 与 state 的三个 index 逐项 validateContentRef（id/path/contentHash 三必填，path 必须仓库相对安全路径 :34-42）；overlay 的 runtimeId 必须等于其 map key（:56-58）；secretRefs 逐条 assertSecretRef；最后 assertNoSecretMaterial 全量扫描（:110）",
+          "concurrency": {
+            "generation": "manifest.generation 单调递增（contracts.ts:119）",
+            "writer_lease": "CodePilot/src/lib/harness-home/repository/writer-lease.ts:11-21 WriterLeaseMetadata = `{ instanceId, machineId(不面向用户的机器不透明标识), pid, processStartedAt, acquiredAt, heartbeatAt, schemaVersion, repositoryGeneration }`；获取入参 :23-29 AcquireWriterLeaseInput 必填 repositoryGeneration",
+            "transactions": "repository/transaction.ts + RepositoryTransactionJournal（被 migration.ts:13 引用），落在 .harness-home/transactions/"
+          },
+          "import_migration": {
+            "file": "CodePilot/src/lib/harness-home/migration.ts",
+            "index_whitelist": "migration.ts:24-36 —— DEFINITION_INDEXES = {identityRefs, ruleRefs, skillRefs, mcpRefs, creativeMethodRefs}；STATE_INDEXES = {memoryRefs, preferenceRefs, feedbackRefs}",
+            "plan_before_apply": "migration.ts:38-60 —— HarnessImportCandidate `{ id, index, targetPath, content, mediaType?, provenance }` → HarnessImportPlanItem `{ candidate, action, contentHash, existingHash, reason }`；action = 'create' | 'skip_same' | 'conflict'（:47）",
+            "plan_shape": "HarnessImportPlan `{ harnessId, baseGeneration, items }`（:57-60）—— baseGeneration 把计划钉在某一代上",
+            "hash_based": "hashBytes / hashFile 来自 repository（migration.ts:9-10），内容相同即 skip_same，不同即 conflict —— 从不静默覆盖"
+          },
+          "export_symmetry": "CodePilot/src/lib/harness-home/adapters/types.ts:59-75 —— HarnessExportPlanWrite `{ refId, targetPath, content, action:'create'|'skip_same'|'conflict'|'unsupported', expectedOldHash, newHash, reason }`；HarnessExportPlan 带 canApply 布尔，导出同样先出计划再决定能否应用"
+        },
+        "assistant_workspace": {
+          "version": "schemaVersion: 5（CodePilot/src/lib/assistant-workspace.ts:12 DEFAULT_STATE）",
+          "strategy": "载入时自动逐级迁移（:523-540）：<2 → migrateStateV1ToV2；<3 → V2ToV3；<4 → V3ToV4；<5 → V4ToV5；任一执行过就 `return loadState(dir)` 重新加载（:541-543）",
+          "step_impls": "assistant-workspace.ts:104-116（→2，:104 早退 `if (state.schemaVersion >= 2) return`）、:146-158（→3）、:177-180（→4）、:198-219（→5）—— 每步自带幂等早退与结尾写版本号（:116,158,180,219）"
+        },
+        "html_bundle": "CodePilot/src/lib/assets/html-bundle-materializer.ts:253 schemaVersion:1（局部产物版本）"
+      },
+      "integrity_hashing": {
+        "content_hash_format": "`sha256:<hex>`（CodePilot/src/lib/assets/html-bundle-security.ts:409,466）",
+        "verify_after_copy": "html-bundle-materializer.ts:242 —— 复制后比对 `copied.contentHash !== prepared.inspection.contentHash` 才认账",
+        "skill_dedupe": "CodePilot/src/app/api/skills/route.ts:212,221,254 —— 同名 skill 按 contentHash 集合判定是否真冲突"
+      }
+    },
+    "PiDeck": {
+      "extension_data": {
+        "verdict": "absent —— 扩展没有宿主分配的数据区，也没有 pluginId 命名空间。",
+        "what_exists": [
+          "会话内自定义 entry：pi.appendEntry(customType, data)（source/pi/packages/coding-agent/src/core/extensions/types.ts:1311-1312），写进 session JSONL，按 customType 字符串分槽，无命名空间校验",
+          "扩展自选文件路径：扩展可以自由 import node:fs 往任何地方写，宿主不分配也不限制"
+        ],
+        "real_pattern": "PiDeck/resources/extensions/pi-deck-todo.ts:53-55 —— WIDGET_KEY / ENTRY_TYPE 都取值 'pi-deck-todo'，靠前缀自律；:9-11 注释说明状态持久化用 appendEntry 写 custom entry，session_start / session_tree 时读最后一条快照重建",
+        "branch_semantics": "pi-deck-todo.ts:9-11 —— 该方案『天然支持分支：分支切换后 getEntries 返回该分支的快照，todo 状态自动跟随分支』。即数据分区隐式跟随**会话树节点**，这是 pi 会话模型白送的",
+        "widget_collapse_state": "PiDeck/src/renderer/src/components/app/AppParts.tsx:561,605-606 —— localStorage key `pid:extension-widget-collapsed:${sessionIdOrPath}:${widgetKey}`；:594 注释说明加 sessionIdOrPath 是为了避免 Todo 等同名 widget 在不同 agent 间共享折叠状态。这是**宿主**为扩展 UI 状态做的分区，维度 = 会话 × widgetKey"
+      },
+      "partition_dimensions": {
+        "scope": "user / project 两级（PiExtensionSummary.scope，ExtensionManager.ts:546,553,558）",
+        "user_level": "~/.pi/agent/extensions/（ExtensionManager.ts:207,266,347；loader.ts:690-691 agentDir/extensions）",
+        "project_level": "<project>/.pi/extensions/（loader.ts:686-687 cwd/CONFIG_DIR_NAME/extensions；PiDeck 侧 ProjectResourceManager.ts:95 用 <project>/.pi/settings.json）",
+        "wsl_home_switch": "ExtensionManager.ts:49-58 configureWsl —— 把扩展文件边界切到 WSL HOME，切换后旧缓存立即失效（:53）",
+        "agent_cwd": "PiDeck/src/main/pi/PiProcess.ts:253 —— 每个 agent 绑定独立 cwd，让 pi 自行发现项目级资源与 session 分组"
+      },
+      "host_side_state": {
+        "removed_builtin": "PiDeck 桌面设置的 removedBuiltInExtensions: string[]（ExtensionManager.ts:152,317,333,357 patchPiDeckSettings）—— 按内置扩展文件名分区",
+        "project_disabled": "<project>/.pi/settings.json 的 disabledExtensions: string[]（ProjectResourceManager.ts:95-109），标识用文件名/目录名，注释说明是『与 pi list 输出对齐』"
+      },
+      "schema_version_and_migration": {
+        "verdict": "absent —— grep schemaVersion|SETTINGS_VERSION|migrate 在 PiDeck/src/main/ 与 PiDeck/src/shared/ 零命中。",
+        "actual_compat_strategy": "改用**运行时版本探测 + 条件降级**，而不是数据 schema 版本：ExtensionManager.ts:476-485 noApproveSupported（pi >= 0.79 才传 --no-approve）、PiProcess.ts:192-201（trust flag 同门控）、ExtensionManager.ts:462-471 compareVersions",
+        "settings_evolution": "设置字段靠 `?? 默认值` 就地兼容（如 :152 `removedBuiltInExtensions ?? []`、:99 `settings.disabledExtensions ?? []`），新增字段即向后兼容，无显式迁移步骤"
+      }
+    },
+    "comparison": {
+      "partition_key": "CodePilot 有一套正式的四档 scope（builtin/user/assistant/project）+ runtime overlay；PiDeck 只有 user/project 两档 + 隐式的会话树分支",
+      "plugin_namespace": "两边都没有『按 pluginId 隔离的数据区』——插件要么没有数据，要么自己找地方写",
+      "versioning": "CodePilot 两套并存：harness-home 走严格拒绝 + generation + writer lease + 计划式导入；assistant-workspace 走经典逐级自动迁移。PiDeck 完全没有数据版本概念"
+    }
+  },
+  "F_third_party_isolation": {
+    "CodePilot": {
+      "same_realm": {
+        "answer": "否 —— 第三方代码从不进入 CodePilot 的 renderer 或 Next.js server realm。",
+        "evidence": [
+          "CodePilot/src/lib/plugin-discovery.ts 全文只有 fs.readFileSync / JSON.parse / fs.existsSync，无 import()、无 require、无 vm、无 eval（:252-253 readManifest 是唯一读插件文件的地方，读完即 JSON.parse）",
+          "CodePilot/src/lib/plugin-discovery.ts:16-18 —— 插件加载完全交给 Agent SDK",
+          "插件 UI 组件（src/components/plugins/PluginCard.tsx / PluginDetail.tsx / PluginList.tsx，共 257 行）只消费 PluginInfo JSON"
+        ]
+      },
+      "isolation_means": {
+        "process_boundary": "Agent SDK 子进程负责插件；外部 MCP 服务器是独立进程/传输",
+        "cli_subprocess": "skills 市场的 install/remove 走 npx 子进程，`shell: false`（CodePilot/src/lib/skills-marketplace-command.ts:121-142），Windows 下显式 `cmd.exe /c npx.cmd`",
+        "asset_sandbox": "HTML 产物有专门的安全检查与物化流程（src/lib/assets/html-bundle-security.ts、html-bundle-materializer.ts），带 sha256 校验与复制后比对（materializer:242）"
+      },
+      "input_validation": {
+        "install_source": "CodePilot/src/lib/skills-marketplace-command.ts:34-61 —— source 必须是安全的 GitHub repo 标识或 https://github.com URL；拒绝不安全路径、凭据、端口、query/hash 片段、非法段",
+        "uninstall_name": "skills-marketplace-command.ts:63-70 —— skill 名必须是 trim 后非空的安全路径段，最长 256 字符，不得以斜杠开头",
+        "csrf_and_origin": "skills-marketplace-command.ts:76-113 —— 变更类请求要求 `Content-Type: application/json`、同源、目标 host 为 loopback、非跨站 fetch",
+        "plugin_id": "CodePilot/src/app/api/plugins/[id]/route.ts:9-17 parsePluginId —— URL decode 后按**最后一个** @ 切分，@ 在首位或不存在直接判非法"
+      },
+      "signature_hash_version": {
+        "signature": "absent —— 无签名校验",
+        "hash": "有但用途是去重/一致性，不是来源可信：skills 的 contentHash（api/skills/route.ts:212,254）、harness-home 的 PortableContentRef.contentHash（contracts.ts:42）与 sha256 资产哈希（html-bundle-security.ts:409,466）",
+        "version_compat": "absent —— enabledPlugins 的 string[] 号称版本约束，但 isEnabledValue 对任何数组一律返回 true，从不解析（plugin-discovery.ts:222-228）",
+        "secret_scrubbing": "CodePilot/src/lib/harness-home/manifest.ts:110 assertNoSecretMaterial 全量扫描清单；SecretRef 只存引用（contracts.ts:78-87）；Provenance 强制 `secretMaterial: 'absent' | 'stripped'`（contracts.ts:74）",
+        "scanner_allowlist": "CodePilot/src/lib/harness/user-codepilot-extensions.ts:10-14 —— 只读 MCP 配置的 name/command/args 显式白名单，含 auth_token/api_key 的字段不进 bundle"
+      },
+      "registration_is_compile_time": {
+        "statement": "CodePilot/src/lib/runtime/runtime-catalog.ts:6-8 原文：『Runtime implementations are still bundled and explicitly registered; this is not a dynamic third-party code loader.』",
+        "enforced_by": "packagedRegistration: 'explicit' 是 RuntimeRegistration 的必填字段（runtime-catalog.ts:38）且三条实例全为 'explicit'（:54,68,82）；DescriptorRegistry 注册后立即 seal（adapters/registry.ts:12、runtime/descriptor.ts:103）"
+      }
+    },
+    "PiDeck": {
+      "same_realm": {
+        "answer": "对 Electron 而言是隔离的；对 pi 进程而言是完全同 realm。",
+        "vs_electron": "扩展跑在 pi CLI 子进程（PiDeck/src/main/pi/PiProcess.ts:258-260 spawn，stdio 三管道），拿不到 Electron API、拿不到 renderer、拿不到 preload 暴露面",
+        "vs_pi": "扩展由 jiti 直接 import 进 pi 的 Node 进程（source/pi/packages/coding-agent/src/core/extensions/loader.ts:420-431），与 pi 核心同一个模块图、同一个全局对象、同一个 Node 权限集。无 vm、无 worker、无 sandbox"
+      },
+      "isolation_means": {
+        "module_resolution_control": {
+          "virtual_modules": "loader.ts:50-74 VIRTUAL_MODULES —— 把 typebox、@earendil-works/pi-agent-core、pi-tui、pi-ai(+compat/oauth/providers)、pi-coding-agent 及其 @mariozechner/* 旧别名静态注入。注释 :18-20 说明必须静态 import 才能被 Bun 打进单文件二进制",
+          "aliases": "loader.ts:86-142 getAliases —— Node 构建模式下把同一批 specifier 指向 dist 入口，workspace 存在时优先用 workspace 路径（:97-103）",
+          "runtime_branch": "loader.ts:424-428 —— Bun 二进制用 virtualModules + tryNative:false；TS 源码运行用 virtualModules + tsconfigPaths；Node 构建用 alias",
+          "effect": "这是**依赖版本统一**手段（防止扩展 import 到不同副本的 pi-ai 导致 instanceof 失效），不是安全隔离——扩展仍可自由 import 任意 node: 内建与 npm 包"
+        },
+        "cache_scoping": "loader.ts:146-168 —— extensionCache 按 cwd 绑定，cwd 变更整体清空；createJiti 的 moduleCache 显式关闭（:421）以支持 /reload",
+        "error_containment": "loader.ts:475-491 —— 每个扩展独立 try/catch，加载失败只产出 error 字符串不中断其余",
+        "load_phase_lockdown": "loader.ts:174-183 —— runtime 的 action 方法在 bindCore 之前全是 throwing stub；:179-183 staleMessage 机制让失效 context 上的调用继续抛错"
+      },
+      "pideck_quarantine_mechanism": {
+        "name": "文件停放（park / unpark）—— PiDeck 独有的宿主侧隔离",
+        "file": "PiDeck/src/main/pi/piExtensionFilter.ts",
+        "blocklist": "piExtensionFilter.ts:12-15 DESKTOP_BLOCKED_EXTENSION_PATTERNS = [/^codeisland(\\.ts|\\.js)?$/i, /codeisland/i]",
+        "rationale": "piExtensionFilter.ts:4-11 注释：CodeIsland 面向终端 pi + macOS 浮动窗，在 Electron 子进程树下曾出现『启动 Agent 后 PiDeck 整应用退出』。无法改第三方扩展时，由 PiDeck 在 RPC 生命周期内临时 rename 该文件，进程退出后还原",
+        "park_suffix": "piExtensionFilter.ts:18 DESKTOP_PARK_SUFFIX = '.pideck-disabled' —— 刻意不以 .ts/.js 结尾，pi 自动发现就不会加载它",
+        "scan": "piExtensionFilter.ts:40-100 scanExtensionDir —— 返回 `{ blocked: string[], safePaths: string[] }`；已停放文件记回 blocked 供还原（:60-64）；跳过 . 开头 / node_modules / .d.ts（:56）；单文件与含 index.ts/js 的目录都识别（:77-96）",
+        "merge": "piExtensionFilter.ts:103-116 mergeExtensionFilters —— 合并用户级与项目级扫描结果，Set 去重",
+        "lifecycle": "PiDeck/src/main/pi/PiProcess.ts:176 parkIncompatibleExtensions()（start 时）→ :152-157 restoreParkedExtensions()（幂等，可多次调用）",
+        "why_not_whitelist": "piExtensionFilter.ts:10 与 PiProcess.ts:174-176 两处注释一致：『不要用 --no-extensions 白名单方案——会误伤 npm packages 扩展』；:303 保留了一个空实现的 @deprecated 函数说明白名单方案已被弃用",
+        "user_visibility": "PiDeck/src/main/pi/AgentManager.ts:866-877 —— 启动后若有停放项，向会话插入系统消息说明『已临时停用与 PiDeck 不兼容的扩展：…（仅桌面 RPC 会话期间；其它扩展与 npm 包装扩展不受影响，Agent 结束后会自动恢复，CLI 仍可正常使用）』，同时写 appLogger；:2992-2994 诊断面板也列出 `已自动隔离扩展: …`"
+      },
+      "renderer_boundary": {
+        "data_only": "扩展能送到 renderer 的只有字符串数组与对话框字段，绝无代码：PiDeck/src/main/pi/AgentManager.ts:3403-3405 widgetLines 为 `string[] | undefined`；preload 白名单字段 PiDeck/src/preload/index.ts:1027；renderer 收到后再次逐项 `typeof line === 'string'` 过滤（PiDeck/src/renderer/src/App.tsx:2447-2448）",
+        "unreachable_apis": "pi 的组件工厂类 UI API（setWidget 组件重载 types.ts:171-175、setFooter :183-187、setHeader :190、custom :196-210、setEditorComponent :260）在 RPC 模式下没有 TUI 可依附，天然不可达"
+      },
+      "path_traversal_guards": [
+        "PiDeck/src/main/extensions/ExtensionManager.ts:265-275 removeLocalExtension —— source 必须严格等于 basename(source)，拒绝 ../ 与绝对路径，否则抛『非法扩展路径』",
+        "ExtensionManager.ts:346-354 removeBuiltInFile —— 同样的 basename 相等校验，外加必须 pi-deck- 前缀，否则抛『非法内置扩展路径』",
+        "PiDeck/src/main/projects/ProjectResourceManager.ts:45,75,83,93,116 assertInsideProject —— 所有项目资源写/删前校验路径归属",
+        "PiDeck/src/main/index.ts:1444 注释：『项目资源删除由 ProjectResourceManager 再次校验路径归属，避免 renderer 传入任意文件路径』—— 明确的 renderer 不可信假设"
+      ],
+      "signature_hash_version": {
+        "signature": "absent",
+        "hash": "absent —— 全项目无扩展内容哈希",
+        "version_compat": {
+          "extension_side": "absent —— 扩展不声明兼容区间；只有 npm 包能读到 package.json.version（ExtensionManager.ts:422-430）用于展示与更新提示",
+          "host_side": "有，但是**宿主对宿主**：pi >= 0.79 才传 --no-approve / --approve（ExtensionManager.ts:476-485、PiProcess.ts:192-201）；compareVersions 手写实现（:462-471）",
+          "gap": "PiProcess.ts:201 —— 版本不支持信任标志时静默跳过，注释承认『老版本 pi 无 trust 系统，自动加载所有资源』"
+        },
+        "identity_check": "唯一的『这段代码是不是我的』判定是字符串包含：PiDeck/resources/extensions/pi-deck-todo.ts:74-78 isOwnTodo() 检查 sourceInfo.path/source 是否 includes('pi-deck-todo')"
+      }
+    },
+    "comparison": {
+      "realm": "CodePilot 第三方零进程内执行（最强）；PiDeck 对 Electron 零进程内执行、对 pi 完全同 realm（中）",
+      "quarantine": "只有 PiDeck 有运行期隔离机制（文件停放），且是黑名单式、按文件名正则、写死单个扩展",
+      "supply_chain": "两边都没有签名、没有兼容区间校验；哈希只用于去重与一致性，不用于来源可信"
+    }
+  },
+  "G_mature_vs_pitfall": {
+    "note": "以下只陈述源码事实与作者在注释/测试中自陈的理由，不含对 PiBuddy 的实施建议。",
+    "mature_designs": [
+      {
+        "id": "capability-contract-single-source",
+        "project": "CodePilot",
+        "what": "每个能力一条声明，同时钉住 systemPrompt 片段、三个 runtime 的 exposure(module+factory 符号名)、toolNames、事件类型、UI 渲染路径、产物契约。",
+        "evidence": "CodePilot/src/lib/harness/capability-contract.ts:178-217（接口）、:223-257（widget 实例）",
+        "why_it_works": "capability-contract.ts:33-44 记录了引入前的真实事故：WIDGET_SYSTEM_PROMPT 有三份漂移副本（src/lib/widget-guidelines.ts 完整版、src/lib/builtin-tools/widget-guidelines.ts 14 行删节版、Codex bridge 的另一份 paraphrase），同一产品面向不同用户给出不同规则。契约把 module/factory 写成可 grep 的字符串，由 drift test 强制（:66-70）。"
+      },
+      {
+        "id": "strict-live-semantics",
+        "project": "CodePilot",
+        "what": "status:'live' 严格要求每个声明的 runtime exposure 都可执行，不允许任一为 unsupported；做不到就必须拆分能力或降级为 deferred。",
+        "evidence": "CodePilot/src/lib/harness/capability-contract.ts:102-132",
+        "why_it_works": ":110-116 自陈：宽松语义下曾出现『一个 runtime 是 unsupported 但能力仍标 live』的混合口径；:294-297 展示了实际拆分动作——codepilot_hatch_buddy 因为 bridge 只挂了 5 个名字里的 4 个，被拆成独立的 assistant_buddy 能力并标 deferred。"
+      },
+      {
+        "id": "executable-vs-perceptible",
+        "project": "CodePilot",
+        "what": "能力投影时区分『本 runtime 可执行』与『仅可感知』，并为不可用项附上 CapabilityGap 理由。",
+        "evidence": "CodePilot/src/lib/harness-home/projection.ts:24-52 buildRuntimeProjection（:31-40 只有 referenceStatus==='executable' 且在 executableCapabilityIds 里才进 executable，其余一律 perceptibleOnly）；契约类型 CodePilot/src/lib/harness-home/contracts.ts:163-171 RuntimeProjection、:150-154 CapabilityGap",
+        "why_it_works": "CodePilot/src/lib/harness/user-codepilot-extensions.ts:32-41 记录了修复前的真实风险：扫描器把每条扩展都标 executable:true，泄漏进模型的『Callable in this Runtime』提示，模型可能伪造工具调用（例如 Codex Runtime 一轮假装能调用无桥接的 .claude/skills/ 技能）。:42-68 给出了按扩展种类 × runtime 的逐条可执行性规则，:70-74 说明缺省 runtimeId 时保守回落为 perception_only 并有测试钉住。"
+      },
+      {
+        "id": "descriptor-registry-throw-and-seal",
+        "project": "CodePilot",
+        "what": "注册表对重复 id 抛错而非覆盖，注册窗口用 seal() 显式关闭。",
+        "evidence": "CodePilot/src/lib/harness-home/registry.ts:13-28（重复 throw、空 id throw、sealed 后 throw）；使用点 adapters/registry.ts:7-12、runtime/descriptor.ts:100-103 均注册完立即 seal",
+        "contrast": "与 pi 的 Map.set 静默覆盖（loader.ts:251,260,275,283,291,302）形成直接对照。"
+      },
+      {
+        "id": "plan-before-apply-with-hash",
+        "project": "CodePilot",
+        "what": "导入/导出都先产出计划再应用，每项带 action('create'|'skip_same'|'conflict'[|'unsupported'])、contentHash、existingHash 与 reason；计划钉在 baseGeneration 上。",
+        "evidence": "CodePilot/src/lib/harness-home/migration.ts:38-60；导出对称结构 CodePilot/src/lib/harness-home/adapters/types.ts:59-75（含 expectedOldHash / canApply）",
+        "why_it_works": "内容哈希相同即 skip_same，不同即 conflict，从不静默覆盖用户文件。"
+      },
+      {
+        "id": "fail-closed-everywhere",
+        "project": "CodePilot",
+        "what": "所有降级路径都朝更严格的方向塌陷，并留下可归因事件。",
+        "evidence": [
+          "CodePilot/src/lib/permission/profile.ts:33-40 normalizePermissionProfile —— 来自 DB/旧客户端/未校验载荷的未知值塌陷到最严格档",
+          "CodePilot/src/lib/permission/review-event.ts:18-45 —— denied/unavailable/timeout 三态皆算拒绝",
+          "CodePilot/src/lib/claude-client.ts:848-875 —— runtime 无法兑现 auto review 时降级并发出可归因的拒绝性 review 事件，而不是静默按 normal 语义跑",
+          "CodePilot/src/app/api/chat/permission-capability/route.ts:27-37 —— 探测最宽 settingSources，只可能高估存在性；方向刻意选『可能误报不可用』而非『可能误放行』"
+        ]
+      },
+      {
+        "id": "sdk-behavior-verified-not-assumed",
+        "project": "CodePilot",
+        "what": "对上游 SDK 的权限解析顺序做了源码级核实，并把结论连同版本号写进注释，据此改换拦截手段。",
+        "evidence": "CodePilot/src/lib/permission/profile.ts:196-228 —— 读 node_modules/@anthropic-ai/claude-agent-sdk/cli.js (0.2.111) 确认 deny 规则先于分类器、canUseTool 在 auto 批准路径上永不被调用，因此把 human-only 工具改为 deny 规则而非依赖 canUseTool 分支；:224-228 明确写出这是刻意的 fail-closed 取舍",
+        "residual_risk_documented": "CodePilot/src/lib/permission/external-mcp.ts:7-15 —— 作者自己记下了未闭合的洞：构建 deny 规则时尚未出现的外部 credential 形态 MCP 工具仍可能被分类器批准。"
+      },
+      {
+        "id": "always-ask-tools",
+        "project": "CodePilot",
+        "what": "把『交互本身就是目的』的工具列为任何模式都必须询问。",
+        "evidence": "CodePilot/src/lib/permission-checker.ts:114-125 ALWAYS_ASK_TOOLS = {AskUserQuestion, ExitPlanMode}，:133-135 在模式判定之前先命中",
+        "why_it_works": ":121-123 —— 否则 trust 模式会自动放行这两个工具并返回空/默认答案，功能自毁。"
+      },
+      {
+        "id": "write-layer-escalation",
+        "project": "CodePilot",
+        "what": "写开关前先模拟『写到默认层后重新 merge』，若被高优先层覆盖就升级到最高优先且 gitignore 的 local 层，并把 escalated 标志回传 UI。",
+        "evidence": "CodePilot/src/lib/plugin-discovery.ts:424-459；结果类型 :403-409；HTTP 透传 api/plugins/[id]/route.ts:90-94",
+        "why_it_works": "避免了『UI 点了启用但因高层覆盖而无效』这一类静默失败；resolveWriteValue(:389-401) 同时保留已存在的版本约束。"
+      },
+      {
+        "id": "generation-guarded-cache",
+        "project": "PiDeck",
+        "what": "列表缓存带代数（generation），变更操作递增代数并断开 inflight；in-flight 请求返回时若代数已变则丢弃结果并递归重取。",
+        "evidence": "PiDeck/src/main/extensions/ExtensionManager.ts:34-38（字段）、:68-75（失效）、:93-113（代数捕获与丢弃/递归）",
+        "why_it_works": ":97-99 注释：失效前的调用方也必须拿到变更后的列表，否则 UI 会短暂或永久停在旧数据。"
+      },
+      {
+        "id": "data-only-ui-bridge",
+        "project": "PiDeck",
+        "what": "扩展能送进 renderer 的只有 string[] 与对话框标量字段，preload 逐字段白名单，renderer 再做一次类型过滤。",
+        "evidence": "PiDeck/src/main/pi/AgentManager.ts:3403-3405；PiDeck/src/preload/index.ts:1027（显式字段列表）；PiDeck/src/renderer/src/App.tsx:2447-2448（再过滤）",
+        "bonus": "AgentManager.ts:3397 —— widget 刷新只走 IPC 状态不落会话消息，避免高频进度刷新污染会话 JSONL。"
+      },
+      {
+        "id": "quarantine-not-whitelist",
+        "project": "PiDeck",
+        "what": "对已知不兼容的第三方扩展在 RPC 生命周期内 rename 停放，进程退出后还原；停放后缀刻意不以 .ts/.js 结尾使宿主自动发现跳过它。",
+        "evidence": "PiDeck/src/main/pi/piExtensionFilter.ts:4-18；PiProcess.ts:152-157(还原,幂等) 与 :176(停放)",
+        "why_not_whitelist": "piExtensionFilter.ts:10 与 PiProcess.ts:174-176 —— 白名单方案（--no-extensions + -e 列举）会误伤 npm packages 扩展；:303 保留了空实现的 @deprecated 函数记录这条弃用",
+        "user_visibility": "AgentManager.ts:866-877 主动向会话插系统消息说明哪些扩展被临时停用、影响范围与恢复条件。"
+      },
+      {
+        "id": "path-traversal-basename-equality",
+        "project": "PiDeck",
+        "what": "删除类操作要求 source 严格等于 basename(source)，而不是仅做 `..` 过滤。",
+        "evidence": "PiDeck/src/main/extensions/ExtensionManager.ts:265-275、:346-354（内置额外要求 pi-deck- 前缀）；项目级 ProjectResourceManager.ts:45,75,83,93,116 assertInsideProject",
+        "renderer_untrusted": "PiDeck/src/main/index.ts:1444 注释明确把 renderer 传入的路径当不可信输入。"
+      },
+      {
+        "id": "explicit-packaged-registration",
+        "project": "CodePilot",
+        "what": "把『不是动态第三方代码加载器』写成显式契约字段而不只是注释。",
+        "evidence": "CodePilot/src/lib/runtime/runtime-catalog.ts:6-8（注释）、:38 packagedRegistration 字段必填、:54,68,82 三条实例全为 'explicit'；RuntimeDescriptor 同样带该字段（harness-home/registry.ts:82）"
+      },
+      {
+        "id": "forward-compatible-manifest-parsing",
+        "project": "CodePilot",
+        "what": "清单解析校验已知 schema 并返回克隆，未知顶层字段、未知 index 字段、未安装 adapter 的 runtime overlay 全部原样保留。",
+        "evidence": "CodePilot/src/lib/harness-home/manifest.ts:63-66（注释）、CodePilot/src/lib/harness-home/contracts.ts:124-128（runtimeOverlays 说明）、:95,102,110-113,130-137（各接口的索引签名兜底）"
+      },
+      {
+        "id": "secret-by-reference-only",
+        "project": "CodePilot",
+        "what": "清单只存 SecretRef，Provenance 强制声明密钥物料状态，写入前全量扫描断言无密钥物料。",
+        "evidence": "CodePilot/src/lib/harness-home/contracts.ts:78-87 SecretRef、:74 `secretMaterial: 'absent' | 'stripped'`；manifest.ts:107-110 assertSecretRef + assertNoSecretMaterial；扫描器侧 CodePilot/src/lib/harness/user-codepilot-extensions.ts:10-14 白名单读取"
+      }
+    ],
+    "pitfalls": [
+      {
+        "id": "same-realm-dynamic-import",
+        "project": "PiDeck / pi",
+        "severity": "high",
+        "what": "扩展由 jiti 直接 import 进 pi 主进程，与核心同 realm、同全局、同权限集，无 vm/worker/sandbox。",
+        "evidence": "source/pi/packages/coding-agent/src/core/extensions/loader.ts:420-431（createJiti + jiti.import）、:484（`await factory(api)` 立即执行）",
+        "consequence": "扩展可自由 import node:fs / node:child_process（真实用例：examples/extensions/interactive-shell.ts:23 spawnSync、mac-system-theme.ts:8 exec、claude-rules.ts:20-21 fs/path），且 pi 官方 API 直接给了 pi.exec（types.ts:1328，ExecOptions 只有 signal/timeout/cwd，见 core/exec.ts:11-18）。装扩展 = 授予任意代码执行。",
+        "host_workaround": "PiDeck 只能在文件层做黑名单停放（piExtensionFilter.ts:12-15，目前只覆盖 codeisland 一个正则）。"
+      },
+      {
+        "id": "unconstrained-registration-map-set",
+        "project": "PiDeck / pi",
+        "severity": "high",
+        "what": "全部 7 类注册点都是裸 Map.set，同名后注册静默覆盖先注册，宿主不告警、不拒绝、无命名空间。",
+        "evidence": "loader.ts:246(handlers) / :251(tools) / :260(commands) / :275(shortcuts) / :283(flags) / :291(messageRenderers) / :302(entryRenderers)",
+        "self_documented": "PiDeck/resources/extensions/pi-deck-todo.ts:16-21 原文确认这一语义。",
+        "real_damage": "PiDeck/src/main/extensions/ExtensionManager.ts:174-176 —— 同名 Tool 冲突直接导致 RPC 启动失败（整个 agent 起不来），所以宿主被迫删除磁盘文件而非仅改设置。",
+        "host_workaround_is_a_hack": "ExtensionManager.ts:586-590 只有三条硬编码关键词（todo/plan/ask）+ 子串匹配（:596-603）；:158 注释自陈『nul-redirect-fix 等其它内置扩展暂不参与冲突检测，避免 mode 等通用词误伤』——即这套启发式既不完整也不精确。"
+      },
+      {
+        "id": "no-teardown-hooks",
+        "project": "PiDeck / pi",
+        "severity": "high",
+        "what": "ExtensionAPI 有 7 类 register，只有 1 个 unregister（provider）。没有 dispose/unregisterTool/unregisterCommand/off。",
+        "evidence": "source/pi/packages/coding-agent/src/core/extensions/types.ts:1193-1431 全表；唯一反注册 :1427 unregisterProvider；runner 侧实现 runner.ts:405-410",
+        "consequence": "扩展在工厂里起的 watcher / interval / 子进程 / 事件订阅没有宿主可调用的回收入口；禁用只能靠杀 pi 进程。`/reload` 也只重载扩展、不重读配置（PiDeck/src/main/pi/AgentManager.ts:2510）。"
+      },
+      {
+        "id": "shared-event-bus-no-isolation",
+        "project": "PiDeck / pi",
+        "severity": "medium",
+        "what": "pi.events 是全扩展共享的 EventBus，无命名空间、无权限、任意扩展可收发任意事件。",
+        "evidence": "source/pi/packages/coding-agent/src/core/extensions/types.ts:1429-1430"
+      },
+      {
+        "id": "request-interception-apis-ungated",
+        "project": "PiDeck / pi",
+        "severity": "high",
+        "what": "任意扩展都可以拦改发往模型的请求与请求头、拦改任意工具调用与结果、注册任意 provider（含 baseUrl / apiKey / 自定义 stream 处理器）、以用户身份注入消息。",
+        "evidence": "types.ts:1216-1220(before_provider_request / before_provider_headers) / :1236-1237(tool_call / tool_result) / :1411-1412 与 :1438-1475(registerProvider + ProviderConfig 含 baseUrl/apiKey/headers/streamSimple/oauth) / :1297-1309(sendMessage / sendUserMessage)",
+        "note": "这些是设计上的强大之处，但没有任何声明、审批或可见性机制与之配套——清单里看不到扩展会用哪一个。"
+      },
+      {
+        "id": "manifest-declares-nothing-runtime-decides-everything",
+        "project": "PiDeck / pi",
+        "severity": "medium",
+        "what": "package.json#pi 只列入口文件路径（extensions/skills/prompts/themes 四个 string[]），不声明 tools / commands / UI / 权限 / 兼容区间。",
+        "evidence": "source/pi/packages/coding-agent/src/core/pi-manifest.ts:3-8,16-33",
+        "consequence": "宿主在 load 之前无法知道扩展会注册什么，因此无法做安装期冲突检测、无法做能力预览、无法做权限提示——只能事后靠包名关键词猜（ExtensionManager.ts:586-603）。"
+      },
+      {
+        "id": "silent-fail-open-on-old-host",
+        "project": "PiDeck",
+        "severity": "medium",
+        "what": "pi 版本低于 0.79 时 trust flag 被静默跳过，而老版本 pi 没有 trust 系统会自动加载所有资源。",
+        "evidence": "PiDeck/src/main/pi/PiProcess.ts:194-201（:201 注释原文）；同类门控 ExtensionManager.ts:476-485",
+        "why_pitfall": "这是全项目中方向与 CodePilot fail-closed 原则相反的一处：版本探测失败或版本过低 → 更宽松而非更严格。"
+      },
+      {
+        "id": "dual-id-schemes",
+        "project": "PiDeck",
+        "severity": "low",
+        "what": "同一个列表里并存两套 id 规则：本地文件扩展 `local:${source}`，pi list 解析出的包 `${scope}:${source}`。",
+        "evidence": "PiDeck/src/main/extensions/ExtensionManager.ts:242 vs :566",
+        "downstream": "禁用/删除路径也随之分叉：内置走 removeBuiltIn（:303-309）、本地文件走 rm（:284-286）、npm 包走 pi remove（:288-292），三条互斥分支各带自己的前缀判断。"
+      },
+      {
+        "id": "text-parsing-as-integration-contract",
+        "project": "PiDeck",
+        "severity": "medium",
+        "what": "扩展列表来自对 `pi list` 人类可读输出的正则解析。",
+        "evidence": "PiDeck/src/main/extensions/ExtensionManager.ts:544-579 parseListOutput —— 靠 `^User packages:` / `^Project packages:` 分段与 `^(npm|file|github|git|https?):` 前缀识别条目，紧邻的下一行当 path",
+        "consequence": "上游改一行输出格式就会静默产生错误的扩展列表；:257-259 的 isLocalFileExtension 也建立在同一套前缀约定上。"
+      },
+      {
+        "id": "conflict-detection-inline-in-list",
+        "project": "PiDeck",
+        "severity": "low",
+        "what": "冲突检测与自动让位（含删磁盘文件、写设置）内联在 list() 的读路径里执行。",
+        "evidence": "PiDeck/src/main/extensions/ExtensionManager.ts:161-197",
+        "self_documented_hazard": ":159-160 注释：此处刻意不走 disableBuiltIn，因为它会 invalidateListCache，导致 list 请求中途 generation 变化、结果被丢弃后反复重入。即一个『读』操作产生副作用，且必须绕开自己的缓存失效机制才不会自激。"
+      },
+      {
+        "id": "no-ui-extension-points-at-all",
+        "project": "CodePilot",
+        "severity": "medium",
+        "what": "插件完全无法贡献 UI；所有插槽都是应用自有的 React props / 路由 / 内部事件。",
+        "evidence": "AppShell.tsx:53-55,163-164,238,624-625；ChatComposerActionBar.tsx:5-15；ChatView.tsx:1469,1497-1517,1739,1775-1795；settings/layout.tsx:25-28,56-77；GlobalSearchDialog.tsx:281-389；ui/command.tsx:32-34,179-183",
+        "tradeoff": "换来的是零第三方渲染风险（见 F 节），代价是插件只能贡献 Claude 侧能力，界面完全封闭。"
+      },
+      {
+        "id": "version-constraint-declared-but-never-parsed",
+        "project": "CodePilot",
+        "severity": "medium",
+        "what": "enabledPlugins 的值支持 string[]『版本约束』并被小心地保留传递，但从未被解析或执行。",
+        "evidence": "CodePilot/src/lib/plugin-discovery.ts:58-65（类型注释称其为 version constraints）、:222-228 isEnabledValue 对任何数组一律 return true、:389-401 resolveWriteValue 只负责原样保留",
+        "consequence": "存在一个看起来像兼容性机制、实际零语义的字段。"
+      },
+      {
+        "id": "no-plugin-uninstall-path",
+        "project": "CodePilot",
+        "severity": "low",
+        "what": "/api/plugins 只有 GET 与 PUT(enabled)，没有 DELETE；插件目录只能由外部 Claude CLI 管理。",
+        "evidence": "CodePilot/src/app/api/plugins/route.ts（全 17 行只有 GET）、CodePilot/src/app/api/plugins/[id]/route.ts（只导出 GET 与 PUT）",
+        "contrast": "skills 侧有完整 install/remove（api/skills/marketplace/install/route.ts:8-42、remove/route.ts:1-8）。"
+      },
+      {
+        "id": "manifest-without-identity-fields",
+        "project": "CodePilot",
+        "severity": "medium",
+        "what": "plugin.json 只有 name / description / author 三个实义字段，没有 id、version、permissions、compatibility。运行期身份靠 `${name}@${目录名}` 拼装。",
+        "evidence": "CodePilot/src/lib/plugin-discovery.ts:29-36（类型）、:284-296（兜底与目录探测）、:361（key 拼装）",
+        "consequence": "marketplace 目录改名即换身份，enabledPlugins 里的旧 key 变孤儿；能力（commands/skills/agents）靠 fs.existsSync 探测目录而非清单声明（:294-296）。"
+      },
+      {
+        "id": "canUseTool-is-not-an-interception-point",
+        "project": "CodePilot",
+        "severity": "high",
+        "what": "在上游 SDK 的 permissionMode:'auto' 下，canUseTool 回调在分类器批准路径上根本不会被调用，把它当作统一拦截点会形成安全假象。",
+        "evidence": "CodePilot/src/lib/permission/profile.ts:196-228（四步解析顺序的源码级核实）；未闭合部分 CodePilot/src/lib/permission/external-mcp.ts:7-15",
+        "status": "CodePilot 已改用 deny 规则规避（profile.ts:224-228），但残留洞被作者自己记录在案。此条列为坑，是因为『统一 invoke 入口 = 统一拦截点』这个直觉在该 SDK 上不成立。"
+      },
+      {
+        "id": "prefix-as-allow-decision",
+        "project": "CodePilot",
+        "severity": "high",
+        "what": "曾用 `codepilot_*` 前缀作为放行判据造成漏洞（Phase 5e），现已改为前缀只用于限制。",
+        "evidence": "CodePilot/src/lib/permission/profile.ts:94-99 原文：『NOT a revival of the Phase 5e `codepilot_*`-prefix hole (that one *allowed* on prefix match; this one only ever *restricts*)』",
+        "generalization": "名称前缀可以用来收紧，不能用来放行。"
+      },
+      {
+        "id": "documented-internal-drift",
+        "project": "CodePilot",
+        "severity": "low",
+        "what": "契约本身诚实记录了尚未收敛的漂移：memory 能力的 native 与 bridge 两个实现各有自己的删节版 system prompt。",
+        "evidence": "CodePilot/src/lib/harness/capability-contract.ts:274-276（native『Currently has its own MEMORY_SEARCH_SYSTEM_PROMPT (5-line abridged) that drifts from MCP. Tech-debt』）、:281-282（bridge 同类）、:315-316（notification 的 SYSTEM vs MCP_SYSTEM 命名差异，Drift TBD-checked in slice 8）",
+        "reading": "把已知未收敛项写进契约本体、标注 tech-debt，是可取的做法；但它同时说明 systemPromptFragment 的『逐字一致』约束只对部分能力被真正执行。"
+      }
+    ],
+    "cross_cutting_observations": [
+      "两个项目在同一个问题上做了相反选择：CodePilot 通过『第三方代码完全不进我的进程』换取零沙箱负担（plugin-discovery.ts:16-18），代价是 UI 完全封闭且对插件行为零可见性；PiDeck/pi 给出丰富的 in-process API（types.ts:1193-1431 约 40 个方法），代价是同 realm、无权限、无命名空间、无拆卸。",
+      "两者的第三方代码都最终被推到进程边界之外（CodePilot → Agent SDK 子进程；PiDeck → pi CLI 子进程），即『进程边界』是这两套设计里唯一真正生效的隔离手段，其余（前缀约定、关键词黑名单、文件停放）都是补丁。",
+      "凡是有『声明 → 校验 → 投影』三段结构的地方（CodePilot 的 capability-contract + harness-home），冲突与漂移都能被静态发现；凡是『运行期注册』的地方（pi 的 register*），冲突只能在崩溃时被发现（ExtensionManager.ts:174-176 的 RPC 启动失败）。",
+      "两个项目都没有实现签名校验与兼容区间校验；哈希（CodePilot 的 contentHash / sha256）只用于去重与一致性验证，不构成来源可信链。"
+    ]
+  }
+}

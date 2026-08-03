@@ -6,6 +6,7 @@
  */
 export * from "./channels.js";
 export * from "./channel-contract.js";
+export * from "./capability.js";
 export * from "./envelope.js";
 export * from "./settings.js";
 export * from "./session.js";

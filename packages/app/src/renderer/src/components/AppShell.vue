@@ -25,6 +25,7 @@ import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
 import { useArtifactsStore } from "../stores/artifacts";
+import { useCapabilitiesStore } from "../stores/capabilities";
 import {
   createDirtyDialog,
   setDirtyPrompt,
@@ -37,6 +38,7 @@ const updateStore = useUpdateStore();
 const piRes = usePiResourcesStore();
 const providers = useProvidersStore();
 const artifacts = useArtifactsStore();
+const capabilities = useCapabilitiesStore();
 const message = useMessage();
 const dialog = useDialog();
 store.setNotifier(message);
@@ -113,11 +115,29 @@ const dragging = ref(0);
 const filesOpen = ref(false);
 const changesOpen = ref(false);
 
+/**
+ * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
+ *
+ * 判据来自主进程的能力快照，不是本地的一个布尔 —— 「启用」在主进程侧的
+ * 含义是「通道已注册」，渲染侧另记一份必然会在依赖被拒这类情况上分叉，
+ * 表现是面板照常出现、点下去每个动作都报未知通道。
+ *
+ * 现阶段只门控这四块的**可见性**，AppShell 的四个具名 slot 一个都没动
+ * （ADR-0002 D5 的 registry 驱动改造属第二阶段）。
+ */
+const filesEnabled = computed(() => capabilities.isEnabled("common.workspace-files"));
+const reviewEnabled = computed(() => capabilities.isEnabled("common.workspace-review"));
+const previewEnabled = computed(() => capabilities.isEnabled("common.preview"));
+const artifactsEnabled = computed(() => capabilities.isEnabled("common.artifacts"));
+
 onMounted(() => {
   void store.init();
   // 先取快照再订阅：窗口 reload 之后进度必须从 main 的快照原样恢复，
   // 而不是回到 idle。
   void updateStore.init();
+  // 能力快照：没回来之前 isEnabled() 一律放行，因此这一行的迟到不会让
+  // 界面先闪一下空壳（理由见 stores/capabilities.ts 的文件头）。
+  void capabilities.refresh();
 });
 
 /**
@@ -186,7 +206,7 @@ function onDrop(): void {
 
     <slot name="sidebar">
       <Sidebar />
-      <FileTreePanel v-if="filesOpen" />
+      <FileTreePanel v-if="filesOpen && filesEnabled" />
     </slot>
     <div class="main-col">
       <TopBar />
@@ -222,6 +242,7 @@ function onDrop(): void {
         <slot name="main">
           <div class="workspace-toggles">
             <n-button
+              v-if="filesEnabled"
               size="tiny"
               :type="filesOpen ? 'primary' : 'default'"
               quaternary
@@ -230,6 +251,7 @@ function onDrop(): void {
               📁 文件
             </n-button>
             <n-button
+              v-if="reviewEnabled"
               size="tiny"
               :type="changesOpen ? 'primary' : 'default'"
               quaternary
@@ -238,6 +260,7 @@ function onDrop(): void {
               🔀 改动
             </n-button>
             <n-button
+              v-if="artifactsEnabled"
               size="tiny"
               :type="artifacts.panelOpen ? 'primary' : 'default'"
               quaternary
@@ -247,14 +270,17 @@ function onDrop(): void {
             </n-button>
           </div>
           <ChatView />
-          <FileEditorPane v-if="filesOpen" />
-          <!-- 预览区跟着文件面板一起开合：不开文件树的时候它没有输入来源 -->
+          <FileEditorPane v-if="filesOpen && filesEnabled" />
+          <!-- 预览区跟着文件面板一起开合：不开文件树的时候它没有输入来源。
+               能力门控是**两个**：文件树给它输入，预览能力给它转换与沙箱窗口，
+               缺任何一个这块都没有意义（ADR-0002 D5 记的那个「一个 filesOpen
+               同时控制两个能力域」的问题，在这里先按两个判据拆开表达）。 -->
           <PreviewPane
-            v-if="filesOpen"
+            v-if="filesOpen && filesEnabled && previewEnabled"
             :workspace-id="store.workspaceId ?? undefined"
             :relative-path="artifacts.previewRelativePath || undefined"
           />
-          <ChangesetPanel v-if="changesOpen" />
+          <ChangesetPanel v-if="changesOpen && reviewEnabled" />
           <InputBar />
         </slot>
       </template>
@@ -269,7 +295,7 @@ function onDrop(): void {
       <ProjectTrustDialog />
       <ProviderCenter />
       <UsagePanel />
-      <ArtifactLibrary />
+      <ArtifactLibrary v-if="artifactsEnabled" />
     </slot>
   </div>
 </template>

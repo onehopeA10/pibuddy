@@ -222,6 +222,19 @@ export const CHANNELS = {
   /** 一次 agent_settled 之后上报会话累计量，由主进程做差值入库 */
   usageRecord: "usage:record",
 
+  // ---- 能力包与 Profile（ADR-0002 第一阶段，恰 3 条） ----
+  //
+  // 三条都**不接受 manifest**：能力集合由主进程的 CapabilityRegistry 在装配期
+  // 封口，渲染进程只能在已注册的集合里挑，既塞不进一个新能力，也改不了任何
+  // 一条 manifest 的权限申请。set-profile 的入参是 profileId，set-enabled 的
+  // 入参是已注册的 capabilityId + 一个布尔——两条路上都没有可供构造的结构。
+  /** 当前 Profile、全部已注册能力及其启用态 */
+  capabilitiesDescribe: "capabilities:describe",
+  /** 切换 Profile（= 换一组启用集合，不是换一个应用） */
+  capabilitiesSetProfile: "capabilities:set-profile",
+  /** 在当前 Profile 之上单独开关一个能力 */
+  capabilitiesSetEnabled: "capabilities:set-enabled",
+
   // ---- 诊断与健康（OBS-101，恰 3 条） ----
   //
   // 三条都**不接受路径**：诊断包的落盘位置由主进程的保存对话框决定，

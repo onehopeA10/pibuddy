@@ -1,0 +1,1666 @@
+{
+  "meta": {
+    "angle": "implementation",
+    "scope_readonly": true,
+    "files_modified": 0,
+    "generated_at": "2026-08-03",
+    "method": "maestro explore（3 prompt，会话 exp-20260803-163658-78yr）+ rg 结构扫描 + 逐文件 Read 交叉验证",
+    "confidence_notes": [
+      "A 段层级建议依据用户给定的归类基准；ambiguous 项已逐条写明两难点，未做取舍。",
+      "B 段所有 import 行号来自 rg 直读源码，双源（explore + rg）一致。",
+      "coding 与 connector 两层的「不存在」结论依据 packages/app/package.json 依赖表 + CHANNELS 全表 + rg 关键词全扫三重否证。"
+    ]
+  },
+  "A_module_inventory": {
+    "main_modules": [
+      {
+        "path": "packages/app/src/main/index.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "Electron app 引导：创建 BrowserWindow、装 window-policy、registerIpc、启动健康检查、armUpdateChecks。packages/app/src/main/index.ts:1-8 的 import 列表即进程装配清单。",
+        "notes": "index.ts:4 直接 import disposeAllWorkspaceResources（workspace 域），是内核入口硬编码了一个 common 层模块的清理函数。"
+      },
+      {
+        "path": "packages/app/src/main/ipc.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "只剩 22 行门面：setGuardLogger + registerAllIpc（ipc.ts:19-22），并 re-export disposeClientFor / MAX_AUDIO_BYTES（ipc.ts:16-17）。"
+      },
+      {
+        "path": "packages/app/src/main/ipc-registry.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "12 个域的 register*Ipc() 集中装配（ipc-registry.ts:23-36）。这是「能力注册」当前的唯一形态：一个写死顺序的函数体，不是数据驱动的注册表。"
+      },
+      {
+        "path": "packages/app/src/main/ipc-guard.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "全仓唯一 ipcMain.handle 出口（ipc-guard.ts:293-318），四道闸：assertMainFrame / schema.parse / assertSizeWithin / rateLimiter.check。implements PermissionEngine（ipc-guard.ts:221）。"
+      },
+      {
+        "path": "packages/app/src/main/logger.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "doc/architecture.md:102 列为「结构化脱敏日志」单点实现，复用方为全主进程。"
+      },
+      {
+        "path": "packages/app/src/main/logger-redact.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "doc/architecture.md:103 列为脱敏规则单点实现；实际复用方 diagnostics/support-bundle.ts:33、providers/connectivity.ts:21。"
+      },
+      {
+        "path": "packages/app/src/main/fs-atomic.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "doc/architecture.md:104 的原子写单点实现；被 workspace-registry.ts:28、secret-store.ts:31、endpoints.ts、settings.ts、changeset/*、update/*、health/update-markers.ts:30、pi-resources/trust-store.ts:38、providers/*、artifacts 等跨域复用。"
+      },
+      {
+        "path": "packages/app/src/main/settings.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "settings.json 读写 + SETTINGS_SCHEMA_VERSION=2 + migrate()（settings.ts:36, 80-）。被 5 个域跨目录 import。",
+        "notes": "AppSettings 是一个扁平大对象，同时装 kernel 字段（piRuntimeMode/provider/modelId）与偏好字段（notificationsEnabled/voiceEnabled/onboardingStep），没有按能力分片。"
+      },
+      {
+        "path": "packages/app/src/main/secret-store.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "safeStorage 加密的 secrets.json，只进不出（secret-store.ts:94-139）。SECRET_KEYS 目前只有一个槽位 sttApiKey（secret-store.ts:37-39）。"
+      },
+      {
+        "path": "packages/app/src/main/endpoints.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "出站端点注册表：渲染进程只拿 endpointId，校验在落盘之前（endpoints.ts:1-11）。EndpointKind = \"stt\" | \"provider\"（endpoints.ts:20）。"
+      },
+      {
+        "path": "packages/app/src/main/workspace-registry.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "workspaceId = sha256(canonical realpath) 前 32 hex（workspace-registry.ts:96-100）；resolveInWorkspace 是全计划唯一收容原语 CT-18（workspace-registry.ts:173-212）；assertContained（:221-229）。落盘 workspaces.json。",
+        "notes": "被 15 个文件跨目录 import，是全 main 耦合度最高的模块 —— 但它是安全原语，属于「内核被上层依赖」的正向依赖。"
+      },
+      {
+        "path": "packages/app/src/main/attachment-registry.ts",
+        "kind": "top_level_file",
+        "layer": "ambiguous",
+        "evidence": "一次性 capability token（30 分钟滑动 TTL，attachment-registry.ts:55）、magic-bytes 嗅探（:199-214）、read/read-write 访问级别（:75, :342-344）、按 sessionId 批量撤销（:415-424）。",
+        "ambiguity": "机制（token 签发/兑付/撤销）是 kernel 的能力凭证设施；但它的语义完全绑定在 common 层的 workspace-files（附件/拖放）上 —— capabilities 枚举写死为 read|open|reveal（:61），kind 写死为 image|video|other（IMAGE_EXT/VIDEO_EXT :124-125），且直接持有 shell.openPath（:395-401）。拆分时要么把枚举下沉为可扩展的能力名，要么整体归 common 而只把 token 机制留在 kernel。"
+      },
+      {
+        "path": "packages/app/src/main/misc-ipc.ts",
+        "kind": "top_level_file",
+        "layer": "ambiguous",
+        "evidence": "单文件同时注册 4 类通道：settings（:47/:55/:74/:83/:94）、dialog+workspace:current（:137/:148/:162）、file 附件+shell（:182/:186/:190/:194/:198）、stt 语音（:208）。",
+        "ambiguity": "settings/pi-runtime 属 kernel；dialog/file/shell 属 common 的 workspace-files 与附件；stt:transcribe 属 common（或独立语音能力）。这是唯一一个「一个文件横跨三层」的 IPC 注册点，拆分时必然要切开。"
+      },
+      {
+        "path": "packages/app/src/main/pi-launcher.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "buildPiSpawn / verifyRuntimeHandshake / resolveExternalCommand —— pi 子进程的 spawn 参数与运行时校验。被 pi/pi-ipc.ts:39、pi-resources/pi-resources-ipc.ts:37、misc-ipc.ts:28 复用。"
+      },
+      {
+        "path": "packages/app/src/main/pi-runtime-manifest.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "RUNTIME_MANIFEST_FILENAME = \"runtime-manifest.json\"（:15），内置 pi 运行时的清单解析。"
+      },
+      {
+        "path": "packages/app/src/main/pi-supervisor.ts",
+        "kind": "top_level_file",
+        "layer": "kernel",
+        "evidence": "doc/architecture.md:94 的 PiRuntimeSupervisor 端口落地；仅被 pi/pi-ipc.ts:42 使用。"
+      },
+      {
+        "path": "packages/app/src/main/pi/",
+        "kind": "directory",
+        "layer": "kernel",
+        "evidence": "pi-ipc.ts 注册 pi 生命周期 4 条 + 15 个产品动作 + 会话树 5 条（pi-ipc.ts:158-398）；event-forwarder.ts 做 33ms 批处理与信封化（doc/architecture.md:52-56）。Agent runtime + 流式事件 + 会话切换全在这里。",
+        "notes": "pi-ipc.ts 同时导出 log()、tryClientFor()、disposeClientFor()，被 misc-ipc.ts:28、update/update-ipc.ts:36、sessions/sessions-ipc.ts:27、ipc.ts:14 反向依赖 —— 见 B 段。"
+      },
+      {
+        "path": "packages/app/src/main/sessions/",
+        "kind": "directory",
+        "layer": "kernel",
+        "evidence": "session-dir.ts（pi 会话目录编码，纯函数）、session-index.ts（SQLite 索引 + workspace_id 过滤 + 草稿列）、session-history.ts（JSONL 字节 offset 翻页）、session-rename.ts、sessions-ipc.ts 注册 9 条 sessions:* 通道（:41-49）。",
+        "notes": "草稿（draft_text/draft_json）与用量汇总（token_total/cost_total）都塞在 sessions 表里（session-index.ts:139-153），不是独立分区。"
+      },
+      {
+        "path": "packages/app/src/main/providers/",
+        "kind": "directory",
+        "layer": "kernel",
+        "evidence": "provider-catalog.ts / auth-store.ts（~/.pi/agent/auth.json）/ models-store.ts（~/.pi/agent/models.json）/ model-scope.ts（global/workspace/session 三层默认模型）/ connectivity.ts / providers-ipc.ts 注册 8 条 providers:* + 3 条 usage:*（:167-260）。归口「模型与 Provider」。"
+      },
+      {
+        "path": "packages/app/src/main/usage/",
+        "kind": "directory",
+        "layer": "ambiguous",
+        "evidence": "usage-store.ts：usage.db，usage_daily 主键 (day, workspace_root, provider, model_id)（usage-store.ts:65-78），USAGE_SCHEMA_VERSION=1（:30）。IPC 由 providers-ipc.ts 一并注册（:232/:236/:260）。",
+        "ambiguity": "计量口径是「模型与 Provider」的一部分（kernel），但它是横切所有能力包的用量账本，且分区键用的是 workspace_root 明文路径而不是 workspaceId —— 与其它表口径不一致。"
+      },
+      {
+        "path": "packages/app/src/main/security/",
+        "kind": "directory",
+        "layer": "kernel",
+        "evidence": "window-policy.ts（CSP 响应头 + will-navigate 白名单 + setWindowOpenHandler 恒 deny，:217-236）、pi-runtime-approval.ts（外部运行时的原生选择框 + 二次确认）。"
+      },
+      {
+        "path": "packages/app/src/main/net/",
+        "kind": "directory",
+        "layer": "kernel",
+        "evidence": "outbound-guard.ts 是全 main 唯一出站 HTTP 原语（结构性断言写在 :20-23），safeFetch/normalizeEndpointUrl/assertPublicAddress。复用方 providers/models-store.ts:27、misc-ipc.ts:26、endpoints.ts:18。"
+      },
+      {
+        "path": "packages/app/src/main/update/",
+        "kind": "directory",
+        "layer": "kernel",
+        "evidence": "update-service.ts / release-integrity.ts / runtime-version-policy.ts / update-errors.ts / update-ipc.ts 注册 9 条 update:* + 推 update:event（:169-223）。update-prefs.json 独立落盘（update-ipc.ts:72）。"
+      },
+      {
+        "path": "packages/app/src/main/health/",
+        "kind": "directory",
+        "layer": "kernel",
+        "evidence": "startup-health.ts / safe-mode.ts / health-check.ts / update-markers.ts（pending-update.json、last-known-good.json、health.json，:32-34）。属更新与启动可靠性。",
+        "notes": "startup-health.ts:30 import sessionIndex —— 内核健康检查直接依赖会话索引实现。"
+      },
+      {
+        "path": "packages/app/src/main/lifecycle/",
+        "kind": "directory",
+        "layer": "kernel",
+        "evidence": "graceful-shutdown.ts —— 退出时的有序释放。"
+      },
+      {
+        "path": "packages/app/src/main/diagnostics/",
+        "kind": "directory",
+        "layer": "kernel",
+        "evidence": "support-bundle.ts（清单预览 + 脱敏导出）、diagnostics-ipc.ts 注册 3 条 diagnostics:*。属日志/可观测。",
+        "notes": "diagnostics-ipc.ts:25-28 同时 import logger、settings、health/update-markers、health/safe-mode —— 它是天然的跨域聚合点，拆分后需要一个「各能力包自报诊断项」的接口。"
+      },
+      {
+        "path": "packages/app/src/main/extension-ui/",
+        "kind": "directory",
+        "layer": "ambiguous",
+        "evidence": "ext-ui-service.ts 持有挂起表、timeout 定时器、代际清理；九个上游 method 路由到六个分支（ext-ui-service.ts:36-45 附近的 routeOf）。推 pi:ui-request / pi:ui-expire / pi:ui-expire-all。",
+        "ambiguity": "从协议看它是 pi RPC 的 extension_ui_request 分派，属 kernel 的流式事件/协议层；从产品看它就是 structured-interaction（Ask/确认/表单/审批 + widget/title），归口 common。目前两者是同一份代码，method 枚举来自 @pibuddy/pi-sdk 而非本地契约。"
+      },
+      {
+        "path": "packages/app/src/main/pi-resources/",
+        "kind": "directory",
+        "layer": "ambiguous",
+        "evidence": "resource-scanner.ts（扫 ~/.pi/agent 与项目 .pi 下的 skills/commands/themes/extensions）、package-install.ts（execFile 子命令白名单）、trust-store.ts（~/.pi/agent/trust.json）、pi-resources-ipc.ts 注册 5 条 pi-resources:* + 2 条 trust:*（:168-230）。",
+        "ambiguity": "project trust 与安装白名单是 kernel 的安全/能力注册；但被扫描的资源（skills/commands/extensions）本身就是「垂直能力包」的上游形态 —— 这一域既是能力注册机制，又是第三方能力的载体。"
+      },
+      {
+        "path": "packages/app/src/main/workspace/",
+        "kind": "directory",
+        "layer": "common",
+        "evidence": "file-tree.ts / ignore-rules.ts / search-entry.ts / search-scan.ts / search-worker.ts / file-editor.ts / workspace-store.ts（workspaces.db 档案表）/ workspace-ipc.ts 注册 9 条 workspace:*（:147-292）。对应 common 的 workspace-files（文件树/搜索/附件/拖放）。",
+        "notes": "workspace-store.ts 的 WorkspaceProfile 已经带 permissionRules: PermissionRule[] 字段（workspace-store.ts:57），但当前 ipc-guard 的限流/尺寸判定并不读它 —— 见 E 段。"
+      },
+      {
+        "path": "packages/app/src/main/changeset/",
+        "kind": "directory",
+        "layer": "common",
+        "evidence": "tool-watch.ts（从工具调用捕获变更）、changeset-store.ts（changesets.db）、apply.ts（接受/回滚）、changeset-ipc.ts 注册 4 条 changeset:*（:32-54）。对应 common 的 workspace-review。",
+        "notes": "changeset/tool-watch.ts:25 import ../artifacts/artifact-tracker.js —— common 内部横向硬耦合，见 B 段。"
+      },
+      {
+        "path": "packages/app/src/main/artifacts/",
+        "kind": "directory",
+        "layer": "common",
+        "evidence": "artifact-store.ts（artifacts.db，logical_key + version 版本链，回收站为 status 而非另一张表，:52-74）、artifact-tracker.ts（trackToolStart/trackToolEnd）、artifact-ipc.ts 注册 8 条 artifacts:*（:32-39）。对应 common 的 artifacts。"
+      },
+      {
+        "path": "packages/app/src/main/preview/",
+        "kind": "directory",
+        "layer": "common",
+        "evidence": "preview-window.ts（partition sandbox:preview、javascript:false、CSP、webRequest 全拦，:204-215/:268-269）、convert-host.ts（utilityProcess.fork + env 白名单 + 30s 超时，:177-179/:210/:335）、convert-worker.ts、preview-types.ts、office-safety。对应 common 的 documents（PDF/Office/CSV/图片预览）。"
+      }
+    ],
+    "renderer_stores": [
+      {
+        "path": "packages/app/src/renderer/src/stores/app.ts",
+        "layer": "kernel",
+        "evidence": "Agent runtime 的渲染侧总 reducer：settings/booting/startError、workspaceId+displayPath（:571-574）、items/queue/localQueue（:490-506）、runtimeId/generation/lastSequence/droppedEnvelopes（:903-909）、composer 草稿与附件（:1540-1564）、settingsOpen（:529）。handleEvent switch 是 doc/architecture.md:57-59 的第 5 跳。",
+        "notes": "被 21 个非测试文件直接 import（见 B 段），其中 6 个属 common 层组件。它同时持有 kernel 状态与 UI 开关（settingsOpen）与 common 状态（inboundAttachments/draftAttachments），是渲染侧最大的拆分障碍。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/sessions.ts",
+        "layer": "kernel",
+        "evidence": "会话中心（sessions:query / rename / pin / status / purge / draft / export）。被 app.ts:28 静态 import。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/session-scope.ts",
+        "layer": "kernel",
+        "evidence": "registerSessionScopedReset / resetSessionScopedState —— 会话切换时的跨 store 状态清理注册表（app.ts:38、extensionUi.ts:21 各注册一次）。",
+        "notes": "这是渲染侧唯一一处已有的、数据驱动的「模块自注册」雏形，形态上最接近能力注册表。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/extensionUi.ts",
+        "layer": "ambiguous",
+        "evidence": "挂起弹窗表、busyStatus、extStatus、widget、displayTitle、recordUnknownEvent。被 app.ts:39 import，app.ts:520/589/591 把 uiRequests/busyStatus/extStatus 再 computed 转发一遍。",
+        "ambiguity": "与 main/extension-ui 同源：既是 pi 协议的 UI 请求分派（kernel），又是 structured-interaction 的渲染侧（common）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/model-capability.ts",
+        "layer": "kernel",
+        "evidence": "assertImageCapable / imageBlockedMessage —— 模型能力判定，被 app.ts:34-37 import 用于发送前拦截。属「模型与 Provider」。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/providers.ts",
+        "layer": "kernel",
+        "evidence": "provider 列表、panelOpen（:33）、usagePanelOpen（:34）、refresh()。属「模型与 Provider」。",
+        "notes": "panelOpen / usagePanelOpen 两个 UI 开关住在 kernel store 里，被 AppShell.vue:242 之外的 ProviderCenter/UsagePanel 消费。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/update.ts",
+        "layer": "kernel",
+        "evidence": "更新状态快照 + 事件订阅 + blockerDialogOpen（:64）。AppShell.vue:120 在 onMounted 里 init()。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/piResources.ts",
+        "layer": "ambiguous",
+        "evidence": "panelOpen（:17）、trustOpen（:19）、describeTrust()。AppShell.vue:130-136 watch workspaceId 触发 describeTrust。",
+        "ambiguity": "同 main/pi-resources：能力注册机制 vs 第三方能力载体。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/chat-ui.ts",
+        "layer": "kernel",
+        "evidence": "clearChatUiState()，被 app.ts:32 import。会话视图的纯 UI 态。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/chat-window.ts",
+        "layer": "kernel",
+        "evidence": "聊天窗口虚拟化/窗口化。chat-window.ts:24 import useAppStore —— 同层横向依赖。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/workspace.ts",
+        "layer": "common",
+        "evidence": "文件树 / 编辑器 tab / 脏页决策（createDirtyDialog、setDirtyPrompt、DirtyDecision、EditorTab，见 AppShell.vue:28-33 的 import）。对应 common 的 workspace-files。",
+        "notes": "app.ts:31 静态 import useWorkspaceStore（注释明说「workspace store 不反向依赖本文件」）—— kernel store 单向依赖 common store，方向与目标分层相反。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stores/artifacts.ts",
+        "layer": "common",
+        "evidence": "产物库列表、panelOpen（:42）、previewRelativePath（AppShell.vue:255 消费）。对应 common 的 artifacts。"
+      }
+    ],
+    "renderer_components": [
+      {
+        "path": "packages/app/src/renderer/src/components/AppShell.vue",
+        "layer": "kernel",
+        "evidence": "布局骨架 + 四个具名 slot + 三栏开关；详见 C 段。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/TopBar.vue",
+        "layer": "kernel",
+        "evidence": "模型选择、thinkingLevel、上下文占比、扩展标题/状态（:96-192）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/Sidebar.vue",
+        "layer": "kernel",
+        "evidence": "会话侧栏 + 本次花费（:30）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/ChatView.vue",
+        "layer": "kernel",
+        "evidence": "消息流渲染，import useAppStore（:4）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/MessageItem.vue",
+        "layer": "kernel",
+        "evidence": "单条消息渲染（markdown + 代码高亮）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/InputBar.vue",
+        "layer": "ambiguous",
+        "evidence": "输入框 + 附件 + 图片 + 发送模式（:4 import useAppStore, ComposerImage, SendMode）。",
+        "ambiguity": "发送/steer/followUp 是 kernel；附件拖放与图片是 common 的 workspace-files；语音输入是第三块。三者在同一个组件里。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/QueuePanel.vue",
+        "layer": "kernel",
+        "evidence": "本地队列，import useAppStore（:14）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/ToolActivity.vue",
+        "layer": "kernel",
+        "evidence": "工具调用活动，import useAppStore（:6）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/SessionListPanel.vue",
+        "layer": "kernel",
+        "evidence": "会话列表，import useAppStore（:15）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/StatusCenter.vue",
+        "layer": "kernel",
+        "evidence": "状态中心，import useAppStore（:22）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/SettingsModal.vue",
+        "layer": "kernel",
+        "evidence": "设置弹窗，import useAppStore（:15），由 store.settingsOpen 驱动。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/OnboardingWizard.vue",
+        "layer": "kernel",
+        "evidence": "首启向导，import useAppStore（:31）；AppShell.vue:85-87 用 onboardingCompletedAt 判定。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/Welcome.vue",
+        "layer": "kernel",
+        "evidence": "import useAppStore（:3）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/ProviderCenter.vue",
+        "layer": "kernel",
+        "evidence": "服务商配置，import useAppStore（:30）；由 providers.panelOpen 驱动。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/UsagePanel.vue",
+        "layer": "kernel",
+        "evidence": "用量面板，import useAppStore（:14）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/UpdateBanner.vue",
+        "layer": "kernel",
+        "evidence": "更新通条，AppShell.vue:185 的 banner slot 默认内容。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/UpdateSettingsPanel.vue",
+        "layer": "kernel",
+        "evidence": "更新偏好（channel/autoCheck/autoDownload）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/InstallBlockerDialog.vue",
+        "layer": "kernel",
+        "evidence": "安装阻断，由 update store blockerDialogOpen 驱动。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/SafeModeBanner.vue",
+        "layer": "kernel",
+        "evidence": "安全模式通条，import useAppStore（:15）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/DiagnosticsPanel.vue",
+        "layer": "kernel",
+        "evidence": "诊断包预览/导出，import useAppStore（:21）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/ExtensionUiHost.vue",
+        "layer": "ambiguous",
+        "evidence": "扩展弹窗宿主，import useAppStore（:19）。",
+        "ambiguity": "同 extensionUi store：协议分派（kernel）vs structured-interaction（common）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/ExtensionWidgetHost.vue",
+        "layer": "ambiguous",
+        "evidence": "扩展 widget 宿主。",
+        "ambiguity": "同上。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/PiResourcesPanel.vue",
+        "layer": "ambiguous",
+        "evidence": "资源中心，import useAppStore（:38）。",
+        "ambiguity": "同 main/pi-resources。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/ProjectTrustDialog.vue",
+        "layer": "kernel",
+        "evidence": "project trust 决定（权限），import useAppStore（:27）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/FileTreePanel.vue",
+        "layer": "common",
+        "evidence": "文件树，import useAppStore（:15）；由 AppShell.vue:113 的 filesOpen 驱动（:189）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/FileEditorPane.vue",
+        "layer": "ambiguous",
+        "evidence": "CodeMirror 6 编辑器：EditorState/EditorView/lineNumbers/highlightActiveLine/defaultKeymap/history（:16-18），只 import useWorkspaceStore（:19），不碰 app store。",
+        "ambiguity": "「编辑工作区文件」是 common 的 workspace-files；但编辑器内核（CodeMirror）与行号/快捷键是 coding 包的典型件。当前没有任何语言模式/语法扩展被加载，所以现状更接近 common。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/ChangesetPanel.vue",
+        "layer": "common",
+        "evidence": "变更审阅/接受/回滚；由 AppShell.vue:114 的 changesOpen 驱动（:257）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/PreviewPane.vue",
+        "layer": "common",
+        "evidence": "文档预览；AppShell.vue:252-256 传 workspaceId + relativePath，且被 filesOpen 连带控制。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/ArtifactLibrary.vue",
+        "layer": "common",
+        "evidence": "产物库，import useAppStore（:16）；由 artifacts.panelOpen 驱动（AppShell.vue:272）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/components/ArtifactLink.vue",
+        "layer": "common",
+        "evidence": "消息内产物链接，import useAppStore（:15）。"
+      }
+    ],
+    "renderer_shared_modules": [
+      {
+        "path": "packages/app/src/renderer/src/markdown.ts",
+        "layer": "common",
+        "evidence": "markdown-it + highlight.js/lib/common（:1-3）。代码高亮在这里，不是独立 coding 模块。没有 KaTeX/math 渲染（math-rendering 尚不存在）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/stt.ts",
+        "layer": "common",
+        "evidence": "语音转写前端，对应 stt:transcribe 单通道。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/friendly.ts",
+        "layer": "kernel",
+        "evidence": "错误信息友好化。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/App.vue",
+        "layer": "kernel",
+        "evidence": "根组件，无 v-if/v-show 条件渲染（rg 无命中）。"
+      },
+      {
+        "path": "packages/app/src/renderer/src/main.ts",
+        "layer": "kernel",
+        "evidence": "Vue 应用装配（pinia + naive-ui）。"
+      }
+    ],
+    "absent_layers": {
+      "coding": {
+        "status": "几乎不存在",
+        "evidence": "packages/app/package.json 依赖里没有 simple-git/nodegit、没有 node-pty/xterm、没有 monaco、没有 tree-sitter、没有任何 LSP 客户端。rg 对 git/worktree/terminal/lsp/tree-sitter 的命中全部是无关词（workspace-store.ts:41 的 \".git\" ignore 项、release-integrity.ts 的 digest、package-install.ts 的 npm 子命令）。",
+        "present_pieces": [
+          "packages/app/package.json:20-24 —— @codemirror/{commands,state,view} + codemirror 6.0.2（仅 FileEditorPane.vue 使用，无语言模式）",
+          "packages/app/package.json:29 —— highlight.js（仅 renderer/src/markdown.ts:3 使用，用于消息里的代码块）"
+        ]
+      },
+      "connector": {
+        "status": "完全不存在",
+        "evidence": "CHANNELS 全表（packages/contract/src/channels.ts:20-236）没有任何飞书/Slack/邮件/云盘/远程通道；preload/api/ 下 14 个命名空间没有 connector 类；main/ 下无对应目录。唯一的出站能力是 net/outbound-guard.ts 的 safeFetch，且只服务 stt 与 provider 两种 EndpointKind（endpoints.ts:20）。"
+      }
+    }
+  },
+  "B_cross_layer_dependencies": {
+    "reverse_dependency_kernel_on_upper": [
+      {
+        "file_line": "packages/app/src/main/index.ts:4",
+        "import": "import { disposeAllWorkspaceResources } from \"./workspace/workspace-ipc.js\";",
+        "from_layer": "kernel",
+        "to_layer": "common",
+        "why_blocking": "应用入口在 window closed / before-quit 路径上硬编码了 workspace 域的清理函数。能力包被摘掉后这一行会编译失败。"
+      },
+      {
+        "file_line": "packages/app/src/main/health/startup-health.ts:30",
+        "import": "import { sessionIndex } from \"../sessions/session-index.js\";",
+        "from_layer": "kernel(health)",
+        "to_layer": "kernel(sessions)",
+        "why_blocking": "同层横向：启动健康检查直接持有会话索引单例，而不是通过一个「各子系统自报健康」的接口。"
+      },
+      {
+        "file_line": "packages/app/src/main/diagnostics/diagnostics-ipc.ts:27",
+        "import": "import { loadSettings } from \"../settings.js\";",
+        "from_layer": "kernel(diagnostics)",
+        "to_layer": "kernel(settings)",
+        "why_blocking": "诊断包的收集清单硬编码在 diagnostics-ipc.ts:39-52（markerDir、settings.json 路径），没有「能力包注册诊断项」的入口。"
+      },
+      {
+        "file_line": "packages/app/src/main/diagnostics/diagnostics-ipc.ts:28",
+        "import": "import { markerDir, readPendingUpdate, readHealth } from \"../health/update-markers.js\";",
+        "from_layer": "kernel(diagnostics)",
+        "to_layer": "kernel(health)",
+        "why_blocking": "同上，横向硬耦合。"
+      },
+      {
+        "file_line": "packages/app/src/main/diagnostics/diagnostics-ipc.ts:29",
+        "import": "import { safeModeState } from \"../health/safe-mode.js\";",
+        "from_layer": "kernel(diagnostics)",
+        "to_layer": "kernel(health)",
+        "why_blocking": "同上。"
+      }
+    ],
+    "kernel_module_reaching_into_pi_domain": [
+      {
+        "file_line": "packages/app/src/main/ipc.ts:14",
+        "import": "import { log } from \"./pi/pi-ipc.js\";",
+        "why_blocking": "IPC 门面把 guard 的 warn 日志接到 pi 域导出的 log() 上（ipc.ts:20）。logger 明明是 kernel 单点实现（doc/architecture.md:102），却要经 pi-ipc 中转。"
+      },
+      {
+        "file_line": "packages/app/src/main/misc-ipc.ts:28",
+        "import": "import { log } from \"./pi/pi-ipc.js\";",
+        "why_blocking": "settings/dialog/file/shell/stt 五类 handler 的日志出口在 pi 域。"
+      },
+      {
+        "file_line": "packages/app/src/main/update/update-ipc.ts:36",
+        "import": "import { log } from \"../pi/pi-ipc.js\";",
+        "why_blocking": "更新子系统的日志出口在 pi 域 —— 更新必须在 pi runtime 不可用时也能工作，这条依赖与该前提冲突。"
+      },
+      {
+        "file_line": "packages/app/src/main/sessions/sessions-ipc.ts:27",
+        "import": "import { tryClientFor } from \"../pi/pi-ipc.js\";",
+        "why_blocking": "sessions:rename / export 要经 pi-ipc 持有的 client 索引取当前 runtime。ipc-registry.ts:5-9 的注释明确把这条依赖写成了「注册顺序不能换」的硬约束（pi-ipc 必须先注册）。",
+        "related": "packages/app/src/main/ipc-registry.ts:24-25 —— registerPiIpc() 必须排在 registerSessionsIpc() 之前"
+      },
+      {
+        "file_line": "packages/app/src/main/ipc.ts:16",
+        "import": "export { disposeClientFor } from \"./pi/pi-ipc.js\";",
+        "why_blocking": "re-export 让 index.ts 不必知道 client 索引在哪，但也意味着 pi 域的生命周期被写进了 kernel 门面的公开面。"
+      }
+    ],
+    "common_layer_horizontal_coupling": [
+      {
+        "file_line": "packages/app/src/main/changeset/tool-watch.ts:25",
+        "import": "import { trackToolEnd, trackToolStart } from \"../artifacts/artifact-tracker.js\";",
+        "from": "common/workspace-review",
+        "to": "common/artifacts",
+        "why_blocking": "变更集的工具监听同时驱动产物追踪。两个 common 能力包被同一个 tool 事件流缝在一起 —— 单独启用 workspace-review 而不启用 artifacts 时这行会断。"
+      },
+      {
+        "file_line": "packages/app/src/main/changeset/apply.ts:31",
+        "import": "import { classifyWriteError, CONFLICT_PREVIEW_CHARS } from \"../workspace/file-editor.js\";",
+        "from": "common/workspace-review",
+        "to": "common/workspace-files",
+        "why_blocking": "接受变更时复用文件编辑器的错误分类与冲突预览常量。"
+      },
+      {
+        "file_line": "packages/app/src/main/preview/preview-ipc.ts:27",
+        "import": "import { resolveAttachment } from \"../attachment-registry.js\";",
+        "from": "common/documents",
+        "to": "kernel/attachment token（形态上）",
+        "why_blocking": "预览接受 attachment token 作为目标之一（channels.ts:145-152）。若 attachment-registry 归 common/workspace-files，则 documents 依赖 workspace-files。"
+      },
+      {
+        "file_line": "packages/app/src/main/workspace/workspace-ipc.ts:35",
+        "import": "import { createAttachment } from \"../attachment-registry.js\";",
+        "from": "common/workspace-files",
+        "to": "attachment token",
+        "why_blocking": "workspace:attachment-create 把工作区文件转成八字段附件引用。"
+      },
+      {
+        "file_line": "packages/app/src/main/pi/pi-ipc.ts:35",
+        "import": "import * as attachments from \"../attachment-registry.js\";",
+        "from": "kernel/pi",
+        "to": "attachment token",
+        "why_blocking": "pi:prompt 携带附件时要在 main 侧兑付 token 拼接文件引用块。这是 kernel 直接依赖附件设施 —— 决定了 attachment-registry 不能整体下沉进 common。"
+      },
+      {
+        "file_line": "packages/app/src/main/artifacts/artifact-store.ts:39",
+        "import": "import { requireWorkspaceRoot } from \"../workspace-registry.js\";",
+        "from": "common/artifacts",
+        "to": "kernel/workspace-registry",
+        "why_blocking": "正向依赖（可接受），但说明 artifacts 的落盘位置在工作区 root 之内（artifact-store.ts:334-347、:513）。"
+      }
+    ],
+    "pi_domain_fan_out": {
+      "file": "packages/app/src/main/pi/pi-ipc.ts",
+      "note": "kernel/pi 是全 main 依赖面最宽的单文件，同时跨到 6 个其它域。这些是 kernel 内部横向依赖，不是层级违规，但决定了 pi-ipc.ts 无法被单独抽离。",
+      "imports": [
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:35",
+          "import": "import * as attachments from \"../attachment-registry.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:36",
+          "import": "import { ExtensionUiService, type ExtUiHost } from \"../extension-ui/ext-ui-service.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:37",
+          "import": "import { registerHandler, forgetSender } from \"../ipc-guard.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:38",
+          "import": "import { createLogger, type Logger } from \"../logger.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:39",
+          "import": "import { buildPiSpawn, verifyRuntimeHandshake } from \"../pi-launcher.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:40",
+          "import": "import { sessionTrustFor } from \"../pi-resources/pi-resources-ipc.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:41",
+          "import": "import { describeTrust, trustArgsFor } from \"../pi-resources/trust-store.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:42",
+          "import": "import { PiSupervisor } from \"../pi-supervisor.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:43",
+          "import": "import { resolveSessionDir } from \"../sessions/session-dir.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:44",
+          "import": "import { sessionIndex } from \"../sessions/session-index.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:45",
+          "import": "import { loadSettings } from \"../settings.js\";"
+        },
+        {
+          "file_line": "packages/app/src/main/pi/pi-ipc.ts:46",
+          "import": "import { assertContained, requireWorkspaceRoot, workspaceIdFor } from \"../workspace-registry.js\";"
+        }
+      ],
+      "notable": "pi-ipc.ts:40 反向 import 另一个 handler 文件（pi-resources-ipc.ts）的导出 sessionTrustFor —— 两个 register*Ipc 模块互相引用，注册顺序因此也被绑定（ipc-registry.ts:24-25）。"
+    },
+    "ipc_registry_layer_map": {
+      "source": "packages/app/src/main/ipc-registry.ts:23-36",
+      "entries": [
+        {
+          "line": 24,
+          "call": "registerPiIpc()",
+          "layer": "kernel",
+          "channels": "pi:start/stop/ui-respond/ui-pending + 15 产品动作 + 5 会话树（pi-ipc.ts:158-398）"
+        },
+        {
+          "line": 25,
+          "call": "registerPiResourcesIpc()",
+          "layer": "ambiguous",
+          "channels": "pi-resources:scan/set-enabled/install/remove/open-dir + trust:describe/decide（pi-resources-ipc.ts:168-230）"
+        },
+        {
+          "line": 26,
+          "call": "registerSessionsIpc()",
+          "layer": "kernel",
+          "channels": "sessions:query/rename/set-pinned/set-status/purge/get-draft/save-draft/export-html/read-history（sessions-ipc.ts:41-49）"
+        },
+        {
+          "line": 27,
+          "call": "registerMiscIpc()",
+          "layer": "ambiguous（横跨三层）",
+          "channels": "settings:get/set/set-secret/describe-secret/set-pi-runtime（kernel）+ workspace:current/dialog:choose-folder/dialog:choose-files（common）+ file:attach-dropped/file:read-attachment/shell:open-path/shell:show-in-folder/attachment:revoke-all（common）+ stt:transcribe（common）"
+        },
+        {
+          "line": 28,
+          "call": "registerProvidersIpc()",
+          "layer": "kernel",
+          "channels": "providers:list/save-key/remove/add-custom/test/discover-models/set-scope-default（providers-ipc.ts:167-210）"
+        },
+        {
+          "line": 29,
+          "call": "registerUsageIpc()",
+          "layer": "kernel",
+          "channels": "usage:query/export/record（providers-ipc.ts:232/236/260）"
+        },
+        {
+          "line": 30,
+          "call": "registerUpdateIpc()",
+          "layer": "kernel",
+          "channels": "update:get-state/check/download/cancel-download/install/set-channel/set-auto-check/set-auto-download/dismiss-version（update-ipc.ts:189-223）+ push update:event（:169）"
+        },
+        {
+          "line": 31,
+          "call": "registerDiagnosticsIpc()",
+          "layer": "kernel",
+          "channels": "diagnostics:preview-bundle/export-bundle/get-report"
+        },
+        {
+          "line": 32,
+          "call": "registerWorkspaceIpc()",
+          "layer": "common",
+          "channels": "workspace:tree-list/tree-watch/search/search-cancel/file-read/file-save/file-mutate/attachment-create/release（workspace-ipc.ts:147-292）+ push workspace:tree-event"
+        },
+        {
+          "line": 33,
+          "call": "registerChangesetIpc()",
+          "layer": "common",
+          "channels": "changeset:query/accept/reject/accept-batch（changeset-ipc.ts:32-54）"
+        },
+        {
+          "line": 34,
+          "call": "registerPreviewIpc()",
+          "layer": "common",
+          "channels": "preview:open/convert/close（preview-ipc.ts:94/128/161）"
+        },
+        {
+          "line": 35,
+          "call": "registerArtifactIpc()",
+          "layer": "common",
+          "channels": "artifacts:query/rename/duplicate/export/show-in-folder/trash/restore/compare-versions（artifact-ipc.ts:50-156）"
+        }
+      ],
+      "fact": "注册是 12 行写死的函数调用，没有条件、没有能力开关、没有返回值。ipc-guard.ts:275-280 的 registered Set + registeredChannels() 是唯一的运行时注册面查询点。"
+    },
+    "contract_channel_grouping": {
+      "channels_ts": {
+        "file": "packages/contract/src/channels.ts",
+        "grouping_form": "单个扁平的 CHANNELS as const 对象（:20-236）+ PUSH_CHANNELS（:239-264），分组仅靠注释横幅，没有任何嵌套结构或按域导出",
+        "comment_groups": [
+          {
+            "lines": "21-32",
+            "label": "运行时生命周期",
+            "layer": "kernel"
+          },
+          {
+            "lines": "34-49",
+            "label": "15 个产品动作窄通道",
+            "layer": "kernel"
+          },
+          {
+            "lines": "51-60",
+            "label": "会话树 / 分叉",
+            "layer": "kernel"
+          },
+          {
+            "lines": "62-74",
+            "label": "会话中心（SES-101，恰 9 条）",
+            "layer": "kernel"
+          },
+          {
+            "lines": "76-100",
+            "label": "设置",
+            "layer": "kernel"
+          },
+          {
+            "lines": "102-110",
+            "label": "workspace 与附件 capability",
+            "layer": "common"
+          },
+          {
+            "lines": "112-133",
+            "label": "Workspace 文件服务（FS-101，恰 9 条）",
+            "layer": "common"
+          },
+          {
+            "lines": "135-143",
+            "label": "Agent 变更集（FS-102，恰 4 条）",
+            "layer": "common"
+          },
+          {
+            "lines": "145-152",
+            "label": "安全预览（ART-101，恰 3 条）",
+            "layer": "common"
+          },
+          {
+            "lines": "154-166",
+            "label": "Artifact 仓库（ART-102，恰 8 条）",
+            "layer": "common"
+          },
+          {
+            "lines": "168-169",
+            "label": "语音",
+            "layer": "common"
+          },
+          {
+            "lines": "171-185",
+            "label": "Pi 资源中心与 project trust（EXT-102，恰 7 条）",
+            "layer": "ambiguous"
+          },
+          {
+            "lines": "187-200",
+            "label": "应用自更新（UPD-001~004，恰 9 条）",
+            "layer": "kernel"
+          },
+          {
+            "lines": "202-223",
+            "label": "Provider 与模型中心（PROV-101，恰 8 条）",
+            "layer": "kernel"
+          },
+          {
+            "lines": "225-235",
+            "label": "诊断与健康（OBS-101，恰 3 条）",
+            "layer": "kernel"
+          }
+        ],
+        "push_channels": [
+          {
+            "line": 240,
+            "channel": "pi:event",
+            "layer": "kernel"
+          },
+          {
+            "line": 241,
+            "channel": "pi:ui-request",
+            "layer": "ambiguous"
+          },
+          {
+            "line": 242,
+            "channel": "pi:exit",
+            "layer": "kernel"
+          },
+          {
+            "line": 251,
+            "channel": "pi:ui-expire",
+            "layer": "ambiguous"
+          },
+          {
+            "line": 253,
+            "channel": "pi:ui-expire-all",
+            "layer": "ambiguous"
+          },
+          {
+            "line": 255,
+            "channel": "update:event",
+            "layer": "kernel"
+          },
+          {
+            "line": 263,
+            "channel": "workspace:tree-event",
+            "layer": "common"
+          }
+        ],
+        "constraint": "channels.ts:1-12 明说本文件刻意不 import zod —— preload sandbox:true 要求产物自包含。这条约束限制了「通道名按能力包分文件」的做法：任何拆分后的通道名模块都必须同样零依赖。"
+      },
+      "ipc_contract_ts": {
+        "file": "packages/contract/src/ipc-contract.ts",
+        "grouping_form": "CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract>（:477-）—— 一个必须穷举全部通道的映射表，键类型即 channels.ts 的 InvokeChannel，少一条或多一条编译不过",
+        "comment_groups": [
+          {
+            "line": 478,
+            "label": "生命周期"
+          },
+          {
+            "line": 499,
+            "label": "15 个产品动作"
+          },
+          {
+            "line": 528,
+            "label": "会话树 / 分叉（数据面）"
+          },
+          {
+            "line": 538,
+            "label": "会话中心（9 条）"
+          },
+          {
+            "line": 573,
+            "label": "设置"
+          },
+          {
+            "line": 592,
+            "label": "workspace 与附件"
+          },
+          {
+            "line": 617,
+            "label": "Workspace 文件服务（FS-101，9 条）"
+          },
+          {
+            "line": 655,
+            "label": "Agent 变更集（FS-102，4 条）"
+          },
+          {
+            "line": 673,
+            "label": "安全预览（ART-101，3 条）"
+          },
+          {
+            "line": 687,
+            "label": "Artifact 仓库（ART-102，8 条）"
+          }
+        ],
+        "blocking_fact": "Record<InvokeChannel, ...> 的穷举性是拆分的直接障碍：任一能力包被移出，channels.ts 与 ipc-contract.ts 必须同步改，且 CHANNEL_CONTRACTS 无法按包分片再合并（合并后的类型不再是穷举断言）。",
+        "domain_schema_files": [
+          "packages/contract/src/workspace.ts（common）",
+          "packages/contract/src/preview.ts（common）",
+          "packages/contract/src/artifacts.ts（common）",
+          "packages/contract/src/session.ts（kernel）",
+          "packages/contract/src/providers.ts（kernel）",
+          "packages/contract/src/update.ts（kernel）",
+          "packages/contract/src/diagnostics.ts（kernel）",
+          "packages/contract/src/settings.ts（kernel）",
+          "packages/contract/src/envelope.ts（kernel）",
+          "packages/contract/src/pi-resources.ts（ambiguous）",
+          "packages/contract/src/ports.ts（kernel，只定型不实现）"
+        ],
+        "index_barrel": "packages/contract/src/index.ts:7-19 —— export * 全量桶，14 个文件全部对外扁平展开，消费方无法按层 import。"
+      }
+    },
+    "preload_namespaces": [
+      {
+        "namespace": "pi",
+        "file_line": "packages/app/src/preload/api/index.ts:41",
+        "impl": "packages/app/src/preload/api/pi.ts",
+        "layer": "kernel",
+        "channels": "pi:* 全部 + PUSH pi:event/pi:ui-request/pi:exit/pi:ui-expire/pi:ui-expire-all（pi.ts:55-133）"
+      },
+      {
+        "namespace": "piResources",
+        "file_line": "packages/app/src/preload/api/index.ts:42",
+        "impl": "packages/app/src/preload/api/piResources.ts",
+        "layer": "ambiguous",
+        "channels": "pi-resources:* + trust:*（piResources.ts:25-60）"
+      },
+      {
+        "namespace": "providers",
+        "file_line": "packages/app/src/preload/api/index.ts:44",
+        "impl": "packages/app/src/preload/api/providers.ts",
+        "layer": "kernel",
+        "channels": "providers:* + usage:*（providers.ts:28-49）",
+        "note": "usage 三条挂在 providers 命名空间下，没有独立 namespace"
+      },
+      {
+        "namespace": "sessions",
+        "file_line": "packages/app/src/preload/api/index.ts:45",
+        "impl": "packages/app/src/preload/api/sessions.ts",
+        "layer": "kernel",
+        "channels": "sessions:*（sessions.ts:30-68）"
+      },
+      {
+        "namespace": "settings",
+        "file_line": "packages/app/src/preload/api/index.ts:46",
+        "impl": "packages/app/src/preload/api/settings.ts",
+        "layer": "kernel",
+        "channels": "settings:*（settings.ts:41-56）"
+      },
+      {
+        "namespace": "dialog",
+        "file_line": "packages/app/src/preload/api/index.ts:47",
+        "impl": "packages/app/src/preload/api/dialog.ts",
+        "layer": "common",
+        "channels": "workspace:current / dialog:choose-folder / dialog:choose-files（dialog.ts:17-20）",
+        "note": "workspace:current 挂在 dialog 而不是 workspace 命名空间下 —— 命名空间划分与能力边界已经不齐"
+      },
+      {
+        "namespace": "file",
+        "file_line": "packages/app/src/preload/api/index.ts:48",
+        "impl": "packages/app/src/preload/api/file.ts",
+        "layer": "common",
+        "channels": "file:attach-dropped / file:read-attachment / attachment:revoke-all（file.ts:17-22）"
+      },
+      {
+        "namespace": "shell",
+        "file_line": "packages/app/src/preload/api/index.ts:49",
+        "impl": "packages/app/src/preload/api/shell.ts",
+        "layer": "common",
+        "channels": "shell:open-path / shell:show-in-folder（shell.ts:15-16）"
+      },
+      {
+        "namespace": "stt",
+        "file_line": "packages/app/src/preload/api/index.ts:50",
+        "impl": "packages/app/src/preload/api/stt.ts",
+        "layer": "common",
+        "channels": "stt:transcribe（stt.ts:15）"
+      },
+      {
+        "namespace": "update",
+        "file_line": "packages/app/src/preload/api/index.ts:51",
+        "impl": "packages/app/src/preload/api/update.ts",
+        "layer": "kernel",
+        "channels": "update:*（update.ts:21-49）+ PUSH update:event（:56）"
+      },
+      {
+        "namespace": "diagnostics",
+        "file_line": "packages/app/src/preload/api/index.ts:52",
+        "impl": "packages/app/src/preload/api/diagnostics.ts",
+        "layer": "kernel",
+        "channels": "diagnostics:*（diagnostics.ts:17-28）"
+      },
+      {
+        "namespace": "workspace",
+        "file_line": "packages/app/src/preload/api/index.ts:54",
+        "impl": "packages/app/src/preload/api/workspace.ts",
+        "layer": "common",
+        "channels": "workspace:*（workspace.ts:36-102）+ PUSH workspace:tree-event（:44）+ changeset:*（:115-124）",
+        "note": "changeset 四条被塞进 workspace 命名空间，没有独立 namespace —— workspace-files 与 workspace-review 在 preload 层未分家"
+      },
+      {
+        "namespace": "preview",
+        "file_line": "packages/app/src/preload/api/index.ts:56",
+        "impl": "packages/app/src/preload/api/preview.ts",
+        "layer": "common",
+        "channels": "preview:open/convert/close（preview.ts:20-26）"
+      },
+      {
+        "namespace": "artifacts",
+        "file_line": "packages/app/src/preload/api/index.ts:58",
+        "impl": "packages/app/src/preload/api/artifacts.ts",
+        "layer": "common",
+        "channels": "artifacts:*（artifacts.ts:31-51）"
+      }
+    ],
+    "preload_structure_fact": {
+      "file_line": "packages/app/src/preload/api/index.ts:40-61",
+      "detail": "api 是一个字面量对象，PiBuddyApi = typeof api（:61），index.d.ts 由此推导。新增命名空间 = 新增文件 + 在 :40-59 加一行。这已经是「按能力分文件」的形态，但聚合仍是编译期写死的对象字面量，不是运行时注册表。",
+      "note": "index.ts:11-23 的注释自称七个键，实际是 14 个 —— 文档与代码已漂移。"
+    },
+    "renderer_app_store_consumers": {
+      "fact": "stores/app.ts 被 23 处非测试代码直接 import（21 个组件 + chat-window.ts + AppShell 自身）。其中属 common 层的消费方有 6 处，是渲染侧「上层依赖内核大对象」的具体清单。",
+      "common_layer_consumers": [
+        {
+          "file_line": "packages/app/src/renderer/src/components/FileTreePanel.vue:15",
+          "import": "import { useAppStore } from \"../stores/app\";",
+          "layer": "common/workspace-files"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/components/ArtifactLibrary.vue:16",
+          "import": "import { useAppStore } from \"../stores/app\";",
+          "layer": "common/artifacts"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/components/ArtifactLink.vue:15",
+          "import": "import { useAppStore } from \"../stores/app\";",
+          "layer": "common/artifacts"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/components/InputBar.vue:4",
+          "import": "import { useAppStore, type ComposerImage, type SendMode } from \"../stores/app\";",
+          "layer": "kernel+common 混合（附件/图片 composer 状态在 app store 里）"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/components/PiResourcesPanel.vue:38",
+          "import": "import { useAppStore } from \"../stores/app\";",
+          "layer": "ambiguous"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/components/ExtensionUiHost.vue:19",
+          "import": "import { useAppStore } from \"../stores/app\";",
+          "layer": "ambiguous"
+        }
+      ],
+      "kernel_layer_consumers": [
+        "packages/app/src/renderer/src/components/AppShell.vue:4",
+        "packages/app/src/renderer/src/components/ChatView.vue:4",
+        "packages/app/src/renderer/src/components/TopBar.vue:5",
+        "packages/app/src/renderer/src/components/Sidebar.vue:3",
+        "packages/app/src/renderer/src/components/Welcome.vue:3",
+        "packages/app/src/renderer/src/components/ToolActivity.vue:6",
+        "packages/app/src/renderer/src/components/QueuePanel.vue:14",
+        "packages/app/src/renderer/src/components/UsagePanel.vue:14",
+        "packages/app/src/renderer/src/components/SessionListPanel.vue:15",
+        "packages/app/src/renderer/src/components/SettingsModal.vue:15",
+        "packages/app/src/renderer/src/components/SafeModeBanner.vue:15",
+        "packages/app/src/renderer/src/components/DiagnosticsPanel.vue:21",
+        "packages/app/src/renderer/src/components/StatusCenter.vue:22",
+        "packages/app/src/renderer/src/components/ProjectTrustDialog.vue:27",
+        "packages/app/src/renderer/src/components/ProviderCenter.vue:30",
+        "packages/app/src/renderer/src/components/OnboardingWizard.vue:31"
+      ],
+      "store_to_store": [
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:28",
+          "import": "import { useSessionsStore } from \"./sessions\";",
+          "direction": "kernel → kernel"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:31",
+          "import": "import { useWorkspaceStore } from \"./workspace\";",
+          "direction": "kernel → common（反向）",
+          "note": "app.ts:29-30 注释：「静态引：workspace store 不反向依赖本文件，动态 import 只会让打包器把同一个模块同时算进两种图里并报一条警告」。这条依赖是刻意保留的。"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:32",
+          "import": "import { clearChatUiState } from \"./chat-ui\";",
+          "direction": "kernel → kernel"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:34-37",
+          "import": "import { assertImageCapable, imageBlockedMessage, type ImageCapabilityVerdict } from \"./model-capability\";",
+          "direction": "kernel → kernel"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:38",
+          "import": "import { registerSessionScopedReset, resetSessionScopedState } from \"./session-scope\";",
+          "direction": "kernel → kernel（注册表机制）"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:39",
+          "import": "import { recordUnknownEvent, useExtensionUiStore } from \"./extensionUi\";",
+          "direction": "kernel → ambiguous"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/chat-window.ts:24",
+          "import": "import { useAppStore } from \"./app\";",
+          "direction": "kernel → kernel（横向）"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/extensionUi.ts:21",
+          "import": "import { registerSessionScopedReset } from \"./session-scope\";",
+          "direction": "ambiguous → kernel（正向）"
+        }
+      ],
+      "app_store_holds_upper_layer_state": [
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:529",
+          "field": "settingsOpen = ref(false)",
+          "note": "纯 UI 开关住在 kernel store"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:1540",
+          "field": "draftAttachments = computed<AttachmentRef[]>",
+          "note": "附件（common/workspace-files）状态"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:1546",
+          "field": "draftImages = computed<ComposerImage[]>",
+          "note": "同上"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:1561",
+          "field": "inboundAttachments = ref<AttachmentRef[]>([])",
+          "note": "同上"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:520",
+          "field": "uiRequests = computed(() => extUi.uiRequests)",
+          "note": "structured-interaction 状态经 app store 转发"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:589",
+          "field": "busyStatus = computed(() => extUi.busyStatus)"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:591",
+          "field": "extStatus = computed(() => extUi.extStatus)"
+        }
+      ]
+    }
+  },
+  "C_existing_slot_prototypes": {
+    "named_slots": {
+      "fact": "全渲染进程只有 4 个具名 slot，全部在 AppShell.vue。rg '<slot' 对 packages/app/src/renderer/src/**/*.vue 只命中这 4 处，其它布局组件（Sidebar/TopBar/ChatView）没有任何 slot。",
+      "contract_comment": "packages/app/src/renderer/src/components/AppShell.vue:180-182 —— 「布局契约（TASK-009 定义，M3-M5 各任务只往这四个具名插槽里注入内容，不得改动插槽名集合）」",
+      "slots": [
+        {
+          "name": "banner",
+          "file_line": "packages/app/src/renderer/src/components/AppShell.vue:185",
+          "default_content": "<SafeModeBanner /><UpdateBanner />",
+          "layer_of_default": "kernel"
+        },
+        {
+          "name": "sidebar",
+          "file_line": "packages/app/src/renderer/src/components/AppShell.vue:187-190",
+          "default_content": "<Sidebar /> + <FileTreePanel v-if=\"filesOpen\" />",
+          "layer_of_default": "kernel + common 混合"
+        },
+        {
+          "name": "main",
+          "file_line": "packages/app/src/renderer/src/components/AppShell.vue:222-259",
+          "default_content": "workspace-toggles 三个按钮 + <ChatView /> + <FileEditorPane v-if=\"filesOpen\" /> + <PreviewPane v-if=\"filesOpen\" /> + <ChangesetPanel v-if=\"changesOpen\" /> + <InputBar />",
+          "layer_of_default": "kernel + common 混合"
+        },
+        {
+          "name": "overlay",
+          "file_line": "packages/app/src/renderer/src/components/AppShell.vue:264-273",
+          "default_content": "ExtensionUiHost / SettingsModal / InstallBlockerDialog / PiResourcesPanel / ProjectTrustDialog / ProviderCenter / UsagePanel / ArtifactLibrary（8 个，写死顺序）",
+          "layer_of_default": "kernel + common + ambiguous 混合"
+        }
+      ],
+      "limitation": "slot 是「整块替换」语义：传入 sidebar slot 会同时顶掉 Sidebar 与 FileTreePanel。没有「往 overlay 里追加一个」的形态，因此当前的 slot 契约无法直接承载多个能力包各自注册一个浮层。"
+    },
+    "global_toggles": {
+      "in_appshell_local_refs": [
+        {
+          "file_line": "packages/app/src/renderer/src/components/AppShell.vue:113",
+          "code": "const filesOpen = ref(false);",
+          "controls": [
+            "AppShell.vue:189 —— <FileTreePanel v-if=\"filesOpen\" />",
+            "AppShell.vue:250 —— <FileEditorPane v-if=\"filesOpen\" />",
+            "AppShell.vue:252-253 —— <PreviewPane v-if=\"filesOpen\" ...>（注释：预览区跟着文件面板一起开合）",
+            "AppShell.vue:226-231 —— 顶部「📁 文件」按钮"
+          ],
+          "layer": "common/workspace-files（连带控制 common/documents）",
+          "note": "一个 ref 同时决定三个组件的挂载，其中 PreviewPane 属另一个能力域 —— 开关粒度与能力边界不一致。"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/components/AppShell.vue:114",
+          "code": "const changesOpen = ref(false);",
+          "controls": [
+            "AppShell.vue:257 —— <ChangesetPanel v-if=\"changesOpen\" />",
+            "AppShell.vue:233-239 —— 顶部「🔀 改动」按钮"
+          ],
+          "layer": "common/workspace-review"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/components/AppShell.vue:105",
+          "code": "const dragging = ref(0);",
+          "controls": [
+            "AppShell.vue:263 —— <div v-if=\"dragging > 0\" class=\"drop-mask\">"
+          ],
+          "layer": "common/workspace-files（拖放）",
+          "note": "dragenter/dragleave/drop 三个处理函数（:138-146）挂在 app-shell 根 div（:176-178）上，是硬编码在骨架里的 common 能力。"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/components/AppShell.vue:85-87",
+          "code": "const onboardingPending = computed(() => !store.booting && store.settings.onboardingCompletedAt === undefined);",
+          "controls": [
+            "AppShell.vue:160 —— <OnboardingWizard v-else-if=\"onboardingPending\" />"
+          ],
+          "layer": "kernel"
+        }
+      ],
+      "in_stores_panel_flags": [
+        {
+          "file_line": "packages/app/src/renderer/src/stores/artifacts.ts:42",
+          "code": "const panelOpen = ref(false);",
+          "exported_at": "packages/app/src/renderer/src/stores/artifacts.ts:213",
+          "consumed_at": [
+            "packages/app/src/renderer/src/components/AppShell.vue:242 —— :type=\"artifacts.panelOpen ? 'primary' : 'default'\"",
+            "packages/app/src/renderer/src/components/AppShell.vue:245 —— @click=\"artifacts.panelOpen = !artifacts.panelOpen\""
+          ],
+          "layer": "common/artifacts"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/providers.ts:33",
+          "code": "const panelOpen = ref(false);",
+          "exported_at": "packages/app/src/renderer/src/stores/providers.ts:168",
+          "consumed_at": [
+            "packages/app/src/renderer/src/components/AppShell.vue:217 —— @click=\"providers.panelOpen = true\"（no-model 空状态的「去配置账号」）"
+          ],
+          "layer": "kernel"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/providers.ts:34",
+          "code": "const usagePanelOpen = ref(false);",
+          "layer": "kernel"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/piResources.ts:17",
+          "code": "const panelOpen = ref(false);",
+          "exported_at": "packages/app/src/renderer/src/stores/piResources.ts:225",
+          "layer": "ambiguous"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/piResources.ts:19",
+          "code": "const trustOpen = ref(false);",
+          "layer": "kernel（权限）"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/app.ts:529",
+          "code": "const settingsOpen = ref(false);",
+          "layer": "kernel"
+        },
+        {
+          "file_line": "packages/app/src/renderer/src/stores/update.ts:64",
+          "code": "const blockerDialogOpen = ref(false);",
+          "layer": "kernel"
+        }
+      ],
+      "summary_fact": "开关分两处：AppShell 局部 ref（filesOpen / changesOpen / dragging）与各 store 的 panelOpen（artifacts / providers / piResources / update.blockerDialogOpen / app.settingsOpen）。没有统一的开关注册表，也没有任何一处按能力名索引的结构。"
+    },
+    "hardcoded_component_imports_in_shell": {
+      "file_line": "packages/app/src/renderer/src/components/AppShell.vue:5-27",
+      "count": 18,
+      "detail": "AppShell 顶部静态 import 18 个组件 + 4 个 store（update/piResources/providers/artifacts）+ workspace store 的三个导出（:28-33）。任何一个能力包被摘掉，这些 import 会编译失败。",
+      "store_imports": [
+        "AppShell.vue:24 —— import { useUpdateStore } from \"../stores/update\";",
+        "AppShell.vue:25 —— import { usePiResourcesStore } from \"../stores/piResources\";",
+        "AppShell.vue:26 —— import { useProvidersStore } from \"../stores/providers\";",
+        "AppShell.vue:27 —— import { useArtifactsStore } from \"../stores/artifacts\";",
+        "AppShell.vue:28-33 —— import { createDirtyDialog, setDirtyPrompt, type DirtyDecision, type EditorTab } from \"../stores/workspace\";"
+      ]
+    },
+    "cross_layer_lifecycle_hooks_in_shell": [
+      {
+        "file_line": "packages/app/src/renderer/src/components/AppShell.vue:42",
+        "code": "store.setNotifier(message);",
+        "note": "naive-ui message 实例注入 kernel store"
+      },
+      {
+        "file_line": "packages/app/src/renderer/src/components/AppShell.vue:75-76",
+        "code": "setDirtyPrompt(askDirty); onBeforeUnmount(() => setDirtyPrompt(null));",
+        "note": "AppShell 把 common/workspace-files 的脏页确认函数注册进 workspace store。AppShell.vue:44-57 的注释解释为什么必须装在这里：切工作区时编辑器面板可能未挂载。这是现有唯一一处「骨架向能力包注入宿主能力」的形态。"
+      },
+      {
+        "file_line": "packages/app/src/renderer/src/components/AppShell.vue:97-103",
+        "code": "watch(onboardingPending, (pending) => { if (!pending) void providers.refresh(); }, { immediate: true });",
+        "note": "骨架驱动 kernel provider 拉取"
+      },
+      {
+        "file_line": "packages/app/src/renderer/src/components/AppShell.vue:116-121",
+        "code": "onMounted(() => { void store.init(); void updateStore.init(); });",
+        "note": "两个 kernel store 的初始化写死在骨架里"
+      },
+      {
+        "file_line": "packages/app/src/renderer/src/components/AppShell.vue:130-136",
+        "code": "watch(() => store.workspaceId, (id) => { if (id) void piRes.describeTrust(id); }, { immediate: true });",
+        "note": "骨架驱动 pi-resources 的 trust 查询"
+      }
+    ]
+  },
+  "D_data_partitioning": {
+    "location_convention": "全部落在 app.getPath(\"userData\")（除 3 处落在 ~/.pi/agent/），每个 store 都有一个 __set*DataDir(dir) 的单测注入口。没有按 workspace 分目录，也没有按能力包分目录 —— 所有能力的数据平铺在同一个 userData 根下。",
+    "sqlite_stores": [
+      {
+        "file": "session-index.db",
+        "path_at": "packages/app/src/main/sessions/session-index.ts:125-126",
+        "table": "sessions",
+        "ddl_at": "packages/app/src/main/sessions/session-index.ts:129-154",
+        "primary_key": "source_path（会话 JSONL 的磁盘路径）",
+        "workspace_partition": "有 —— workspace_id TEXT NOT NULL（:132），查询恒带 where workspace_id = ?（:595、:655）",
+        "workspace_id_source": "packages/app/src/main/sessions/session-index.ts:48 —— import { workspaceIdFor } from \"../workspace-registry.js\"",
+        "schema_version": "SESSION_INDEX_SCHEMA_VERSION = 1（:51）；PRAGMA user_version 记代际，migrate() 在 :365-377，current > 版本时不静默重建（:371-375）；行级也存 schema_version 列（:153, :583）",
+        "co_located_concerns": [
+          "草稿：draft_text / draft_json 两列（:149-150），读写在 :718-735。草稿不是独立分区，跟着会话行走",
+          "用量汇总：token_total / cost_total / message_count（:141-143）—— 与 usage.db 重复了一份口径",
+          "搜索：search_blob（:139）",
+          "整理态：status / pinned / unread / running / deleted_at（:145-152）"
+        ]
+      },
+      {
+        "file": "artifacts.db",
+        "path_at": "packages/app/src/main/artifacts/artifact-store.ts:90-91",
+        "table": "artifacts",
+        "ddl_at": "packages/app/src/main/artifacts/artifact-store.ts:52-70",
+        "workspace_partition": "有 —— workspace_id TEXT NOT NULL（:49 附近），两条索引都以 workspace_id 打头（:73-74）",
+        "version_chain": "logical_key + version（:73），MAX(version) 递增（:208-210）",
+        "trash_model": "status 枚举含 'trashed'，回收站是状态不是另一张表（CHECK 约束 :56 附近，注释 :44-50）",
+        "on_disk_location": "export_path 相对 workspace root —— 实际文件写在 requireWorkspaceRoot(record.workspaceId) 之下（:334-347、:513）",
+        "schema_version": "ARTIFACT_SCHEMA_VERSION = 1（:42）；migrate() 只写 PRAGMA user_version，current > 版本时直接 return，无任何降级处理（:184-190）"
+      },
+      {
+        "file": "changesets.db",
+        "path_at": "packages/app/src/main/changeset/changeset-store.ts:259",
+        "table": "changesets",
+        "ddl_at": "packages/app/src/main/changeset/changeset-store.ts:66-85",
+        "workspace_partition": "有 —— workspace_id TEXT NOT NULL；同时带 session_id / turn_id / tool_call_id / tool_name（:68-72），是分区维度最细的一张表",
+        "content_storage": "before_content / after_content 作为 BLOB 直接入库（:76-77），带 binary / too_large 标志（:81-82），CHANGESET_DIFF_MAX_BYTES = 512KB（:59）",
+        "schema_version": "CHANGESET_SCHEMA_VERSION = 2（:56）；行级 schema_version 列（:84, :350）+ PRAGMA user_version（:268-279）"
+      },
+      {
+        "file": "workspaces.db",
+        "path_at": "packages/app/src/main/workspace/workspace-store.ts:86-87",
+        "table": "workspaces",
+        "ddl_at": "packages/app/src/main/workspace/workspace-store.ts:60-71",
+        "workspace_partition": "本身即以 workspace 为行（id PRIMARY KEY）",
+        "columns_of_note": "trust / ignore_policy / default_model / permission_rules（:63-69）—— permission_rules 是 PermissionRule[] 的 JSON 列",
+        "schema_version": "WORKSPACE_STORE_SCHEMA_VERSION = 1（:28）；行级 schema_version 列（:70）+ PRAGMA user_version（:110-113）",
+        "relation_to_registry": "workspace-store.ts:1-19 明说与 workspace-registry.ts 的分工：registry 管安全收容，store 管用户设定；id 由 workspaceIdFor 派生（:25）"
+      },
+      {
+        "file": "usage.db",
+        "path_at": "packages/app/src/main/usage/usage-store.ts:46-48",
+        "tables": [
+          "usage_meta",
+          "usage_daily",
+          "usage_session_seen"
+        ],
+        "ddl_at": "packages/app/src/main/usage/usage-store.ts:78-99",
+        "workspace_partition": "口径不一致 —— usage_daily 主键是 (day, workspace_root, provider, model_id)（:78），用的是 workspace_root 明文路径，不是 workspaceId。usage_session_seen 只按 session_id 分（:96）",
+        "schema_version": "USAGE_SCHEMA_VERSION = 1（:30）；不用 PRAGMA user_version，改用 usage_meta 表里 key='schemaVersion' 的行（:103-105）—— 与其它四个库的代际机制不同"
+      }
+    ],
+    "json_files_userdata": [
+      {
+        "file": "settings.json",
+        "path_at": "packages/app/src/main/settings.ts:47-51",
+        "backup": "settings.json.bak，覆盖前复制（settings.ts:53-55 + 头注释 :16-18）",
+        "workspace_partition": "无 —— 单份全局文件。内部有 workspaceDefaults 字段（settings.ts:74 提到的 v1→v2 迁移项）承载 per-workspace 覆盖，但那是对象里的一个键，不是分区",
+        "schema_version": "SETTINGS_SCHEMA_VERSION = 2（:36）；migrate() 逐代 fallthrough（:80-）；v0 迁移会删掉历史明文 sttApiKey（:104-106 注释）",
+        "atomic_write": "writeJsonAtomic（settings.ts:25 import）"
+      },
+      {
+        "file": "workspaces.json",
+        "path_at": "packages/app/src/main/workspace-registry.ts:39, :50-53",
+        "shape": "Record<workspaceId, {root, registeredAt}>（:82-86）",
+        "workspace_partition": "本身即工作区注册表",
+        "schema_version": "无 —— 没有任何版本字段。load() 失败时静默当作空表重建（:75-77）",
+        "atomic_write": "writeJsonAtomic（workspace-registry.ts:28）"
+      },
+      {
+        "file": "secrets.json",
+        "path_at": "packages/app/src/main/secret-store.ts:34, :59-62",
+        "shape": "{ version: number, secrets: Record<slot, base64(safeStorage 密文)> }（:45-49）",
+        "workspace_partition": "无 —— 全局单份，槽位名是扁平字符串（SECRET_KEYS 目前只有 sttApiKey，:37-39）",
+        "schema_version": "有一个 version 字段（默认 1，:75），但没有任何 migrate 分支",
+        "atomic_write": "writeJsonAtomic（secret-store.ts:31）"
+      },
+      {
+        "file": "endpoints.json",
+        "path_at": "packages/app/src/main/endpoints.ts:37, :47-49",
+        "workspace_partition": "无 —— 全局。EndpointKind = \"stt\" | \"provider\"（:20）",
+        "schema_version": "无",
+        "atomic_write": "writeJsonAtomic（endpoints.ts:17）"
+      },
+      {
+        "file": "update-prefs.json",
+        "path_at": "packages/app/src/main/update/update-ipc.ts:72",
+        "workspace_partition": "无 —— 全局",
+        "schema_version": "未见版本字段"
+      },
+      {
+        "file": "pending-update.json / last-known-good.json / health.json",
+        "path_at": "packages/app/src/main/health/update-markers.ts:32-34（markerDir 之下）",
+        "workspace_partition": "无 —— 全局启动标记",
+        "schema_version": "未见版本字段",
+        "atomic_write": "writeJsonAtomic（update-markers.ts:30）"
+      },
+      {
+        "file": "logs/（目录）",
+        "path_at": "packages/app/src/main/index.ts:14 —— path.join(app.getPath(\"userData\"), \"logs\")；pi/pi-ipc.ts:59 同路径",
+        "workspace_partition": "无"
+      }
+    ],
+    "files_outside_userdata": [
+      {
+        "file": "~/.pi/agent/auth.json",
+        "path_at": "packages/app/src/main/providers/auth-store.ts:116",
+        "owner": "pi 运行时，不归 secret-store 管（secret-store.ts:18-22 的 CT-24 例外声明）",
+        "protection": "0o600 + 原子写 + 写前备份"
+      },
+      {
+        "file": "~/.pi/agent/models.json",
+        "path_at": "packages/app/src/main/providers/models-store.ts:64"
+      },
+      {
+        "file": "~/.pi/agent/trust.json",
+        "path_at": "packages/app/src/main/pi-resources/trust-store.ts:42",
+        "note": "project trust 的 remember=true 决定写这里（channels.ts:185）"
+      },
+      {
+        "file": "~/.pi/agent/settings.json 与 <project>/.pi/settings.json",
+        "path_at": "packages/app/src/main/pi-resources/pi-resources-ipc.ts:88, :153；resource-scanner.ts:728-733",
+        "note": "pi 自己的用户级/项目级设置，被资源扫描器读，PiBuddy 也会写（set-enabled）"
+      },
+      {
+        "file": "pi 会话 JSONL 目录",
+        "path_at": "packages/app/src/main/sessions/session-dir.ts:48-58 —— 四级优先链，默认 ~/.pi/agent/sessions/<encodeSessionDirSegment(cwd)>",
+        "workspace_partition": "有 —— 目录名由 cwd 编码而来（:34-36），但用的是路径字符串编码，不是 workspaceId"
+      }
+    ],
+    "summary_facts": [
+      "五个 SQLite 库里有四个（session-index / artifacts / changesets / workspaces）已经带 workspace_id 列并以它为查询前缀；usage.db 用 workspace_root 明文路径，是唯一口径不一致的。",
+      "六个 JSON 文件中只有 settings.json 有真正的 migrate 链（SETTINGS_SCHEMA_VERSION=2）；workspaces.json / endpoints.json / update-prefs.json / 三个 health marker 完全无版本字段；secrets.json 有 version 字段但无迁移分支。",
+      "代际机制有三种：PRAGMA user_version（session-index / artifacts / changesets / workspaces）、meta 表行（usage）、JSON 字段 + migrate 函数（settings）。没有统一的 schema 版本设施。",
+      "行级 schema_version 列出现在 sessions（:153）、changesets（:84）、workspaces（:70）三张表，artifacts 与 usage 没有。",
+      "没有任何按能力包命名的数据目录或表前缀 —— 当前分区维度只有 workspace 与 session 两种。"
+    ]
+  },
+  "E_isolation_and_permission_facilities": {
+    "facilities": [
+      {
+        "name": "ipc-guard 四道闸",
+        "file": "packages/app/src/main/ipc-guard.ts",
+        "entry_point": "registerHandler(channel, schema, handler)（:293-318）—— 全仓唯一允许调用 ipcMain.handle 的地方，结构性断言写在 :14-15 的注释里（rg 计数必须为 0）",
+        "gates": [
+          {
+            "gate": 1,
+            "name": "assertMainFrame",
+            "at": "packages/app/src/main/ipc-guard.ts:97-101",
+            "rule": "event.senderFrame !== event.sender.mainFrame 即拒，子 frame/iframe/webview 一律不放行"
+          },
+          {
+            "gate": 2,
+            "name": "schema.parse",
+            "at": "packages/app/src/main/ipc-guard.ts:301",
+            "rule": "按 CHANNEL_CONTRACTS 的 per-channel zod schema 校验结构"
+          },
+          {
+            "gate": 3,
+            "name": "assertSizeWithin",
+            "at": "packages/app/src/main/ipc-guard.ts:142-160（调用在 :302-303）",
+            "rule": "整体载荷按 CHANNEL_MAX_BYTES 查表封顶（默认 8MB，:38），顶层字符串字段单独 256KB 封顶（:48）"
+          },
+          {
+            "gate": 4,
+            "name": "rateLimiter.check",
+            "at": "packages/app/src/main/ipc-guard.ts:171-206（调用在 :304）",
+            "rule": "按 (channel, senderId) 滑动窗口，10 秒；prompt 类 10 次（:68），其余 30 次（:70）"
+          }
+        ],
+        "granularity": "硬编码，不是按能力申请",
+        "granularity_evidence": [
+          "packages/app/src/main/ipc-guard.ts:57-63 —— CHANNEL_MAX_BYTES 是一张写死的 Partial<Record<InvokeChannel, number>>，5 个通道的例外直接列在源码里",
+          "packages/app/src/main/ipc-guard.ts:73 —— PROMPT_CHANNELS 是写死的 Set<string>，含 3 条通道名字符串",
+          "packages/app/src/main/ipc-guard.ts:80-87 —— ruleFor(channel) 由上面两张表现算出 PermissionRule，没有任何外部输入",
+          "packages/app/src/main/ipc-guard.ts:224-232 —— checkFrame 的准入判据是 isKnownChannel(channel)，即「在不在 CHANNELS 全表里」，没有「这个能力包有没有被授予这条通道」的概念"
+        ],
+        "reusable_shape": "IpcGuard implements PermissionEngine（:221），三个不抛错的判定方法 checkFrame / checkPayload / checkRate（:224-246）已经是可被外部策略查询的形态；registeredChannels()（:278-280）可枚举当前注册面。缺的是「规则从哪来」——目前恒为源码常量。",
+        "existing_but_unused_hook": "packages/app/src/main/workspace/workspace-store.ts:57 —— WorkspaceProfile 已有 permissionRules: PermissionRule[] 字段并落盘（DDL :69 的 permission_rules 列），但 ipc-guard 的四道闸没有任何一处读它。per-workspace 权限规则当前是只写不读的数据。"
+      },
+      {
+        "name": "attachment capability token",
+        "file": "packages/app/src/main/attachment-registry.ts",
+        "mechanism": [
+          "签发只有两个入口：系统文件对话框选中结果与拖拽（:236-238 注释），token = randomBytes(24).toString('base64url')（:259）",
+          "记录含 canonicalPath 但绝不外发；对外只有 8 字段 AttachmentDescriptor（toDescriptor :296-307）或 AttachmentRef（toAttachmentRef :439-449）",
+          "兑付 resolveAttachment 重做全部校验：过期、能力、realpath 比对、workspace 收容、stat（:324-362）",
+          "TTL 30 分钟滑动过期，访问即续期（:55, :114-116）",
+          "撤销：revokeAllForSession(sessionId)（:415-424）与 revokeAll()（:427-431）"
+        ],
+        "granularity": "已经是「按能力申请」的形态，但能力名是写死的闭集",
+        "granularity_evidence": [
+          "packages/app/src/main/attachment-registry.ts:61 —— export type AttachmentCapability = \"read\" | \"open\" | \"reveal\"（三个字面量，无扩展点）",
+          "packages/app/src/main/attachment-registry.ts:75 —— export type AttachmentAccess = \"read\" | \"read-write\"（与 capabilities 正交的第二个轴，注释 :65-73 明说为什么不合并）",
+          "packages/app/src/main/attachment-registry.ts:266 —— 默认签发即给满 capabilities: [\"read\",\"open\",\"reveal\"]，调用方不指定就是全给",
+          "packages/app/src/main/attachment-registry.ts:338-344 —— 校验点：capability 不在数组里拒；access 为 read 的记录遇 read-write 请求拒"
+        ],
+        "reusable_shape": "签发 → 不透明 token → 兑付时重校验 → 按 sessionId 批量撤销，这套时序可以原样套给别的能力凭证。需要改的只有 capability 枚举与 kind 枚举（:124-132 的 IMAGE_EXT / VIDEO_EXT 写死）。",
+        "coupling_note": "packages/app/src/main/attachment-registry.ts:395-401 —— openAttachment 直接调 shell.openPath，注释自称「全 main 唯一调用 shell.openPath 的地方」。这把 OS 交互能力焊在了附件模块里。"
+      },
+      {
+        "name": "workspace containment（CT-18）",
+        "file": "packages/app/src/main/workspace-registry.ts",
+        "primitives": [
+          "resolveInWorkspace(workspaceId, relativePath, {requireFile})（:173-212）—— 拒绝绝对路径与 `..`，realpath 后用 path.relative 判定收容；relativePath 为空串（root 自身）视为放行，注释 :170-172 声明这是全计划唯一口径",
+          "assertContained(root, absTarget)（:221-229）—— 已是绝对路径的目标复核，供 attachment-registry 与会话文件使用",
+          "workspaceIdFor(canonicalRoot)（:96-100）—— sha256(小写化 realpath) 前 32 hex，跨重启稳定",
+          "requireWorkspaceRoot(workspaceId)（:145-149）—— 未注册即抛 WORKSPACE_UNKNOWN"
+        ],
+        "granularity": "按 workspace 边界，硬编码；不是按能力申请",
+        "granularity_evidence": [
+          "所有调用方直接传 workspaceId + relativePath，没有「哪个能力包在访问」这一维。15 个跨目录调用点见 B 段 cross-layer 清单。",
+          "packages/app/src/main/workspace-registry.ts:151-154 —— ResolveOptions 只有 requireFile 一个选项，没有 read/write 意图字段。写权限判定散落在各调用方（如 file-editor.ts、changeset/apply.ts）。"
+        ],
+        "reusable_shape": "「不透明 id + 相对路径」这套接口形态已经贯穿 9 条 workspace:* 通道与 4 条 changeset:* 通道（channels.ts:112-143 的注释），是现成的能力包沙箱边界。"
+      },
+      {
+        "name": "outbound-guard（唯一出站原语）",
+        "file": "packages/app/src/main/net/outbound-guard.ts",
+        "chain": [
+          "normalizeEndpointUrl —— 协议必须 https、剥用户名密码、host 小写与 punycode、数字 IP 归一化（头注释 :20-22）",
+          "assertPublicAddress —— 数字 IP 直接判定；域名先 dns.lookup(all) 再逐个判定；拦 169.254.169.254（:53 具名常量 CLOUD_METADATA_IPV4）",
+          "safeFetch —— redirect:\"manual\" 每跳重跑上述两步；连接 5s / 整体 60s（:41-43）；MAX_REDIRECTS=3（:45）；响应体 2MB 截断（:39）；content-type 必须 application/json（:47）"
+        ],
+        "uniqueness_assertion": "packages/app/src/main/net/outbound-guard.ts:22-23 —— rg 计数断言：main 下除本文件外 fetch( 出现次数必须为 0",
+        "granularity": "全局硬编码，无按能力的出站白名单",
+        "granularity_evidence": [
+          "packages/app/src/main/net/outbound-guard.ts:56-64 —— 拒绝码统一为 OUTBOUND_BLOCKED 前缀，没有「哪个能力包发起」这一维",
+          "packages/app/src/main/endpoints.ts:20 —— EndpointKind 只有 \"stt\" | \"provider\" 两种，新增连接器需要改这个联合类型",
+          "调用方只有三处：providers/models-store.ts:27、misc-ipc.ts:26、endpoints.ts:18（经 assertPublicAddress/normalizeEndpointUrl）"
+        ],
+        "known_residual_risk": "packages/app/src/main/net/outbound-guard.ts:26-32 —— 解析后校验再交给 fetch 二次解析，存在 DNS rebinding TOCTOU 窗口，已记入 doc/threat-model.md"
+      },
+      {
+        "name": "预览沙箱",
+        "files": [
+          "packages/app/src/main/preview/preview-window.ts",
+          "packages/app/src/main/preview/convert-host.ts"
+        ],
+        "window_layer": [
+          "packages/app/src/main/preview/preview-window.ts:29 —— PREVIEW_PARTITION = \"sandbox:preview\"，独立 session 分区，不共享主窗口 cookie/storage",
+          "packages/app/src/main/preview/preview-window.ts:204-213 —— sandbox:true / contextIsolation:true / nodeIntegration:false / nodeIntegrationInWorker:false / nodeIntegrationInSubFrames:false / webSecurity:true",
+          "packages/app/src/main/preview/preview-window.ts:215 —— javascript 引擎层面关闭（注释 :11-12：比 CSP 更硬）",
+          "packages/app/src/main/preview/preview-window.ts:117-136 —— 分区上装四道策略：webRequest 全量拦截、CSP 响应头（PREVIEW_CSP :41）、权限请求、权限查询",
+          "packages/app/src/main/preview/preview-window.ts:166 —— 内容里再注一次 <meta http-equiv Content-Security-Policy>",
+          "packages/app/src/main/preview/preview-window.ts:268-269 —— setWindowOpenHandler 恒 deny + will-navigate preventDefault"
+        ],
+        "convert_layer": [
+          "packages/app/src/main/preview/convert-host.ts:25 —— utilityProcess（不是 BrowserWindow，也不是 child_process）",
+          "packages/app/src/main/preview/convert-host.ts:177-179 —— env 白名单：PATH/Path/TEMP/TMP/TMPDIR/SystemRoot/windir/HOME，其余一律不传（:253 的 lastForkEnv 供单测断言凭据没外泄）",
+          "packages/app/src/main/preview/convert-host.ts:281 —— 闸 1：输入大小在 fork 之前查，超了根本不起进程（forkCountSoFar() :258 供断言）",
+          "packages/app/src/main/preview/convert-host.ts:54 + :335 —— 30s 超时由宿主侧计时，到期 finish({ok:false, code:\"timeout\"})",
+          "packages/app/src/main/preview/convert-host.ts:295 —— 输出目录 path.join(base, randomUUID())"
+        ],
+        "granularity": "硬编码的单一沙箱配置，不是按能力申请",
+        "granularity_evidence": [
+          "分区名、CSP、env 白名单、超时全是模块级常量，没有 per-capability 的沙箱描述符",
+          "packages/contract/src/channels.ts:145-152 —— preview:* 三条通道的入参只允许 attachment token 或 workspaceId + relativePath，解析器与磁盘位置渲染进程都指定不了。这是「能力边界靠通道形参收敛」而非「靠权限声明收敛」"
+        ],
+        "reusable_shape": "「独立 partition + JS 关闭 + webRequest 全拦 + utilityProcess env 白名单 + 输入前置尺寸闸 + 宿主侧超时」这一套是现成的能力包沙箱模板。"
+      },
+      {
+        "name": "主窗口 window-policy",
+        "file": "packages/app/src/main/security/window-policy.ts",
+        "gates": [
+          "packages/app/src/main/security/window-policy.ts:217-222 —— CSP 经 webRequest.onHeadersReceived 注入响应头（覆盖 dev 的 http:// 加载路径），CSP_POLICY 常量在 :29",
+          "packages/app/src/main/security/window-policy.ts:228-234 —— will-navigate 只放行应用自身 origin，其余 preventDefault",
+          "packages/app/src/main/security/window-policy.ts:236 —— setWindowOpenHandler 恒 deny，绝不开新 BrowserWindow",
+          "packages/app/src/main/security/window-policy.ts:145 —— dev 下对 vite HMR 整页刷新的例外说明"
+        ],
+        "granularity": "全局硬编码，单一策略"
+      },
+      {
+        "name": "secret-store",
+        "file": "packages/app/src/main/secret-store.ts",
+        "properties": [
+          "fail closed：safeStorage 不可用时抛 SECRET_STORE_UNAVAILABLE，拒绝降级明文（:103-108），且抛错在碰磁盘之前（:90-92 注释）",
+          "只进不出：对外三个动作 saveSecret / loadSecret / describeSecret，loadSecret 仅主进程内部用（:117-118）；渲染进程能看到的极限是 {configured, last4}（:132-139）",
+          "对应通道 settings:set-secret 与 settings:describe-secret（packages/contract/src/channels.ts:84, :86），没有任何取回明文的通道"
+        ],
+        "granularity": "按槽位名（slot）硬编码",
+        "granularity_evidence": [
+          "packages/app/src/main/secret-store.ts:37-39 —— SECRET_KEYS 目前只有 { sttApiKey: \"stt.apiKey\" }，注释「加一把就在这里加一行」",
+          "packages/contract/src/ipc-contract.ts:231 —— secretKindSchema = z.enum([\"stt\"])，渲染侧可写的槽位是一个单元素枚举",
+          "没有「哪个能力包可以读哪个槽位」的概念：loadSecret(slot) 对任何主进程调用方都一视同仁"
+        ],
+        "scope_exception": "packages/app/src/main/secret-store.ts:18-22 —— CT-24：pi 运行时自读的 ~/.pi/agent/auth.json 不归本模块，由 providers/auth-store.ts 以 0o600 + 原子写 + 写前备份保护"
+      },
+      {
+        "name": "project trust（pi 资源加载准入）",
+        "file": "packages/app/src/main/pi-resources/trust-store.ts",
+        "properties": [
+          "~/.pi/agent/trust.json 记录 allow/deny 决定（:42），remember=true 时落盘（packages/contract/src/channels.ts:185）",
+          "trustArgsFor / describeTrust 被 pi/pi-ipc.ts:41 在 spawn 前消费；sessionTrustFor 由 pi-resources-ipc.ts 提供给 pi-ipc.ts:40",
+          "packages/app/src/main/pi-resources/trust-store.ts:250 —— 受信资源清单里逐条列出 { segments: [\".pi\", \"settings.json\"], label, kind } 这类描述符"
+        ],
+        "granularity": "按「工作目录 × allow/deny」二元决定，不是按能力申请",
+        "granularity_evidence": [
+          "决定的粒度是整个项目目录的资源是否加载，没有「只允许 skills 不允许 extensions」这一层",
+          "packages/app/src/renderer/src/components/AppShell.vue:130-136 —— 触发时机是 workspaceId 变化时问一次"
+        ]
+      },
+      {
+        "name": "package-install 白名单",
+        "file": "packages/app/src/main/pi-resources/package-install.ts",
+        "properties": [
+          "packages/contract/src/channels.ts:171-176 —— pi-resources:install 收的是包规格字符串而不是命令行；真正的 execFile 只发生在 package-install.ts，子命令白名单写死在那里"
+        ],
+        "granularity": "写死的子命令白名单"
+      },
+      {
+        "name": "session-scope reset registry（渲染侧）",
+        "file": "packages/app/src/renderer/src/stores/session-scope.ts",
+        "properties": [
+          "registerSessionScopedReset(fn) / resetSessionScopedState()，注册方目前 2 处：stores/app.ts:38、stores/extensionUi.ts:21"
+        ],
+        "granularity": "已是数据驱动的注册表（回调数组），但只覆盖「会话切换时清状态」这一件事",
+        "note": "这是全仓唯一一处运行时的、可被任意模块自注册的 hook 点。"
+      }
+    ],
+    "summary": {
+      "already_capability_shaped": [
+        "attachment capability token —— 有签发/兑付/撤销/TTL/能力校验的完整时序，但能力名是三元闭集（attachment-registry.ts:61）",
+        "endpoints 注册表 —— 渲染进程只持 endpointId，但 EndpointKind 只有两种（endpoints.ts:20）",
+        "session-scope reset —— 唯一的运行时自注册 hook（session-scope.ts）"
+      ],
+      "hardcoded_needs_parameterizing": [
+        "ipc-guard 的 CHANNEL_MAX_BYTES / PROMPT_CHANNELS / limitFor（ipc-guard.ts:57-77）—— 全是源码常量",
+        "ipc-guard checkFrame 的准入判据 isKnownChannel（ipc-guard.ts:225-227）—— 只问「通道存不存在」，不问「谁被授权」",
+        "ipc-registry.ts:23-36 —— 12 行写死的 register 调用",
+        "secret-store SECRET_KEYS + secretKindSchema（secret-store.ts:37-39 / ipc-contract.ts:231）",
+        "preview 沙箱的 partition/CSP/env 白名单/超时（preview-window.ts:29,41；convert-host.ts:54,177-179）",
+        "window-policy 的 CSP_POLICY 与导航白名单（window-policy.ts:29, :228-236）"
+      ],
+      "written_but_never_read": [
+        "packages/app/src/main/workspace/workspace-store.ts:57 + DDL :69 —— WorkspaceProfile.permissionRules: PermissionRule[] 已落盘，ipc-guard 不读"
+      ]
+    }
+  }
+}

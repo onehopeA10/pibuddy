@@ -47,6 +47,7 @@ import {
   usageRowSchema,
 } from "./providers.js";
 import { artifactContractShard } from "./artifacts.js";
+import { capabilitiesContractShard } from "./capability.js";
 import { previewContractShard } from "./preview.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
@@ -753,7 +754,7 @@ export const diagnosticsContractShard = defineContractShard("diagnostics", {
  * 能力包拆出去之后，这个数组就是「本次构建启用了哪些能力」的唯一声明点；
  * 现阶段全部内置，因此全部列在这里。
  */
-const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
+export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   piRuntimeContractShard,
   sessionsContractShard,
   settingsContractShard,
@@ -767,6 +768,7 @@ const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   updateContractShard,
   providersContractShard,
   diagnosticsContractShard,
+  capabilitiesContractShard,
 ];
 
 /**
