@@ -290,7 +290,9 @@ export function registerPiIpc(): void {
     // 后者内部再判一次注入总开关、抽词检索、落下命中记录（供隐私视图查看）。
     if (isCapabilityEnabled(MEMORY_CAPABILITY_ID)) {
       const memoryRoot = loadSettings().workspace;
-      if (memoryRoot) message = injectMemory(message, workspaceIdFor(memoryRoot));
+      // v2：注入改混合语义排序，需现算查询向量 → 变异步。仍在 client.send 之前，
+      // 未启用时上面那道零成本门根本不会走到这里（连 embedder 都不解）。
+      if (memoryRoot) message = await injectMemory(message, workspaceIdFor(memoryRoot));
     }
     return client.send({
       type: "prompt",

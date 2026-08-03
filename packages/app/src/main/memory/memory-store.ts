@@ -37,6 +37,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   MEMORY_DATA_SCHEMA_VERSION,
+  type KnowledgeRecord,
+  type KnowledgeSourceKind,
   type MemoryRecord,
   type MemoryScope,
   type MemorySensitivity,
@@ -44,6 +46,7 @@ import {
 } from "@pibuddy/contract";
 
 import { classifyContent } from "./memory-secret.js";
+import { deserializeVector, serializeVector } from "./memory-vector.js";
 
 /** 单条注入命中候选，带匹配分（命中的词数）。 */
 export interface InjectionCandidate extends MemoryRecord {
@@ -60,6 +63,13 @@ export interface SaveInput {
   confidence?: number;
   expiry?: number | null;
   sensitivity?: MemorySensitivity;
+  /**
+   * 来源。缺省 `user`（用户显式保存）。v2 的有限抽取传 `inferred` —— 连同
+   * confidence<1 一起，明确「这是推断的、可能是错的」，绝不伪装成用户亲手记下的事实。
+   */
+  origin?: "user" | "inferred";
+  /** 缺省 false。抽取出来的候选默认 true（不自动注入，等用户确认）。 */
+  excluded?: boolean;
 }
 
 export interface SaveOutcome {
@@ -105,6 +115,42 @@ const DDL_META = `CREATE TABLE IF NOT EXISTS memory_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 )`;
+
+/**
+ * 向量表（v2）——语义检索的存储面。
+ *
+ * `(kind, ref_id)` 主键：kind 区分 memory / knowledge，ref_id 指向对应主表的 id。
+ * `model` 记产出这条向量的 embedder 标识 —— 检索只比同 model 的向量（本地哈希与
+ * Provider 向量落在不同空间，混算无意义）。`vec` 是 Float32Array 的 BLOB，纯 JS
+ * 余弦，不引任何原生向量库（check-pure-js-deps 闸门）。
+ */
+const DDL_EMBEDDINGS = `CREATE TABLE IF NOT EXISTS embeddings (
+  kind TEXT NOT NULL,
+  ref_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'workspace',
+  model TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  vec BLOB NOT NULL,
+  PRIMARY KEY (kind, ref_id)
+)`;
+
+/** 知识库主表（v2）：文档 / 片段 + 来源坐标。删除时连 FTS 与向量一并清。 */
+const DDL_KNOWLEDGE = `CREATE TABLE IF NOT EXISTS knowledge (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  source_ref TEXT,
+  source_turn_id TEXT,
+  created INTEGER NOT NULL,
+  updated INTEGER NOT NULL
+)`;
+
+/** 知识库 FTS 影子表（trigram，中英一致）。 */
+const DDL_KNOWLEDGE_FTS = `CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts
+  USING fts5(id UNINDEXED, content, tokenize = 'trigram')`;
 
 /** meta 键：全局注入总开关。 */
 const META_GLOBAL_INJECTION = "global_injection_enabled";
@@ -165,10 +211,22 @@ export class MemoryStore {
     this.db.exec(DDL_MEMORIES);
     this.db.exec(DDL_FTS);
     this.db.exec(DDL_META);
+    // v2 表：CREATE IF NOT EXISTS 幂等 —— 用 v2 代码打开 v1 库时，这几条把新表
+    // 补上而**不动** v1 已有的 memories / FTS / meta 一个字节（迁移不丢数据）。
+    this.db.exec(DDL_EMBEDDINGS);
+    this.db.exec(DDL_KNOWLEDGE);
+    this.db.exec(DDL_KNOWLEDGE_FTS);
     this.migrate();
   }
 
-  /** 用 `PRAGMA user_version` 记代际；升级在这里补分支，绝不静默重建。 */
+  /**
+   * 用 `PRAGMA user_version` 记代际；升级在这里补分支，绝不静默重建。
+   *
+   * v1(1) → v2(2)：新表已在构造里以 IF NOT EXISTS 建好（非破坏性），这里只把
+   * 代际推到 2。老库里已有的 memories 一条不动，语义检索所需的向量按需补算
+   * （memory:reembed / 保存时嵌入），因此「迁移不丢数据」是真的——v1 的记录
+   * 迁移后仍能被 FTS 查到、能被注入，只是尚无向量直到被重嵌。
+   */
   private migrate(): void {
     const row = this.db.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined;
     const current = Number(row?.user_version ?? 0);
@@ -201,10 +259,10 @@ export class MemoryStore {
       content: input.content,
       type: input.type,
       scope: input.scope,
-      origin: "user",
+      origin: input.origin ?? "user",
       confidence: input.confidence ?? 1,
       sensitivity,
-      excluded: false,
+      excluded: input.excluded ?? false,
       sourceSessionId: input.sourceSessionId ?? null,
       sourceTurnId: input.sourceTurnId ?? null,
       created: now,
@@ -226,7 +284,7 @@ export class MemoryStore {
         record.origin,
         record.confidence,
         record.sensitivity,
-        0,
+        record.excluded ? 1 : 0,
         record.sourceSessionId,
         record.sourceTurnId,
         now,
@@ -327,6 +385,9 @@ export class MemoryStore {
   private deleteInternal(id: string): void {
     this.db.prepare("DELETE FROM memories WHERE id = ?").run(id);
     this.db.prepare("DELETE FROM memories_fts WHERE id = ?").run(id);
+    // v2：向量也要清 —— 否则「删除后语义检索仍命中」，与「删除后 FTS 零命中」
+    // 是同一条安全承诺的另一半。少清这一处，一条被删的记忆还能被向量余弦捞回来。
+    this.db.prepare("DELETE FROM embeddings WHERE kind = 'memory' AND ref_id = ?").run(id);
   }
 
   // ------------------------------------------------------------ 读取
@@ -494,6 +555,276 @@ export class MemoryStore {
     if (target === "global") this.setMeta(META_GLOBAL_INJECTION, enabled);
     else this.setMeta(`${META_WS_INJECTION_PREFIX}${workspaceId}`, enabled);
   }
+
+  // ============================================================ v2：向量存储
+
+  /** 写入 / 覆盖一条向量。同 (kind, ref_id) 覆盖，换 model 就换了向量空间。 */
+  upsertEmbedding(
+    kind: "memory" | "knowledge",
+    refId: string,
+    workspaceId: string,
+    scope: MemoryScope,
+    model: string,
+    vec: Float32Array
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO embeddings (kind, ref_id, workspace_id, scope, model, dim, vec)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(kind, ref_id) DO UPDATE SET
+           workspace_id = excluded.workspace_id, scope = excluded.scope,
+           model = excluded.model, dim = excluded.dim, vec = excluded.vec`
+      )
+      .run(kind, refId, workspaceId, scope, model, vec.length, serializeVector(vec));
+  }
+
+  deleteEmbedding(kind: "memory" | "knowledge", refId: string): void {
+    this.db.prepare("DELETE FROM embeddings WHERE kind = ? AND ref_id = ?").run(kind, refId);
+  }
+
+  /**
+   * 可注入 / 可检索的记忆 + 它们的向量（同 model）。
+   *
+   * 资格与 injectionCandidates 一致（未排除、非 sensitive、未过期、作用域匹配），
+   * 再内连 embeddings 只取同 model 的向量。跨 model 的旧向量在这里被自然排除 ——
+   * 换了 embedder 但没重嵌时语义部分为空，而不是拿错空间的向量乱算。
+   */
+  eligibleMemoryVectors(workspaceId: string, model: string): { record: MemoryRecord; vec: Float32Array }[] {
+    const now = Date.now();
+    const rows = this.db
+      .prepare(
+        `SELECT m.*, e.vec AS __vec FROM memories m
+         JOIN embeddings e ON e.kind = 'memory' AND e.ref_id = m.id AND e.model = ?
+         WHERE (m.scope = 'global' OR m.workspace_id = ?)
+           AND m.excluded = 0 AND m.sensitivity = 'normal'
+           AND (m.expiry IS NULL OR m.expiry > ?)`
+      )
+      .all(model, workspaceId, now) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      record: toRecord(row),
+      vec: deserializeVector(row.__vec as Uint8Array),
+    }));
+  }
+
+  /** 某工作区可见（scope global 或本区）的全部记忆（正文 + 作用域），供重嵌。 */
+  visibleMemoriesForEmbedding(workspaceId: string): { id: string; content: string; scope: MemoryScope }[] {
+    const rows = this.db
+      .prepare(
+        "SELECT id, content, scope FROM memories WHERE scope = 'global' OR workspace_id = ?"
+      )
+      .all(workspaceId) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: String(r.id),
+      content: String(r.content),
+      scope: String(r.scope) as MemoryScope,
+    }));
+  }
+
+  /** 可见记忆总数 与 已按 model 嵌入的数（供 embed-status）。 */
+  memoryEmbedCounts(workspaceId: string, model: string): { total: number; embedded: number } {
+    const total = (
+      this.db
+        .prepare("SELECT count(*) c FROM memories WHERE scope = 'global' OR workspace_id = ?")
+        .get(workspaceId) as { c: number }
+    ).c;
+    const embedded = (
+      this.db
+        .prepare(
+          `SELECT count(*) c FROM memories m
+           JOIN embeddings e ON e.kind = 'memory' AND e.ref_id = m.id AND e.model = ?
+           WHERE m.scope = 'global' OR m.workspace_id = ?`
+        )
+        .get(model, workspaceId) as { c: number }
+    ).c;
+    return { total, embedded };
+  }
+
+  // ============================================================ v2：知识库
+
+  /** 加入一条知识片段。secret 命中即拒（不落库）——知识库同样不该收密钥。 */
+  addKnowledge(input: {
+    workspaceId: string;
+    title: string;
+    content: string;
+    sourceKind: KnowledgeSourceKind;
+    sourceRef?: string | null;
+    sourceTurnId?: string | null;
+  }): { ok: boolean; record: KnowledgeRecord | null; message?: string } {
+    const verdict = classifyContent(input.content);
+    if (verdict.rejected) return { ok: false, record: null, message: verdict.reason };
+    const now = Date.now();
+    const id = randomUUID();
+    const record: KnowledgeRecord = {
+      id,
+      title: input.title,
+      content: input.content,
+      sourceKind: input.sourceKind,
+      sourceRef: input.sourceRef ?? null,
+      sourceTurnId: input.sourceTurnId ?? null,
+      created: now,
+      updated: now,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO knowledge (id, workspace_id, title, content, source_kind, source_ref, source_turn_id, created, updated)
+         VALUES (?,?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        id,
+        input.workspaceId,
+        record.title,
+        record.content,
+        record.sourceKind,
+        record.sourceRef,
+        record.sourceTurnId,
+        now,
+        now
+      );
+    this.db.prepare("INSERT INTO knowledge_fts (id, content) VALUES (?, ?)").run(id, record.content);
+    return { ok: true, record };
+  }
+
+  getKnowledge(id: string): KnowledgeRecord | null {
+    const row = this.db.prepare("SELECT * FROM knowledge WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? toKnowledgeRecord(row) : null;
+  }
+
+  /** 一条知识的归属工作区（删除时清向量用）。 */
+  knowledgeWorkspace(id: string): string | null {
+    const row = this.db.prepare("SELECT workspace_id FROM knowledge WHERE id = ?").get(id) as
+      | { workspace_id?: string }
+      | undefined;
+    return row?.workspace_id ? String(row.workspace_id) : null;
+  }
+
+  listKnowledge(workspaceId: string): KnowledgeRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM knowledge WHERE workspace_id = ? ORDER BY updated DESC")
+      .all(workspaceId) as Record<string, unknown>[];
+    return rows.map(toKnowledgeRecord);
+  }
+
+  /** 删除一条知识：主表 + FTS + 向量一起清（与记忆删除同一套覆盖承诺）。 */
+  deleteKnowledge(id: string): { ok: boolean } {
+    const exists = this.db.prepare("SELECT 1 FROM knowledge WHERE id = ?").get(id);
+    if (!exists) return { ok: false };
+    this.db.prepare("DELETE FROM knowledge WHERE id = ?").run(id);
+    this.db.prepare("DELETE FROM knowledge_fts WHERE id = ?").run(id);
+    this.db.prepare("DELETE FROM embeddings WHERE kind = 'knowledge' AND ref_id = ?").run(id);
+    return { ok: true };
+  }
+
+  /** 知识 FTS 命中：term → id 集合（>=3 字走 FTS，否则 LIKE）。 */
+  knowledgeSearchIds(term: string): string[] {
+    if (term.length >= 3) {
+      try {
+        const rows = this.db
+          .prepare("SELECT id FROM knowledge_fts WHERE knowledge_fts MATCH ?")
+          .all(ftsLiteral(term)) as { id: string }[];
+        return rows.map((r) => r.id);
+      } catch {
+        /* 回落 LIKE */
+      }
+    }
+    const rows = this.db
+      .prepare("SELECT id FROM knowledge WHERE content LIKE ?")
+      .all(`%${term}%`) as { id: string }[];
+    return rows.map((r) => r.id);
+  }
+
+  /** 一组 term 在知识库里的命中计数：id → 命中词数（FTS 分）。 */
+  knowledgeFtsHits(workspaceId: string, terms: string[]): Map<string, { record: KnowledgeRecord; hits: number }> {
+    const out = new Map<string, { record: KnowledgeRecord; hits: number }>();
+    if (terms.length === 0) return out;
+    const count = new Map<string, number>();
+    for (const term of terms) {
+      for (const id of this.knowledgeSearchIds(term)) count.set(id, (count.get(id) ?? 0) + 1);
+    }
+    for (const [id, hits] of count) {
+      const row = this.db
+        .prepare("SELECT * FROM knowledge WHERE id = ? AND workspace_id = ?")
+        .get(id, workspaceId) as Record<string, unknown> | undefined;
+      if (row) out.set(id, { record: toKnowledgeRecord(row), hits });
+    }
+    return out;
+  }
+
+  /** 知识片段 + 向量（同 model），供语义检索。 */
+  knowledgeVectors(workspaceId: string, model: string): { record: KnowledgeRecord; vec: Float32Array }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT k.*, e.vec AS __vec FROM knowledge k
+         JOIN embeddings e ON e.kind = 'knowledge' AND e.ref_id = k.id AND e.model = ?
+         WHERE k.workspace_id = ?`
+      )
+      .all(model, workspaceId) as Record<string, unknown>[];
+    return rows.map((row) => ({
+      record: toKnowledgeRecord(row),
+      vec: deserializeVector(row.__vec as Uint8Array),
+    }));
+  }
+
+  /** 某工作区的全部知识片段（正文），供重嵌。 */
+  knowledgeForEmbedding(workspaceId: string): { id: string; content: string }[] {
+    const rows = this.db
+      .prepare("SELECT id, content FROM knowledge WHERE workspace_id = ?")
+      .all(workspaceId) as Record<string, unknown>[];
+    return rows.map((r) => ({ id: String(r.id), content: String(r.content) }));
+  }
+
+  knowledgeEmbedCounts(workspaceId: string, model: string): { total: number; embedded: number } {
+    const total = (
+      this.db.prepare("SELECT count(*) c FROM knowledge WHERE workspace_id = ?").get(workspaceId) as {
+        c: number;
+      }
+    ).c;
+    const embedded = (
+      this.db
+        .prepare(
+          `SELECT count(*) c FROM knowledge k
+           JOIN embeddings e ON e.kind = 'knowledge' AND e.ref_id = k.id AND e.model = ?
+           WHERE k.workspace_id = ?`
+        )
+        .get(model, workspaceId) as { c: number }
+    ).c;
+    return { total, embedded };
+  }
+
+  // ============================================================ v2：嵌入配置（meta）
+
+  /** 读嵌入后端配置（存 memory_meta，全局一份）。缺省 local。 */
+  embeddingConfig(): { backend: "local" | "provider"; provider: string | null; model: string | null } {
+    const backend = this.metaString("embedding_backend") === "provider" ? "provider" : "local";
+    return {
+      backend,
+      provider: this.metaString("embedding_provider"),
+      model: this.metaString("embedding_model"),
+    };
+  }
+
+  setEmbeddingConfig(config: { backend: "local" | "provider"; provider?: string; model?: string }): void {
+    this.setMetaString("embedding_backend", config.backend);
+    this.setMetaString("embedding_provider", config.backend === "provider" ? config.provider ?? "" : "");
+    this.setMetaString("embedding_model", config.model ?? "");
+  }
+
+  private metaString(key: string): string | null {
+    const row = this.db.prepare("SELECT value FROM memory_meta WHERE key = ?").get(key) as
+      | { value?: string }
+      | undefined;
+    const value = row?.value ?? "";
+    return value === "" ? null : value;
+  }
+
+  private setMetaString(key: string, value: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO memory_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      )
+      .run(key, value);
+  }
 }
 
 /** DB 行 → 渲染侧视图。workspace_id 在这一步被丢掉（分区键不外发）。 */
@@ -512,6 +843,20 @@ function toRecord(row: Record<string, unknown>): MemoryRecord {
     created: Number(row.created ?? 0),
     updated: Number(row.updated ?? 0),
     expiry: row.expiry == null ? null : Number(row.expiry),
+  };
+}
+
+/** DB 行 → 知识片段视图（workspace_id 在这一步被丢掉）。 */
+function toKnowledgeRecord(row: Record<string, unknown>): KnowledgeRecord {
+  return {
+    id: String(row.id),
+    title: String(row.title ?? ""),
+    content: String(row.content ?? ""),
+    sourceKind: String(row.source_kind ?? "manual") as KnowledgeSourceKind,
+    sourceRef: row.source_ref == null ? null : String(row.source_ref),
+    sourceTurnId: row.source_turn_id == null ? null : String(row.source_turn_id),
+    created: Number(row.created ?? 0),
+    updated: Number(row.updated ?? 0),
   };
 }
 

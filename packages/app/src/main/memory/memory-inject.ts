@@ -23,11 +23,9 @@
  */
 import { isCapabilityEnabled } from "../capability/capability-state.js";
 import { MEMORY_CAPABILITY_ID } from "../capability/manifests/memory.manifest.js";
-import { extractTerms, memoryStore, type InjectionCandidate } from "./memory-store.js";
-import type { MemoryHit } from "@pibuddy/contract";
-
-/** 一轮最多注入几条：太多会挤占上下文，也稀释相关性。 */
-const MAX_INJECTED = 8;
+import { memoryStore } from "./memory-store.js";
+import { MAX_INJECTED, rankedMemories } from "./memory-search.js";
+import type { MemoryRecord, MemoryHit } from "@pibuddy/contract";
 /** 每个工作区保留的命中历史条数上限（内存 cache）。 */
 const MAX_HITS_PER_WS = 100;
 
@@ -50,41 +48,43 @@ function previewOf(content: string): string {
 /**
  * 把命中的记忆折成一段注入块。返回空串表示这一轮什么都不注入。
  */
-function buildBlock(hits: InjectionCandidate[]): string {
-  if (hits.length === 0) return "";
-  const lines = hits.map((h) => `- （${TYPE_LABEL[h.type] ?? h.type}）${h.content}`);
+function buildBlock(records: MemoryRecord[]): string {
+  if (records.length === 0) return "";
+  const lines = records.map((h) => `- （${TYPE_LABEL[h.type] ?? h.type}）${h.content}`);
   return ["[长期记忆]", "以下是之前记住的信息，供参考（可能已过时，以当前对话为准）：", ...lines, "[/长期记忆]"].join(
     "\n"
   );
 }
 
 /**
- * 在一条 prompt 前注入相关记忆。
+ * 在一条 prompt 前注入相关记忆（v2：FTS + 向量混合命中）。
+ *
+ * v1 是纯 FTS 命中，v2 用 rankedMemories 做混合语义排序 —— 但资格过滤（未排除、
+ * 非 sensitive、未过期、作用域匹配）与「注入前记录命中」这两条一字未改：命中项
+ * 仍会落进隐私视图，删除仍会连命中一起清。
  *
  * @returns 注入后的 message；未启用 / 未命中 / 注入被关时原样返回入参。
  */
-export function injectMemory(message: string, workspaceId: string): string {
-  // —— 零成本门：未启用时到此为止，绝不触碰记忆库 ——
+export async function injectMemory(message: string, workspaceId: string): Promise<string> {
+  // —— 零成本门：未启用时到此为止，绝不触碰记忆库、绝不解 embedder ——
   if (!isCapabilityEnabled(MEMORY_CAPABILITY_ID)) return message;
   if (!workspaceId) return message;
 
   const store = memoryStore();
   if (!store.injectionActive(workspaceId)) return message;
 
-  const terms = extractTerms(message);
-  if (terms.length === 0) return message;
-
-  const hits = store.injectionCandidates(workspaceId, terms, MAX_INJECTED);
+  const hits = await rankedMemories(store, workspaceId, message, MAX_INJECTED);
   if (hits.length === 0) return message;
 
-  recordHits(workspaceId, hits);
-  const block = buildBlock(hits);
+  const records = hits.map((h) => h.record);
+  recordHits(workspaceId, records);
+  const block = buildBlock(records);
   return `${block}\n\n${message}`;
 }
 
-function recordHits(workspaceId: string, hits: InjectionCandidate[]): void {
+function recordHits(workspaceId: string, records: MemoryRecord[]): void {
   const at = Date.now();
-  const entries: MemoryHit[] = hits.map((h) => ({
+  const entries: MemoryHit[] = records.map((h) => ({
     id: h.id,
     type: h.type,
     scope: h.scope,

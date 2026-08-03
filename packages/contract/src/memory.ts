@@ -27,8 +27,14 @@ import { z } from "zod";
 import { defineContractShard } from "./channel-contract.js";
 import { CHANNELS } from "./channels.js";
 
-/** 记忆自有数据表的代际。改 DDL 必须 +1 并在 migrate() 里补分支。 */
-export const MEMORY_DATA_SCHEMA_VERSION = 1;
+/**
+ * 记忆自有数据表的代际。改 DDL 必须 +1 并在 migrate() 里补分支。
+ *
+ * v1 → v2：新增语义检索的 `embeddings` 表、知识库的 `knowledge` / `knowledge_fts`
+ * 表。迁移**只加表、不动 v1 已存的 memories/FTS/meta 一个字节**，老用户升级上来
+ * 之前显式保存的记忆一条不丢；语义检索所需的向量按需补算（memory:reembed）。
+ */
+export const MEMORY_DATA_SCHEMA_VERSION = 2;
 
 /**
  * 记忆的类别。
@@ -279,6 +285,226 @@ export const memoryInjectionStateSchema = z.object({
 });
 export type MemoryInjectionState = z.infer<typeof memoryInjectionStateSchema>;
 
+// ================================================================
+//  第二版：语义检索 + 知识库 + 有限抽取（MEM-101 v2）
+// ================================================================
+
+/**
+ * 混合语义检索（memory:search）。
+ *
+ * 与 memory:query 的区别：query 是**管理视图**的 FTS 过滤（列出、按子串筛）；
+ * search 是**相关度检索**——FTS 命中与向量余弦混合打分排序，回答「和这句话最相关的
+ * 记忆是哪几条」。空 query 无意义，因此 query 必填非空。
+ */
+export const memorySearchRequestSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    query: z.string().min(1),
+    scope: memoryScopeSchema.optional(),
+    /** 返回条数上限；缺省由主进程定（当前 8） */
+    limit: z.number().int().positive().max(50).optional(),
+  })
+  .strict();
+export type MemorySearchRequest = z.infer<typeof memorySearchRequestSchema>;
+
+/**
+ * 一条检索命中：记录本体 + 分数分解。
+ *
+ * `ftsScore` / `vectorScore` 分别是词命中与向量余弦的归一分，`score` 是二者的
+ * 加权和。分解出来是为了让「为什么这条排在前面」可解释、可调试，而不是一个
+ * 黑箱数字。
+ */
+export const memorySearchHitSchema = z.object({
+  record: memoryRecordSchema,
+  score: z.number(),
+  ftsScore: z.number(),
+  vectorScore: z.number(),
+});
+export type MemorySearchHit = z.infer<typeof memorySearchHitSchema>;
+
+export const memorySearchResultSchema = z.object({
+  items: z.array(memorySearchHitSchema),
+  /** 本次检索用的 embedder 后端（local / provider / fake），供 UI 如实标注 */
+  backend: z.string(),
+});
+export type MemorySearchResult = z.infer<typeof memorySearchResultSchema>;
+
+/**
+ * 嵌入状态（memory:embed-status）。
+ *
+ * `embeddedMemories < totalMemories` 说明有记录还没向量（多半是 v1 迁移上来的 /
+ * 换了 embedder），UI 据此提示「重嵌以启用语义检索」。
+ */
+export const memoryEmbedStatusSchema = z.object({
+  backend: z.enum(["local", "provider"]),
+  provider: z.string().nullable(),
+  model: z.string(),
+  dim: z.number().int().nonnegative(),
+  embeddedMemories: z.number().int().nonnegative(),
+  totalMemories: z.number().int().nonnegative(),
+  embeddedKnowledge: z.number().int().nonnegative(),
+  totalKnowledge: z.number().int().nonnegative(),
+});
+export type MemoryEmbedStatus = z.infer<typeof memoryEmbedStatusSchema>;
+
+/** 嵌入后端配置。切后端会让旧向量作废，因此附一次「已触发重嵌」的结果。 */
+export const memoryEmbedConfigSchema = z
+  .object({
+    backend: z.enum(["local", "provider"]),
+    provider: z.string().optional(),
+    model: z.string().optional(),
+  })
+  .strict();
+export type MemoryEmbedConfig = z.infer<typeof memoryEmbedConfigSchema>;
+
+/**
+ * 重嵌请求（memory:reembed）。
+ *
+ * 可选切换后端；不带 config 时用当前后端为缺向量的记录补算。返回补了多少条。
+ */
+export const memoryReembedRequestSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    config: memoryEmbedConfigSchema.optional(),
+  })
+  .strict();
+export type MemoryReembedRequest = z.infer<typeof memoryReembedRequestSchema>;
+
+export const memoryReembedResultSchema = z.object({
+  ok: z.boolean(),
+  embeddedMemories: z.number().int().nonnegative(),
+  embeddedKnowledge: z.number().int().nonnegative(),
+  status: memoryEmbedStatusSchema,
+  message: z.string().optional(),
+});
+export type MemoryReembedResult = z.infer<typeof memoryReembedResultSchema>;
+
+/**
+ * 从一段会话抽候选事实（memory:extract）。
+ *
+ * ADR 红线：**不能把总结当不可更正真相**。因此抽取出来的每一条：
+ *   - `origin` 恒为 `inferred`（明确「这是推断的，可能是错的」）；
+ *   - `confidence` < 1（默认 0.5）；
+ *   - 保留 `sourceSessionId` / `sourceTurnId`，用户能点开看原文（memory:evidence）；
+ *   - 落库即可查、可编辑、可删除——与用户显式保存的记忆走同一套审计通道。
+ *
+ * 抽取**不自动注入**：候选默认 `excluded: true`，等用户在面板里逐条确认（取消排除）
+ * 才进注入候选。一条抽错的事实因此不会在用户没看见时就被反复塞进提示词。
+ */
+export const memoryExtractRequestSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    sourceSessionId: z.string().min(1),
+    /** 最多抽几条 */
+    limit: z.number().int().positive().max(20).optional(),
+  })
+  .strict();
+export type MemoryExtractRequest = z.infer<typeof memoryExtractRequestSchema>;
+
+export const memoryExtractResultSchema = z.object({
+  /** 已落库的候选（origin=inferred, excluded=true），供面板逐条确认 */
+  candidates: z.array(memoryRecordSchema),
+  /** 扫描到的会话轮次数（供 UI 说明「从 N 轮里抽出 M 条」） */
+  scannedTurns: z.number().int().nonnegative(),
+});
+export type MemoryExtractResult = z.infer<typeof memoryExtractResultSchema>;
+
+// ---------------------------------------------------------------- 知识库
+
+/**
+ * 知识片段的来源。
+ *
+ *   session   来自某会话某一轮（sourceRef=sessionId, sourceTurnId=轮次）
+ *   file      来自某文件（sourceRef=相对路径）
+ *   manual    用户手工录入（无来源）
+ *
+ * 来源是知识库与「一段无从核对的文本」的区别：检索命中时把它一并回给用户，
+ * 「这条知识出自哪」始终可追溯。
+ */
+export const knowledgeSourceKindSchema = z.enum(["session", "file", "manual"]);
+export type KnowledgeSourceKind = z.infer<typeof knowledgeSourceKindSchema>;
+
+export const knowledgeRecordSchema = z.object({
+  id: z.string().min(1),
+  title: z.string(),
+  content: z.string(),
+  sourceKind: knowledgeSourceKindSchema,
+  /** 来源坐标：会话 id / 文件相对路径；manual 为 null */
+  sourceRef: z.string().nullable(),
+  sourceTurnId: z.string().nullable(),
+  created: z.number(),
+  updated: z.number(),
+});
+export type KnowledgeRecord = z.infer<typeof knowledgeRecordSchema>;
+
+export const knowledgeAddRequestSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    title: z.string().min(1),
+    content: z.string().min(1),
+    sourceKind: knowledgeSourceKindSchema,
+    sourceRef: z.string().optional(),
+    sourceTurnId: z.string().optional(),
+  })
+  .strict();
+export type KnowledgeAddRequest = z.infer<typeof knowledgeAddRequestSchema>;
+
+/** 单条知识动作的统一返回。 */
+export const knowledgeMutationResultSchema = z.object({
+  ok: z.boolean(),
+  record: knowledgeRecordSchema.nullable(),
+  message: z.string().optional(),
+});
+export type KnowledgeMutationResult = z.infer<typeof knowledgeMutationResultSchema>;
+
+export const knowledgeSearchRequestSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    query: z.string().min(1),
+    limit: z.number().int().positive().max(50).optional(),
+  })
+  .strict();
+export type KnowledgeSearchRequest = z.infer<typeof knowledgeSearchRequestSchema>;
+
+/** 一条知识命中：记录 + 分数 + 引用（来源三元组，UI 直接展示「出自哪」）。 */
+export const knowledgeHitSchema = z.object({
+  record: knowledgeRecordSchema,
+  score: z.number(),
+  ftsScore: z.number(),
+  vectorScore: z.number(),
+  citation: z.object({
+    sourceKind: knowledgeSourceKindSchema,
+    sourceRef: z.string().nullable(),
+    sourceTurnId: z.string().nullable(),
+  }),
+});
+export type KnowledgeHit = z.infer<typeof knowledgeHitSchema>;
+
+export const knowledgeSearchResultSchema = z.object({
+  items: z.array(knowledgeHitSchema),
+  backend: z.string(),
+});
+export type KnowledgeSearchResult = z.infer<typeof knowledgeSearchResultSchema>;
+
+export const knowledgeListRequestSchema = z
+  .object({ workspaceId: z.string().min(1) })
+  .strict();
+export type KnowledgeListRequest = z.infer<typeof knowledgeListRequestSchema>;
+
+export const knowledgeListResultSchema = z.object({
+  items: z.array(knowledgeRecordSchema),
+  total: z.number().int().nonnegative(),
+});
+export type KnowledgeListResult = z.infer<typeof knowledgeListResultSchema>;
+
+export const knowledgeIdRequestSchema = z.object({ id: z.string().min(1) }).strict();
+export type KnowledgeIdRequest = z.infer<typeof knowledgeIdRequestSchema>;
+
+export const knowledgeGetResultSchema = z.object({
+  record: knowledgeRecordSchema.nullable(),
+});
+export type KnowledgeGetResult = z.infer<typeof knowledgeGetResultSchema>;
+
 // ---------- 通道契约分片（ADR-0002：各分片各自声明，宿主合并时封口） ----------
 //
 // 分片 id 是 capabilityId 的第二段（`common.memory` → `memory`）：drift test 据它
@@ -319,5 +545,42 @@ export const memoryContractShard = defineContractShard("memory", {
   [CHANNELS.memorySetInjection]: {
     request: memorySetInjectionRequestSchema,
     response: memoryInjectionStateSchema,
+  },
+  // ---- v2：语义检索 + 知识库 + 抽取 ----
+  [CHANNELS.memorySearch]: {
+    request: memorySearchRequestSchema,
+    response: memorySearchResultSchema,
+  },
+  [CHANNELS.memoryEmbedStatus]: {
+    request: memoryHitsRequestSchema,
+    response: memoryEmbedStatusSchema,
+  },
+  [CHANNELS.memoryReembed]: {
+    request: memoryReembedRequestSchema,
+    response: memoryReembedResultSchema,
+  },
+  [CHANNELS.memoryExtract]: {
+    request: memoryExtractRequestSchema,
+    response: memoryExtractResultSchema,
+  },
+  [CHANNELS.memoryKnowledgeAdd]: {
+    request: knowledgeAddRequestSchema,
+    response: knowledgeMutationResultSchema,
+  },
+  [CHANNELS.memoryKnowledgeSearch]: {
+    request: knowledgeSearchRequestSchema,
+    response: knowledgeSearchResultSchema,
+  },
+  [CHANNELS.memoryKnowledgeList]: {
+    request: knowledgeListRequestSchema,
+    response: knowledgeListResultSchema,
+  },
+  [CHANNELS.memoryKnowledgeGet]: {
+    request: knowledgeIdRequestSchema,
+    response: knowledgeGetResultSchema,
+  },
+  [CHANNELS.memoryKnowledgeDelete]: {
+    request: knowledgeIdRequestSchema,
+    response: knowledgeMutationResultSchema,
   },
 });

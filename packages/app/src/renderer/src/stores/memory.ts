@@ -7,7 +7,17 @@
  */
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
-import type { MemoryHit, MemoryRecord, MemoryScope, MemoryType } from "@contract";
+import type {
+  KnowledgeHit,
+  KnowledgeRecord,
+  KnowledgeSourceKind,
+  MemoryEmbedStatus,
+  MemoryHit,
+  MemoryRecord,
+  MemorySearchHit,
+  MemoryScope,
+  MemoryType,
+} from "@contract";
 
 export const useMemoryStore = defineStore("memory", () => {
   const items = shallowRef<MemoryRecord[]>([]);
@@ -169,6 +179,127 @@ export const useMemoryStore = defineStore("memory", () => {
     }
   }
 
+  // -------------------------------------------------- v2：语义检索 + 嵌入状态
+
+  const semanticQuery = ref("");
+  const semanticResults = shallowRef<MemorySearchHit[]>([]);
+  const semanticBackend = ref("");
+  const semanticLoading = ref(false);
+  const embedStatus = ref<MemoryEmbedStatus | null>(null);
+
+  async function semanticSearch(workspaceId: string): Promise<void> {
+    const q = semanticQuery.value.trim();
+    if (!workspaceId || !q) {
+      semanticResults.value = [];
+      return;
+    }
+    semanticLoading.value = true;
+    try {
+      const result = await window.piBuddy.memory.search(workspaceId, q, { limit: 12 });
+      semanticResults.value = result.items;
+      semanticBackend.value = result.backend;
+      lastError.value = "";
+    } catch (err) {
+      lastError.value = (err as Error).message;
+    } finally {
+      semanticLoading.value = false;
+    }
+  }
+
+  async function loadEmbedStatus(workspaceId: string): Promise<void> {
+    if (!workspaceId) return;
+    try {
+      embedStatus.value = await window.piBuddy.memory.embedStatus(workspaceId);
+    } catch (err) {
+      lastError.value = (err as Error).message;
+    }
+  }
+
+  async function reembed(workspaceId: string): Promise<void> {
+    if (!workspaceId) return;
+    try {
+      const result = await window.piBuddy.memory.reembed(workspaceId);
+      embedStatus.value = result.status;
+      if (!result.ok && result.message) lastError.value = result.message;
+    } catch (err) {
+      lastError.value = (err as Error).message;
+    }
+  }
+
+  // -------------------------------------------------- v2：有限抽取
+
+  const extractedCandidates = shallowRef<MemoryRecord[]>([]);
+
+  async function extractFrom(workspaceId: string, sessionId: string): Promise<number> {
+    if (!workspaceId || !sessionId) return 0;
+    try {
+      const result = await window.piBuddy.memory.extract(workspaceId, sessionId, 10);
+      extractedCandidates.value = result.candidates;
+      await refresh(workspaceId);
+      return result.candidates.length;
+    } catch (err) {
+      lastError.value = (err as Error).message;
+      return 0;
+    }
+  }
+
+  // -------------------------------------------------- v2：知识库
+
+  const knowledgeItems = shallowRef<KnowledgeRecord[]>([]);
+  const knowledgeResults = shallowRef<KnowledgeHit[]>([]);
+  const knowledgeQuery = ref("");
+
+  async function knowledgeList(workspaceId: string): Promise<void> {
+    if (!workspaceId) return;
+    try {
+      knowledgeItems.value = (await window.piBuddy.memory.knowledgeList(workspaceId)).items;
+    } catch (err) {
+      lastError.value = (err as Error).message;
+    }
+  }
+
+  async function knowledgeAdd(
+    workspaceId: string,
+    input: { title: string; content: string; sourceKind: KnowledgeSourceKind; sourceRef?: string }
+  ): Promise<boolean> {
+    try {
+      const result = await window.piBuddy.memory.knowledgeAdd({ workspaceId, ...input });
+      if (!result.ok) {
+        lastError.value = result.message ?? "加入失败";
+        return false;
+      }
+      await knowledgeList(workspaceId);
+      return true;
+    } catch (err) {
+      lastError.value = (err as Error).message;
+      return false;
+    }
+  }
+
+  async function knowledgeSearch(workspaceId: string): Promise<void> {
+    const q = knowledgeQuery.value.trim();
+    if (!workspaceId || !q) {
+      knowledgeResults.value = [];
+      return;
+    }
+    try {
+      knowledgeResults.value = (await window.piBuddy.memory.knowledgeSearch(workspaceId, q, 12)).items;
+      lastError.value = "";
+    } catch (err) {
+      lastError.value = (err as Error).message;
+    }
+  }
+
+  async function knowledgeDelete(workspaceId: string, id: string): Promise<void> {
+    try {
+      await window.piBuddy.memory.knowledgeDelete(id);
+      await knowledgeList(workspaceId);
+      knowledgeResults.value = knowledgeResults.value.filter((h) => h.record.id !== id);
+    } catch (err) {
+      lastError.value = (err as Error).message;
+    }
+  }
+
   return {
     items,
     total,
@@ -194,5 +325,23 @@ export const useMemoryStore = defineStore("memory", () => {
     loadEvidence,
     exportAll,
     setInjection,
+    // v2
+    semanticQuery,
+    semanticResults,
+    semanticBackend,
+    semanticLoading,
+    embedStatus,
+    semanticSearch,
+    loadEmbedStatus,
+    reembed,
+    extractedCandidates,
+    extractFrom,
+    knowledgeItems,
+    knowledgeResults,
+    knowledgeQuery,
+    knowledgeList,
+    knowledgeAdd,
+    knowledgeSearch,
+    knowledgeDelete,
   };
 });

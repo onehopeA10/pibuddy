@@ -20,12 +20,18 @@ export const memoryCapability = defineCapability({
   // appMin 是 "0.0.0"：内置能力不可能比宿主更老。真正生效的是 contractMin/Max。
   compatibility: { appMin: "0.0.0", contractMin: 1, contractMax: 1 },
   dependencies: [],
-  // 唯一真正的权限是 workspace.read：读来源会话的原文作为「原始证据」
-  // （memory-evidence.ts 的 createReadStream）。记忆本体存在自己的 sqlite 库里
-  // （node:sqlite，不算 workspace.write），导出只返回文本、不经主进程写盘，
-  // 因此不申请 workspace.write —— 申请了却没有对应的写调用，drift test 会变红，
-  // 而那正是「声明与实现漂移」要防的事。
-  permissions: ["workspace.read"],
+  // 权限有二：
+  //   workspace.read —— 读来源会话原文作为「原始证据」/ 抽取候选事实
+  //     （memory-evidence.ts / memory-extract.ts 的 createReadStream）。
+  //   network:<域名> —— 语义检索的 Provider 嵌入（memory-embed.ts 走 safeFetch 到
+  //     Provider 的 /embeddings 端点）。**只申报确有 OpenAI 兼容嵌入端点、且在
+  //     Provider 目录里的域名**——权限预览里写的域名就是真会连的域名。`network:*`
+  //     通配被禁；自定义端点（任意域名）的嵌入留待权限引擎能表达「按工作区放行
+  //     某域名」之后再做（与 mcp 缓上 http 连接同源）。默认后端是本地哈希嵌入，
+  //     不连任何网络，因此不配 key 也能用语义检索。
+  // 记忆 / 知识 / 向量本体都存在自己的 sqlite 库里（node:sqlite，不算
+  // workspace.write），导出只返回文本、不经主进程写盘，因此不申请 workspace.write。
+  permissions: ["workspace.read", "network:api.openai.com", "network:api.mistral.ai"],
   channels: [
     CHANNELS.memoryQuery,
     CHANNELS.memorySave,
@@ -36,6 +42,16 @@ export const memoryCapability = defineCapability({
     CHANNELS.memoryEvidence,
     CHANNELS.memoryHits,
     CHANNELS.memorySetInjection,
+    // v2：语义检索 + 知识库 + 有限抽取
+    CHANNELS.memorySearch,
+    CHANNELS.memoryEmbedStatus,
+    CHANNELS.memoryReembed,
+    CHANNELS.memoryExtract,
+    CHANNELS.memoryKnowledgeAdd,
+    CHANNELS.memoryKnowledgeSearch,
+    CHANNELS.memoryKnowledgeList,
+    CHANNELS.memoryKnowledgeGet,
+    CHANNELS.memoryKnowledgeDelete,
   ],
   pushChannels: [],
   tools: [],
@@ -49,7 +65,8 @@ export const memoryCapability = defineCapability({
     },
   ],
   settingsSchema: [],
-  dataSchemaVersion: 1,
+  // v2：新增 embeddings / knowledge / knowledge_fts 表（migrate 只加表、不动 v1 数据）。
+  dataSchemaVersion: 2,
   runtime: {
     loading: "inline",
     heavyDependencies: [],

@@ -95,12 +95,29 @@ async function doExport(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+// -------- 知识库新增 --------
+const kbTitle = ref("");
+const kbContent = ref("");
+const KB_KIND_LABEL: Record<string, string> = { session: "会话", file: "文件", manual: "手工" };
+async function submitKnowledge(): Promise<void> {
+  const title = kbTitle.value.trim();
+  const content = kbContent.value.trim();
+  if (!title || !content) return;
+  const ok = await store.knowledgeAdd(workspaceId.value, { title, content, sourceKind: "manual" });
+  if (ok) {
+    kbTitle.value = "";
+    kbContent.value = "";
+  }
+}
+
 watch(
   () => [store.panelOpen, workspaceId.value, store.query, store.scopeFilter, store.includeExcluded],
   () => {
     if (store.panelOpen && workspaceId.value) {
       void store.refresh(workspaceId.value);
       void store.loadHits(workspaceId.value);
+      void store.loadEmbedStatus(workspaceId.value);
+      void store.knowledgeList(workspaceId.value);
     }
   },
   { immediate: true }
@@ -136,6 +153,38 @@ watch(
       <span class="spacer" />
       <n-button size="small" quaternary @click="doExport">导出</n-button>
     </div>
+
+    <!-- 嵌入状态 + 语义检索（v2） -->
+    <section class="semantic" aria-label="语义检索">
+      <div class="bar">
+        <n-input
+          v-model:value="store.semanticQuery"
+          placeholder="语义检索（混合 FTS + 向量，近义不同词也能查到）"
+          clearable
+          size="small"
+          style="max-width: 320px"
+          :input-props="{ 'aria-label': '语义检索' }"
+          @keyup.enter="store.semanticSearch(workspaceId)"
+        />
+        <n-button size="small" type="primary" @click="store.semanticSearch(workspaceId)">检索</n-button>
+        <span class="spacer" />
+        <span v-if="store.embedStatus" class="muted embed-stat">
+          嵌入 {{ store.embedStatus.backend }}·{{ store.embedStatus.model }}
+          （{{ store.embedStatus.embeddedMemories }}/{{ store.embedStatus.totalMemories }}）
+        </span>
+        <n-button size="tiny" quaternary @click="store.reembed(workspaceId)">重嵌</n-button>
+      </div>
+      <div v-if="store.semanticLoading" class="center"><n-spin size="small" /></div>
+      <ul v-else-if="store.semanticResults.length > 0" class="sem-list" aria-label="语义检索结果">
+        <li v-for="h in store.semanticResults" :key="h.record.id" class="sem-row">
+          <n-tag size="small">{{ TYPE_LABEL[h.record.type] ?? h.record.type }}</n-tag>
+          <span class="sem-content">{{ h.record.content }}</span>
+          <span class="sem-score" :title="`FTS ${h.ftsScore.toFixed(2)} · 向量 ${h.vectorScore.toFixed(2)}`">
+            {{ Math.round(h.score * 100) }}
+          </span>
+        </li>
+      </ul>
+    </section>
 
     <!-- 新增 -->
     <section class="add" aria-label="保存一条记忆">
@@ -256,6 +305,70 @@ watch(
           <n-tag size="small">{{ TYPE_LABEL[h.type] ?? h.type }}</n-tag>
           <span class="hit-preview">{{ h.preview }}</span>
         </li>
+      </ul>
+    </section>
+
+    <!-- 知识库（v2）：带来源引用的文档 / 片段 -->
+    <section class="knowledge" aria-label="知识库">
+      <h4>知识库</h4>
+      <div class="kb-add">
+        <n-input
+          v-model:value="kbTitle"
+          placeholder="标题"
+          size="small"
+          style="max-width: 200px"
+          :input-props="{ 'aria-label': '知识标题' }"
+        />
+        <n-input
+          v-model:value="kbContent"
+          type="textarea"
+          placeholder="内容（检索时命中会标出来源）"
+          :autosize="{ minRows: 1, maxRows: 4 }"
+          :input-props="{ 'aria-label': '知识内容' }"
+        />
+        <n-button size="small" type="primary" :disabled="!kbTitle.trim() || !kbContent.trim()" @click="submitKnowledge">
+          加入
+        </n-button>
+      </div>
+      <div class="bar">
+        <n-input
+          v-model:value="store.knowledgeQuery"
+          placeholder="检索知识库"
+          clearable
+          size="small"
+          style="max-width: 280px"
+          :input-props="{ 'aria-label': '检索知识库' }"
+          @keyup.enter="store.knowledgeSearch(workspaceId)"
+        />
+        <n-button size="small" @click="store.knowledgeSearch(workspaceId)">检索</n-button>
+      </div>
+      <ul v-if="store.knowledgeResults.length > 0" class="kb-list" aria-label="知识检索结果">
+        <li v-for="h in store.knowledgeResults" :key="h.record.id" class="kb-row">
+          <div class="kb-main">
+            <div class="kb-title">{{ h.record.title }}</div>
+            <div class="kb-content">{{ h.record.content }}</div>
+            <div class="kb-cite">
+              引用：{{ KB_KIND_LABEL[h.citation.sourceKind] ?? h.citation.sourceKind }}
+              <template v-if="h.citation.sourceRef"> · {{ h.citation.sourceRef }}</template>
+              <template v-if="h.citation.sourceTurnId"> · 轮次 {{ h.citation.sourceTurnId }}</template>
+            </div>
+          </div>
+          <n-button size="tiny" quaternary @click="store.knowledgeDelete(workspaceId, h.record.id)">删除</n-button>
+        </li>
+      </ul>
+      <ul v-else class="kb-list" aria-label="知识库列表">
+        <li v-for="k in store.knowledgeItems" :key="k.id" class="kb-row">
+          <div class="kb-main">
+            <div class="kb-title">{{ k.title }}</div>
+            <div class="kb-content">{{ k.content }}</div>
+            <div class="kb-cite">
+              来源：{{ KB_KIND_LABEL[k.sourceKind] ?? k.sourceKind }}
+              <template v-if="k.sourceRef"> · {{ k.sourceRef }}</template>
+            </div>
+          </div>
+          <n-button size="tiny" quaternary @click="store.knowledgeDelete(workspaceId, k.id)">删除</n-button>
+        </li>
+        <li v-if="store.knowledgeItems.length === 0" class="muted">知识库还是空的。</li>
       </ul>
     </section>
 
@@ -394,6 +507,81 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.semantic {
+  border: 1px solid #eef0f3;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 12px;
+}
+.embed-stat {
+  font-size: 12px;
+}
+.sem-list,
+.kb-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  max-height: 26vh;
+  overflow: auto;
+}
+.sem-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #f4f6f8;
+}
+.sem-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.sem-score {
+  color: #2563eb;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.knowledge {
+  margin-top: 14px;
+  border-top: 1px solid #eef0f3;
+  padding-top: 8px;
+}
+.kb-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.kb-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1f3f5;
+}
+.kb-main {
+  flex: 1;
+  min-width: 0;
+}
+.kb-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.kb-content {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.kb-cite {
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: #9ca3af;
 }
 .muted {
   color: #9ca3af;
