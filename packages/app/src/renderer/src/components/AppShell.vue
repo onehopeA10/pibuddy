@@ -20,11 +20,14 @@ import FileTreePanel from "./FileTreePanel.vue";
 import FileEditorPane from "./FileEditorPane.vue";
 import ChangesetPanel from "./ChangesetPanel.vue";
 import ArtifactLibrary from "./ArtifactLibrary.vue";
+import MemoryPanel from "./MemoryPanel.vue";
 import PreviewPane from "./PreviewPane.vue";
+import SessionTreePanel from "./SessionTreePanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
 import { useArtifactsStore } from "../stores/artifacts";
+import { useMemoryStore } from "../stores/memory";
 import { useCapabilitiesStore } from "../stores/capabilities";
 import {
   createDirtyDialog,
@@ -38,6 +41,7 @@ const updateStore = useUpdateStore();
 const piRes = usePiResourcesStore();
 const providers = useProvidersStore();
 const artifacts = useArtifactsStore();
+const memory = useMemoryStore();
 const capabilities = useCapabilitiesStore();
 const message = useMessage();
 const dialog = useDialog();
@@ -114,6 +118,9 @@ const dragging = ref(0);
  */
 const filesOpen = ref(false);
 const changesOpen = ref(false);
+// 会话树面板的开合。独立的 ref，不复用 filesOpen / changesOpen —— 它是自己
+// 一个能力域（common.session-tree），与文件树 / 改动面板互不牵连。
+const sessionTreeOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -129,6 +136,8 @@ const filesEnabled = computed(() => capabilities.isEnabled("common.workspace-fil
 const reviewEnabled = computed(() => capabilities.isEnabled("common.workspace-review"));
 const previewEnabled = computed(() => capabilities.isEnabled("common.preview"));
 const artifactsEnabled = computed(() => capabilities.isEnabled("common.artifacts"));
+const memoryEnabled = computed(() => capabilities.isEnabled("common.memory"));
+const sessionTreeEnabled = computed(() => capabilities.isEnabled("common.session-tree"));
 
 onMounted(() => {
   void store.init();
@@ -268,6 +277,24 @@ function onDrop(): void {
             >
               📦 产物
             </n-button>
+            <n-button
+              v-if="memoryEnabled"
+              size="tiny"
+              :type="memory.panelOpen ? 'primary' : 'default'"
+              quaternary
+              @click="memory.panelOpen = !memory.panelOpen"
+            >
+              🧠 记忆
+            </n-button>
+            <n-button
+              v-if="sessionTreeEnabled"
+              size="tiny"
+              :type="sessionTreeOpen ? 'primary' : 'default'"
+              quaternary
+              @click="sessionTreeOpen = !sessionTreeOpen"
+            >
+              🌳 会话树
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -281,6 +308,7 @@ function onDrop(): void {
             :relative-path="artifacts.previewRelativePath || undefined"
           />
           <ChangesetPanel v-if="changesOpen && reviewEnabled" />
+          <SessionTreePanel v-if="sessionTreeOpen && sessionTreeEnabled" />
           <InputBar />
         </slot>
       </template>
@@ -296,6 +324,7 @@ function onDrop(): void {
       <ProviderCenter />
       <UsagePanel />
       <ArtifactLibrary v-if="artifactsEnabled" />
+      <MemoryPanel v-if="memoryEnabled" />
     </slot>
   </div>
 </template>

@@ -15,6 +15,7 @@ import type {
   SessionQuery,
   SessionRow,
   SessionStatus,
+  SessionTreeGraph,
 } from "@pibuddy/contract";
 import { invoke } from "./bridge.js";
 
@@ -66,4 +67,17 @@ export const sessions = {
     beforeOffset: number;
     limit: number;
   }) => invoke<SessionHistoryPage>(CHANNELS.sessionsReadHistory, args),
+  /**
+   * 某个会话的**归一化树**（common.session-tree 能力）。
+   *
+   * 据 (workspaceId, sessionId) 反查会话 JSONL 重建树，返回已分类、拍平、带
+   * 性能截断的图，供分叉可视化面板直接渲染。与 readHistoryBefore 一样只持有
+   * 不透明标识，路径反查在 main 侧。分叉 / 克隆本身走
+   * `window.piBuddy.pi.fork/clone`（pi runtime 的内核动作）。
+   *
+   * 能力未启用时该通道在主进程侧根本没注册，调用会拿到「未知通道」的明确错误
+   * ——而面板此时也不会出现（feature gate 的渲染侧一半）。
+   */
+  tree: (workspaceId: string, sessionId: string) =>
+    invoke<SessionTreeGraph>(CHANNELS.sessionTreeGraph, { workspaceId, sessionId }),
 };

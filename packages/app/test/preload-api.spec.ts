@@ -49,6 +49,9 @@ describe("api 聚合对象", () => {
       "diagnostics",
       "dialog",
       "file",
+      "mcp",
+      "memory",
+      "permission",
       "pi",
       "piResources",
       "preview",
@@ -62,7 +65,7 @@ describe("api 聚合对象", () => {
     ]);
   });
 
-  it("sessions 命名空间覆盖全部 9 条通道，一条不漏", async () => {
+  it("sessions 命名空间的每个方法都各自打到自己那条通道，一条不漏", async () => {
     await api.sessions.query("ws");
     await api.sessions.rename("ws", "s", "n");
     await api.sessions.setPinned("ws", "s", true);
@@ -82,6 +85,9 @@ describe("api 聚合对象", () => {
       beforeOffset: 10,
       limit: 5,
     });
+    // tree() 是 common.session-tree 能力的归一化视图，无参、打到 session-tree:graph
+    // （不是 sessions:*）——它挂在 sessions 命名空间下，但通道归会话树能力所有。
+    await api.sessions.tree();
 
     expect(invoked.sort()).toEqual(
       [
@@ -94,6 +100,7 @@ describe("api 聚合对象", () => {
         CHANNELS.sessionsSaveDraft,
         CHANNELS.sessionsExportHtml,
         CHANNELS.sessionsReadHistory,
+        CHANNELS.sessionTreeGraph,
       ].sort()
     );
   });

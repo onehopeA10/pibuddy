@@ -103,13 +103,26 @@ const shardById = new Map(CHANNEL_CONTRACT_SHARDS.map((s) => [s.id, s] as const)
 const CHANNEL_BY_KEY = new Map<string, string>(Object.entries(CHANNELS));
 
 describe("能力清单本身不为空（数据驱动的断言最容易失效的方式是数据集为空）", () => {
-  it("四个通用域各有一份清单", () => {
-    expect(BUILT_IN_CAPABILITIES.map((m) => m.id)).toEqual([
-      "common.workspace-files",
-      "common.workspace-review",
-      "common.preview",
-      "common.artifacts",
-    ]);
+  /**
+   * 四个数据面能力是这一组「反-塌缩地基」的锚点：drift 1-5 全部数据驱动，
+   * 它们只有在清单集合始终非空、且这四个始终在册时才不会空洞通过。
+   *
+   * 这里刻意**不锁死总数、不锁死完整 id 列表**：能力包按 ADR-0002 逐个追加
+   * （session-tree / memory / … 三个并行包同时在长），锁死总数等于让每一个
+   * 新能力都来改这一行，三个包会在同一行上互撞。改成「地基必须在 + 无重复 +
+   * 有下界」既挡住数据集塌缩，又容得下并行追加。
+   */
+  const CORE_DATA_PLANE = [
+    "common.workspace-files",
+    "common.workspace-review",
+    "common.preview",
+    "common.artifacts",
+  ];
+
+  it("四个数据面能力始终在册，且没有重复 id", () => {
+    const ids = BUILT_IN_CAPABILITIES.map((m) => m.id);
+    for (const id of CORE_DATA_PLANE) expect([id, ids.includes(id)]).toEqual([id, true]);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("每份清单都通过装配期校验", () => {
@@ -118,18 +131,23 @@ describe("能力清单本身不为空（数据驱动的断言最容易失效的�
     }
   });
 
-  it("每份清单都真的声明了通道、权限与 UI 贡献（不是一份空壳）", () => {
+  it("每份清单都声明了通道与 UI 贡献；权限可空但整批至少一份非空（防 drift3 空洞）", () => {
     for (const manifest of BUILT_IN_CAPABILITIES) {
-      expect(manifest.channels.length).toBeGreaterThan(0);
-      expect(manifest.permissions.length).toBeGreaterThan(0);
-      expect(manifest.uiContributions.length).toBeGreaterThan(0);
+      expect([manifest.id, manifest.channels.length > 0]).toEqual([manifest.id, true]);
+      expect([manifest.id, manifest.uiContributions.length > 0]).toEqual([manifest.id, true]);
     }
+    // 纯读内核状态的能力（如 common.session-tree）合法地一条权限都不申请；
+    // 但整批里至少要有一份非空，否则 drift3 的权限对账没有任何数据可嚼。
+    expect(BUILT_IN_CAPABILITIES.some((m) => m.permissions.length > 0)).toBe(true);
   });
 
-  it("四份清单合起来盖住 24 条可选通道", () => {
+  it("清单合起来的通道无跨能力重复，且不少于数据面原有的 24 条", () => {
     const all = BUILT_IN_CAPABILITIES.flatMap((m) => [...m.channels]);
-    expect(new Set(all).size).toBe(24);
-    expect(all.length).toBe(24);
+    // 无重复：两个能力抢同一条通道，这里就红（与 CapabilityRegistry 的
+    // channelOwner、mergeChannelContracts 三处一致地拒绝）。
+    expect(new Set(all).size).toBe(all.length);
+    // 反-塌缩下界：四个数据面能力原本就有 24 条，掉到 24 以下说明有能力丢了通道。
+    expect(all.length).toBeGreaterThanOrEqual(24);
   });
 });
 

@@ -39,6 +39,8 @@ import { preview } from "./preview.js";
 import { artifacts } from "./artifacts.js";
 import { capabilities } from "./capabilities.js";
 import { permission } from "./permission.js";
+import { mcp } from "./mcp.js";
+import { memory } from "./memory.js";
 
 export const api = {
   pi,
@@ -63,6 +65,10 @@ export const api = {
   capabilities,
   /** 能力权限决策（ADR-0002 D3 / SEC-003）。决策在主进程，没有直接执行入口 */
   permission,
+  /** 长期记忆（MEM-101）。用户显式保存 + 相关注入；没有「注入任意文本」入口 */
+  memory,
+  /** MCP 服务器管理（common.mcp）。启停 / 测试收不透明 id，spawn 只在主进程 */
+  mcp,
 };
 
 export type PiBuddyApi = typeof api;

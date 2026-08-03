@@ -32,6 +32,9 @@ import {
 } from "@pibuddy/contract";
 
 import * as attachments from "../attachment-registry.js";
+import { isCapabilityEnabled } from "../capability/capability-state.js";
+import { MEMORY_CAPABILITY_ID } from "../capability/manifests/memory.manifest.js";
+import { injectMemory } from "../memory/memory-inject.js";
 import { ExtensionUiService, type ExtUiHost } from "../extension-ui/ext-ui-service.js";
 import { registerHandler, forgetSender } from "../ipc-guard.js";
 import { log } from "../log.js";
@@ -272,6 +275,16 @@ export function registerPiIpc(): void {
         lines.push(`- ${shown}（${record.mimeType}，${record.size} 字节）`);
       }
       message = `${message}\n\n[附件]\n${lines.join("\n")}`.trim();
+    }
+    // 长期记忆注入（MEM-101，本能力唯一的内核接触点）。
+    //
+    // 零成本门：`common.memory` 未启用时 isCapabilityEnabled 是一次内存 Set 命中、
+    // 立即为假，连 loadSettings 都不会跑 —— 「关掉记忆」因此真的等于「这段不存在」，
+    // 而不是「每发一句话还白读一次设置」。启用时才解出 workspaceId 交给 injectMemory，
+    // 后者内部再判一次注入总开关、抽词检索、落下命中记录（供隐私视图查看）。
+    if (isCapabilityEnabled(MEMORY_CAPABILITY_ID)) {
+      const memoryRoot = loadSettings().workspace;
+      if (memoryRoot) message = injectMemory(message, workspaceIdFor(memoryRoot));
     }
     return client.send({
       type: "prompt",

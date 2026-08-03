@@ -14,6 +14,9 @@ import { artifactsCapability } from "../artifacts/artifacts.capability.js";
 import { workspaceReviewCapability } from "../changeset/workspace-review.capability.js";
 import { previewCapability } from "../preview/preview.capability.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
+import { mcpCapability } from "./manifests/mcp.manifest.js";
+import { memoryCapability } from "./manifests/memory.manifest.js";
+import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
 
 /**
  * 全部内置能力，按装配顺序。
@@ -26,6 +29,9 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   workspaceReviewCapability,
   previewCapability,
   artifactsCapability,
+  sessionTreeCapability,
+  memoryCapability,
+  mcpCapability,
 ];
 
 /**
@@ -45,12 +51,15 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
   {
     id: "general",
     displayName: "通用办公",
-    description: "文件、预览、产物库与变更审阅，日常文档工作的默认组合。",
+    description: "文件、预览、产物库、变更审阅与会话树，日常文档工作的默认组合。",
     capabilityIds: [
       "common.workspace-files",
       "common.workspace-review",
       "common.preview",
       "common.artifacts",
+      "common.session-tree",
+      "common.memory",
+      "common.mcp",
     ],
   },
   {
@@ -62,6 +71,9 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.workspace-review",
       "common.preview",
       "common.artifacts",
+      "common.session-tree",
+      "common.memory",
+      "common.mcp",
     ],
   },
   {

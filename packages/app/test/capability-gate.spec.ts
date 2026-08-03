@@ -68,12 +68,14 @@ describe("装配确实发生了（默认值是「未装配 = 全部视为启用�
 });
 
 describe("未启用的能力：通道一条都不注册", () => {
-  it("24 条可选通道一条都不在已注册表里", () => {
+  it("全部可选通道一条都不在已注册表里", () => {
     const table = new Set(registeredChannels());
     const leaked = CAPABILITY_CHANNELS.filter((channel) => table.has(channel));
     expect(leaked).toEqual([]);
-    // 集合非空才有意义：CAPABILITY_CHANNELS 空了的话上面那条恒真。
-    expect(CAPABILITY_CHANNELS.length).toBe(24);
+    // 集合非空才有意义：CAPABILITY_CHANNELS 空了的话上面那条恒真。数据面原有
+    // 24 条是下界；能力包按 ADR-0002 逐个追加（session-tree / memory / …），
+    // 不锁死总数以免每加一个都来改这行、三个并行包互撞。
+    expect(CAPABILITY_CHANNELS.length).toBeGreaterThanOrEqual(24);
   });
 
   it("ipcMain 那一侧也确实没被绑过 —— 不是只有守卫的账本没记", () => {

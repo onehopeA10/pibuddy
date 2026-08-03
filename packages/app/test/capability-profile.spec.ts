@@ -45,15 +45,24 @@ beforeEach(() => {
 });
 
 describe("默认状态", () => {
-  it("没有偏好文件时落在默认 Profile，四个通用能力全开", () => {
+  it("没有偏好文件时落在默认 Profile，该 Profile 声明的能力全开", () => {
     const state = catalog.describeCapabilities();
     expect(state.activeProfileId).toBe("general");
-    expect(enabledIds(state)).toEqual([
+    // 启用集合恰等于 general 自己声明的 capabilityIds：general 就是「全开」
+    // 的那条。这样断言而不是硬列一串 id，是因为能力包按 ADR-0002 逐个追加
+    // （session-tree / memory / … 并行在长），硬列会让三个包在同一行互撞。
+    const general = state.profiles.find((p) => p.id === "general");
+    expect(general).toBeTruthy();
+    expect(enabledIds(state).sort()).toEqual([...general!.capabilityIds].sort());
+    // 反-塌缩：四个数据面能力必须都在默认启用集里。
+    for (const id of [
       "common.workspace-files",
       "common.workspace-review",
       "common.preview",
       "common.artifacts",
-    ]);
+    ]) {
+      expect([id, enabledIds(state).includes(id)]).toEqual([id, true]);
+    }
   });
 
   it("未装配时 restartRequired 为 false（没有可比对的基准，不该凭空要求重启）", () => {

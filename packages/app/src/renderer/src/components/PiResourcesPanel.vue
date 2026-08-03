@@ -14,11 +14,12 @@
  * 「执行这条命令」—— pi 的包管理跑的是 npm 和 git，留一条通用转发口
  * 等于把本机命令行挂在界面上。
  *
- * ## MCP 明确标为未实现
+ * ## MCP 服务器管理（能力包 common.mcp）
  *
- * MCP 的增删改查、启停、连接测试、OAuth 状态、工具列表本轮**没有做**。
- * 这里写出这句话，而不是渲染一个空列表 —— 空列表在同一块像素上表达的是
- * 「你还没配过 MCP」，那是另一件完全不同的事。
+ * TASK-012 时 MCP 标为「未实现」，本轮补上，接进 `common.mcp` 能力：stdio
+ * 服务器的枚举 / 增删改 / 启停 / 连接测试全实现，http / OAuth 仅枚举展示。
+ * 面板由 `McpPanel.vue` 承载，能力未启用时**整块不渲染**（feature gate 的
+ * 渲染侧门控，判据 `capabilities.isEnabled("common.mcp")`）。
  */
 import { computed, ref, watch } from "vue";
 import {
@@ -37,9 +38,19 @@ import {
 } from "naive-ui";
 import { useAppStore } from "../stores/app";
 import { usePiResourcesStore } from "../stores/piResources";
+import { useCapabilitiesStore } from "../stores/capabilities";
+import McpPanel from "./McpPanel.vue";
 
 const store = useAppStore();
 const piRes = usePiResourcesStore();
+const capabilities = useCapabilitiesStore();
+
+/**
+ * MCP 面板的可见性门控（ADR-0002 feature gate 渲染侧）。双引号写法是
+ * capability-drift.spec.ts 的对账目标：宿主必须出现字面量
+ * `isEnabled("common.mcp")`，否则「声明了 UI 贡献却没人门控」被判红。
+ */
+const mcpEnabled = computed(() => capabilities.isEnabled("common.mcp"));
 
 const KIND_LABEL: Record<string, string> = {
   skill: "技能",
@@ -198,10 +209,11 @@ async function doInstall(): Promise<void> {
           </section>
         </n-spin>
 
-        <!-- MCP：本轮未实现，明说 -->
-        <n-alert type="default" title="MCP 服务器管理">
-          {{ piRes.mcpNote || "MCP 管理（增删改查、启停、连接测试、OAuth 状态、工具列表）本轮尚未实现" }}
-        </n-alert>
+        <!-- MCP 服务器管理（common.mcp）：能力启用时才渲染整块 -->
+        <section v-if="mcpEnabled" class="mcp-section">
+          <h4>MCP 服务器</h4>
+          <McpPanel />
+        </section>
       </n-space>
     </n-drawer-content>
   </n-drawer>
@@ -211,10 +223,15 @@ async function doInstall(): Promise<void> {
 .section-hint {
   font-size: 12px;
 }
-.group h4 {
+.group h4,
+.mcp-section h4 {
   margin: 16px 0 8px;
   font-size: 13px;
   opacity: 0.7;
+}
+.mcp-section {
+  border-top: 1px solid rgba(128, 128, 128, 0.24);
+  padding-top: 8px;
 }
 .row {
   display: flex;

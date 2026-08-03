@@ -22,6 +22,12 @@ import { disposeChangesetResources, registerChangesetIpc } from "../changeset/ch
 import { workspaceReviewCapability } from "../changeset/workspace-review.capability.js";
 import { disposePreviewResources, registerPreviewIpc } from "../preview/preview-ipc.js";
 import { previewCapability } from "../preview/preview.capability.js";
+import { disposeMemoryResources, registerMemoryIpc } from "../memory/memory-ipc.js";
+import { memoryCapability } from "./manifests/memory.manifest.js";
+import { registerSessionTreeIpc } from "../session-tree/session-tree-ipc.js";
+import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
+import { disposeMcpResources, registerMcpIpc } from "../mcp/mcp-ipc.js";
+import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -64,6 +70,22 @@ capabilityRegistry.register({
   manifest: artifactsCapability,
   activate: registerArtifactIpc,
   deactivate: disposeArtifactResources,
+});
+// 会话树：只注册一条归一化视图通道，无 deactivate——它不持有 watcher / worker /
+// 子进程等需要拆卸的运行期资源（teardown 为空，见 manifest）。
+capabilityRegistry.register({
+  manifest: sessionTreeCapability,
+  activate: registerSessionTreeIpc,
+});
+capabilityRegistry.register({
+  manifest: memoryCapability,
+  activate: registerMemoryIpc,
+  deactivate: disposeMemoryResources,
+});
+capabilityRegistry.register({
+  manifest: mcpCapability,
+  activate: registerMcpIpc,
+  deactivate: disposeMcpResources,
 });
 capabilityRegistry.seal();
 

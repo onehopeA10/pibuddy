@@ -59,6 +59,17 @@ export const CHANNELS = {
   piFork: "pi:fork",
   piClone: "pi:clone",
 
+  // ---- 会话树可视化（common.session-tree，ADR-0002 能力包，恰 1 条） ----
+  //
+  // 上面那五条 pi:* 是**平台内核**（pi runtime）的数据面，恒注册；这一条是
+  // 归属 `common.session-tree` 能力的**归一化视图**：pi:get-tree 回来的是
+  // `{tree, leafId}` 的裸结构（RpcResponse<unknown>），本通道把它折成一份
+  // 带节点分类（user / assistant / compaction / model-change）、分支点、
+  // 当前叶子标记与性能截断的类型化图，供分叉可视化面板直接渲染。
+  // 能力未启用时它一条都不注册（feature gate 的主进程侧），对照见
+  // capability-gate.spec.ts。
+  sessionTreeGraph: "session-tree:graph",
+
   // ---- 会话中心（SES-101，恰 9 条） ----
   //
   // 取代原先那条一次性全量枚举的 `sessions:list`：列表、搜索、整理、草稿、
@@ -252,6 +263,39 @@ export const CHANNELS = {
    * 入口。它声明自己需要 process.git，未授权时被第五道闸挡在 handler 之外。
    */
   permissionProbe: "permission:probe",
+
+  // ---- MCP 服务器管理（EXT-102 / 能力包 common.mcp，恰 6 条） ----
+  //
+  // 全部以**不透明服务器 id** 或结构化配置为入参：启停 / 连接测试收的是
+  // 扫描结果里的 id，main 侧按 id 从磁盘配置查出 command/args 再 spawn
+  // （shell:false）—— 渲染进程在结构上表达不出「执行这条命令」。save 由
+  // 渲染进程给出配置（与 pi-resources 的 install 同构），main 侧再过一遍
+  // 注入校验。env / header 的值单向下发时脱敏（只留键名）。
+  mcpList: "mcp:list",
+  mcpSave: "mcp:save",
+  mcpRemove: "mcp:remove",
+  mcpTest: "mcp:test",
+  mcpStart: "mcp:start",
+  mcpStop: "mcp:stop",
+
+  // ---- 长期记忆（MEM-101 第一版，能力包 common.memory，恰 9 条） ----
+  //
+  // 九条都以不透明 workspaceId / memory id 为入参：记忆按 capabilityId +
+  // workspaceId 分区（ADR-0002 D4 规则 3），渲染进程既指定不了别的工作区的
+  // 记忆，也表达不出「注入一段任意上下文」——注入内容只来自用户显式保存过的
+  // 记录。没有一条通道能塞进一份现成的注入文本。
+  memoryQuery: "memory:query",
+  memorySave: "memory:save",
+  memoryUpdate: "memory:update",
+  memoryMerge: "memory:merge",
+  memoryDelete: "memory:delete",
+  memoryExport: "memory:export",
+  /** 取一条记忆的来源会话轮次原文（查看原始证据） */
+  memoryEvidence: "memory:evidence",
+  /** 注入命中记录（调试 / 隐私视图）：这一轮注入了哪些记忆 */
+  memoryHits: "memory:hits",
+  /** 开关注入（当前工作区 / 全局），不删任何记忆 */
+  memorySetInjection: "memory:set-injection",
 
   // ---- 诊断与健康（OBS-101，恰 3 条） ----
   //
