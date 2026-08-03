@@ -336,6 +336,8 @@ function onDrop(): void {
               @click="gitOpen = !gitOpen"
             >
               🌿 Git
+            </n-button>
+            <n-button
               v-if="tasksEnabled"
               size="tiny"
               :type="tasks.panelOpen ? 'primary' : 'default'"
