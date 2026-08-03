@@ -360,6 +360,24 @@ export const CHANNELS = {
   tasksCancelRun: "tasks:cancel-run",
   tasksRetryRun: "tasks:retry-run",
   tasksDuplicate: "tasks:duplicate",
+
+  // ---- child Agent 编排（AGT-102，能力包 common.child-agent，恰 5 条） ----
+  //
+  // 编排是**通用能力**（可关闭）：关掉它单会话对话照常，只是不能派生子 Agent。
+  // 五条通道的入参一律不透明 nodeId + 结构化子规格 —— 渲染进程既塞不进一个运行
+  // 时句柄，也表达不出「让某进程跑这条命令」。子 Agent 的真实进程派生走后台池
+  // （origin:"child"），本组只表达编排意图：取拓扑 / 创建子 / 取消（向子树传播）/
+  // 回答子的结构化提问 / 裁决子 worktree 改动的合并。
+  /** 取整棵编排拓扑（父子关系、状态、成本、证据、结果、限流视图）。 */
+  childAgentDescribe: "child-agent:describe",
+  /** 父创建一个子 Agent（parentId=null 表示用户直接创建的顶层子）。 */
+  childAgentCreate: "child-agent:create",
+  /** 取消某节点：向它的整棵子树传播（子进程一并停）。 */
+  childAgentCancel: "child-agent:cancel",
+  /** 回答某子 Agent 的一条结构化提问。 */
+  childAgentAnswer: "child-agent:answer",
+  /** 裁决某子 Agent 的 worktree 改动合并（accept / reject）。 */
+  childAgentResolveMerge: "child-agent:resolve-merge",
 } as const;
 
 /** 主进程单向推送通道（7 个）。 */
@@ -396,6 +414,14 @@ export const PUSH_CHANNELS = {
    * 对齐快照，不必另写一份序号比较。快照是全量的，晚到的旧快照被序号闸门丢弃。
    */
   agentPoolEvent: "agent-pool:event",
+  /**
+   * child Agent 编排拓扑变更（AGT-102）。
+   *
+   * 载荷是 `PiEnvelope<ChildTopologySnapshot>`：与池快照同一套信封，渲染侧复用
+   * 现成的 sequence（按本通道单调判）+ generation（全局判）丢弃规则对齐拓扑，
+   * 不必另写一份序号比较。快照是全量的，晚到的旧快照被序号闸门丢弃。
+   */
+  childAgentEvent: "child-agent:event",
 } as const;
 
 export type InvokeChannel = (typeof CHANNELS)[keyof typeof CHANNELS];
