@@ -9,15 +9,25 @@ import type {
   TextContent,
   UserMessage,
 } from "@sdk";
+import type { ArtifactLink as ArtifactLinkRef } from "@contract";
 import { renderMarkdown, truncateToolOutput } from "../markdown";
 import { openThinking, thinkingKey } from "../stores/chat-ui";
 import ToolActivity from "./ToolActivity.vue";
+import ArtifactLink from "./ArtifactLink.vue";
 
 const props = defineProps<{
   message: AgentMessage;
   streaming?: boolean;
   /** 消息在列表中的稳定 key；展开态按它归一化到 store。 */
   messageKey?: number | string;
+  /**
+   * 这条消息产出的产物（ART-102）。
+   *
+   * 每一项只有 artifactId + version + 显示名，**没有路径** —— 于是
+   * 「消息里存了个会失效的路径」在类型层就表达不出来。文件后来被挪到
+   * 哪里、被重命名成什么，这条链接照样解析得到当时那一版。
+   */
+  artifacts?: ArtifactLinkRef[];
 }>();
 
 const emit = defineEmits<{
@@ -139,6 +149,17 @@ async function copyText(text: string): Promise<void> {
           <ToolActivity v-else-if="block.type === 'toolCall'" :call="block" />
         </template>
 
+        <!-- 工具生成的文件：渲染成产物链接而不是一行路径文本 -->
+        <div v-if="(props.artifacts?.length ?? 0) > 0" class="artifact-row">
+          <ArtifactLink
+            v-for="link in props.artifacts"
+            :key="`${link.artifactId}@${link.version}`"
+            :artifact-id="link.artifactId"
+            :version="link.version"
+            :name="link.name"
+          />
+        </div>
+
         <n-alert
           v-if="errorMessage"
           type="error"
@@ -176,6 +197,12 @@ async function copyText(text: string): Promise<void> {
 </template>
 
 <style scoped>
+.artifact-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
 .msg-actions {
   display: flex;
   gap: 8px;

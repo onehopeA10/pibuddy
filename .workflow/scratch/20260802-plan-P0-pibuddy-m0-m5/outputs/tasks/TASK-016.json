@@ -8,8 +8,8 @@
   "priority": "medium",
   "effort": "large",
   "action": "新建 packages/app/src/main/preview/convert-host.ts，用 `utilityProcess.fork(convertWorkerPath, [], { env: { NODE_OPTIONS: '' }, stdio: 'pipe' })` 起转换进程，并对每次转换施加硬上限常量 `const CONVERT_LIMITS = { maxInputBytes: 50 * 1024 * 1024, maxOutputBytes: 100 * 1024 * 1024, timeoutMs: 30_000, maxRssBytes: 512 * 1024 * 1024 } as const`，超时或超限一律 kill 并返回 `{ ok: false, code: 'timeout'|'too-large'|'oom' }`；转换进程只被授予单一输入文件路径与一个专属输出临时目录（`path.join(app.getPath('temp'), 'pibuddy-convert', randomUUID())`），禁止访问其它路径。新建 preview/preview-window.ts，用 `new BrowserWindow({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: undefined, partition: 'sandbox:preview', webSecurity: true, javascript: false } })` 承载 HTML 预览，并对该 partition 注册 `session.fromPartition('sandbox:preview').webRequest.onBeforeRequest` 拦截一切非 `file://` 且非本地转换输出目录的请求，同时注入 CSP 响应头 `default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'none'; connect-src 'none'; frame-src 'none'`。解析库选型已定死为以下六个纯 JS、零原生依赖的精确版本，写入 packages/app/package.json dependencies（无 `^` / `~`）：`\"mammoth\": \"1.12.0\"`（DOCX → 结构化 HTML/文本）、`\"exceljs\": \"4.4.0\"`（XLSX/XLSM 读取）、`\"unpdf\": \"1.8.0\"`（PDF 文本抽取，pdfjs 的无 canvas 打包版，dependencies 为空）、`\"papaparse\": \"5.5.4\"`（CSV，零依赖）、`\"jszip\": \"3.10.1\"` + `\"fast-xml-parser\": \"4.5.3\"`（PPTX：解 zip 后解析 ppt/slides/slideN.xml 抽文本，无成熟纯 JS PPTX 库，如实自建最小实现）。明确排除：`xlsx`（SheetJS npm 上的 0.18.5 已停更且带未修复的原型污染 CVE-2023-30533）、`pdfjs-dist` 与 `pdf-parse`（二者均把 `@napi-rs/canvas` 列为 dependencies，会引入 .node 二进制）。`unpdf` 的 `@napi-rs/canvas` 仅为 peerDependency 且只服务于 renderPageAsImage，本任务只用 extractText，故不安装该 peer。",
-  "status": "pending",
-  "completed_at": null,
+  "status": "completed",
+  "completed_at": "2026-08-03T08:11:24.925456+08:00",
   "actual_duration": null,
   "scope": "packages/app/src/main/preview, packages/app/src/main/artifacts, packages/app/src/renderer/src/components",
   "focus_paths": [

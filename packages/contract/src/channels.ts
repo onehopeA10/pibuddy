@@ -121,6 +121,29 @@ export const CHANNELS = {
   changesetReject: "changeset:reject",
   changesetAcceptBatch: "changeset:accept-batch",
 
+  // ---- 安全预览（ART-101，恰 3 条） ----
+  //
+  // 入参只有 attachment token 或 workspaceId + relativePath（CT-17 / CT-18），
+  // 一个绝对路径字段都没有。真正的解析发生在一个受限 utilityProcess 里，
+  // 渲染进程既指定不了「用哪个解析器」，也指定不了「解析哪个磁盘位置」。
+  previewOpen: "preview:open",
+  previewConvert: "preview:convert",
+  previewClose: "preview:close",
+
+  // ---- Artifact 仓库（ART-102，恰 8 条） ----
+  //
+  // 全部以不透明 artifactId 为入参：产物的真实落盘位置只活在主进程，
+  // 渲染进程连「这个文件在哪」都问不出来，自然也就无法用产物库当成
+  // 一条读任意文件的旁路。
+  artifactsQuery: "artifacts:query",
+  artifactsRename: "artifacts:rename",
+  artifactsDuplicate: "artifacts:duplicate",
+  artifactsExport: "artifacts:export",
+  artifactsShowInFolder: "artifacts:show-in-folder",
+  artifactsTrash: "artifacts:trash",
+  artifactsRestore: "artifacts:restore",
+  artifactsCompareVersions: "artifacts:compare-versions",
+
   // ---- 语音 ----
   sttTranscribe: "stt:transcribe",
 

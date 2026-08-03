@@ -14,9 +14,11 @@ import { NButton, NInput, NSpin, useDialog, useMessage } from "naive-ui";
 import type { FileTreeEntry } from "@contract";
 import { useAppStore } from "../stores/app";
 import { useWorkspaceStore } from "../stores/workspace";
+import { useArtifactsStore } from "../stores/artifacts";
 
 const app = useAppStore();
 const ws = useWorkspaceStore();
+const artifacts = useArtifactsStore();
 const dialog = useDialog();
 const message = useMessage();
 
@@ -76,7 +78,18 @@ async function onRowClick(entry: FileTreeEntry): Promise<void> {
     message.info("这是一个符号链接，PiBuddy 不跟随它");
     return;
   }
-  if (entry.isDirectory) await ws.toggleDir(entry.relativePath);
+  if (entry.isDirectory) {
+    await ws.toggleDir(entry.relativePath);
+    return;
+  }
+  // 单击文件 = 看一眼（只读预览），双击才进编辑器。
+  //
+  // 没有这一步的话，预览面板挂在界面上却**没有任何东西会去调它** ——
+  // 转换链路、沙箱窗口、错误建议表全都在，用户点遍整棵文件树也永远
+  // 看到「选一个文件来看看」。这类「两端齐全、中间没人接」的缺口不会
+  // 让任何一道门禁变红。
+  const workspaceId = app.workspaceId;
+  if (workspaceId) void artifacts.preview({ workspaceId, relativePath: entry.relativePath });
 }
 
 async function onRowDouble(entry: FileTreeEntry): Promise<void> {

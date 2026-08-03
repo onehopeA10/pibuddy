@@ -13,5 +13,7 @@ export * from "./pi-resources.js";
 export * from "./providers.js";
 export * from "./diagnostics.js";
 export * from "./workspace.js";
+export * from "./preview.js";
+export * from "./artifacts.js";
 export * from "./ipc-contract.js";
 export * from "./ports.js";

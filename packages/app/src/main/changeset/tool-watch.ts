@@ -22,6 +22,7 @@ import type { ChangesetKind } from "@pibuddy/contract";
 import fs from "node:fs";
 import path from "node:path";
 
+import { trackToolEnd, trackToolStart } from "../artifacts/artifact-tracker.js";
 import { requireWorkspaceRoot } from "../workspace-registry.js";
 import { changesetStore } from "./changeset-store.js";
 
@@ -116,12 +117,26 @@ export async function observeToolEvent(
         kind,
         beforeContent: readOrNull(path.resolve(root, relativePath)),
       });
+      // 产物库同步插一条 generating（ART-102）。删除类工具不算产物 ——
+      // 「做出来的东西」和「删掉的东西」放同一个库里只会互相干扰。
+      if (kind !== "delete") {
+        trackToolStart({
+          workspaceId: ctx.workspaceId,
+          sessionId: ctx.sessionId,
+          turnId: ctx.turnId,
+          toolCallId: event.toolCallId,
+          relativePath,
+        });
+      }
       return;
     }
 
     if (event.type !== "tool_execution_end") return;
     const snapshot = pending.get(event.toolCallId);
     pending.delete(event.toolCallId);
+    // 产物状态先结算：即便下面因为「内容没变」提前 return，产物库里那条
+    // generating 也必须落定，否则它会永远停在生成中（ART-102）。
+    trackToolEnd(event.toolCallId, !event.isError);
     if (!snapshot) return;
     // 工具自己报错时不登记：磁盘多半没被改过，记一条空变更只会制造噪音
     if (event.isError) return;

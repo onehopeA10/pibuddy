@@ -19,14 +19,18 @@ import UsagePanel from "./UsagePanel.vue";
 import FileTreePanel from "./FileTreePanel.vue";
 import FileEditorPane from "./FileEditorPane.vue";
 import ChangesetPanel from "./ChangesetPanel.vue";
+import ArtifactLibrary from "./ArtifactLibrary.vue";
+import PreviewPane from "./PreviewPane.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
+import { useArtifactsStore } from "../stores/artifacts";
 
 const store = useAppStore();
 const updateStore = useUpdateStore();
 const piRes = usePiResourcesStore();
 const providers = useProvidersStore();
+const artifacts = useArtifactsStore();
 const message = useMessage();
 store.setNotifier(message);
 
@@ -192,9 +196,23 @@ function onDrop(): void {
             >
               🔀 改动
             </n-button>
+            <n-button
+              size="tiny"
+              :type="artifacts.panelOpen ? 'primary' : 'default'"
+              quaternary
+              @click="artifacts.panelOpen = !artifacts.panelOpen"
+            >
+              📦 产物
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen" />
+          <!-- 预览区跟着文件面板一起开合：不开文件树的时候它没有输入来源 -->
+          <PreviewPane
+            v-if="filesOpen"
+            :workspace-id="store.workspaceId ?? undefined"
+            :relative-path="artifacts.previewRelativePath || undefined"
+          />
           <ChangesetPanel v-if="changesOpen" />
           <InputBar />
         </slot>
@@ -210,6 +228,7 @@ function onDrop(): void {
       <ProjectTrustDialog />
       <ProviderCenter />
       <UsagePanel />
+      <ArtifactLibrary />
     </slot>
   </div>
 </template>

@@ -19,6 +19,8 @@
  *   stt       语音转写
  *   update    应用自更新（状态快照 + 九个动作 + 事件订阅）
  *   workspace 工作区文件服务（树 / 搜索 / 读写 / 变更集），只认相对路径
+ *   preview   安全预览（沙箱窗口 + 受限转换进程）
+ *   artifacts 产物库（版本链 / 回收站 / 导出 / 版本比较）
  */
 import { pi } from "./pi.js";
 import { piResources } from "./piResources.js";
@@ -32,6 +34,8 @@ import { stt } from "./stt.js";
 import { update } from "./update.js";
 import { diagnostics } from "./diagnostics.js";
 import { workspace } from "./workspace.js";
+import { preview } from "./preview.js";
+import { artifacts } from "./artifacts.js";
 
 export const api = {
   pi,
@@ -48,6 +52,10 @@ export const api = {
   diagnostics,
   /** 工作区文件服务与 Agent 变更集（FS-101 / FS-102）。出入参一律相对路径 */
   workspace,
+  /** 安全预览（ART-101）。目标只能是 attachment token 或工作区相对路径 */
+  preview,
+  /** 产物库（ART-102）。入参一律不透明 artifactId，没有路径字段 */
+  artifacts,
 };
 
 export type PiBuddyApi = typeof api;

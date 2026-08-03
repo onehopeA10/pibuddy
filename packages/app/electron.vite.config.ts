@@ -6,7 +6,27 @@ export default defineConfig({
   main: {
     // pi-sdk / contract 是源码形式的 workspace 包，必须随主进程一起打包；
     // 漏加会构建通过但运行时报「无法解析的 external」
-    plugins: [externalizeDepsPlugin({ exclude: ["@pibuddy/pi-sdk", "@pibuddy/contract"] })],
+    // 六个解析库必须**打进产物**而不是留成 external（ART-101）。
+    //
+    // 理由是 asar：convert-worker.js 被 asarUnpack 外置到
+    // app.asar.unpacked/out/main/ 之后，它的模块解析会从那个目录往上找
+    // node_modules —— 而依赖都躺在 app.asar/node_modules 里，两条路径
+    // 不相交。留成 external 的表现是：三大门禁全绿、dev 一切正常、
+    // 装完之后每一次预览都 ERR_MODULE_NOT_FOUND。
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: [
+          "@pibuddy/pi-sdk",
+          "@pibuddy/contract",
+          "mammoth",
+          "exceljs",
+          "unpdf",
+          "papaparse",
+          "jszip",
+          "fast-xml-parser",
+        ],
+      }),
+    ],
     build: {
       rollupOptions: {
         // search-entry 是 utility process 的入口（FS-101 的内容搜索）。
@@ -16,6 +36,18 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, "src/main/index.ts"),
           "search-entry": resolve(__dirname, "src/main/workspace/search-entry.ts"),
+          // convert-worker 同理（ART-101 的 Office/PDF 转换）。它另外还要
+          // 被 electron-builder 的 asarUnpack 外置：utilityProcess.fork 打不开
+          // asar 里的虚拟路径，运行期由 convert-host.resolveWorkerPath() 把
+          // app.asar 重写成 app.asar.unpacked。
+          "convert-worker": resolve(__dirname, "src/main/preview/convert-worker.ts"),
+          // 沙箱预览窗口的策略单独出一个产物文件，供
+          // scripts/preview-sandbox-probe.cjs 起一个**真** Electron 去跑
+          // ART-101 的三条可观察副作用断言（请求被 cancel / 内联脚本没执行
+          // / 一个资源都没加载）。那三条只有真窗口才验证得到，而拿一份
+          // 抄来的 webPreferences 去测等于什么都没测 —— 探针必须消费
+          // 生产代码里的**同一个**对象。
+          "preview-window": resolve(__dirname, "src/main/preview/preview-window.ts"),
         },
       },
     },

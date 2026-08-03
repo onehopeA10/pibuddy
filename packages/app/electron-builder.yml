@@ -21,6 +21,21 @@ files:
 asar: true
 npmRebuild: false
 
+# utilityProcess.fork 收的是一个磁盘上的真实文件路径，asar 里的虚拟路径
+# 它打不开。转换 worker 因此必须外置；运行期的路径重写在
+# src/main/preview/convert-host.ts 的 resolveWorkerPath() 里
+# （app.asar → app.asar.unpacked）。漏掉任何一半的表现都一样：
+# dev 全绿、单测全绿、装完之后预览整体不可用。
+# 六个解析库被打进 out/main/chunks/ 下的动态 chunk（见 electron.vite.config.ts）。
+# worker 被外置之后是从 app.asar.unpacked/out/main/ 起算相对路径去 import 它们的，
+# 因此 chunks 必须一起外置 —— 只外置 worker 自己的表现是：worker 起得来，
+# 第一次真正解析文档时报 ERR_MODULE_NOT_FOUND，而 dev 与单测全绿。
+# 主进程（仍在 asar 内）import 同一批 chunk 不受影响：Electron 的 asar 层
+# 会把「已 unpack」的成员读取自动重定向到 app.asar.unpacked。
+asarUnpack:
+  - out/main/convert-worker.js
+  - out/main/chunks/**
+
 extraResources:
   - from: resources/pi-runtime
     to: pi-runtime
