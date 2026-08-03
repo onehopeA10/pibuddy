@@ -161,7 +161,7 @@ Actions 表达式解析器上不是稳定行为）。
 对拍 I：从 `ci.yml` 删掉 `Verify packaged artifacts` step → **2 failed / 11 passed**。还原后全绿。
 
 ### CI 真的触发了一次
-见文末「CI 实跑」。
+见文末「CI 实跑（run 30793998863）」—— 两个平台的 package job 都在真实 runner 上跑通了。
 
 ---
 
@@ -212,6 +212,57 @@ updater  msg="Found version 0.2.0 (url: PiBuddy-Setup-0.2.0.exe)"
 
 收尾进程核对：`Stop-Process -Force` 后 PiBuddy 进程数 **0**，fake-feed 端口 8788
 `Test-NetConnection` 返回 False，`dev-app-update.yml`（gitignored）已清理。
+
+---
+
+## CI 实跑（run 30793998863，push b0fe003）
+
+```
+✓ package (ubuntu-latest)   1m25s     ← 新增
+✓ package (windows-latest)  4m35s     ← 新增
+✓ verify  (ubuntu-latest)   2m29s
+X verify  (windows-latest)  3m15s     ← 见下「CI 既有红」
+```
+
+新 package job 在**真实 runner** 上的输出，两个平台都跑通了完整打包链路：
+
+```
+package (windows-latest)
+  [prepare-pi-runtime] 已复制 126 个依赖包
+  • packaging  platform=win32 arch=x64 electron=43.2.0 appOutDir=release\win-unpacked
+  • pi runtime deps copied  files=18462
+  ✓ [win-unpacked] pi-runtime 依赖 18462 个文件，与源一致
+  ✓ [win-unpacked] convert-worker 与 11 个 chunk 已外置且无 external 解析库
+  verify-packaged-app: OK（校验 1 个产物目录）
+
+package (ubuntu-latest)
+  • packaging  platform=linux arch=x64 electron=43.2.0 appOutDir=release/linux-unpacked
+  • pi runtime deps copied  files=18450
+  ✓ [linux-unpacked] pi-runtime 依赖 18450 个文件，与源一致
+  ✓ [linux-unpacked] convert-worker 与 11 个 chunk 已外置且无 external 解析库
+  verify-packaged-app: OK（校验 1 个产物目录）
+```
+
+`fromJSON` 条件矩阵按预期工作：push 事件下 ubuntu + windows 都跑到了。
+afterPack 在两个平台上都真的执行了（文件数与源一致）。
+
+### ⚠️ CI 既有红（非本次引入，需另行处理）
+`verify (windows-latest)` 的 `Test` step 在**我提交之前就已经红了**，
+上一次 run 30789633013（commit 299301d）同样是它：
+
+```
+× workspace_id 跨重启稳定（裁定3） > 重开索引 DB 后，同一目录仍能查回全部会话
+  AssertionError: expected +0 to be 2
+  packages/app/src/main/sessions/session-index.test.ts
+× 大小与收容 > openAttachment / revealAttachment 只接受凭证，且是唯一触达 shell 的路径
+  AssertionError: expected "spy" to be called with arguments: [ Array(1) ]
+  packages/app/test/attachment-registry.spec.ts
+Tests  2 failed | 815 passed (817)
+```
+
+两条都是 **Windows 专有**（ubuntu 全绿），落在 sessions / attachments，
+不在我的地盘，本次未动。「817 全绿」这个基线只在本机 Windows 与 CI ubuntu 成立，
+**CI windows 上从来没绿过**。建议单独派一条修复。
 
 ---
 
