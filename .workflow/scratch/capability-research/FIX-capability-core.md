@@ -406,3 +406,23 @@ artifacts.db 12288 / changesets.db 4096 / session-index.db 4096 / usage.db 4096 
    比宿主更老。对内置真正生效的是 `contractMin/contractMax`（`CAPABILITY_HOST_CONTRACT_VERSION`
    一旦 +1，每份没跟着改的 manifest 当场被拒）。`appMin/appBelow` 的行为由
    `capability-registry.spec.ts` 用合成 manifest 钉住，不是没有判据。
+
+---
+
+## 7. CI 实跑结果
+
+提交 `30e1595`，run `30807543035`：
+
+```
+package (ubuntu-latest):  success
+package (windows-latest): success
+verify  (ubuntu-latest):  success
+verify  (windows-latest): success
+```
+
+四个 job 全绿。job 内逐步：Typecheck / Check test discovery scope /
+Check contract uniqueness / Check workflow action pins /
+Check pure-JS dependency closure / Test / Build 全部 ✓。
+
+唯一的 annotation 是 `actions/checkout` 等 action 仍以 Node.js 20 为目标的
+deprecation 提示，与本次改动无关，且在上一次 run（`30803272548`）里同样存在。
