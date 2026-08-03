@@ -13,6 +13,9 @@
 import { dialog } from "electron";
 import {
   CHANNELS,
+  GIT_CAPABILITY_ID,
+  GIT_GATED_CHANNELS,
+  GIT_PERMISSION,
   isDangerousPermission,
   PERMISSION_PROBE_CAPABILITY_ID,
   PERMISSION_PROBE_PERMISSION,
@@ -45,6 +48,17 @@ export const CHANNEL_PERMISSION_REQUIREMENTS: Partial<
     capabilityId: PERMISSION_PROBE_CAPABILITY_ID,
     permission: PERMISSION_PROBE_PERMISSION,
   },
+  // Git 编码能力包（coding.git）——**第一个真实的 process.git 消费者**。按
+  // FEAT-permission-engine §6 的预留入口接入：给每条 git 通道在这张表里加一行
+  // `{capabilityId: coding.git, permission: process.git}`，能力 manifest 声明
+  // process.git，引擎的上界校验与第五道闸的拦截**自动生效**，无需再动
+  // ipc-guard 的任何逻辑（本文件只往这张需求表追加行，不改既有决策逻辑）。
+  ...Object.fromEntries(
+    GIT_GATED_CHANNELS.map((channel) => [
+      channel,
+      { capabilityId: GIT_CAPABILITY_ID, permission: GIT_PERMISSION },
+    ])
+  ),
 };
 
 /** 危险权限持久化授权前的原生确认。可注入，便于单测与真机取证。 */

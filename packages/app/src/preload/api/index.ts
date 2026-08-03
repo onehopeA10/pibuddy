@@ -42,6 +42,7 @@ import { permission } from "./permission.js";
 import { mcp } from "./mcp.js";
 import { memory } from "./memory.js";
 import { agentPool } from "./agentPool.js";
+import { git } from "./git.js";
 
 export const api = {
   pi,
@@ -72,6 +73,8 @@ export const api = {
   mcp,
   /** 后台会话池（AGT-101）。观测与调度，入参只有不透明 sessionId / 资源上界 */
   agentPool,
+  /** Git 编码能力包（coding.git）。九个意图，无 argv 入口，每条通道要 process.git */
+  git,
 };
 
 export type PiBuddyApi = typeof api;

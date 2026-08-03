@@ -14,6 +14,7 @@ import { artifactsCapability } from "../artifacts/artifacts.capability.js";
 import { workspaceReviewCapability } from "../changeset/workspace-review.capability.js";
 import { previewCapability } from "../preview/preview.capability.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
+import { gitCapability } from "./manifests/git.manifest.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
@@ -32,6 +33,9 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   sessionTreeCapability,
   memoryCapability,
   mcpCapability,
+  // 第一个垂直能力包（coding tier）。它默认只进「编码」Profile，因此排在
+  // common 能力之后——被依赖的 common.workspace-review 已在前面注册。
+  gitCapability,
 ];
 
 /**
@@ -65,7 +69,11 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
   {
     id: "coding",
     displayName: "编码",
-    description: "在通用能力之上叠加编码专用工具；垂直包拆出前与通用办公等价。",
+    // 在通用能力之上叠加第一个垂直包 coding.git —— 这是「编码」与「通用办公」
+    // 第一次有了可验证的差别（此前两者能力集相同，因为一个垂直包都不存在）。
+    // 切到本 Profile = 装上 Git；切走 = 卸下。这正是 ADR-0002「可装卸」要立起来
+    // 的那条机制的第一个真实用例。
+    description: "在通用能力之上叠加 Git 等编码专用工具。",
     capabilityIds: [
       "common.workspace-files",
       "common.workspace-review",
@@ -74,6 +82,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.session-tree",
       "common.memory",
       "common.mcp",
+      "coding.git",
     ],
   },
   {

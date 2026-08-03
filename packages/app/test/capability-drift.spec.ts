@@ -79,7 +79,12 @@ const PERMISSION_MARKERS: Record<string, RegExp> = {
   "workspace.write":
     /\b(writeFile|writeFileSync|writeFileAtomic|writeJsonAtomic|mkdirSync|rmSync|renameSync|copyFile|copyFileSync|appendFileSync|cpSync)\s*\(|shell\.trashItem\s*\(/,
   "process.shell": /\b(execFile|execFileSync|spawn|spawnSync)\s*\(/,
-  "process.git": /\bsimpleGit\s*\(|\bnodegit\b/,
+  // coding.git 用**系统 git CLI**（ADR-0002 D2：不引 nodegit/simple-git 之类带原生
+  // 依赖的库），所有 git 子进程都经 git-cli 的 runGit() 唯一原语。runGit 内部把
+  // execFile 别名成 execGit 调用，因此不会命中上面的 process.shell 标记——「跑
+  // git」归 process.git，「跑任意子进程」才归 process.shell，两者在源码上可分。
+  // 保留 simpleGit/nodegit 两个备选，日后若换实现仍可对账。
+  "process.git": /\bsimpleGit\s*\(|\bnodegit\b|\brunGit\s*\(/,
   "external.open": /shell\.(openPath|showItemInFolder)\s*\(/,
   network: /\bsafeFetch\s*\(/,
   secret: /\b(readSecret|writeSecret)\s*\(/,

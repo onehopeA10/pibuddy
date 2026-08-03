@@ -28,6 +28,8 @@ import { registerSessionTreeIpc } from "../session-tree/session-tree-ipc.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
 import { disposeMcpResources, registerMcpIpc } from "../mcp/mcp-ipc.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
+import { disposeGitResources, registerGitIpc } from "../git/git-ipc.js";
+import { gitCapability } from "./manifests/git.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -86,6 +88,13 @@ capabilityRegistry.register({
   manifest: mcpCapability,
   activate: registerMcpIpc,
   deactivate: disposeMcpResources,
+});
+// 第一个垂直能力包（coding.git）。默认只在「编码」Profile 启用，未启用时
+// activate 一次都不调用 —— 它的九条通道因此不会进 ipc-guard 的注册表。
+capabilityRegistry.register({
+  manifest: gitCapability,
+  activate: registerGitIpc,
+  deactivate: disposeGitResources,
 });
 capabilityRegistry.seal();
 
