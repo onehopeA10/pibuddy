@@ -18,6 +18,9 @@
  */
 import { z } from "zod";
 
+import { defineContractShard } from "./channel-contract.js";
+import { CHANNELS } from "./channels.js";
+
 /**
  * 第一版覆盖的十类可预览内容。
  *
@@ -146,3 +149,22 @@ export const previewHandleSchema = z.object({
   result: previewResultSchema,
 });
 export type PreviewHandle = z.infer<typeof previewHandleSchema>;
+
+// ---------- 通道契约分片（ADR-0002：各分片各自声明，宿主合并时封口） ----------
+//
+// 入参只有 attachment token 或 workspaceId + relativePath（CT-17 / CT-18），
+// 一个绝对路径字段都没有。
+export const previewContractShard = defineContractShard("preview", {
+  [CHANNELS.previewOpen]: {
+    request: previewTargetSchema,
+    response: previewHandleSchema,
+  },
+  [CHANNELS.previewConvert]: {
+    request: previewTargetSchema,
+    response: previewResultSchema,
+  },
+  [CHANNELS.previewClose]: {
+    request: previewCloseRequestSchema,
+    response: z.void(),
+  },
+});

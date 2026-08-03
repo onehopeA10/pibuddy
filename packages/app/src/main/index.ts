@@ -2,23 +2,13 @@ import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { registerIpc, disposeClientFor } from "./ipc.js";
 import { disposeAllWorkspaceResources } from "./workspace/workspace-ipc.js";
-import { configureLogging, createLogger, type Logger } from "./logger.js";
+// 全应用共享的 logger（内核设施，在 whenReady 之后才可用：依赖 userData 路径）。
+// 早先这里另起了一个惰性实例，与 pi 域那一个并存 —— 同一个目录被两个实例
+// 各自算着 written 字节数，轮转判定因此各算各的。现在只有 log.ts 一处。
+import { log } from "./log.js";
 import { runPostUpdateHealthCheck } from "./health/startup-health.js";
 import { applyWindowPolicy } from "./security/window-policy.js";
 import { armUpdateChecks, disposeUpdateService } from "./update/update-ipc.js";
-
-/** 全应用唯一的 logger 实例，在 whenReady 之后才可用（依赖 userData 路径）。 */
-let logger: Logger | null = null;
-export function mainLogger(): Logger {
-  if (!logger) {
-    const dir = path.join(app.getPath("userData"), "logs");
-    // 先把默认目录钉下来：其它模块用 createLogger('updater') 这种简写时，
-    // 拿到的必须是同一个目录，否则 support-bundle 只会收到其中一半。
-    configureLogging({ dir });
-    logger = createLogger({ dir, scope: "main" });
-  }
-  return logger;
-}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -41,7 +31,7 @@ function createWindow(): void {
   });
 
   // CSP / 导航拦截 / 开窗拒绝 / 外链白名单 / 权限最小化，全部集中在 window-policy
-  applyWindowPolicy(win, { logger: mainLogger() });
+  applyWindowPolicy(win, { logger: log() });
 
   const wcId = win.webContents.id;
   win.on("closed", () => {
@@ -64,7 +54,7 @@ function createWindow(): void {
   const onWindowReady = (): void => {
     if (windowReadyFired) return;
     windowReadyFired = true;
-    mainLogger().info("window_ready", { wcId });
+    log().info("window_ready", { wcId });
     armUpdateChecks();
     // 更新之后的第一次启动才真的跑三项检查（判据是 pending-update marker）。
     // 失败不抛到调用栈上：健康检查本身把应用搞挂，是最难查的一类问题。
@@ -72,7 +62,7 @@ function createWindow(): void {
       .then(({ ran, result, safeMode }) => {
         // 无条件记一行。只在 ran 为真时记的话，「健康检查根本没跑」和
         // 「跑了且一切正常」在日志上完全一样 —— 而这两者需要查的方向相反。
-        mainLogger().info("startup_health", {
+        log().info("startup_health", {
           ran,
           ok: result?.ok ?? null,
           failed: result?.failed ?? [],
@@ -80,7 +70,7 @@ function createWindow(): void {
         });
       })
       .catch((err: unknown) => {
-        mainLogger().warn("startup_health_crashed", { error: String(err) });
+        log().warn("startup_health_crashed", { error: String(err) });
       });
   };
   win.once("ready-to-show", onWindowReady);
@@ -107,7 +97,7 @@ if (!gotLock) {
   });
 
   void app.whenReady().then(() => {
-    mainLogger().info("app_ready", {
+    log().info("app_ready", {
       version: app.getVersion(),
       platform: process.platform,
     });

@@ -19,6 +19,9 @@
  */
 import { z } from "zod";
 
+import { defineContractShard } from "./channel-contract.js";
+import { CHANNELS } from "./channels.js";
+
 // ---------------------------------------------------------------- 基础
 
 /** 工作区信任态。未知 = 还没问过用户。 */
@@ -371,3 +374,67 @@ export const workspaceTreeEventSchema = z.object({
   relativePath: z.string(),
 });
 export type WorkspaceTreeEvent = z.infer<typeof workspaceTreeEventSchema>;
+
+// ---------- 通道契约分片（ADR-0002：各分片各自声明，宿主合并时封口） ----------
+//
+// 拆成两片而不是一片：workspace-files 与 workspace-review 在能力包架构里是
+// 两个可以分别启用的能力，通道声明从现在起就按那个边界分开。
+export const workspaceFilesContractShard = defineContractShard("workspace-files", {
+  [CHANNELS.workspaceTreeList]: {
+    request: treeListRequestSchema,
+    response: fileTreePageSchema,
+  },
+  [CHANNELS.workspaceTreeWatch]: {
+    request: treeWatchRequestSchema,
+    response: z.void(),
+  },
+  [CHANNELS.workspaceSearch]: {
+    request: workspaceSearchRequestSchema,
+    response: workspaceSearchPageSchema,
+  },
+  [CHANNELS.workspaceSearchCancel]: {
+    request: workspaceSearchCancelSchema,
+    response: z.void(),
+  },
+  [CHANNELS.workspaceFileRead]: {
+    request: fileReadRequestSchema,
+    response: fileReadResultSchema,
+  },
+  [CHANNELS.workspaceFileSave]: {
+    request: fileSaveRequestSchema,
+    response: fileSaveResultSchema,
+  },
+  [CHANNELS.workspaceFileMutate]: {
+    request: fileMutateRequestSchema,
+    response: fileMutateResultSchema,
+  },
+  [CHANNELS.workspaceAttachmentCreate]: {
+    request: attachmentCreateRequestSchema,
+    response: attachmentDescriptorSchema,
+  },
+  [CHANNELS.workspaceRelease]: {
+    request: workspaceReleaseRequestSchema,
+    response: z.void(),
+  },
+});
+
+// 接受一条变更是**唯一**会由渲染进程触发的、对用户文件的写入，因此四条
+// 通道一律只收不透明的 changeset id。
+export const changesetContractShard = defineContractShard("workspace-review", {
+  [CHANNELS.changesetQuery]: {
+    request: changesetQueryRequestSchema,
+    response: changesetQueryResultSchema,
+  },
+  [CHANNELS.changesetAccept]: {
+    request: changesetIdRequestSchema,
+    response: changesetApplyResultSchema,
+  },
+  [CHANNELS.changesetReject]: {
+    request: changesetIdRequestSchema,
+    response: changesetApplyResultSchema,
+  },
+  [CHANNELS.changesetAcceptBatch]: {
+    request: changesetBatchRequestSchema,
+    response: changesetBatchResultSchema,
+  },
+});

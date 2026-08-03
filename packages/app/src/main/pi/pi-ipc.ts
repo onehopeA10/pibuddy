@@ -13,7 +13,6 @@
  * 一处，否则两边各持一个 map，停一个进程只会清掉其中一份。
  */
 import { app } from "electron";
-import path from "node:path";
 import type { PiRpcClient } from "@pibuddy/pi-sdk";
 import {
   CHANNELS,
@@ -35,7 +34,7 @@ import {
 import * as attachments from "../attachment-registry.js";
 import { ExtensionUiService, type ExtUiHost } from "../extension-ui/ext-ui-service.js";
 import { registerHandler, forgetSender } from "../ipc-guard.js";
-import { createLogger, type Logger } from "../logger.js";
+import { log } from "../log.js";
 import { buildPiSpawn, verifyRuntimeHandshake } from "../pi-launcher.js";
 import { sessionTrustFor } from "../pi-resources/pi-resources-ipc.js";
 import { describeTrust, trustArgsFor } from "../pi-resources/trust-store.js";
@@ -52,14 +51,6 @@ import { assertContained, requireWorkspaceRoot, workspaceIdFor } from "../worksp
  * error → close，没有 exit）时死 client 会滞留在 map 里接走后续所有请求。
  */
 const clients = new Map<number, PiRpcClient>();
-
-let ipcLogger: Logger | null = null;
-export function log(): Logger {
-  if (!ipcLogger) {
-    ipcLogger = createLogger({ dir: path.join(app.getPath("userData"), "logs") });
-  }
-  return ipcLogger;
-}
 
 let supervisorInstance: PiSupervisor | null = null;
 /** 全应用唯一的运行时监管者（代际、序号、信封、33ms 转发都归它管）。 */

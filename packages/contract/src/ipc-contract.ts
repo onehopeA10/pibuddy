@@ -22,6 +22,12 @@ import {
   type PushChannel,
 } from "./channels.js";
 import {
+  defineContractShard,
+  sealChannelContracts,
+  type ChannelContract,
+  type ContractShard,
+} from "./channel-contract.js";
+import {
   bundleExportRequestSchema,
   bundleExportResultSchema,
   bundlePreviewSchema,
@@ -40,22 +46,8 @@ import {
   usageRecordRequestSchema,
   usageRowSchema,
 } from "./providers.js";
-import {
-  artifactCompareRequestSchema,
-  artifactComparisonSchema,
-  artifactExportResultSchema,
-  artifactIdRequestSchema,
-  artifactMutationResultSchema,
-  artifactQueryRequestSchema,
-  artifactQueryResultSchema,
-  artifactRenameRequestSchema,
-} from "./artifacts.js";
-import {
-  previewCloseRequestSchema,
-  previewHandleSchema,
-  previewResultSchema,
-  previewTargetSchema,
-} from "./preview.js";
+import { artifactContractShard } from "./artifacts.js";
+import { previewContractShard } from "./preview.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -89,27 +81,8 @@ import {
   updateToggleRequestSchema,
 } from "./update.js";
 import {
-  attachmentCreateRequestSchema,
-  attachmentDescriptorSchema,
-  changesetApplyResultSchema,
-  changesetBatchRequestSchema,
-  changesetBatchResultSchema,
-  changesetIdRequestSchema,
-  changesetQueryRequestSchema,
-  changesetQueryResultSchema,
-  fileMutateRequestSchema,
-  fileMutateResultSchema,
-  fileReadRequestSchema,
-  fileReadResultSchema,
-  fileSaveRequestSchema,
-  fileSaveResultSchema,
-  fileTreePageSchema,
-  treeListRequestSchema,
-  treeWatchRequestSchema,
-  workspaceReleaseRequestSchema,
-  workspaceSearchCancelSchema,
-  workspaceSearchPageSchema,
-  workspaceSearchRequestSchema,
+  changesetContractShard,
+  workspaceFilesContractShard,
   workspaceTreeEventSchema,
 } from "./workspace.js";
 
@@ -462,19 +435,28 @@ export interface RuntimeSchema<T = unknown> {
   parse(value: unknown): T;
 }
 
-export interface ChannelContract {
-  /** invoke 的入参 schema；无参通道为 z.void() */
-  request: z.ZodType;
-  /** invoke 的返回 schema */
-  response: z.ZodType;
-}
-
 const NO_ARGS: ChannelContract = {
   request: voidRequestSchema,
   response: rpcResponseSchema,
 };
 
-export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
+/**
+ * ---------- 契约分片（ADR-0002 实施顺序第 2 条） ----------
+ *
+ * 改前这里是**一个** `Record<InvokeChannel, ChannelContract>` 对象字面量，
+ * 类型的穷举性保证「每条通道都有 schema」。代价是所有通道必须写在同一个
+ * 对象里 —— 能力包无法各自声明自己那几条再合并，而那正是能力包架构的前提。
+ *
+ * 现在每一组通道是一个具名分片，由 `sealChannelContracts` 合并并封口：
+ * 重复 key 抛错、缺一条抛错、多一条抛错（见 channel-contract.ts）。
+ *
+ * 已经能独立成片的四组直接住进了各自的域文件（`workspace.ts` 的
+ * workspace-files / workspace-review、`preview.ts`、`artifacts.ts`）——
+ * 那是能力包拆出去之后契约该待的地方。剩下的仍留在本文件，因为它们的
+ * request schema 也还定义在这里；随各自能力包拆分时一并搬走。
+ */
+
+export const piRuntimeContractShard = defineContractShard("pi-runtime", {
   // ---- 生命周期 ----
   [CHANNELS.piStart]: {
     request: piStartParamsSchema,
@@ -534,7 +516,9 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   [CHANNELS.piGetForkMessages]: NO_ARGS,
   [CHANNELS.piFork]: { request: piForkRequestSchema, response: rpcResponseSchema },
   [CHANNELS.piClone]: NO_ARGS,
+});
 
+export const sessionsContractShard = defineContractShard("sessions", {
   // ---- 会话中心（9 条） ----
   [CHANNELS.sessionsQuery]: {
     request: sessionQuerySchema,
@@ -569,7 +553,9 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     request: readHistoryRequestSchema,
     response: sessionHistoryPageSchema,
   },
+});
 
+export const settingsContractShard = defineContractShard("settings", {
   // ---- 设置 ----
   [CHANNELS.settingsGet]: { request: voidRequestSchema, response: appSettingsSchema },
   [CHANNELS.settingsSet]: {
@@ -588,7 +574,9 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     request: piRuntimeChoiceRequestSchema,
     response: piRuntimeApplyResultSchema,
   },
+});
 
+export const attachmentsContractShard = defineContractShard("attachments", {
   // ---- workspace 与附件 ----
   [CHANNELS.workspaceCurrent]: {
     request: voidRequestSchema,
@@ -613,121 +601,17 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   [CHANNELS.shellOpenPath]: { request: tokenRequestSchema, response: z.string() },
   [CHANNELS.shellShowInFolder]: { request: tokenRequestSchema, response: z.void() },
   [CHANNELS.attachmentRevokeAll]: { request: voidRequestSchema, response: z.void() },
+});
 
-  // ---- Workspace 文件服务（FS-101，9 条） ----
-  [CHANNELS.workspaceTreeList]: {
-    request: treeListRequestSchema,
-    response: fileTreePageSchema,
-  },
-  [CHANNELS.workspaceTreeWatch]: {
-    request: treeWatchRequestSchema,
-    response: z.void(),
-  },
-  [CHANNELS.workspaceSearch]: {
-    request: workspaceSearchRequestSchema,
-    response: workspaceSearchPageSchema,
-  },
-  [CHANNELS.workspaceSearchCancel]: {
-    request: workspaceSearchCancelSchema,
-    response: z.void(),
-  },
-  [CHANNELS.workspaceFileRead]: {
-    request: fileReadRequestSchema,
-    response: fileReadResultSchema,
-  },
-  [CHANNELS.workspaceFileSave]: {
-    request: fileSaveRequestSchema,
-    response: fileSaveResultSchema,
-  },
-  [CHANNELS.workspaceFileMutate]: {
-    request: fileMutateRequestSchema,
-    response: fileMutateResultSchema,
-  },
-  [CHANNELS.workspaceAttachmentCreate]: {
-    request: attachmentCreateRequestSchema,
-    response: attachmentDescriptorSchema,
-  },
-  [CHANNELS.workspaceRelease]: {
-    request: workspaceReleaseRequestSchema,
-    response: z.void(),
-  },
-
-  // ---- Agent 变更集（FS-102，4 条） ----
-  [CHANNELS.changesetQuery]: {
-    request: changesetQueryRequestSchema,
-    response: changesetQueryResultSchema,
-  },
-  [CHANNELS.changesetAccept]: {
-    request: changesetIdRequestSchema,
-    response: changesetApplyResultSchema,
-  },
-  [CHANNELS.changesetReject]: {
-    request: changesetIdRequestSchema,
-    response: changesetApplyResultSchema,
-  },
-  [CHANNELS.changesetAcceptBatch]: {
-    request: changesetBatchRequestSchema,
-    response: changesetBatchResultSchema,
-  },
-
-  // ---- 安全预览（ART-101，3 条） ----
-  [CHANNELS.previewOpen]: {
-    request: previewTargetSchema,
-    response: previewHandleSchema,
-  },
-  [CHANNELS.previewConvert]: {
-    request: previewTargetSchema,
-    response: previewResultSchema,
-  },
-  [CHANNELS.previewClose]: {
-    request: previewCloseRequestSchema,
-    response: z.void(),
-  },
-
-  // ---- Artifact 仓库（ART-102，8 条） ----
-  //
-  // 每一条改动型动作的 response 都是**权威快照**（ArtifactMutationResult
-  // 带整条记录）：渲染进程做完动作立刻拿到真实状态，不必自己推断列表
-  // 变成了什么样 —— 「点了重命名但列表没变」在结构上不成立。
-  [CHANNELS.artifactsQuery]: {
-    request: artifactQueryRequestSchema,
-    response: artifactQueryResultSchema,
-  },
-  [CHANNELS.artifactsRename]: {
-    request: artifactRenameRequestSchema,
-    response: artifactMutationResultSchema,
-  },
-  [CHANNELS.artifactsDuplicate]: {
-    request: artifactIdRequestSchema,
-    response: artifactMutationResultSchema,
-  },
-  [CHANNELS.artifactsExport]: {
-    request: artifactIdRequestSchema,
-    response: artifactExportResultSchema,
-  },
-  [CHANNELS.artifactsShowInFolder]: {
-    request: artifactIdRequestSchema,
-    response: z.void(),
-  },
-  [CHANNELS.artifactsTrash]: {
-    request: artifactIdRequestSchema,
-    response: artifactMutationResultSchema,
-  },
-  [CHANNELS.artifactsRestore]: {
-    request: artifactIdRequestSchema,
-    response: artifactMutationResultSchema,
-  },
-  [CHANNELS.artifactsCompareVersions]: {
-    request: artifactCompareRequestSchema,
-    response: artifactComparisonSchema,
-  },
-
+export const sttContractShard = defineContractShard("stt", {
   // ---- 语音 ----
   [CHANNELS.sttTranscribe]: {
     request: sttTranscribeRequestSchema,
     response: sttTranscribeResultSchema,
   },
+});
 
+export const piResourcesContractShard = defineContractShard("pi-resources", {
   // ---- Pi 资源中心与 project trust（7 条） ----
   //
   // 五条资源通道全部以 scan 结果作为返回：任何一次改动之后渲染进程立刻拿到
@@ -761,7 +645,9 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     request: trustDecideRequestSchema,
     response: projectTrustStateSchema,
   },
+});
 
+export const updateContractShard = defineContractShard("update", {
   // ---- 应用自更新 ----
   //
   // 九条全部以 UpdateState 作为返回：渲染进程发起任何一个动作之后立刻拿到
@@ -796,7 +682,9 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     request: updateDismissRequestSchema,
     response: updateStateSchema,
   },
+});
 
+export const providersContractShard = defineContractShard("providers", {
   // ---- Provider 与模型中心（PROV-101） ----
   //
   // 每一条的 response 都是**权威快照**（providerListResult / providerTestResult）：
@@ -841,7 +729,9 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     request: usageRecordRequestSchema,
     response: z.void(),
   },
+});
 
+export const diagnosticsContractShard = defineContractShard("diagnostics", {
   // ---- 诊断与健康（OBS-101，恰 3 条） ----
   [CHANNELS.diagnosticsPreviewBundle]: {
     request: voidRequestSchema,
@@ -855,7 +745,39 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     request: voidRequestSchema,
     response: diagnosticsReportSchema,
   },
-};
+});
+
+/**
+ * 宿主的装配清单。
+ *
+ * 能力包拆出去之后，这个数组就是「本次构建启用了哪些能力」的唯一声明点；
+ * 现阶段全部内置，因此全部列在这里。
+ */
+const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
+  piRuntimeContractShard,
+  sessionsContractShard,
+  settingsContractShard,
+  attachmentsContractShard,
+  workspaceFilesContractShard,
+  changesetContractShard,
+  previewContractShard,
+  artifactContractShard,
+  sttContractShard,
+  piResourcesContractShard,
+  updateContractShard,
+  providersContractShard,
+  diagnosticsContractShard,
+];
+
+/**
+ * 合并并封口后的全表。
+ *
+ * `sealChannelContracts` 在模块加载期核对 `CHANNELS` 全表：任何一条通道
+ * 漏掉契约，`import "@pibuddy/contract"` 本身就会抛错 —— 那是原先
+ * `Record<InvokeChannel, …>` 那条穷举性约束的等价物（见 channel-contract.ts
+ * 的文件头）。
+ */
+export const CHANNEL_CONTRACTS = sealChannelContracts(CHANNEL_CONTRACT_SHARDS);
 
 /**
  * pi:exit 的 payload。

@@ -16,6 +16,9 @@
  */
 import { z } from "zod";
 
+import { defineContractShard } from "./channel-contract.js";
+import { CHANNELS } from "./channels.js";
+
 /** 产物的内容类别。与 PreviewKind 刻意分开：那个是「怎么渲染」，这个是「是什么」。 */
 export const artifactKindSchema = z.enum([
   "document",
@@ -169,3 +172,43 @@ export const artifactLinkSchema = z.object({
   name: z.string(),
 });
 export type ArtifactLink = z.infer<typeof artifactLinkSchema>;
+
+// ---------- 通道契约分片（ADR-0002：各分片各自声明，宿主合并时封口） ----------
+//
+// 八条改动型动作的 response 都是**权威快照**（ArtifactMutationResult 带整条
+// 记录）：渲染进程做完动作立刻拿到真实状态，不必自己推断列表变成了什么样 ——
+// 「点了重命名但列表没变」在结构上不成立。
+export const artifactContractShard = defineContractShard("artifacts", {
+  [CHANNELS.artifactsQuery]: {
+    request: artifactQueryRequestSchema,
+    response: artifactQueryResultSchema,
+  },
+  [CHANNELS.artifactsRename]: {
+    request: artifactRenameRequestSchema,
+    response: artifactMutationResultSchema,
+  },
+  [CHANNELS.artifactsDuplicate]: {
+    request: artifactIdRequestSchema,
+    response: artifactMutationResultSchema,
+  },
+  [CHANNELS.artifactsExport]: {
+    request: artifactIdRequestSchema,
+    response: artifactExportResultSchema,
+  },
+  [CHANNELS.artifactsShowInFolder]: {
+    request: artifactIdRequestSchema,
+    response: z.void(),
+  },
+  [CHANNELS.artifactsTrash]: {
+    request: artifactIdRequestSchema,
+    response: artifactMutationResultSchema,
+  },
+  [CHANNELS.artifactsRestore]: {
+    request: artifactIdRequestSchema,
+    response: artifactMutationResultSchema,
+  },
+  [CHANNELS.artifactsCompareVersions]: {
+    request: artifactCompareRequestSchema,
+    response: artifactComparisonSchema,
+  },
+});

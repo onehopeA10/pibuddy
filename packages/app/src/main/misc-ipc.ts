@@ -23,8 +23,8 @@ import {
 import * as attachments from "./attachment-registry.js";
 import { registerEndpoint, requireEndpoint } from "./endpoints.js";
 import { registerHandler } from "./ipc-guard.js";
+import { log } from "./log.js";
 import { safeFetch } from "./net/outbound-guard.js";
-import { log } from "./pi/pi-ipc.js";
 import { resolveExternalCommand } from "./pi-launcher.js";
 import { applyPiRuntimeChoice } from "./security/pi-runtime-approval.js";
 import { SECRET_KEYS, describeSecret, loadSecret, saveSecret } from "./secret-store.js";

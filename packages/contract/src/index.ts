@@ -5,6 +5,7 @@
  * 消费方式与 @pibuddy/pi-sdk 一致：以源码形式被 include，不产出 dist。
  */
 export * from "./channels.js";
+export * from "./channel-contract.js";
 export * from "./envelope.js";
 export * from "./settings.js";
 export * from "./session.js";

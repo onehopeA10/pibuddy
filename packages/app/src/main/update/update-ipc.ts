@@ -33,7 +33,7 @@ import {
 } from "../lifecycle/graceful-shutdown.js";
 import { writeJsonAtomic } from "../fs-atomic.js";
 import { markerDir, writePendingUpdate } from "../health/update-markers.js";
-import { log } from "../pi/pi-ipc.js";
+import { log } from "../log.js";
 import { verifyBeforeInstall } from "./release-integrity.js";
 import { UpdateService } from "./update-service.js";
 import {
