@@ -108,7 +108,13 @@ export interface ConvertReply {
   result: PreviewResult;
 }
 
-/** 宿主侧对外的结果形状：成功带 result，失败只带 code。 */
+/**
+ * 宿主侧对外的结果形状：成功带 result，失败带 code。
+ *
+ * `suggestion` 是可选的**更具体**的那句话。默认文案按 code 查 SUGGESTION
+ * 表就够了，但「太大」有好几种不同的太法（工作表太多 / 列太多 / 总量太大），
+ * 对应的下一步动作也不同。给不出更具体的话时留空，调用方回落到 SUGGESTION。
+ */
 export type ConvertOutcome =
   | { ok: true; result: PreviewResult }
-  | { ok: false; code: PreviewCode };
+  | { ok: false; code: PreviewCode; suggestion?: string };

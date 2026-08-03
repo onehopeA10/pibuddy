@@ -64,7 +64,9 @@ function flatten(
     kind: "text",
     code: outcome.code,
     text: "",
-    suggestion: outcome.code === "ok" ? "" : SUGGESTION[outcome.code],
+    // 宿主给了更具体的那句话（比如「这个文件里有 300 个工作表」）就用它，
+    // 否则回落到按 code 分类的默认文案。
+    suggestion: outcome.suggestion ?? (outcome.code === "ok" ? "" : SUGGESTION[outcome.code]),
     notices: [],
     tables: [],
     dataUrl: null,

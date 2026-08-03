@@ -42,10 +42,93 @@ import type { ConvertOutcome, ConvertReply, ConvertRequest } from "./preview-typ
  */
 export const CONVERT_LIMITS = {
   maxInputBytes: 50 * 1024 * 1024,
+  /**
+   * 输出上限，量的是**整个 PreviewResult**，不只是 `text`。
+   *
+   * 只量 text 的话，`tables` / `dataUrl` / `notices` 三处全是敞开的：一个
+   * 宽表或多工作表的 xlsx 可以做到 text 为空、tables 里躺着几百兆字符串，
+   * 这个闸门一个字节都数不到。而这份结果要跨两次 structured-clone
+   * （worker → main、main → 渲染进程），主进程在克隆期间是**完全卡住**的。
+   */
   maxOutputBytes: 100 * 1024 * 1024,
   timeoutMs: 30_000,
   maxRssBytes: 512 * 1024 * 1024,
+  /** 工作表 / 分片数上限。真实文件极少超过，异常形状会一眼撞上。 */
+  maxTables: 256,
+  /** 单表列数上限。Excel 理论上能到 16384 列，那种表预览里根本没法看。 */
+  maxTableColumns: 4096,
+  /** 全部表格单元格的字符总数。宽表最直接的膨胀维度就是它。 */
+  maxTableCellChars: 8_000_000,
 } as const;
+
+/** 超限时的降级信息：错误码 + 一句用户能据以行动的话。 */
+export interface OutputLimitViolation {
+  code: "too-large";
+  suggestion: string;
+}
+
+/**
+ * 检查一份转换结果的规模。**在宿主这一侧，不在 worker 里。**
+ *
+ * worker 正在解析攻击者提供的字节，它写在自己代码里的任何上限都可能已经
+ * 随它一起被打崩了；这里量的是**实际收到的东西**。
+ *
+ * 超限一律返回可行动的降级提示，而不是悄悄截断 —— 截断之后用户看到的是
+ * 一份缺了后半截的表格，界面上没有任何线索说少了东西，他会照着这份残表
+ * 去做判断。
+ */
+export function checkOutputLimits(result: PreviewResult): OutputLimitViolation | null {
+  if (result.tables.length > CONVERT_LIMITS.maxTables) {
+    return {
+      code: "too-large",
+      suggestion: `这个文件里有 ${result.tables.length} 个工作表，超过预览能安全处理的 ${CONVERT_LIMITS.maxTables} 个。请用 Excel 这类程序直接打开，或者先拆成几个小文件再预览。`,
+    };
+  }
+
+  let cellChars = 0;
+  let bytes =
+    Buffer.byteLength(result.text, "utf8") +
+    Buffer.byteLength(result.suggestion, "utf8") +
+    Buffer.byteLength(result.sourceName, "utf8") +
+    (result.dataUrl === null ? 0 : Buffer.byteLength(result.dataUrl, "utf8"));
+  for (const notice of result.notices) bytes += Buffer.byteLength(notice, "utf8");
+
+  for (const table of result.tables) {
+    bytes += Buffer.byteLength(table.name, "utf8");
+    for (const row of table.rows) {
+      if (row.length > CONVERT_LIMITS.maxTableColumns) {
+        return {
+          code: "too-large",
+          suggestion: `这张表有 ${row.length} 列，超过预览上限 ${CONVERT_LIMITS.maxTableColumns} 列。请用 Excel 这类程序直接打开，或者先删掉用不到的列再预览。`,
+        };
+      }
+      for (const cell of row) {
+        cellChars += cell.length;
+        bytes += Buffer.byteLength(cell, "utf8");
+        // 提前收手：已经超了就不必把剩下的几千万个单元格再数一遍。
+        if (cellChars > CONVERT_LIMITS.maxTableCellChars) {
+          return {
+            code: "too-large",
+            suggestion: `这个文件里的表格内容太多（超过 ${Math.round(CONVERT_LIMITS.maxTableCellChars / 10000) / 100} 百万字符），全部塞进预览会把界面卡死。请用 Excel 这类程序直接打开它。`,
+          };
+        }
+        if (bytes > CONVERT_LIMITS.maxOutputBytes) return tooLargeOverall(bytes);
+      }
+    }
+  }
+
+  if (bytes > CONVERT_LIMITS.maxOutputBytes) return tooLargeOverall(bytes);
+  return null;
+}
+
+function tooLargeOverall(bytes: number): OutputLimitViolation {
+  const mb = Math.round(bytes / 1024 / 1024);
+  const limitMb = Math.round(CONVERT_LIMITS.maxOutputBytes / 1024 / 1024);
+  return {
+    code: "too-large",
+    suggestion: `这个文件抽出来的内容有大约 ${mb} MB，超过预览上限 ${limitMb} MB，显示出来会把界面卡死。请用系统里的对应程序直接打开它。`,
+  };
+}
 
 /** 全部专属临时目录的父目录。清理断言查的就是它下面还剩几个条目。 */
 export function convertBaseDir(): string {
@@ -263,11 +346,11 @@ function runInChild(
       if (!reply || reply.requestId !== requestId) return;
       const result = reply.result as PreviewResult | undefined;
       if (!result) return finish({ ok: false, code: "corrupt" });
-      // ---- 闸 4：输出大小。抽出来的文本也可能是攻击载荷（zip 炸弹解出来
-      // 的几百兆字符），塞进 IPC 会把渲染进程一起拖死。
-      if (Buffer.byteLength(result.text, "utf8") > CONVERT_LIMITS.maxOutputBytes) {
-        return finish({ ok: false, code: "too-large" });
-      }
+      // ---- 闸 4：输出规模。抽出来的内容也可能是攻击载荷（zip 炸弹解出来
+      // 的几百兆字符、几千列的宽表），塞进 IPC 会把主进程与渲染进程一起
+      // 拖死。量的是整份结果，不只是 text —— 见 checkOutputLimits。
+      const violation = checkOutputLimits(result);
+      if (violation) return finish({ ok: false, code: violation.code, suggestion: violation.suggestion });
       finish({ ok: true, result });
     });
 

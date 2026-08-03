@@ -241,3 +241,82 @@ describe("临时目录清理", () => {
     expect(fs.readdirSync(base)).toHaveLength(0);
   });
 });
+
+/**
+ * 输出闸门量的是**整份结果**，不只是 `text`。
+ *
+ * 旧实现只数 `Buffer.byteLength(result.text)`，于是 `tables` / `dataUrl` /
+ * `notices` 三处全是敞开的：一个宽表或多工作表的 xlsx 完全可以做到 text
+ * 为空、tables 里躺着几百兆字符串 —— 闸门一个字节都数不到，而这份结果要
+ * 跨两次 structured-clone，主进程在克隆期间是完全卡住的。
+ */
+describe("输出规模上限覆盖 tables / dataUrl / notices", () => {
+  function result(over: Partial<PreviewResult>): PreviewResult {
+    return {
+      kind: "excel",
+      code: "ok",
+      text: "",
+      suggestion: "",
+      notices: [],
+      tables: [],
+      dataUrl: null,
+      sourceName: "book.xlsx",
+      sizeBytes: 1024,
+      elapsedMs: 1,
+      ...over,
+    };
+  }
+
+  function sheet(name: string, rows: string[][]): PreviewResult["tables"][number] {
+    return { name, rows, truncated: false };
+  }
+
+  it("正常结果放行", () => {
+    expect(
+      host.checkOutputLimits(result({ tables: [sheet("Sheet1", [["a", "b"], ["c", "d"]])] }))
+    ).toBeNull();
+  });
+
+  it("工作表数超限 → too-large，提示里说清是工作表太多", () => {
+    const tables = Array.from({ length: host.CONVERT_LIMITS.maxTables + 1 }, (_, i) =>
+      sheet(`S${i}`, [["x"]])
+    );
+    const v = host.checkOutputLimits(result({ tables }));
+    expect(v?.code).toBe("too-large");
+    expect(v?.suggestion).toContain("工作表");
+  });
+
+  it("列数超限 → too-large，提示里说清是列太多", () => {
+    const wide = Array.from({ length: host.CONVERT_LIMITS.maxTableColumns + 1 }, () => "x");
+    const v = host.checkOutputLimits(result({ tables: [sheet("宽表", [wide])] }));
+    expect(v?.code).toBe("too-large");
+    expect(v?.suggestion).toContain("列");
+  });
+
+  it("单元格字符总数超限 → too-large（text 为空也照样拦得住）", () => {
+    // 每格 1000 字符 × 10000 格 = 1000 万字符，超过 800 万上限
+    const cell = "字".repeat(1000);
+    const rows = Array.from({ length: 100 }, () => Array.from({ length: 100 }, () => cell));
+    const v = host.checkOutputLimits(result({ text: "", tables: [sheet("Sheet1", rows)] }));
+    expect(v?.code).toBe("too-large");
+    expect(v?.suggestion).toContain("表格内容太多");
+  });
+
+  it("dataUrl 也计入总量（图片走的就是这一条）", () => {
+    const huge = "A".repeat(host.CONVERT_LIMITS.maxOutputBytes + 1);
+    const v = host.checkOutputLimits(result({ kind: "image", dataUrl: `data:image/png;base64,${huge}` }));
+    expect(v?.code).toBe("too-large");
+    expect(v?.suggestion).toContain("MB");
+  });
+
+  it("超限时 convert() 返回 too-large，并带上那句更具体的提示", async () => {
+    const file = writeFile("wide.xlsx", 4096);
+    const wide = Array.from({ length: host.CONVERT_LIMITS.maxTableColumns + 1 }, () => "x");
+    installFactory(() => ({ reply: { tables: [{ name: "宽表", rows: [wide], truncated: false }] } }));
+    const outcome = await host.convert({ inputPath: file, sourceName: "wide.xlsx" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error("unreachable");
+    expect(outcome.code).toBe("too-large");
+    expect(outcome.suggestion).toContain("列");
+  });
+});

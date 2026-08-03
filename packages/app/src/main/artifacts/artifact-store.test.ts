@@ -295,3 +295,69 @@ describe("搜索、复制与版本比较", () => {
     expect(renamed.exportPath).toBe(r.exportPath);
   });
 });
+
+/**
+ * latestOnly 的判据是 **version 最大**，不是 updated_at 最大。
+ *
+ * 这两者不是同一件事：rename / restore 只改 updated_at，不改 version。
+ * 下面两条用例把 updated_at 与 version 的顺序**真的做反**（v1 的
+ * updated_at 大于 v2 的），旧实现「按 updated_at 排序后取第一条」会返回
+ * v1 —— 界面上写着 v1、磁盘上躺着 v2 的内容，且不报任何错。
+ */
+describe("latestOnly 取的是版本号最大的那一版", () => {
+  it("给旧版本改名（updated_at 越过新版本）之后，列表里仍然是新版本", async () => {
+    const mod = await fresh();
+    const store = mod.artifactStore();
+
+    write("reports/q1.docx", "第一版");
+    const v1 = store.markReady(store.begin({ workspaceId, relativePath: "reports/q1.docx", now: 1_000 }).id, { now: 1_000 });
+    write("reports/q1.docx", "第二版");
+    const v2 = store.markReady(store.begin({ workspaceId, relativePath: "reports/q1.docx", now: 2_000 }).id, { now: 2_000 });
+
+    // 用户给**老版本**改了个名字：只有 updated_at 被推到最新，version 还是 1
+    const renamed = store.rename(v1.id, "季度总结（初稿）", 9_000);
+    expect(renamed.version).toBe(1);
+    expect(renamed.updatedAt).toBeGreaterThan(v2.updatedAt);
+
+    const listed = store.query({ workspaceId, latestOnly: true });
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0].version).toBe(2);
+    expect(listed.items[0].id).toBe(v2.id);
+  });
+
+  it("把旧版本从回收站恢复之后，列表里仍然是新版本", async () => {
+    const mod = await fresh();
+    const store = mod.artifactStore();
+
+    write("reports/q2.docx", "第一版");
+    const v1 = store.markReady(store.begin({ workspaceId, relativePath: "reports/q2.docx", now: 1_000 }).id, { now: 1_000 });
+    write("reports/q2.docx", "第二版");
+    const v2 = store.markReady(store.begin({ workspaceId, relativePath: "reports/q2.docx", now: 2_000 }).id, { now: 2_000 });
+
+    store.setStatus(v1.id, "trashed", 8_000);
+    const restored = store.setStatus(v1.id, "ready", 9_000);
+    expect(restored.version).toBe(1);
+    expect(restored.updatedAt).toBeGreaterThan(v2.updatedAt);
+
+    const listed = store.query({ workspaceId, latestOnly: true });
+    expect(listed.items.map((r) => r.version)).toEqual([2]);
+  });
+
+  it("最新一版进了回收站时，非回收站视图里的「最新」是仍然可见的那一版", async () => {
+    const mod = await fresh();
+    const store = mod.artifactStore();
+
+    write("reports/q3.docx", "第一版");
+    const v1 = store.markReady(store.begin({ workspaceId, relativePath: "reports/q3.docx", now: 1_000 }).id, { now: 1_000 });
+    write("reports/q3.docx", "第二版");
+    const v2 = store.markReady(store.begin({ workspaceId, relativePath: "reports/q3.docx", now: 2_000 }).id, { now: 2_000 });
+    store.setStatus(v2.id, "trashed", 3_000);
+
+    const listed = store.query({ workspaceId, latestOnly: true });
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0].id).toBe(v1.id);
+
+    const trash = store.query({ workspaceId, latestOnly: true, trashed: true });
+    expect(trash.items.map((r) => r.id)).toEqual([v2.id]);
+  });
+});

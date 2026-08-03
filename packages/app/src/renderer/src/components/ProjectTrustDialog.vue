@@ -34,11 +34,25 @@ const remember = ref(true);
 const trust = computed(() => piRes.trust);
 const resources = computed(() => trust.value?.resources ?? []);
 
+/**
+ * 弹窗里显示的是**哪个项目**的资源。
+ *
+ * 决定必须提交给它，而不是提交给 `store.workspaceId`：这两者会分开 ——
+ * describeTrust 的响应晚于一次工作目录切换时，弹窗里列的是旧项目的资源，
+ * 而 store.workspaceId 已经是新项目。照 store.workspaceId 提交等于**拿 A
+ * 项目的资源清单问用户，把答案写给 B 项目**，而 remember 会把它写进与
+ * 终端 pi 共享的 trust.json。store 侧的代际校验已经不让过期响应落地了，
+ * 这里是同一条判据的第二道 —— 提交的目标只能来自用户实际看到的那份数据。
+ */
+const shownWorkspaceId = computed(() => trust.value?.workspaceId ?? "");
+
 async function decide(decision: "allow" | "deny"): Promise<void> {
-  await piRes.decideTrust(store.workspaceId, decision, remember.value);
+  const target = shownWorkspaceId.value;
+  const result = await piRes.decideTrust(target, decision, remember.value);
   // 信任决定影响的是 pi 启动时加载哪些资源，因此必须重启 runtime 才生效。
   // 不重启的话，用户点了「信任」却发现技能还是没有，会以为按钮没用。
-  if (decision === "allow") await store.start();
+  // 只在决定确实落地、且这个项目仍然是当前工作目录时才重启。
+  if (decision === "allow" && result && store.workspaceId === target) await store.start();
 }
 </script>
 

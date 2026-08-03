@@ -435,13 +435,27 @@ export class ArtifactStore {
     const sql = `SELECT * FROM artifacts WHERE ${where.join(" AND ")} ORDER BY updated_at DESC, version DESC`;
     let rows = (this.db.prepare(sql).all(...params) as unknown as Row[]).map(toRecord);
     if (request.latestOnly) {
-      const seen = new Set<string>();
-      rows = rows.filter((r) => {
+      // 「最新一版」的判据是 **version 最大**，不是 updated_at 最大。
+      //
+      // 这两者会真的分开：rename 只改 name 与 updated_at，restore 只改
+      // status 与 updated_at —— 对 v1 做任意一个动作，v1 的 updated_at 就
+      // 越过了 v2。此前这里靠「按 updated_at 排完序取第一条」去重，于是
+      // 产物库里显示的是 v1、点开拿到的是 v1 的记录，而磁盘上躺着的是
+      // v2 的内容 —— 用户看到的版本号和内容对不上，且不报任何错。
+      //
+      // 去重在 JS 里做而不是塞进 SQL 子查询，是因为 MAX(version) 必须与
+      // 上面那串 where（trashed / kind / status / sessionId / query）**同一
+      // 套过滤条件**才正确：v2 进了回收站时，非回收站视图里的「最新一版」
+      // 是 v1。子查询要重复一遍这些条件，重复就会漂移。
+      const best = new Map<string, ArtifactRecord>();
+      for (const r of rows) {
         const key = `${r.workspaceId}#${r.logicalKey}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+        const prev = best.get(key);
+        if (!prev || r.version > prev.version) best.set(key, r);
+      }
+      const keep = new Set([...best.values()].map((r) => r.id));
+      // filter 而不是直接用 map 的值：外层的 updated_at 排序要原样保留。
+      rows = rows.filter((r) => keep.has(r.id));
     }
     const total = rows.length;
     if (request.limit && request.limit > 0) rows = rows.slice(0, request.limit);
