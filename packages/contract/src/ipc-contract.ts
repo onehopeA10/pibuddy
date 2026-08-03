@@ -106,6 +106,7 @@ import {
   fileTreePageSchema,
   treeListRequestSchema,
   treeWatchRequestSchema,
+  workspaceReleaseRequestSchema,
   workspaceSearchCancelSchema,
   workspaceSearchPageSchema,
   workspaceSearchRequestSchema,
@@ -388,7 +389,44 @@ export const rendererSettingsPatchSchema = appSettingsPatchSchema.omit({
   // workspaceId 会被解成真实 root 并校验存在，允许渲染进程直接塞一整张表
   // 等于让它自己编 workspaceId。
   workspaceDefaults: true,
+  // ---- SEC-005：Pi 运行时来源不再是一个「设置字段」----
+  //
+  // 这两项最终会走到 pi-launcher 的 spawn：`piExternalCommand` 就是那条
+  // 命令行的第一个 argv。留在可写集合里，等于给渲染进程留了一条
+  // 「写一次设置 → 主进程替我启动任意本机程序」的路 —— 它绕开了 TASK-007
+  // 把 `pi:command` 拆成 15 条窄通道所建立的全部约束（那次收敛的整个理由
+  // 就是「渲染进程不得表达任意命令执行」）。
+  //
+  // 改由 `settings:set-pi-runtime` 承接：入参只有 mode 枚举，路径由主进程
+  // 的原生文件选择框产生，并经一次展示完整路径的确认框。
+  piRuntimeMode: true,
+  piExternalCommand: true,
 });
+
+/**
+ * `settings:set-pi-runtime` 的入参（SEC-005）。
+ *
+ * **恰好一个字段**，且它是枚举而不是字符串。渲染进程能表达的极限是
+ * 「我想用内置」或「我想挑一个外部命令」这两个意图，表达不出「用这个
+ * 文件」—— 后者由主进程弹原生对话框向用户当面取得。
+ */
+export const piRuntimeChoiceRequestSchema = z.object({
+  mode: z.enum(["bundled", "external"]),
+});
+export type PiRuntimeChoiceRequest = z.infer<typeof piRuntimeChoiceRequestSchema>;
+
+/**
+ * `settings:set-pi-runtime` 的返回。
+ *
+ * `applied:false` 表示用户在文件选择框或确认框里取消了 —— 此时磁盘上一个
+ * 字节都没改，`settings` 是原样的当前设置。界面据此提示「已取消」，而不是
+ * 谎报保存成功。
+ */
+export const piRuntimeApplyResultSchema = z.object({
+  applied: z.boolean(),
+  settings: appSettingsSchema,
+});
+export type PiRuntimeApplyResult = z.infer<typeof piRuntimeApplyResultSchema>;
 
 /** RPC 响应的通用外壳；`data` 的具体形状由各命令自行约定。 */
 export const rpcResponseSchema = z
@@ -531,6 +569,10 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
     request: secretQueryRequestSchema,
     response: secretDescriptorSchema,
   },
+  [CHANNELS.settingsSetPiRuntime]: {
+    request: piRuntimeChoiceRequestSchema,
+    response: piRuntimeApplyResultSchema,
+  },
 
   // ---- workspace 与附件 ----
   [CHANNELS.workspaceCurrent]: {
@@ -557,7 +599,7 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   [CHANNELS.shellShowInFolder]: { request: tokenRequestSchema, response: z.void() },
   [CHANNELS.attachmentRevokeAll]: { request: voidRequestSchema, response: z.void() },
 
-  // ---- Workspace 文件服务（FS-101，8 条） ----
+  // ---- Workspace 文件服务（FS-101，9 条） ----
   [CHANNELS.workspaceTreeList]: {
     request: treeListRequestSchema,
     response: fileTreePageSchema,
@@ -589,6 +631,10 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   [CHANNELS.workspaceAttachmentCreate]: {
     request: attachmentCreateRequestSchema,
     response: attachmentDescriptorSchema,
+  },
+  [CHANNELS.workspaceRelease]: {
+    request: workspaceReleaseRequestSchema,
+    response: z.void(),
   },
 
   // ---- Agent 变更集（FS-102，4 条） ----

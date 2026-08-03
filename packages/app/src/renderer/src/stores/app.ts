@@ -26,6 +26,9 @@ import type {
 } from "@contract";
 import { parseEnvelope, UI_EXPIRED_HINT } from "@contract";
 import { useSessionsStore } from "./sessions";
+// 静态引：workspace store 不反向依赖本文件，动态 import 只会让打包器
+// 把同一个模块同时算进两种图里并报一条警告，收益为零。
+import { useWorkspaceStore } from "./workspace";
 import { clearChatUiState } from "./chat-ui";
 import {
   assertImageCapable,
@@ -1213,6 +1216,13 @@ export const useAppStore = defineStore("app", () => {
     // 主进程自己把绝对路径写进设置并注册工作区，这里只收到不透明 id + 显示名
     const chosen = await window.piBuddy.dialog.chooseFolder();
     if (!chosen) return;
+    // 换工作区会把编辑器 tab 全部清掉。先问一次「未保存的编辑怎么办」，
+    // 用户点取消就到此为止 —— 中止必须是真的中止，不能问完还是照切。
+    // 问在 chooseFolder 之后：先弹一个和目录无关的对话框，用户根本不知道
+    // 自己是在为哪次操作做决定。
+    if (chosen.workspaceId !== workspaceId.value) {
+      if (!(await useWorkspaceStore().confirmLeave())) return;
+    }
     adoptWorkspace(chosen);
     settings.value = await window.piBuddy.settings.get();
     await start();
@@ -1520,13 +1530,30 @@ export const useAppStore = defineStore("app", () => {
   }
 
   /**
+   * 切换 Pi 运行时来源（SEC-005）。
+   *
+   * 渲染进程能表达的极限就是这个 mode 枚举 —— 外部命令的路径由主进程弹
+   * 原生文件选择框 + 确认框当面取得，这里既给不出路径，也读不到用户在
+   * 对话框里做了什么，只知道最终 applied 与否。
+   *
+   * 返回是否真的落盘：用户在任一个对话框上取消时为 false，界面据此提示
+   * 「已取消」而不是谎报保存成功。
+   */
+  async function setPiRuntime(mode: "bundled" | "external"): Promise<boolean> {
+    const result = await window.piBuddy.settings.setPiRuntime(mode);
+    settings.value = result.settings;
+    return result.applied;
+  }
+
+  /**
    * 从 external 运行时切回内置。
    *
    * 只有用户点这个按钮才写设置 —— external 启动失败本身绝不自动改写
    * piRuntimeMode，否则用户的显式选择会在一次失败后被悄悄抹掉。
+   * 切回内置是降权，主进程不会为它弹确认框。
    */
   async function switchToBundledRuntime(): Promise<void> {
-    settings.value = await window.piBuddy.settings.set({ piRuntimeMode: "bundled" });
+    await setPiRuntime("bundled");
     await start();
   }
 
@@ -1591,6 +1618,7 @@ export const useAppStore = defineStore("app", () => {
     modelMismatchPrompt,
     keepSessionModel,
     switchToPromptedModel,
+    setPiRuntime,
     switchToBundledRuntime,
     setThinkingLevel,
     saveSettings,

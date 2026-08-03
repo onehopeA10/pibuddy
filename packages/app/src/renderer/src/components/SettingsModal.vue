@@ -48,8 +48,6 @@ const sttBaseUrl = ref("");
 const sttApiKeyInput = ref("");
 const secretHint = ref("");
 const sttModel = ref("");
-const piRuntimeMode = ref<"bundled" | "external">("bundled");
-const piExternalCommand = ref("");
 
 watch(
   () => store.settingsOpen,
@@ -61,8 +59,6 @@ watch(
         ? `已配置 ····${store.settings.sttApiKeyLast4 || "????"}（留空则不改动）`
         : "";
       sttModel.value = store.settings.sttModel ?? "";
-      piRuntimeMode.value = store.settings.piRuntimeMode ?? "bundled";
-      piExternalCommand.value = store.settings.piExternalCommand ?? "";
     }
   }
 );
@@ -74,11 +70,13 @@ async function save(): Promise<void> {
   try {
     // 端点先保存：地址不合格（非 HTTPS / 指向内网）时这一步就抛，
     // 密钥与其余字段一个都不会落盘。
+    //
+    // **这里没有、也不许有 piRuntimeMode / piExternalCommand**（SEC-005）：
+    // 那两项最终是 spawn 的 argv[0]，走 changeRuntime() 那条需要主进程当面
+    // 确认的通道。放回来一行，这个界面就重新成了一条任意程序执行的入口。
     await store.saveSettings({
       sttBaseUrl: sttBaseUrl.value.trim(),
       sttModel: sttModel.value.trim(),
-      piRuntimeMode: piRuntimeMode.value,
-      piExternalCommand: piExternalCommand.value.trim(),
     });
     if (sttApiKeyInput.value.trim() !== "") {
       await store.saveSttSecret(sttApiKeyInput.value.trim());
@@ -94,9 +92,35 @@ async function save(): Promise<void> {
   store.settingsOpen = false;
 }
 
+const runtimeBusy = ref(false);
+
+/**
+ * 切换运行时来源。
+ *
+ * 与其余设置项不同，它**不跟随「保存」按钮**：这一步会弹主进程的文件选择框
+ * 与确认框，必须当场完成、当场落盘，混进批量保存里的话，用户在对话框上点的
+ * 「确认」到底确认了什么就说不清了。
+ */
+async function changeRuntime(mode: "bundled" | "external"): Promise<void> {
+  if (mode === (store.settings.piRuntimeMode ?? "bundled") && mode === "bundled") return;
+  runtimeBusy.value = true;
+  try {
+    const applied = await store.setPiRuntime(mode);
+    if (applied) {
+      message.success(mode === "external" ? "已切换到外部 Pi 运行时" : "已切回内置运行时");
+    } else {
+      message.info("已取消，运行时设置未改动");
+    }
+  } catch (err) {
+    saveError.value = err instanceof Error ? err.message : String(err);
+    message.error(saveError.value);
+  } finally {
+    runtimeBusy.value = false;
+  }
+}
+
 /** 只有点这个按钮才会把 piRuntimeMode 写回 bundled —— 启动失败本身不写设置。 */
 async function backToBundled(): Promise<void> {
-  piRuntimeMode.value = "bundled";
   await store.switchToBundledRuntime();
   message.success("已切回内置运行时");
   store.settingsOpen = false;
@@ -146,23 +170,38 @@ async function backToBundled(): Promise<void> {
 
       <div style="margin: 12px 0 8px; font-size: 12.5px; color: #8a8f98">
         高级：Pi 运行时。默认使用应用自带的版本，不需要在电脑上单独安装 pi。
-        只有明确知道自己在做什么时才改成「外部命令」。
+        只有明确知道自己在做什么时才改成「外部命令」——
+        选「外部命令」会打开一个文件选择框，由你亲自挑那个可执行文件。
       </div>
 
+      <!--
+        这一组是**立即生效**的，不跟随下面的「保存」按钮：切到外部命令会弹
+        主进程的文件选择框与确认框（SEC-005）。界面这边给不出、也不传任何
+        路径 —— 一旦这里出现一个能填路径的输入框，渲染进程就重新拥有了
+        「让主进程执行任意本机程序」的表达能力。
+      -->
       <n-form-item label="Pi 运行时">
-        <n-radio-group v-model:value="piRuntimeMode">
+        <n-radio-group
+          :value="store.settings.piRuntimeMode ?? 'bundled'"
+          :disabled="runtimeBusy"
+          @update:value="(v: 'bundled' | 'external') => changeRuntime(v)"
+        >
           <n-space>
             <n-radio value="bundled">内置（推荐）</n-radio>
-            <n-radio value="external">外部命令</n-radio>
+            <n-radio value="external">外部命令…</n-radio>
           </n-space>
         </n-radio-group>
       </n-form-item>
 
-      <n-form-item v-if="piRuntimeMode === 'external'" label="命令路径">
-        <n-input
-          v-model:value="piExternalCommand"
-          placeholder="例如 D:\\tools\\pi\\bin\\pi 或 PATH 中的命令名"
-        />
+      <n-form-item v-if="store.settings.piRuntimeMode === 'external'" label="当前命令">
+        <n-space vertical size="small" style="width: 100%">
+          <span style="font-size: 12.5px; word-break: break-all; color: #4b5563">
+            {{ store.settings.piExternalCommand || "未选择" }}
+          </span>
+          <n-button size="small" :disabled="runtimeBusy" @click="changeRuntime('external')">
+            重新选择…
+          </n-button>
+        </n-space>
       </n-form-item>
     </n-form>
 

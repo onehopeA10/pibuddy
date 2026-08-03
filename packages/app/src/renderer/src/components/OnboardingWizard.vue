@@ -120,8 +120,21 @@ async function chooseFolder(): Promise<void> {
   }
 }
 
+/**
+ * 切换运行时来源（SEC-005）。
+ *
+ * 不走 saveSettings：`piRuntimeMode` / `piExternalCommand` 已经不在渲染进程
+ * 可写的设置子集里 —— 它们最终是 spawn 的 argv[0]。选「外部」会由主进程弹
+ * 文件选择框 + 确认框，用户在那两个框上取消时这里什么都不会变（单选框的
+ * 显示值直接读 store，因此会自动弹回「内置」）。
+ */
 async function setRuntime(mode: "bundled" | "external"): Promise<void> {
-  await app.saveSettings({ piRuntimeMode: mode });
+  busy.value = true;
+  try {
+    await app.setPiRuntime(mode);
+  } finally {
+    busy.value = false;
+  }
 }
 
 /** 最后一步：写 completedAt，主界面这才渲染出来。 */

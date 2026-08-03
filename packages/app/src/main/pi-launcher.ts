@@ -202,8 +202,15 @@ function resolveBundledPackaged(resourcesPath: string): ResolvedPiRuntime {
   };
 }
 
-/** external 模式：显式路径优先，其次在 PATH 中查找，全程不依赖 shell 解析。 */
-function resolveExternalCommand(raw: string, env: NodeJS.ProcessEnv): string {
+/**
+ * external 模式：显式路径优先，其次在 PATH 中查找，全程不依赖 shell 解析。
+ *
+ * 导出是给 SEC-005 的授权流程用的：确认框上必须写**真正会被 spawn 的那个
+ * 文件**，而它只能由这份解析算出来。用户挑 `pi` 时 Windows 上实际执行的
+ * 可能是 `pi.cmd`，抄一份近似实现去生成确认文案，等于让用户确认了一个和
+ * 实际执行对象不同的路径。
+ */
+export function resolveExternalCommand(raw: string, env: NodeJS.ProcessEnv): string {
   const wanted = raw.trim();
   if (!wanted) {
     throw new PiRuntimeResolveError("外部 pi 命令为空：请在高级设置中填写可执行文件路径");

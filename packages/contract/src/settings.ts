@@ -56,9 +56,26 @@ export const appSettingsSchema = z.object({
    * - bundled：使用应用自带的 pi 运行时（默认，且是唯一被保证可用的形态）
    * - external：使用用户显式指定的外部 pi 命令，失败时**不会**自动回退，
    *   由界面提示用户手动「切回内置」，避免静默改写用户设置。
+   *
+   * ## SEC-005：本字段与下面的 piExternalCommand **不在渲染进程可写集合里**
+   *
+   * 它们最终会走到 pi-launcher 的 spawn。只要 `settings:set` 还能写它们，
+   * 渲染进程里的任意 JS（XSS / 恶意扩展内容）就等价于「让主进程启动我指定
+   * 的任意本机程序」。因此 ipc-contract.ts 的 rendererSettingsPatchSchema
+   * 把两项一起 omit 掉，改由 `settings:set-pi-runtime` 承接 —— 那条通道的
+   * 入参只有一个 mode 枚举，路径由主进程弹原生文件选择框当面取得。
+   *
+   * 它们仍留在 APP_SETTINGS_PUBLIC_KEYS 里：那是**只读展示**（设置页要显示
+   * 当前用的是哪个运行时、哪个路径），可读与可写是两件事。
    */
   piRuntimeMode: z.enum(["bundled", "external"]).default("bundled"),
-  /** external 模式下的命令：绝对/相对路径优先，否则在 PATH 中查找 */
+  /**
+   * external 模式下实际会被 spawn 的可执行文件。
+   *
+   * 落盘的是**已解析的绝对路径**（用户在原生文件选择框里挑中、并在确认框
+   * 里看到的那一个），不是一个待查找的命令名 —— 存命令名的话，用户确认过
+   * 的东西和日后真正被执行的东西可以因为 PATH 变化而不是同一个文件。
+   */
   piExternalCommand: z.string().optional(),
   /**
    * 崩溃转储的隐私选择（OBS-101）。

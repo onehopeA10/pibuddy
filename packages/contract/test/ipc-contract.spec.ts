@@ -46,6 +46,9 @@ describe("CT-09 设置里不再有任何密钥字段", () => {
       "sttEndpointId",
       "sttApiKeyConfigured",
       "sttApiKeyLast4",
+      // SEC-005：这两项最终是 spawn 的 argv[0]，只能经 settings:set-pi-runtime
+      "piRuntimeMode",
+      "piExternalCommand",
     ]) {
       expect(writable).not.toContain(forbidden);
     }

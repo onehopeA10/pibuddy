@@ -8,6 +8,7 @@ import { BrowserWindow, dialog } from "electron";
 import {
   CHANNELS,
   attachDroppedRequestSchema,
+  piRuntimeChoiceRequestSchema,
   rendererSettingsPatchSchema,
   secretQueryRequestSchema,
   secretWriteRequestSchema,
@@ -24,6 +25,8 @@ import { registerEndpoint, requireEndpoint } from "./endpoints.js";
 import { registerHandler } from "./ipc-guard.js";
 import { safeFetch } from "./net/outbound-guard.js";
 import { log } from "./pi/pi-ipc.js";
+import { resolveExternalCommand } from "./pi-launcher.js";
+import { applyPiRuntimeChoice } from "./security/pi-runtime-approval.js";
 import { SECRET_KEYS, describeSecret, loadSecret, saveSecret } from "./secret-store.js";
 import { loadSettings, publicSettings, saveSettings } from "./settings.js";
 import { describeWorkspace, registerWorkspace } from "./workspace-registry.js";
@@ -79,6 +82,54 @@ export function registerMiscIpc(): void {
 
   registerHandler(CHANNELS.settingsDescribeSecret, secretQueryRequestSchema, () =>
     describeSecret(SECRET_KEYS.sttApiKey)
+  );
+
+  // ------------------------------------------------- Pi 运行时来源（SEC-005）
+  //
+  // 这条通道存在的唯一理由，是把「哪个可执行文件会被 spawn」这个决定从
+  // 渲染进程手里拿走。入参只有 mode 枚举（见 piRuntimeChoiceRequestSchema），
+  // 路径由下面这个原生文件选择框产生，再经一次展示完整路径的确认框。
+  // 判定逻辑住在 security/pi-runtime-approval.ts，本文件只负责接上真的
+  // electron 对话框 —— 否则「取消了到底有没有落盘」只能靠真机点击来验证。
+  registerHandler(
+    CHANNELS.settingsSetPiRuntime,
+    piRuntimeChoiceRequestSchema,
+    async (payload, event) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const outcome = await applyPiRuntimeChoice(payload.mode, {
+        pickExecutable: async () => {
+          const result = await dialog.showOpenDialog(win!, {
+            title: "选择外部 Pi 可执行文件",
+            message: "PiBuddy 将来会启动你在这里挑中的程序",
+            properties: ["openFile", "dontAddToRecent"],
+          });
+          if (result.canceled) return null;
+          return result.filePaths[0] ?? null;
+        },
+        // 与 pi-launcher 共用同一份解析：确认框上写的必须是真正会被 spawn 的
+        // 那个文件（Windows 上挑 `pi` 实际执行的可能是 `pi.cmd`）。
+        resolveCommand: (picked) => resolveExternalCommand(picked, process.env),
+        confirm: async (resolvedPath) => {
+          const { response } = await dialog.showMessageBox(win!, {
+            type: "warning",
+            title: "确认使用外部 Pi 运行时",
+            message: "PiBuddy 将执行下面这个程序",
+            // 完整路径必须原样出现在正文里：只写文件名的话，
+            // C:\Users\x\Downloads\pi.exe 和内置运行时看起来一模一样。
+            detail: `${resolvedPath}\n\n只有你确实知道这个文件是什么时才继续。内置运行时无需任何设置即可使用。`,
+            buttons: ["取消", "确认使用"],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+          });
+          return response === 1;
+        },
+        persist: (patch) => saveSettings(patch),
+        current: () => loadSettings(),
+      });
+      log().info("pi_runtime_choice", { mode: payload.mode, applied: outcome.applied });
+      return { applied: outcome.applied, settings: publicSettings(outcome.settings) };
+    }
   );
 
   // ------------------------------------------- workspace 与附件 capability

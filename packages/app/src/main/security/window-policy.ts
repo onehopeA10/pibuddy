@@ -13,6 +13,8 @@
  *                    只放行「主窗口 + media + 纯 audio」（语音输入需要麦克风）。
  */
 import { app, session, shell, type BrowserWindow, type WebContents } from "electron";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * 内容安全策略。
@@ -73,8 +75,73 @@ function devRendererOrigin(): string | null {
 }
 
 /**
+ * 打包后 renderer 入口相对 `app.getAppPath()` 的位置。
+ *
+ * 与 main/index.ts 的 `loadFile(join(import.meta.dirname, "../renderer/index.html"))`
+ * 是同一个文件：主进程产物在 `out/main/`，`../renderer/index.html` 即
+ * `out/renderer/index.html`，而 `app.getAppPath()` 指向 `out/` 的父目录
+ * （asar 内则是 app.asar 根）。
+ */
+const RENDERER_ENTRY_RELATIVE = ["out", "renderer", "index.html"] as const;
+
+/** 打包后 renderer 入口的绝对路径；取不到 appPath 时为 null（此时 file: 一律不放行）。 */
+function rendererEntryPath(): string | null {
+  try {
+    const root = app.getAppPath();
+    if (typeof root !== "string" || root === "") return null;
+    return path.resolve(root, ...RENDERER_ENTRY_RELATIVE);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 这个 file: URL 是不是**那一个** renderer 入口文件（SEC-006）。
+ *
+ * 收敛前这里是 `if (url.protocol === "file:") return true` —— 任何本地 HTML
+ * 被导航到主窗口都会被判成「应用 URL」，从而绕过 will-navigate 的拦截并继承
+ * 同一个 preload，也就是完整的 `window.piBuddy`。攻击面很具体：模型或工具往
+ * 工作区写一个 .html，再诱导用户点开它即可。
+ *
+ * 判据有两条纪律：
+ *
+ *   1. **收容用 path.relative，不用字符串 startsWith** —— `C:\app-evil\x.html`
+ *      以 `C:\app` 开头，前缀比较会把它判成应用内。这与
+ *      workspace-registry.ts / preview-window.ts 的收容判据同一口径。
+ *   2. **只放行入口那一个文件，不放行整个目录** —— 放行目录的话，任何被写进
+ *      `out/renderer/` 的 html（比如将来某个导出功能的落点）都会重新变成
+ *      一块能拿到 preload 的执行面。
+ *
+ * query 与 hash 一律忽略：`index.html?x=1` 指向的仍是同一个文件。
+ */
+function isRendererEntryFile(url: URL): boolean {
+  const entry = rendererEntryPath();
+  if (entry === null) return false;
+  // 带 host 的 UNC 形式（file://server/share/...）直接拒：它指向另一台机器，
+  // 无论如何都不是本应用的入口。
+  if (url.host !== "" && url.host !== "localhost") return false;
+
+  let target: string;
+  try {
+    // 只取 pathname：query / hash 参与不了文件定位，带着它们 fileURLToPath 会抛。
+    target = path.resolve(fileURLToPath(`file://${url.pathname}`));
+  } catch {
+    return false;
+  }
+
+  const rel = path.relative(path.dirname(entry), target);
+  const base = path.basename(entry);
+  // win32 的 path.relative 已按大小写不敏感比较目录段，但尾段原样保留，
+  // 因此这里补一次同平台口径的比较（NTFS 上 INDEX.HTML 就是同一个文件）。
+  return process.platform === "win32"
+    ? rel.toLowerCase() === base.toLowerCase()
+    : rel === base;
+}
+
+/**
  * 是否是「应用自身」的地址。
- * packaged 走 file://（loadFile），dev 走 ELECTRON_RENDERER_URL 的 origin —— 后者必须放行，
+ * packaged 走 file://（loadFile）——**只有** renderer 入口那一个文件算数；
+ * dev 走 ELECTRON_RENDERER_URL 的 origin —— 后者必须放行，
  * 否则 vite HMR 的整页刷新会被 will-navigate 拦掉，热更新直接失效。
  */
 export function isAppUrl(raw: string): boolean {
@@ -84,7 +151,7 @@ export function isAppUrl(raw: string): boolean {
   } catch {
     return false;
   }
-  if (url.protocol === "file:") return true;
+  if (url.protocol === "file:") return isRendererEntryFile(url);
   const dev = devRendererOrigin();
   return dev !== null && url.origin === dev;
 }

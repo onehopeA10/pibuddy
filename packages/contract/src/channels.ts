@@ -84,6 +84,20 @@ export const CHANNELS = {
   settingsSetSecret: "settings:set-secret",
   /** 查询某把密钥的配置态：{configured, last4}，不含明文 */
   settingsDescribeSecret: "settings:describe-secret",
+  /**
+   * 切换 Pi 运行时来源（SEC-005）。
+   *
+   * 入参**只有一个枚举** `{mode}`，没有、也不允许有任何路径或命令字段 ——
+   * `piRuntimeMode` / `piExternalCommand` 最终会被交给 spawn，渲染进程一旦
+   * 能写它们，一次 XSS 或一段恶意扩展内容就等价于「让主进程启动我指定的
+   * 任意可执行文件」。因此这两个字段被整体移出 `settings:set` 的可写集合，
+   * external 的可执行文件改由**主进程**弹原生文件选择框让用户当场挑，再用
+   * 一次展示完整路径的确认框二次确认，确认之后才落盘（落的是解析后的绝对
+   * 路径，不是渲染进程给的字符串）。
+   *
+   * 切回 bundled 是降权操作，不需要确认。
+   */
+  settingsSetPiRuntime: "settings:set-pi-runtime",
 
   // ---- workspace 与附件 capability ----
   workspaceCurrent: "workspace:current",
@@ -95,7 +109,7 @@ export const CHANNELS = {
   shellShowInFolder: "shell:show-in-folder",
   attachmentRevokeAll: "attachment:revoke-all",
 
-  // ---- Workspace 文件服务（FS-101，恰 8 条） ----
+  // ---- Workspace 文件服务（FS-101，恰 9 条） ----
   //
   // 八条通道的入参与返回**只有 relativePath**：canonical root 与文件的
   // 真实位置只活在主进程，渲染进程拿到一个相对路径既推断不出磁盘布局，
@@ -110,6 +124,13 @@ export const CHANNELS = {
   workspaceFileMutate: "workspace:file-mutate",
   /** 工作区内的文件 → 结构化附件引用（八字段，标识恒为 token） */
   workspaceAttachmentCreate: "workspace:attachment-create",
+  /**
+   * 释放某个工作区在主进程侧占用的 watcher 与搜索子进程。
+   *
+   * 切换工作区时由渲染进程发一次。main 侧早就有释放函数，缺的一直是这条
+   * 「谁来叫它」的通道 —— 泄漏在功能上完全无声，只有句柄数会一路往上走。
+   */
+  workspaceRelease: "workspace:release",
 
   // ---- Agent 变更集（FS-102，恰 4 条） ----
   //

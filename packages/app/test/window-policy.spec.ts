@@ -11,6 +11,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   openExternal: vi.fn(async () => undefined),
   isPackaged: { value: false },
+  // 打包后 app.getAppPath() 指向 out/ 的父目录（asar 内则是 app.asar 根）；
+  // renderer 入口固定在它下面的 out/renderer/index.html。
+  appPath: { value: "C:\\app" },
 }));
 
 vi.mock("electron", () => ({
@@ -18,6 +21,7 @@ vi.mock("electron", () => ({
     get isPackaged() {
       return mocks.isPackaged.value;
     },
+    getAppPath: () => mocks.appPath.value,
   },
   shell: { openExternal: mocks.openExternal },
   session: {
@@ -40,9 +44,16 @@ vi.mock("electron", () => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const registered: Record<string, any> = {};
 
-const { CSP_POLICY, applyWindowPolicy, openExternalSafely } = await import(
+const { CSP_POLICY, applyWindowPolicy, isAppUrl, openExternalSafely } = await import(
   "../src/main/security/window-policy.js"
 );
+const { default: path } = await import("node:path");
+const { pathToFileURL } = await import("node:url");
+
+/** 平台无关的应用根：win32 上是 C:\...\app-root，posix 上是 /.../app-root。 */
+const APP_ROOT = path.resolve("app-root");
+const RENDERER_ENTRY = path.join(APP_ROOT, "out", "renderer", "index.html");
+const fileUrl = (p: string): string => pathToFileURL(p).href;
 const { renderMarkdown, truncateToolOutput, MAX_TOOL_OUTPUT_BYTES } = await import(
   "../src/renderer/src/markdown.js"
 );
@@ -68,6 +79,56 @@ function makeFakeWindow() {
 beforeEach(() => {
   mocks.openExternal.mockClear();
   mocks.isPackaged.value = false;
+  mocks.appPath.value = APP_ROOT;
+});
+
+/**
+ * SEC-006：`isAppUrl` 只认打包后的 renderer 入口那**一个**文件。
+ *
+ * 收敛前它是 `if (url.protocol === "file:") return true` —— 任何本地 HTML 被
+ * 导航到主窗口都会被判成「应用 URL」，于是绕过 will-navigate 的拦截，并继承
+ * 同一个 preload（也就是完整的 window.piBuddy）。攻击面很具体：模型或工具往
+ * 工作区写一个 .html，诱导用户点开即可。
+ */
+describe("isAppUrl 的 file: 收容", () => {
+  it("放行 renderer 入口本身（含 query / hash）", () => {
+    expect(isAppUrl(fileUrl(RENDERER_ENTRY))).toBe(true);
+    expect(isAppUrl(`${fileUrl(RENDERER_ENTRY)}?x=1#/chat`)).toBe(true);
+  });
+
+  const blocked = [
+    // 工作区里被写出来的任意 html —— 这一条就是缺陷本身
+    ["工作区中的任意 html", () => fileUrl(path.resolve("workspace", "evil.html"))],
+    // 前缀相邻目录：字符串 startsWith 会把这两条都误判成应用内
+    [
+      "与应用根同前缀的兄弟目录",
+      () => fileUrl(path.join(`${APP_ROOT}-evil`, "out", "renderer", "index.html")),
+    ],
+    [
+      "与 renderer 目录同前缀的兄弟目录",
+      () => fileUrl(path.join(APP_ROOT, "out", "renderer-evil", "index.html")),
+    ],
+    // 同目录下的另一个 html：放行整个目录就会漏掉它
+    [
+      "入口同目录下的其它 html",
+      () => fileUrl(path.join(path.dirname(RENDERER_ENTRY), "other.html")),
+    ],
+    // 穿越回上一层
+    [
+      "带 .. 穿越到应用根之外",
+      () => `${pathToFileURL(path.dirname(RENDERER_ENTRY)).href}/../../../evil.html`,
+    ],
+    ["系统程序", () => fileUrl(path.resolve("windows", "system32", "calc.exe"))],
+  ] as const;
+
+  it.each(blocked)("拒绝 %s", (_label, make) => {
+    expect(isAppUrl(make())).toBe(false);
+  });
+
+  it("appPath 取不到时 file: 一律不放行（宁可白屏也不放开执行面）", () => {
+    mocks.appPath.value = "";
+    expect(isAppUrl(fileUrl(RENDERER_ENTRY))).toBe(false);
+  });
 });
 
 describe("openExternalSafely", () => {
@@ -117,12 +178,17 @@ describe("applyWindowPolicy", () => {
     // 导航：应用自身放行，外部 origin 被 preventDefault
     const willNavigate = win.listeners.get("will-navigate")!;
     const evAllowed = { preventDefault: vi.fn() };
-    willNavigate(evAllowed, "file:///C:/app/out/renderer/index.html");
+    willNavigate(evAllowed, fileUrl(RENDERER_ENTRY));
     expect(evAllowed.preventDefault).not.toHaveBeenCalled();
 
     const evBlocked = { preventDefault: vi.fn() };
     willNavigate(evBlocked, "https://evil.example.com/");
     expect(evBlocked.preventDefault).toHaveBeenCalledTimes(1);
+
+    // 本地 html 同样被拦下：它拿到的会是与主窗口同一个 preload
+    const evLocalHtml = { preventDefault: vi.fn() };
+    willNavigate(evLocalHtml, fileUrl(path.resolve("workspace", "evil.html")));
+    expect(evLocalHtml.preventDefault).toHaveBeenCalledTimes(1);
   });
 
   it("权限处理器只放行主窗口的麦克风", () => {
