@@ -8,6 +8,7 @@ export * from "./channels.js";
 export * from "./channel-contract.js";
 export * from "./capability.js";
 export * from "./permission.js";
+export * from "./agent-pool.js";
 export * from "./memory.js";
 export * from "./envelope.js";
 export * from "./settings.js";

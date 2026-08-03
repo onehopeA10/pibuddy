@@ -32,6 +32,7 @@ import {
 } from "@pibuddy/contract";
 
 import * as attachments from "../attachment-registry.js";
+import { agentPoolObserver } from "../agent-pool/pool.js";
 import { isCapabilityEnabled } from "../capability/capability-state.js";
 import { MEMORY_CAPABILITY_ID } from "../capability/manifests/memory.manifest.js";
 import { injectMemory } from "../memory/memory-inject.js";
@@ -147,6 +148,11 @@ async function resolveSessionPath(sessionId: string, workspaceRoot: string): Pro
 }
 
 export function registerPiIpc(): void {
+  // 把后台会话池挂到 supervisor 上（AGT-101）。依赖方向 pi → kernel：池的实现
+  // 与观测者形状都在内核侧，pi 域只负责把观测者装上去。放在最前面，保证从第一
+  // 次会话握手（adoptSession）起，池就在观测当前会话。
+  supervisor().setPoolObserver(agentPoolObserver());
+
   // ------------------------------------------------------------ 生命周期
 
   registerHandler(CHANNELS.piStart, piStartParamsSchema, async (opts, event) => {
