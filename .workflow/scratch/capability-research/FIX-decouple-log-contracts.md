@@ -326,6 +326,17 @@ diagnostics:preview-bundle → entries/totalBytes/crashDumpConsent           ✔
 
 ---
 
+## CI
+
+提交 `9d89f04` 的 CI 四个 job 全绿（run 30802927421）：
+
+```
+package (ubuntu-latest): success
+verify  (ubuntu-latest): success
+package (windows-latest): success
+verify  (windows-latest): success
+```
+
 ## 偏差与遗留
 
 1. **`index.ts` 的 `mainLogger()` 被删除**，合并进 `log()`。这超出了「只改
