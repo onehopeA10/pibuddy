@@ -196,11 +196,16 @@ describe("大小与收容", () => {
     writePng(file);
     const { token } = await reg.issue(file);
 
+    // 期望值必须用 realpathSync.native —— 实现走的就是 native 版。
+    // 词法版在 Windows 上不展开 8.3 短名，于是同一个文件算出两个字符串，
+    // 在短名路径的机器上这条断言必红（CI runner 正是这种路径）。
+    const canonical = fs.realpathSync.native(file);
+
     await reg.openAttachment(token);
-    expect(openPath).toHaveBeenCalledWith(fs.realpathSync(file));
+    expect(openPath).toHaveBeenCalledWith(canonical);
 
     await reg.revealAttachment(token);
-    expect(showItemInFolder).toHaveBeenCalledWith(fs.realpathSync(file));
+    expect(showItemInFolder).toHaveBeenCalledWith(canonical);
 
     await expect(reg.openAttachment("not-a-token")).rejects.toThrow(
       /ATTACHMENT_TOKEN_INVALID/
