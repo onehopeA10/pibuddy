@@ -22,10 +22,18 @@ const artifacts = useArtifactsStore();
 const dialog = useDialog();
 const message = useMessage();
 
+/**
+ * 跟随当前工作区。
+ *
+ * `attach` 现在是异步的、而且**可以被用户取消**（有未保存的编辑时它会先
+ * 问三选一）。真正的取消发生在上游 —— app.chooseWorkspace 在 adopt 之前
+ * 就问过一次了，所以走到这里时 attach 基本不会再被拒。这里保留返回值
+ * 判定只是为了不把「被拒了」当成「切成功了」。
+ */
 watch(
   () => app.workspaceId,
   (id) => {
-    if (id) ws.attach(id);
+    if (id) void ws.attach(id);
   },
   { immediate: true }
 );

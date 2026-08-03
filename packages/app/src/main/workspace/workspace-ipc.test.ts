@@ -170,10 +170,91 @@ describe("注册面（裁定1 的结构断言）", () => {
     for (const channel of mine) expect(registered).toContain(channel);
     // (b) 注册表里的每条都在契约里有 schema
     for (const channel of registered) expect(CHANNEL_CONTRACTS[channel]).toBeTruthy();
-    // (c) 表长度 >= 8
-    expect(registered.length).toBeGreaterThanOrEqual(8);
-    // workspace 域恰 8 条，changeset 域恰 4 条
-    expect(workspaceIpc.WORKSPACE_CHANNELS).toHaveLength(8);
+    // (c) 表长度 >= 9
+    expect(registered.length).toBeGreaterThanOrEqual(9);
+    // workspace 域恰 9 条，changeset 域恰 4 条
+    expect(workspaceIpc.WORKSPACE_CHANNELS).toHaveLength(9);
     expect(changesetIpc.CHANGESET_CHANNELS).toHaveLength(4);
+  });
+});
+
+/**
+ * 切换工作区必须把 watcher 与搜索子进程收掉。
+ *
+ * 泄漏在功能上完全无声：句柄用尽之前文件树一切正常，用尽之后它停止刷新
+ * 且**不报任何错**。因此断言必须钉在可数的量上，而不是「有没有调到某个
+ * 函数」—— main 侧的释放函数一直存在，缺的从来是「谁来叫它」。
+ */
+describe("切换工作区释放旧资源", () => {
+  it("每轮换一个目录监听再 release：5 轮之后活跃 watcher 数不增长（恒为 0）", async () => {
+    await setup();
+    const { CHANNELS } = await import("@pibuddy/contract");
+    const tree = opened.tree as NonNullable<typeof opened.tree>;
+
+    // 每轮换一个目录：同一个目录反复 watch 只会加引用计数、watchers.size
+    // 恒为 1，那样的断言在真泄漏时照样绿，等于没测。
+    for (let i = 0; i < 5; i++) {
+      const dir = `d${i}`;
+      fs.mkdirSync(path.join(workspaceDir, dir), { recursive: true });
+      await call(CHANNELS.workspaceTreeWatch, { workspaceId, relativePath: dir, watching: true });
+      expect(tree.activeWatcherCount()).toBe(1);
+
+      await call(CHANNELS.workspaceRelease, { workspaceId });
+      expect(tree.activeWatcherCount()).toBe(0);
+    }
+
+    expect(tree.activeWatcherCount()).toBe(0);
+  });
+
+  it("release 之后搜索子进程也被杀掉（不只是 watcher）", async () => {
+    const { workspaceIpc } = await setup();
+    const { CHANNELS } = await import("@pibuddy/contract");
+    const worker = await import("./search-worker.js");
+    const entry = await import("./search-entry.js");
+
+    // 同构的假子进程：跑真的扫描逻辑，只是不真的 fork（与
+    // search-worker.test.ts 同一口径）。要断言的是宿主侧的生命周期。
+    let killed = 0;
+    worker.__setSearchChildFactory(() => {
+      const listeners: ((reply: unknown) => void)[] = [];
+      let dead = false;
+      return {
+        postMessage(message) {
+          setTimeout(() => {
+            if (dead) return;
+            entry.handleSearchRequest(message, (out) => {
+              for (const l of listeners) l(out);
+            });
+          }, 0);
+        },
+        on(_event, listener) {
+          listeners.push(listener as (reply: unknown) => void);
+        },
+        kill() {
+          dead = true;
+          killed++;
+        },
+        get killed() {
+          return dead;
+        },
+      };
+    });
+
+    try {
+      await call(CHANNELS.workspaceSearch, {
+        workspaceId,
+        query: "hello",
+        mode: "content",
+        requestId: "r1",
+      });
+      expect(worker.activeSearchWorkerCount()).toBe(1);
+
+      await call(CHANNELS.workspaceRelease, { workspaceId });
+      expect(worker.activeSearchWorkerCount()).toBe(0);
+      expect(killed).toBe(1);
+    } finally {
+      worker.__setSearchChildFactory(null);
+      workspaceIpc.disposeAllWorkspaceResources();
+    }
   });
 });

@@ -43,6 +43,15 @@ export const workspace = {
   onTreeChanged: (callback: (payload: unknown) => void) =>
     subscribe(PUSH_CHANNELS.workspaceTreeEvent, callback),
 
+  /**
+   * 释放一个工作区在主进程侧的 watcher 与搜索子进程。
+   *
+   * 切换工作区 / 卸载面板时必须调。不调不会有任何报错 —— 只是句柄和
+   * utility process 会随切换次数一路往上走，直到文件树悄悄停止刷新。
+   */
+  release: (workspaceId: string) =>
+    invoke<void>(CHANNELS.workspaceRelease, { workspaceId }),
+
   // ------------------------------------------------------------- 搜索
 
   search: (params: {

@@ -172,6 +172,118 @@ describe("保存冲突：唯一判据是内容 hash", () => {
   });
 });
 
+describe("读-比-写在同一把锁里（TOCTOU）", () => {
+  it("两次并发保存：恰好一次落盘，另一次报冲突（不是两次都成功）", async () => {
+    const { editor } = await freshModules();
+    const file = path.join(workspaceDir, "race.txt");
+    fs.writeFileSync(file, "base\n", "utf8");
+    const read = await editor.readFile({ workspaceId, relativePath: "race.txt" });
+
+    // 两个编辑器拿着**同一份** base 同时按下保存。没有锁的话双方都会读到
+    // "base\n"、双方都通过 hash 判定、双方都写 —— 后写的静默赢，冲突
+    // 对话框一次都不弹。
+    const [a, b] = await Promise.all([
+      editor.saveFile({
+        workspaceId,
+        relativePath: "race.txt",
+        content: "AAA\n",
+        baseMtimeMs: read.mtimeMs,
+        baseSha256: read.sha256,
+      }),
+      editor.saveFile({
+        workspaceId,
+        relativePath: "race.txt",
+        content: "BBB\n",
+        baseMtimeMs: read.mtimeMs,
+        baseSha256: read.sha256,
+      }),
+    ]);
+
+    expect([a, b].filter((r) => r.ok === true)).toHaveLength(1);
+    expect([a, b].filter((r) => r.conflict === true)).toHaveLength(1);
+    // 落盘的是赢家原封不动的内容，而不是两次写交错出来的东西
+    const onDisk = fs.readFileSync(file, "utf8");
+    expect(["AAA\n", "BBB\n"]).toContain(onDisk);
+    // 被拦下的那一次，看到的现状必须是赢家写进去的内容
+    const loser = a.conflict === true ? a : b;
+    expect(loser.current?.preview).toBe(onDisk);
+  });
+
+  it("外部编辑器在判定之后、落盘之前插进来：拦下，且它的内容原样保留", async () => {
+    const { editor } = await freshModules();
+    const file = path.join(workspaceDir, "toctou.txt");
+    fs.writeFileSync(file, "base\n", "utf8");
+    const read = await editor.readFile({ workspaceId, relativePath: "toctou.txt" });
+
+    let fired = 0;
+    editor.__setPreWriteHook(() => {
+      fired++;
+      fs.writeFileSync(file, "外部改动\n", "utf8");
+    });
+    try {
+      const saved = await editor.saveFile({
+        workspaceId,
+        relativePath: "toctou.txt",
+        content: "我的改动\n",
+        baseMtimeMs: read.mtimeMs,
+        baseSha256: read.sha256,
+      });
+      expect(fired).toBe(1);
+      expect(saved.conflict).toBe(true);
+      expect(saved.ok).toBe(false);
+      // 关键断言：外部那次修改必须还在磁盘上
+      expect(fs.readFileSync(file, "utf8")).toBe("外部改动\n");
+      expect(saved.current?.preview).toContain("外部改动");
+    } finally {
+      editor.__setPreWriteHook(null);
+    }
+  });
+
+  it("用户点了「覆盖」时，落盘前的复验不再拦（覆盖就是覆盖）", async () => {
+    const { editor } = await freshModules();
+    const file = path.join(workspaceDir, "force.txt");
+    fs.writeFileSync(file, "base\n", "utf8");
+    const read = await editor.readFile({ workspaceId, relativePath: "force.txt" });
+
+    editor.__setPreWriteHook(() => fs.writeFileSync(file, "外部改动\n", "utf8"));
+    try {
+      const saved = await editor.saveFile({
+        workspaceId,
+        relativePath: "force.txt",
+        content: "我的改动\n",
+        baseMtimeMs: read.mtimeMs,
+        baseSha256: read.sha256,
+        overwrite: true,
+      });
+      expect(saved.ok).toBe(true);
+      expect(fs.readFileSync(file, "utf8")).toBe("我的改动\n");
+    } finally {
+      editor.__setPreWriteHook(null);
+    }
+  });
+
+  it("锁表不泄漏：并发保存全部结束后排队数归 0", async () => {
+    const { editor } = await freshModules();
+    const file = path.join(workspaceDir, "leak.txt");
+    fs.writeFileSync(file, "base\n", "utf8");
+    const read = await editor.readFile({ workspaceId, relativePath: "leak.txt" });
+
+    await Promise.all(
+      Array.from({ length: 6 }, (_, i) =>
+        editor.saveFile({
+          workspaceId,
+          relativePath: "leak.txt",
+          content: `v${i}\n`,
+          baseMtimeMs: read.mtimeMs,
+          baseSha256: read.sha256,
+          overwrite: true,
+        })
+      )
+    );
+    expect(editor.pendingWriteLockCount()).toBe(0);
+  });
+});
+
 describe("写失败的分类", () => {
   it("权限不足返回 errorCode='permission'，不抛未捕获异常", async () => {
     const { editor } = await freshModules();

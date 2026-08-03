@@ -15,3 +15,4 @@
 {"type":"cli","id":"CLI-1785726328798-1","timestamp":"2026-08-03T03:05:28.798Z","command":"load","args":{"type":"knowhow","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-020"}}
 {"type":"cli","id":"CLI-1785726328847-1","timestamp":"2026-08-03T03:05:28.847Z","command":"load","args":{"type":"knowhow","id":"knowhow-KNW-20260803-030121-session-compact-019fc516-fd39-77-8b160e64-073a-48-002"}}
 {"type":"cli","id":"CLI-1785726328915-1","timestamp":"2026-08-03T03:05:28.915Z","command":"load","args":{"type":"spec","id":"spec:project:architecture-constraints"}}
+{"type":"cli","id":"CLI-1785727740817-1","timestamp":"2026-08-03T03:29:00.817Z","command":"load","args":{"type":"spec","id":"spec:project:architecture-constraints"}}

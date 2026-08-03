@@ -106,6 +106,7 @@ import {
   fileTreePageSchema,
   treeListRequestSchema,
   treeWatchRequestSchema,
+  workspaceReleaseRequestSchema,
   workspaceSearchCancelSchema,
   workspaceSearchPageSchema,
   workspaceSearchRequestSchema,
@@ -630,6 +631,10 @@ export const CHANNEL_CONTRACTS: Record<InvokeChannel, ChannelContract> = {
   [CHANNELS.workspaceAttachmentCreate]: {
     request: attachmentCreateRequestSchema,
     response: attachmentDescriptorSchema,
+  },
+  [CHANNELS.workspaceRelease]: {
+    request: workspaceReleaseRequestSchema,
+    response: z.void(),
   },
 
   // ---- Agent 变更集（FS-102，4 条） ----

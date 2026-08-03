@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
-import { useMessage, NButton, NSpin } from "naive-ui";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useDialog, useMessage, NButton, NSpin } from "naive-ui";
 import { useAppStore } from "../stores/app";
 import Sidebar from "./Sidebar.vue";
 import TopBar from "./TopBar.vue";
@@ -25,6 +25,12 @@ import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
 import { useArtifactsStore } from "../stores/artifacts";
+import {
+  createDirtyDialog,
+  setDirtyPrompt,
+  type DirtyDecision,
+  type EditorTab,
+} from "../stores/workspace";
 
 const store = useAppStore();
 const updateStore = useUpdateStore();
@@ -32,7 +38,42 @@ const piRes = usePiResourcesStore();
 const providers = useProvidersStore();
 const artifacts = useArtifactsStore();
 const message = useMessage();
+const dialog = useDialog();
 store.setNotifier(message);
+
+/**
+ * 未保存编辑的三选一，装在这里而不是编辑器组件里。
+ *
+ * 提问的时机有两个：关 tab（编辑器面板里）和切工作区（app store 里）。
+ * 后者在编辑器面板根本没挂载的时候也会发生 —— 装在面板里就等于「面板
+ * 没开时切工作区照样静默丢弃」，而那正是这次要修的缺陷本身。AppShell
+ * 在 NDialogProvider 之内、且与应用同生命周期，是唯一两边都够得着的位置。
+ *
+ * 三个按钮各自对应一种真实意图，没有默认选中项：默认放弃就是这条缺陷的
+ * 成因。右上角的 ×、Esc、点遮罩都归入「取消」。
+ *
+ * 每条出口各自 resolve、一次都不依赖 onAfterLeave —— 理由与断言见
+ * `createDirtyDialog`（那段逻辑住在 store 模块里正是为了能被单测钉住）。
+ */
+function askDirty(tabs: EditorTab[]): Promise<DirtyDecision> {
+  const { handlers, decision } = createDirtyDialog();
+  const names = tabs.map((t) => t.relativePath).join("、");
+  dialog.warning({
+    title: "有还没保存的修改",
+    content:
+      tabs.length === 1
+        ? `《${names}》里的修改还没保存。要先保存吗？`
+        : `这 ${tabs.length} 个文件还没保存：${names}。要先保存吗？`,
+    positiveText: "保存",
+    negativeText: "放弃修改",
+    closable: true,
+    ...handlers,
+  });
+  return decision;
+}
+
+setDirtyPrompt(askDirty);
+onBeforeUnmount(() => setDirtyPrompt(null));
 
 /**
  * 向导是否还没走完。

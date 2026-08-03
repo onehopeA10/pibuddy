@@ -1,5 +1,5 @@
 /**
- * Workspace 文件服务的 IPC handler（FS-101）——**恰 8 条通道**。
+ * Workspace 文件服务的 IPC handler（FS-101）——**恰 9 条通道**。
  *
  * 跨进程边界上只有 relativePath：canonical root 与文件真实位置只活在主
  * 进程。任何一条 handler 的返回值里出现绝对路径，都会让 TASK-007 建立的
@@ -19,6 +19,7 @@ import {
   fileSaveRequestSchema,
   treeListRequestSchema,
   treeWatchRequestSchema,
+  workspaceReleaseRequestSchema,
   workspaceSearchCancelSchema,
   workspaceSearchRequestSchema,
   type AttachmentDescriptor,
@@ -49,7 +50,7 @@ import { workspaceStore } from "./workspace-store.js";
 /**
  * 本域注册的全部通道。
  *
- * 导出成常量而不是散在下面的调用里：单测据它断言「恰 8 条且逐一出现在
+ * 导出成常量而不是散在下面的调用里：单测据它断言「恰 9 条且逐一出现在
  * ipc-guard 的注册表中」，多挂一条或漏挂一条都会立刻失败，而不是等到
  * 用户点到那个按钮才发现。
  */
@@ -62,6 +63,7 @@ export const WORKSPACE_CHANNELS: InvokeChannel[] = [
   CHANNELS.workspaceFileSave,
   CHANNELS.workspaceFileMutate,
   CHANNELS.workspaceAttachmentCreate,
+  CHANNELS.workspaceRelease,
 ];
 
 /** 破坏性动作预览里最多列出的条目数。 */
@@ -277,6 +279,19 @@ export function registerWorkspaceIpc(): void {
       });
     }
   );
+
+  // ------------------------------------------------------------ 资源释放
+
+  /**
+   * 切换工作区时由渲染进程调一次。
+   *
+   * 这条通道没有返回值也不校验 trust：它只做减法（关句柄、杀子进程），
+   * 一个已经不再显示的工作区被多释放一次没有任何坏处，而少释放一次就是
+   * 一条无声的泄漏。
+   */
+  registerHandler(CHANNELS.workspaceRelease, workspaceReleaseRequestSchema, (payload) => {
+    disposeWorkspaceResources(payload.workspaceId);
+  });
 }
 
 /**

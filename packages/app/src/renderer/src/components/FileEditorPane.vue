@@ -110,6 +110,19 @@ async function onKeydown(e: KeyboardEvent): Promise<void> {
   await save();
 }
 
+/**
+ * 点「×」关 tab。
+ *
+ * `closeTab` 对有未保存编辑的 tab 会先问三选一，取消时返回 false 并把
+ * tab 原样留下 —— 所以这里除了把保存失败的原因说出来之外无事可做。
+ * 包一层是为了不把一个 Promise 直接挂在模板的事件处理器上（拒绝时会变成
+ * unhandledrejection，控制台里一片红，用户什么也看不到）。
+ */
+async function requestClose(relativePath: string): Promise<void> {
+  const closed = await ws.closeTab(relativePath);
+  if (!closed && ws.saveError) message.error(ws.saveError);
+}
+
 async function save(overwrite = false): Promise<void> {
   if (!tab.value) return;
   const result = await ws.saveActive(overwrite);
@@ -132,7 +145,7 @@ async function save(overwrite = false): Promise<void> {
       >
         <span class="tab-name">{{ t.relativePath }}</span>
         <span v-if="dirtyOf(t.relativePath)" class="dot" title="未保存">●</span>
-        <span class="close" @click.stop="ws.closeTab(t.relativePath)">×</span>
+        <span class="close" @click.stop="requestClose(t.relativePath)">×</span>
       </button>
     </nav>
 
