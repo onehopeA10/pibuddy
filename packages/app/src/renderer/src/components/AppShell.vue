@@ -23,6 +23,7 @@ import ArtifactLibrary from "./ArtifactLibrary.vue";
 import MemoryPanel from "./MemoryPanel.vue";
 import PreviewPane from "./PreviewPane.vue";
 import SessionTreePanel from "./SessionTreePanel.vue";
+import GitPanel from "./GitPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -121,6 +122,9 @@ const changesOpen = ref(false);
 // 会话树面板的开合。独立的 ref，不复用 filesOpen / changesOpen —— 它是自己
 // 一个能力域（common.session-tree），与文件树 / 改动面板互不牵连。
 const sessionTreeOpen = ref(false);
+// Git 面板（coding.git 垂直能力包）的开合。同样独立成 ref：它是第一个垂直
+// 能力域，默认只在「编码」Profile 里可见。
+const gitOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -138,6 +142,9 @@ const previewEnabled = computed(() => capabilities.isEnabled("common.preview"));
 const artifactsEnabled = computed(() => capabilities.isEnabled("common.artifacts"));
 const memoryEnabled = computed(() => capabilities.isEnabled("common.memory"));
 const sessionTreeEnabled = computed(() => capabilities.isEnabled("common.session-tree"));
+// coding.git 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
+// 它默认只在「编码」Profile 启用，因此在「通用办公」下这个开关与面板都不出现。
+const gitEnabled = computed(() => capabilities.isEnabled("coding.git"));
 
 onMounted(() => {
   void store.init();
@@ -295,6 +302,15 @@ function onDrop(): void {
             >
               🌳 会话树
             </n-button>
+            <n-button
+              v-if="gitEnabled"
+              size="tiny"
+              :type="gitOpen ? 'primary' : 'default'"
+              quaternary
+              @click="gitOpen = !gitOpen"
+            >
+              🌿 Git
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -309,6 +325,7 @@ function onDrop(): void {
           />
           <ChangesetPanel v-if="changesOpen && reviewEnabled" />
           <SessionTreePanel v-if="sessionTreeOpen && sessionTreeEnabled" />
+          <GitPanel v-if="gitOpen && gitEnabled" />
           <InputBar />
         </slot>
       </template>

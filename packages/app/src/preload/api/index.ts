@@ -41,6 +41,7 @@ import { capabilities } from "./capabilities.js";
 import { permission } from "./permission.js";
 import { mcp } from "./mcp.js";
 import { memory } from "./memory.js";
+import { git } from "./git.js";
 
 export const api = {
   pi,
@@ -69,6 +70,8 @@ export const api = {
   memory,
   /** MCP 服务器管理（common.mcp）。启停 / 测试收不透明 id，spawn 只在主进程 */
   mcp,
+  /** Git 编码能力包（coding.git）。九个意图，无 argv 入口，每条通道要 process.git */
+  git,
 };
 
 export type PiBuddyApi = typeof api;

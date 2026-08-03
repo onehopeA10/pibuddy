@@ -49,6 +49,7 @@ describe("api 聚合对象", () => {
       "diagnostics",
       "dialog",
       "file",
+      "git",
       "mcp",
       "memory",
       "permission",

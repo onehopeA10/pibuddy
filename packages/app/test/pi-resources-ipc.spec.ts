@@ -33,6 +33,10 @@ const { PI_RESOURCES_CHANNELS } = await import(
   "../src/main/pi-resources/pi-resources-ipc.js"
 );
 const { registerAllIpc } = await import("../src/main/ipc-registry.js");
+const { BUILT_IN_CAPABILITIES } = await import(
+  "../src/main/capability/capability-manifests.js"
+);
+const { enabledCapabilityIds } = await import("../src/main/capability/capability-state.js");
 
 beforeAll(() => {
   __resetRegisteredChannels();
@@ -65,7 +69,16 @@ describe("EXT-102 的资源 / trust 通道注册面", () => {
 
   it("契约里声明的全部通道都被注册了（没有只写在契约里、没人实现的死通道）", () => {
     const table = new Set(registeredChannels());
-    expect(Object.values(CHANNELS).filter((c) => !table.has(c))).toEqual([]);
+    // 默认 Profile 下未启用的能力（如 coding.git，默认只在「编码」Profile 启用）
+    // 合法地不注册其通道 —— 那是 feature gate 生效，不是死通道。排除后剩下的
+    // 才是真正「写在契约里却没人实现」的判据。
+    const enabled = new Set(enabledCapabilityIds());
+    const disabledChannels = new Set(
+      BUILT_IN_CAPABILITIES.filter((m) => !enabled.has(m.id)).flatMap((m) => [...m.channels])
+    );
+    expect(
+      Object.values(CHANNELS).filter((c) => !table.has(c) && !disabledChannels.has(c))
+    ).toEqual([]);
   });
 
   it("registerHandler 是唯一入口：ipcMain.handle 收到的集合与注册表一致", () => {

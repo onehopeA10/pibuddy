@@ -29,6 +29,10 @@ const { registeredChannels, __resetRegisteredChannels } = await import(
 );
 const { SESSIONS_CHANNELS } = await import("../src/main/sessions/sessions-ipc.js");
 const { registerAllIpc } = await import("../src/main/ipc-registry.js");
+const { BUILT_IN_CAPABILITIES } = await import(
+  "../src/main/capability/capability-manifests.js"
+);
+const { enabledCapabilityIds } = await import("../src/main/capability/capability-state.js");
 
 beforeAll(() => {
   __resetRegisteredChannels();
@@ -77,7 +81,18 @@ describe("registerAllIpc 之后的注册面（裁定1）", () => {
 
   it("契约里声明的全部通道都被注册了（没有只写在契约里、没人实现的死通道）", () => {
     const table = new Set(registeredChannels());
-    const missing = Object.values(CHANNELS).filter((c) => !table.has(c));
+    // 默认 Profile 下**未启用**的能力（如第一个垂直包 coding.git，默认只在
+    // 「编码」Profile 启用）合法地不注册它的通道——那不是「死通道」，是
+    // feature gate 生效的结果。把这些通道排除后，剩下的 missing 才是真正
+    // 「写在契约里却没人实现」的判据（对拍：capability-gate.spec 在 lite 下
+    // 反过来断言这些通道一条都不在）。
+    const enabled = new Set(enabledCapabilityIds());
+    const disabledChannels = new Set(
+      BUILT_IN_CAPABILITIES.filter((m) => !enabled.has(m.id)).flatMap((m) => [...m.channels])
+    );
+    const missing = Object.values(CHANNELS).filter(
+      (c) => !table.has(c) && !disabledChannels.has(c)
+    );
     expect(missing).toEqual([]);
   });
 

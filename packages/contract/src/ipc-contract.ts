@@ -48,6 +48,7 @@ import {
 } from "./providers.js";
 import { artifactContractShard } from "./artifacts.js";
 import { capabilitiesContractShard } from "./capability.js";
+import { gitContractShard } from "./git.js";
 import { permissionContractShard } from "./permission.js";
 import { memoryContractShard } from "./memory.js";
 import { mcpContractShard } from "./mcp.js";
@@ -777,6 +778,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   memoryContractShard,
   mcpContractShard,
   sessionTreeContractShard,
+  gitContractShard,
 ];
 
 /**

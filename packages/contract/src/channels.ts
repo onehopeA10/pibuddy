@@ -308,6 +308,25 @@ export const CHANNELS = {
   diagnosticsExportBundle: "diagnostics:export-bundle",
   /** 启动健康检查结果 + safe mode 态 + 上一稳定版本 */
   diagnosticsGetReport: "diagnostics:get-report",
+
+  // ---- Git 编码能力包（coding.git，ADR-0002 垂直能力包 / GIT-101，恰 9 条） ----
+  //
+  // 第一个 coding tier 垂直能力包。九条通道的入参只有不透明 workspaceId +
+  // 相对路径 / 分支名 / 提交信息，**没有任何 argv 或命令行字段** —— 真正跑
+  // `git` 的地方在 main/git（execFile + shell:false + 只传参数数组）。九条
+  // 全部登记在 main/permission 的需求表里、需要 process.git，未授权时被
+  // ipc-guard 第五道闸挡在 handler 之外（连只读的 status/diff 也要起 git 子
+  // 进程，因此同样受管）。危险类（force push / reset --hard / branch -D）本批
+  // 不做，见 FEAT-git.md 的 deferred。
+  gitStatus: "git:status",
+  gitDiff: "git:diff",
+  gitStage: "git:stage",
+  gitUnstage: "git:unstage",
+  gitRevert: "git:revert",
+  gitCommit: "git:commit",
+  gitBranchList: "git:branch-list",
+  gitBranchCreate: "git:branch-create",
+  gitBranchSwitch: "git:branch-switch",
 } as const;
 
 /** 主进程单向推送通道（6 个）。 */
