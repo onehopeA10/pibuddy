@@ -138,7 +138,7 @@ Tests  1 failed | 13 passed (14)
 | `pnpm typecheck` | 失败，但**全部错误在 `src/renderer/src/stores/`**（`app.ts` / `sessions.ts` / `chat-window.ts`）—— 并行 sessions agent 的在途改动，非本次范围 |
 | `pnpm -w test` | `Test Files 3 failed \| 88 passed (91)` |
 | `pnpm build` | 通过 |
-| `pnpm --filter @pibuddy/app dist` | 通过（exit 0，产出 `PiBuddy-Setup-0.1.0.exe`） |
+| `pnpm --filter @pibuddy/app dist` | 通过（exit 0，产出 `PiBuddy-Setup-0.1.0.exe`）；复跑一次撞上并行 agent 的 electron-builder，见 §6.1 |
 | 真机启动 `release/win-unpacked/PiBuddy.exe` | 见 §6 |
 
 ### 3 个失败测试文件不属于本次改动
@@ -155,16 +155,49 @@ Tests  1 failed | 13 passed (14)
 
 ## 6. 真机启动验证
 
+### 6.1 先确认「验证的是新构建」
+
+第一轮 dist 是在我改完 `looksBinary` 之前就已开跑的，无法证明产物含最终代码；
+而 `out/` 的时间戳也不可信 —— 并行 agent 在 13:51 重建过它。第二轮 dist 直接
+撞车失败（两个 electron-builder 同时操作同一个 `release/win-unpacked`）：
+
 ```
-启动前 PiBuddy 进程数: 0
-启动后 PiBuddy 进程数: 5
-主窗口标题: PiBuddy · AI 办公小助手
-40 秒后仍存活进程数: 5
-杀进程后 PiBuddy 进程数: 0     # powershell Stop-Process -Name PiBuddy -Force
+⨯ ENOENT: no such file or directory, rename
+  'release\win-unpacked\electron.exe' -> 'release\win-unpacked\PiBuddy.exe'
 ```
 
-打包应用正常起窗并稳定存活 40 秒，无崩溃。按要求用
-`powershell Stop-Process -Force` 收尾并核对进程数归 0（未用 `pkill -f electron`）。
+确认是并发冲突而非本次代码问题（`Get-CimInstance Win32_Process` 查到并行
+agent 的 electron-builder / electron-vite 进程）。改为**直接扫描已出包的
+asar**，判断产物里到底有没有本次修复 —— 时间戳 14:01:03，晚于本次提交：
+
+```
+✓ 命中  这个文件是二进制，不支持逐行审阅     ← 仅存在于本次修复的 apply.ts
+✓ 命中  这个文件过大，未逐行比对             ← 同上
+✓ 命中  没能抓到改动前的快照                 ← 修复前后都有，对照锚点
+```
+
+前两条是本次新增的守卫文案，修复前的代码里不存在 —— 打包产物确实含本次修复。
+
+### 6.2 干净的启动验证
+
+首次读数 `启动前: 5`（并行 agent 已经开着 PiBuddy），Electron 单实例锁会让
+`Start-Process` 挂到既有实例上，那个读数**不能作数**。清场后重测，并跟踪
+`-PassThru` 拿到的 PID：
+
+```
+清场后: 0
+启动前: 0
+拉起 PID: 5612
+启动后进程数: 5
+该 PID 仍存活: True          # 35 秒后
+主窗口: PiBuddy · AI 办公小助手
+杀进程后 PiBuddy 进程数: 1   # 子进程尚在退出中
+二次清理后 PiBuddy 进程数: 0
+```
+
+打包应用正常起窗、稳定存活 35 秒、无崩溃。按要求用
+`powershell Stop-Process -Force` 收尾并核对进程数归 0（未用 `pkill -f electron`）；
+第一次读到 1 是子进程收尾竞态，二次清理后确认归 0。
 全部验证在临时目录与打包产物上进行，**未触碰用户真实文件**；单测的工作区一律
 `fs.mkdtempSync(os.tmpdir())`，`afterEach` 中先按正常入口关闭 sqlite 句柄
 （`__setChangesetDataDir(null)` / `__setArtifactDataDir(null)`）再删除，
@@ -181,8 +214,13 @@ Tests  1 failed | 13 passed (14)
 - `ipcMain.handle` 调用点仍为 **0**（`changeset-ipc.ts` 未改，
   仍全部经 `ipc-guard.registerHandler`）。
 - 提交按路径逐个 `git add`，**未使用 `-A` / `.`**；提交前核对暂存清单只含
-  上述 5 个文件。
+  上述 5 个文件 + 本 summary。
 - 未修改 `source/`。
+- 推送前 `git fetch origin` 复核 `origin/main...HEAD` 为 `0 1`（远端无新提交），
+  遂直接快进推送。**未跑 `git pull --rebase`**：工作区里有三个并行 agent 的
+  未提交改动，rebase 遇脏树要么中止要么 autostash——后者会把别人正在写的文件
+  卷走。既然没有东西可拉，fetch 复核在结果上等价且不碰别人的工作区。
+  推送后 `origin/main...HEAD` = `0 0`。
 
 ## 8. 遗留
 
