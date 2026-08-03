@@ -17,15 +17,22 @@
  * 换个方式打开就没了」，且不报任何错。
  */
 import { app } from "electron";
-import type { PermissionRule, WorkspaceTrust } from "@pibuddy/contract";
+import type { CapabilityGrant, PermissionRule, WorkspaceTrust } from "@pibuddy/contract";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { workspaceIdFor } from "../workspace-registry.js";
 
-/** 表结构代际。改 DDL 必须 +1 并在 migrate() 里补分支。 */
-export const WORKSPACE_STORE_SCHEMA_VERSION = 1;
+/**
+ * 表结构代际。改 DDL 必须 +1 并在 migrate() 里补分支。
+ *
+ * v2：新增 `capability_grants` 列（ADR-0002 D3 / SEC-003 的能力权限授权表）。
+ * 它**与 `permission_rules` 并列**，不复用后者：一个按 capabilityId 索引
+ * （「这个能力被允许做哪一类事」），一个按 channel 索引（IPC 准入配额），
+ * 两边连键都对不上（FIX-capability-core §5）。
+ */
+export const WORKSPACE_STORE_SCHEMA_VERSION = 2;
 
 /**
  * 默认 ignore 策略。
@@ -54,7 +61,10 @@ export interface WorkspaceProfile {
   lastOpenedAt: number;
   ignorePolicy: string[];
   defaultModel: string | null;
+  /** IPC 通道准入配额（按 channel 索引，CT-20）。ipc-guard 的运行时投影。 */
   permissionRules: PermissionRule[];
+  /** 能力权限授权表（按 capabilityId 索引，ADR-0002 D3）。PermissionEngine 的决策数据源。 */
+  capabilityGrants: CapabilityGrant[];
 }
 
 const DDL = `CREATE TABLE IF NOT EXISTS workspaces (
@@ -67,6 +77,7 @@ const DDL = `CREATE TABLE IF NOT EXISTS workspaces (
   ignore_policy TEXT NOT NULL,
   default_model TEXT,
   permission_rules TEXT NOT NULL,
+  capability_grants TEXT NOT NULL DEFAULT '[]',
   schema_version INTEGER NOT NULL
 )`;
 
@@ -115,7 +126,18 @@ export class WorkspaceStore {
     const current = Number(row?.user_version ?? 0);
     if (current === WORKSPACE_STORE_SCHEMA_VERSION) return;
     if (current > WORKSPACE_STORE_SCHEMA_VERSION) return;
+    // v1 → v2：补 capability_grants 列。老库里没有这一列，ALTER 补上并给默认
+    // 空表；一个字节的既有数据都不动（D4 规则 4/5：升级不删数据）。DDL 已经
+    // 给新库带上了该列，因此先探测再 ALTER，避免在新库上撞「列已存在」。
+    if (!this.hasColumn("capability_grants")) {
+      this.db.exec("ALTER TABLE workspaces ADD COLUMN capability_grants TEXT NOT NULL DEFAULT '[]'");
+    }
     this.db.exec(`PRAGMA user_version = ${WORKSPACE_STORE_SCHEMA_VERSION}`);
+  }
+
+  private hasColumn(name: string): boolean {
+    const cols = this.db.prepare("PRAGMA table_info(workspaces)").all() as { name?: string }[];
+    return cols.some((c) => c.name === name);
   }
 
   close(): void {
@@ -148,13 +170,14 @@ export class WorkspaceStore {
       ignorePolicy: [...DEFAULT_IGNORE_POLICY],
       defaultModel: null,
       permissionRules: [],
+      capabilityGrants: [],
     };
     this.db
       .prepare(
         `INSERT INTO workspaces
          (id, canonical_root, display_name, trust, created_at, last_opened_at,
-          ignore_policy, default_model, permission_rules, schema_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ignore_policy, default_model, permission_rules, capability_grants, schema_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         profile.id,
@@ -166,6 +189,7 @@ export class WorkspaceStore {
         JSON.stringify(profile.ignorePolicy),
         profile.defaultModel,
         JSON.stringify(profile.permissionRules),
+        JSON.stringify(profile.capabilityGrants),
         WORKSPACE_STORE_SCHEMA_VERSION
       );
     return profile;
@@ -186,6 +210,7 @@ export class WorkspaceStore {
       ignorePolicy: parseJson<string[]>(row.ignore_policy, [...DEFAULT_IGNORE_POLICY]),
       defaultModel: row.default_model === null ? null : String(row.default_model),
       permissionRules: parseJson<PermissionRule[]>(row.permission_rules, []),
+      capabilityGrants: parseJson<CapabilityGrant[]>(row.capability_grants, []),
     };
   }
 
@@ -197,7 +222,7 @@ export class WorkspaceStore {
     this.db
       .prepare(
         `UPDATE workspaces SET display_name = ?, trust = ?, last_opened_at = ?,
-          ignore_policy = ?, default_model = ?, permission_rules = ? WHERE id = ?`
+          ignore_policy = ?, default_model = ?, permission_rules = ?, capability_grants = ? WHERE id = ?`
       )
       .run(
         next.displayName,
@@ -206,6 +231,7 @@ export class WorkspaceStore {
         JSON.stringify(next.ignorePolicy),
         next.defaultModel,
         JSON.stringify(next.permissionRules),
+        JSON.stringify(next.capabilityGrants),
         id
       );
     return next;

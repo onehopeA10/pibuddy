@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { zhCN, dateZhCN, NConfigProvider, NMessageProvider, NDialogProvider } from "naive-ui";
 import AppShell from "./components/AppShell.vue";
+// 权限 UI 挂在根组件而不是 AppShell：它是跨能力的内核设施（授权中心 + 裁决
+// 弹窗恒在），且这样不与 AppShell 那四个具名 slot 抢位置。
+import PermissionPrompt from "./components/PermissionPrompt.vue";
+import PermissionCenter from "./components/PermissionCenter.vue";
 
 const themeOverrides = {
   common: {
@@ -24,6 +28,8 @@ const themeOverrides = {
     <n-message-provider placement="top" :max="3">
       <n-dialog-provider>
         <AppShell />
+        <PermissionPrompt />
+        <PermissionCenter />
       </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>

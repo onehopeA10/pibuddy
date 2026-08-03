@@ -38,6 +38,7 @@ import { workspace } from "./workspace.js";
 import { preview } from "./preview.js";
 import { artifacts } from "./artifacts.js";
 import { capabilities } from "./capabilities.js";
+import { permission } from "./permission.js";
 
 export const api = {
   pi,
@@ -60,6 +61,8 @@ export const api = {
   artifacts,
   /** 能力包与 Profile（ADR-0002）。只能在已封口的表上勾选，没有注册入口 */
   capabilities,
+  /** 能力权限决策（ADR-0002 D3 / SEC-003）。决策在主进程，没有直接执行入口 */
+  permission,
 };
 
 export type PiBuddyApi = typeof api;

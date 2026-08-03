@@ -265,6 +265,20 @@ export type GuardedHandler<Req, Res> = (
 ) => Res | Promise<Res>;
 
 /**
+ * 第五道闸（可选）：能力权限决策。**默认不装**——没有它时，四道闸的行为
+ * 与从前一字不差。装上之后，它对「无适用规则」的通道一律放行（现有全部通道
+ * 都不在权限需求表里），只对声明了权限需求的通道做决策，未授权即抛错。
+ *
+ * 决策主体在 `main/permission/**`；这里只留一个注入点，把它接进那条写死的
+ * 流水线，且不改动前四道闸的任何签名或既有逻辑。
+ */
+export type PermissionGate = (channel: InvokeChannel, payload: unknown) => void;
+let permissionGate: PermissionGate | null = null;
+export function setPermissionGate(gate: PermissionGate | null): void {
+  permissionGate = gate;
+}
+
+/**
  * 已注册通道表。
  *
  * handler 从 ipc.ts 拆到各域的 *-ipc.ts 之后，「这个 channel 到底被注册了
@@ -303,6 +317,7 @@ export function registerHandler<Req, Res>(
       const limit = CHANNEL_MAX_BYTES[channel] ?? MAX_IPC_PAYLOAD_BYTES;
       assertSizeWithin(channel, payload, limit);
       rateLimiter.check(channel, event.sender.id);
+      permissionGate?.(channel, payload); // 闸 5：能力权限（无适用规则则放行）
       return await handler(payload, event);
     } catch (err) {
       // 拒绝路径必须留痕：没有日志的话，「功能突然不好使」和「被限流挡了」

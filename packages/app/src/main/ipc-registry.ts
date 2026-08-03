@@ -19,6 +19,7 @@ import { assembleCapabilities, capabilityRegistry } from "./capability/capabilit
 import { registerCapabilityIpc } from "./capability/capability-ipc.js";
 import { registerDiagnosticsIpc } from "./diagnostics/diagnostics-ipc.js";
 import { registerMiscIpc } from "./misc-ipc.js";
+import { registerPermissionIpc } from "./permission/permission-ipc.js";
 import { registerPiIpc } from "./pi/pi-ipc.js";
 import { registerPiResourcesIpc } from "./pi-resources/pi-resources-ipc.js";
 import { registerProvidersIpc, registerUsageIpc } from "./providers/providers-ipc.js";
@@ -36,6 +37,9 @@ export function registerAllIpc(): void {
   registerUpdateIpc();
   registerDiagnosticsIpc();
   registerCapabilityIpc();
+  // 权限决策：内核设施，恒注册。它内部 setPermissionGate 装上第五道闸——
+  // 装在这里（任何能力 activate 之前）保证从第一条 invoke 起就已生效。
+  registerPermissionIpc();
 
   // ---- 可选能力：只装启用的那些
   //

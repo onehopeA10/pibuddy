@@ -48,6 +48,7 @@ import {
 } from "./providers.js";
 import { artifactContractShard } from "./artifacts.js";
 import { capabilitiesContractShard } from "./capability.js";
+import { permissionContractShard } from "./permission.js";
 import { previewContractShard } from "./preview.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
@@ -769,6 +770,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   providersContractShard,
   diagnosticsContractShard,
   capabilitiesContractShard,
+  permissionContractShard,
 ];
 
 /**

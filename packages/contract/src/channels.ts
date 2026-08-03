@@ -235,6 +235,24 @@ export const CHANNELS = {
   /** 在当前 Profile 之上单独开关一个能力 */
   capabilitiesSetEnabled: "capabilities:set-enabled",
 
+  // ---- 权限决策（ADR-0002 D3 / SEC-003，恰 4 条） ----
+  //
+  // 权限是**平台内核**设施（四层边界表第一行，不可关闭），四条恒注册。授权
+  // 决策在主进程 PermissionEngine 侧做，渲染进程只**收集用户选择**再交给主进程
+  // 记录；grant 的合法性由主进程按 manifest 声明的上界二次校验，渲染进程越不过
+  // 任何一份 manifest 的权限申请。
+  /** 当前 workspace 的授权表 + session 授权 + 审计 */
+  permissionDescribe: "permission:describe",
+  /** 记录一次决策（deny / allow-once / allow-session / allow-workspace） */
+  permissionDecide: "permission:decide",
+  /** 撤销一条 session 或 workspace 授权 */
+  permissionRevoke: "permission:revoke",
+  /**
+   * 权限探针：本轮的可证伪拦截点，也是将来 process.git 之类真实消费者的预留
+   * 入口。它声明自己需要 process.git，未授权时被第五道闸挡在 handler 之外。
+   */
+  permissionProbe: "permission:probe",
+
   // ---- 诊断与健康（OBS-101，恰 3 条） ----
   //
   // 三条都**不接受路径**：诊断包的落盘位置由主进程的保存对话框决定，
