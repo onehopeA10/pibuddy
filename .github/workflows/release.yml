@@ -44,6 +44,12 @@ jobs:
   preflight:
     name: preflight (fail-closed on missing credentials)
     runs-on: ubuntu-latest
+    # 签名与 feed 凭据全部住在 `release` environment（见
+    # docs/product/RELEASE_SETUP.md §2）。**没有这一行的 job 读到的 secrets
+    # 全是空串** —— 表现不是「拿不到密钥」这种明确报错，而是 preflight 把
+    # 每一项都判成 missing 然后 exit 1，人对着一个配好的仓库排查半天。
+    # 反过来，声明了它才有 environment 的人工审批门禁与「fork PR 拿不到」。
+    environment: release
     outputs:
       signed: ${{ steps.gate.outputs.signed }}
     steps:
@@ -85,6 +91,9 @@ jobs:
   upload-artifacts:
     name: upload-artifacts (${{ matrix.platform }})
     needs: preflight
+    # 构建 job 直接消费 WIN_CSC_LINK / CSC_LINK / 三个 Apple 凭据，
+    # 因此同样必须落在 `release` environment 上。
+    environment: release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -150,6 +159,12 @@ jobs:
           pnpm --filter @pibuddy/app run build
           pnpm --filter @pibuddy/app exec electron-builder ${{ matrix.builder_flags }} --publish never
 
+      # 先查**打包目录**（pi-runtime 依赖是否完整、解析库有没有留成 external），
+      # 再查安装包集合。前者的问题在后者里看不出来：安装包照样生成、照样能装，
+      # 只是装完之后 pi 起不来或预览整体不可用。CI 的 package job 跑的是同一个脚本。
+      - name: Verify packaged artifacts
+        run: node packages/app/scripts/verify-packaged-app.mjs
+
       - name: Verify release artifacts
         run: node packages/app/scripts/verify-release-artifacts.mjs ${{ matrix.platform }} --channel ${{ env.RELEASE_CHANNEL }}
 
@@ -186,6 +201,9 @@ jobs:
     # 只有 tag push 才发 feed。手动 dispatch 的 beta/nightly 到 upload-artifacts
     # 为止，产物停在 Actions artifact 上并带 UNSIGNED 标记，进不了 stable feed。
     if: github.event_name == 'push'
+    # publish 是唯一一个「做了就撤不回来」的动作，environment 的人工审批
+    # 门禁在这里最有价值：清单一发，全网客户端下一次检查就看得到。
+    environment: release
     runs-on: ubuntu-latest
     permissions:
       contents: write

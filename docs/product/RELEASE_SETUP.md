@@ -55,6 +55,22 @@ fork 的 PR 也拿不到它。
 | `APPLE_APP_SPECIFIC_PASSWORD` | 该 Apple ID 的 App-Specific Password | release job `exit 1` |
 | `PIBUDDY_UPDATE_FEED_URL` | 更新 feed 的根地址（客户端会去这里取 `latest*.yml`） | release job `exit 1` |
 
+### 2.1 哪些 job 声明了 `environment: release`
+
+environment secret **只有声明了该 environment 的 job 才读得到**。没声明的
+job 里 `${{ secrets.X }}` 是空串，而不是一个明确的报错 —— 表现是「照文档
+配好了，preflight 却说每一项都 missing」。因此下面三个 job 全部显式声明：
+
+| job | 为什么需要 |
+|---|---|
+| `preflight` | 逐项检查凭据是否存在，读不到就等于全都缺失 |
+| `upload-artifacts` | 构建时直接消费 Windows / macOS 签名与公证凭据 |
+| `publish-manifest` | 发布前二次核验凭据，并执行不可撤回的发布动作 |
+
+若在 environment 上配置了 **required reviewers**，审批会在这三个阶段各请求
+一次（`upload-artifacts` 的三个平台同属一个阶段，一次批完）。这不是缺陷：
+第一次批的是「允许开始构建」，最后一次批的是「允许把清单推给全网客户端」。
+
 `.github/workflows/release.yml` 的 `preflight` job 会在**任何构建开始之前**
 逐项检查上表中标注 `exit 1` 的 secret，缺一个就整条流水线红。这是刻意的：
 

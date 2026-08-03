@@ -69,3 +69,63 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  # ---------------------------------------------------------------- 打包链路
+  # `verify` job 跑的是 electron-vite build —— 它**碰不到**打包路径。
+  # 本仓两个致命缺陷全部发生在 electron-builder 摆文件的那一步，且构建退出码
+  # 都是 0：
+  #   - extraResources 静默吞掉 pi-runtime/node_modules（19371 → 885 个文件）
+  #   - 六个解析库留成 external，装完之后每次预览都 ERR_MODULE_NOT_FOUND
+  # 两者此前都要等到打 tag 发布才暴露。这个 job 用 `--dir` 复现同一条路径：
+  # 不产出安装包（省掉 NSIS/DMG 的大头），但 prepare-pi-runtime 与 afterPack
+  # 一步不落地跑完，再由 verify-packaged-app.mjs 去数产物里的文件。
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # PR 上只跑 ubuntu 控制成本；进 main 时补上 windows —— 路径长度与
+        # 大小写敏感性这两类问题只在 Windows 上发作。表达式写成一行：
+        # `${{ }}` 里换行在 Actions 的表达式解析器上不是稳定行为。
+        os: ${{ github.event_name == 'push' && fromJSON('["ubuntu-latest","windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+
+    steps:
+      # actions/checkout v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # pnpm/action-setup v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10
+
+      # actions/setup-node v4
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # pi 运行时目录（含依赖闭包）。afterPack 会拿它当复制源并逐文件对账。
+      - name: Prepare pi runtime
+        run: pnpm --filter @pibuddy/app run prepare:runtime
+
+      - name: Build renderer and main
+        run: pnpm --filter @pibuddy/app run build
+
+      # --dir：只摆出 *-unpacked 目录，不打安装包。afterPack 照常触发，
+      # asar / asarUnpack / extraResources 的行为与正式发布完全一致。
+      - name: Package (--dir, no installer)
+        env:
+          # electron-builder 会解析 publish.url 里的这个变量。CI 不发布，
+          # 给个明确无效的占位值即可，绝不能让它去碰真实 feed 地址。
+          PIBUDDY_UPDATE_FEED_URL: https://example.invalid/pibuddy-ci
+        run: pnpm --filter @pibuddy/app exec electron-builder --dir --publish never
+
+      - name: Verify packaged artifacts
+        run: node packages/app/scripts/verify-packaged-app.mjs

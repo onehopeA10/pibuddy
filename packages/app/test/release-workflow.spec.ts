@@ -19,9 +19,23 @@ import { describe, expect, it } from "vitest";
 const REPO = path.resolve(__dirname, "..", "..", "..");
 const RELEASE = path.join(REPO, ".github", "workflows", "release.yml");
 const CI = path.join(REPO, ".github", "workflows", "ci.yml");
+const SETUP_DOC = path.join(REPO, "docs", "product", "RELEASE_SETUP.md");
 
 function lines(file: string): string[] {
   return fs.readFileSync(file, "utf8").split(/\r?\n/);
+}
+
+/** 取某个 job 块的原始文本（到下一个顶层 job 为止）。 */
+function jobBlock(file: string, job: string): string {
+  const all = lines(file);
+  const start = all.findIndex((l) => l.trimEnd() === `  ${job}:`);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const out: string[] = [];
+  for (let i = start + 1; i < all.length; i++) {
+    if (/^ {2}\S/.test(all[i])) break;
+    out.push(all[i]);
+  }
+  return out.join("\n");
 }
 
 /** 取某个 job 块里的全部 `- name:` 步骤，按出现顺序。 */
@@ -74,6 +88,20 @@ describe("release.yml 结构", () => {
     }
   });
 
+  /**
+   * 文档要求把 secrets 放在 `release` environment，但 workflow 里只要有一个
+   * 消费 secrets 的 job 漏了 `environment:`，那个 job 读到的就全是空串 ——
+   * 用户照文档配完，preflight 却报「每一项都 missing」，同时还悄悄失去了
+   * environment 的审批门禁。这条断言把文档与 workflow 钉在一起。
+   */
+  it("每个消费 secrets 的 job 都声明 environment: release，且与文档一致", () => {
+    for (const job of ["preflight", "upload-artifacts", "publish-manifest"]) {
+      expect(jobBlock(RELEASE, job)).toMatch(/^\s{4}environment:\s*release\s*$/m);
+    }
+    // 文档侧必须写着同一个 environment 名，否则用户会配到别的地方去
+    expect(fs.readFileSync(SETUP_DOC, "utf8")).toContain("environment: release");
+  });
+
   it("正式发布不引用任何第三方 Electron 镜像开关", () => {
     const text = fs.readFileSync(RELEASE, "utf8");
     expect(text).not.toMatch(/PIBUDDY_USE_CN_MIRROR|NPM_CONFIG_REGISTRY|npmmirror/);
@@ -101,6 +129,47 @@ describe("workflow action 固定", () => {
     ]) {
       expect(text).toContain(gate);
     }
+  });
+});
+
+/**
+ * 常规 CI 必须覆盖真正的打包链路。
+ *
+ * 只跑 `electron-vite build` 时，extraResources / afterPack / asarUnpack
+ * 一个都没被触发 —— 而本仓两个致命缺陷全都住在那一段，且构建退出码是 0。
+ * 它们此前要等到打 tag 才暴露。
+ */
+describe("ci.yml 覆盖打包链路", () => {
+  const steps = stepsOf(CI, "package");
+  const block = jobBlock(CI, "package");
+
+  it("package job 依次跑 prepare:runtime → build → electron-builder → 产物校验", () => {
+    for (const name of [
+      "Prepare pi runtime",
+      "Build renderer and main",
+      "Package (--dir, no installer)",
+      "Verify packaged artifacts",
+    ]) {
+      expect(steps).toContain(name);
+    }
+    // 顺序不能乱：afterPack 拿 prepare:runtime 的产物当复制源
+    expect(steps.indexOf("Prepare pi runtime")).toBeLessThan(
+      steps.indexOf("Package (--dir, no installer)")
+    );
+    expect(steps.indexOf("Package (--dir, no installer)")).toBeLessThan(
+      steps.indexOf("Verify packaged artifacts")
+    );
+  });
+
+  it("真的调用 electron-builder，并把校验交给 verify-packaged-app.mjs", () => {
+    expect(block).toContain("electron-builder --dir");
+    expect(block).toContain("node packages/app/scripts/verify-packaged-app.mjs");
+    // CI 绝不能碰真实 feed 地址
+    expect(block).toContain("https://example.invalid/");
+  });
+
+  it("release.yml 的构建 job 用同一个脚本校验打包目录", () => {
+    expect(stepsOf(RELEASE, "upload-artifacts")).toContain("Verify packaged artifacts");
   });
 });
 

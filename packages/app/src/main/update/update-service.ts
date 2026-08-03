@@ -37,6 +37,7 @@ import {
   type UpdateStatus,
 } from "@pibuddy/contract";
 
+import { isPrerelease } from "./release-integrity.js";
 import { mapUpdaterError } from "./update-errors.js";
 import {
   DEFAULT_UPDATE_PREFS,
@@ -99,6 +100,18 @@ export class UpdateService {
   private txSequence = 0;
   /** 主进程一次运行的代际。进程重启后由调用方 +1（默认取启动时间）。 */
   private readonly generation: number;
+
+  /**
+   * **通道代际**。与上面的进程 `generation` 是两件事：那个标识"哪一次进程
+   * 运行"，这个标识"哪一次通道配置"，每次 setChannel +1。
+   *
+   * 口径抄自 main/pi-supervisor.ts 的 runtime generation：作废一批在途任务
+   * 的唯一可靠办法不是"把它停下来"（停不下来 —— 请求已经在网络上了），
+   * 而是给它盖一个戳，回来时对不上就丢掉。
+   */
+  private channelGeneration = 0;
+  /** 最近一次启动的检查/下载所属的通道代际。事件按它判定是否迟到。 */
+  private opGeneration = 0;
 
   // ---- single-flight：三个动作各一把锁，进入时判空，finally 复位 ----
   private checkInFlight = false;
@@ -248,15 +261,67 @@ export class UpdateService {
     return this.state;
   }
 
+  // ------------------------------------------------------------ 迟到事件闸门
+
+  /**
+   * 这个事件是不是"切换通道之前那次请求"带回来的。
+   *
+   * 只重配 updater 是不够的：`initAutoUpdater` 里的 `removeAllListeners`
+   * 摘掉的是**旧的监听器**，而旧请求的回调是在同一个 emitter 上发出的，
+   * 落进的是**新挂上去的**监听器。因此判据必须挂在"这次请求属于哪一代"
+   * 上，而不是"这个监听器属于哪一代"。
+   */
+  private dropStale(event: string): boolean {
+    if (this.opGeneration === this.channelGeneration) return false;
+    this.deps.logger.info("update_stale_event_dropped", {
+      event,
+      eventGeneration: this.opGeneration,
+      currentGeneration: this.channelGeneration,
+      channel: this.prefs.channel,
+    });
+    return true;
+  }
+
+  /**
+   * 第二道、也是决定性的一道：候选版本与当前通道是否相符。
+   *
+   * 代际闸门挡不住这种交错 —— 旧的 beta 请求还在路上，用户切到 stable 之后
+   * 又点了一次「检查更新」（opGeneration 因此追平），此时旧 beta 响应回来，
+   * 代际对得上。但 beta 产物的版本号必然带 prerelease 标记，而 stable 通道
+   * 按定义永远不接受 prerelease，于是它在这里被拦下。
+   *
+   * 反方向（stable→beta 后收到一个正式版候选）刻意放行：beta 通道本来就是
+   * stable 的超集（allowPrerelease=true 时正式版照收），那不是错配。
+   */
+  private matchesChannel(version: string | null): boolean {
+    if (!version) return true;
+    if (this.prefs.channel === "beta") return true;
+    return !isPrerelease(version);
+  }
+
+  /** 通道对不上就丢，并留痕。 */
+  private dropOffChannel(event: string, version: string | null): boolean {
+    if (this.matchesChannel(version)) return false;
+    this.deps.logger.info("update_off_channel_candidate_dropped", {
+      event,
+      version,
+      channel: this.prefs.channel,
+    });
+    return true;
+  }
+
   // ------------------------------------------------------------ updater 事件
 
   private onChecking(): void {
+    if (this.dropStale("checking-for-update")) return;
     if (this.state.status === "checking") return;
     this.commit({ status: "checking" });
   }
 
   private onAvailable(info: UpdateInfoLike): void {
+    if (this.dropStale("update-available")) return;
     const version = info?.version ?? null;
+    if (this.dropOffChannel("update-available", version)) return;
     this.expectedSha512 = info?.files?.[0]?.sha512 ?? null;
     this.failureStreak = 0;
     this.commit({
@@ -274,6 +339,7 @@ export class UpdateService {
   }
 
   private onNotAvailable(): void {
+    if (this.dropStale("update-not-available")) return;
     this.failureStreak = 0;
     this.commit({
       status: "not-available",
@@ -285,6 +351,7 @@ export class UpdateService {
   }
 
   private onProgress(p: ProgressLike): void {
+    if (this.dropStale("download-progress")) return;
     this.commit({
       status: "downloading",
       percent: Math.max(0, Math.min(100, p?.percent ?? 0)),
@@ -295,6 +362,10 @@ export class UpdateService {
   }
 
   private onDownloaded(info: UpdateInfoLike & { downloadedFile?: string }): void {
+    if (this.dropStale("update-downloaded")) return;
+    // 通道对不上的产物连 downloadedPath 都不许落下来：留着它就意味着
+    // 「切到 stable 之后仍然能把刚下完的 beta 包装上去」。
+    if (this.dropOffChannel("update-downloaded", info?.version ?? null)) return;
     this.downloadedPath = info?.downloadedFile ?? null;
     if (info?.files?.[0]?.sha512) this.expectedSha512 = info.files[0].sha512 ?? null;
     this.commit({
@@ -310,6 +381,9 @@ export class UpdateService {
   }
 
   private onError(err: unknown): void {
+    // 旧通道请求的失败不该染红新通道的界面：用户刚切到 stable，看到的却是
+    // 一条来自 beta 源的网络错误，而重试按钮点下去一切正常。
+    if (this.dropStale("error")) return;
     const info = mapUpdaterError(err);
     this.deps.logger.warn("update_error", { code: info.code, detail: info.detail });
     if (info.code === "network") this.failureStreak++;
@@ -337,6 +411,8 @@ export class UpdateService {
       return this.state;
     }
 
+    const gen = this.channelGeneration;
+    this.opGeneration = gen;
     this.checkInFlight = true;
     this.commit({ status: "checking", checkSource: source, errorCode: null });
     try {
@@ -344,9 +420,14 @@ export class UpdateService {
     } catch (err) {
       this.onError(err);
     } finally {
-      this.checkInFlight = false;
-      // 无论成败都重排下一次：失败走退避阶梯，成功回 4h 基线。
-      this.scheduleNext();
+      // 代际变了说明这次请求已经被 setChannel 作废：锁与调度都已由
+      // abortInFlight 复位、并可能已被新一次检查重新占用。旧任务的 finally
+      // 在这里回写，等于把**新任务**的 single-flight 锁解开。
+      if (gen === this.channelGeneration) {
+        this.checkInFlight = false;
+        // 无论成败都重排下一次：失败走退避阶梯，成功回 4h 基线。
+        this.scheduleNext();
+      }
     }
     return this.state;
   }
@@ -357,6 +438,8 @@ export class UpdateService {
     if (this.downloadInFlight) return this.state;
     if (this.state.status === "downloaded") return this.state;
 
+    const gen = this.channelGeneration;
+    this.opGeneration = gen;
     this.downloadInFlight = true;
     this.cancelToken = this.deps.createCancellationToken?.() ?? null;
     this.commit({
@@ -371,8 +454,12 @@ export class UpdateService {
     } catch (err) {
       this.onError(err);
     } finally {
-      this.downloadInFlight = false;
-      this.cancelToken = null;
+      // 同 checkForUpdates：作废掉的旧下载不许再碰锁与令牌，否则它的收尾
+      // 会把切换之后新开的那次下载一起解锁。
+      if (gen === this.channelGeneration) {
+        this.downloadInFlight = false;
+        this.cancelToken = null;
+      }
     }
     return this.state;
   }
@@ -495,13 +582,61 @@ export class UpdateService {
 
   // ------------------------------------------------------------ 偏好
 
+  /**
+   * 切换更新通道。
+   *
+   * 重配 updater **不等于**作废旧任务。切换之前发出的那次检查/下载仍然在
+   * 路上，它带回来的候选版本属于用户刚刚切走的通道；写进状态的表现是
+   * 「我明明切回 stable 了，它却告诉我有个 beta 版可以装」，而那个 beta 包
+   * 甚至已经躺在磁盘上、点一下就装得上去。
+   *
+   * 因此这里做三件事，一件都不能省：
+   *   1. 通道代际 +1 —— 旧任务的事件与收尾从这一刻起全部作废；
+   *   2. 取消在途下载、丢弃已下载产物；
+   *   3. 才是重跑 initAutoUpdater（allowPrerelease 与 channel 联动，
+   *      allowDowngrade 必须在它们之后被重新钉成 false）。
+   */
   setChannel(channel: UpdateChannel): UpdateState {
     if (channel === this.prefs.channel) return this.state;
+
+    this.channelGeneration++;
+    this.abortInFlight();
+
     this.savePrefs({ channel });
-    // channel 变了就得重跑初始化：allowPrerelease 与 channel 是联动的，
-    // 而 allowDowngrade 必须在它们之后被重新钉成 false。
     if (this.supported()) this.initAutoUpdater();
-    return this.commit({ channel, candidateVersion: null, status: "idle" });
+    return this.commit({
+      channel,
+      candidateVersion: null,
+      status: "idle",
+      // 进度与错误一起清干净：留下 87% 的进度条属于上一条通道的下载。
+      percent: 0,
+      bytesTransferred: 0,
+      totalBytes: 0,
+      bytesPerSecond: 0,
+      releaseDate: null,
+      releaseNotes: null,
+      errorCode: null,
+      retryable: false,
+      blockers: [],
+    });
+  }
+
+  /**
+   * 作废在途任务。
+   *
+   * `downloadedPath` / `expectedSha512` 必须一起清 —— 它们指向的是另一条
+   * 通道的安装包，留着就等于「切到 stable 之后仍然能把刚下好的 beta 包装上」。
+   * `announced` 也清：换了通道之后，同一个版本号应当被重新当作新消息。
+   */
+  private abortInFlight(): void {
+    this.cancelToken?.cancel();
+    this.cancelToken = null;
+    this.checkInFlight = false;
+    this.downloadInFlight = false;
+    this.downloadedPath = null;
+    this.expectedSha512 = null;
+    this.announced.clear();
+    this.disarmIdleWait();
   }
 
   setAutoCheck(enabled: boolean): UpdateState {
