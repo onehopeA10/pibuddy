@@ -601,6 +601,26 @@ export const CHANNELS = {
   eduProfileSet: "edu:profile-set",
   /** 读工作区错题本（edu-kids/mistakes.jsonl，坏行跳过、条数有界） */
   eduMistakeList: "edu:mistake-list",
+
+  // ---- 智能家居基座（home.assistant，connector tier / 智能家居 Phase B，恰 5 条） ----
+  //
+  // dashboard / automation / advisor 三个上层家居包的公共地基。五条通道的入参
+  // 只有 workspaceId + 结构化配置字段：token 走 secret-store 只进不出（渲染进程
+  // 能看到的极限是 {configured, last4}），host:port 落配置后还要经 permission:decide
+  // 的 allow-workspace（危险权限，主进程原生确认框）才可用——授权与配置是两条
+  // 通道，「已配置但未授权」是一个界面必须如实显示的中间态。设备控制不在 IPC 面
+  // 上：控制走 pi 回路内工具（home.assistant.call_service，经 tool bridge →
+  // safeLocalFetch 三道关），面板拿到的只是只读实体快照。
+  /** 读当前 workspace 的 HA 端点配置 + token 配置态 + 授权态 */
+  haConfigGet: "ha:config-get",
+  /** 写 host/port（token 可选携带，空串不改动；明文只进不出） */
+  haConfigSet: "ha:config-set",
+  /** 测试连接：authorizeLocalEndpoint 三道关 → GET /api/（HA 返回 API running.） */
+  haTestConnection: "ha:test-connection",
+  /** 实体只读快照（面板用；无 WS 时按 TTL 走 REST，断线标 stale） */
+  haEntities: "ha:entities",
+  /** 运行状态：配置/授权/WS 会话/消费者计数/实体数 */
+  haStatus: "ha:status",
 } as const;
 
 /** 主进程单向推送通道（9 个）。 */

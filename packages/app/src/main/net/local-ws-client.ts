@@ -164,8 +164,13 @@ class LocalWsClient implements LocalWsConnection {
     socket.on("close", () => this.handleClose());
     socket.on("error", () => this.fail("连接错误"));
     // 握手层交接前把流 pause 掉了（防止两次挂 data 监听之间丢字节），
-    // 监听就位后在这里恢复。
-    socket.resume();
+    // 监听就位后在这里恢复。**推迟一个事件循环相位（setImmediate）**：调用方
+    // 是在 `await openLocalWebSocket(...)` 的微任务续体里拿到连接对象再挂
+    // message 监听的，而 resume 的 flow 经 nextTick 触发、会插在两个微任务
+    // 之间——服务端把握手响应与首帧写在同一 TCP 段时（HA 的 auth_required
+    // 就常与 101 同段到达），首帧会在监听挂上之前被消费掉，表现为偶发丢帧。
+    // 推迟到 setImmediate 相位保证调用方的监听先就位。
+    setImmediate(() => socket.resume());
     // 协议级心跳：TCP 不报「对端半死」，ping/pong 才报。unref：心跳不该
     // 独自撑着进程不退出。
     this.pingTimer = setInterval(() => this.heartbeat(), WS_PING_INTERVAL_MS);

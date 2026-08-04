@@ -12,6 +12,9 @@ import { armUpdateChecks, disposeUpdateService } from "./update/update-ipc.js";
 // 远程访问（connector.remote）：按持久配置恢复服务（若上次开着），退出时拆监听。
 // 从没配过远程的用户，restore 一个字节都不碰（默认对外零暴露）。
 import { disposeRemoteResources, restoreRemoteServerIfEnabled } from "./remote/remote-manager.js";
+// 智能家居基座（home.assistant）：退出时收 tool bridge 的 named pipe 监听、
+// WS 会话与 sqlite 句柄。能力未启用时这些资源本来就不存在，dispose 是空转。
+import { disposeHomeResources } from "./home/home-ipc.js";
 // 能力包 pi 资源装卸（R4）：接线薄层，物化器本体是纯逻辑（capability-assets.ts）。
 import { syncCapabilityAssetsOnStartup } from "./capability/capability-assets-wiring.js";
 // 后台会话池：应用退出时必须把全部后台 pi runtime 收掉（窗口关闭 ≠ 停止，但
@@ -136,6 +139,8 @@ if (!gotLock) {
     // 显式停远程监听 + 关 sqlite 句柄：崩溃现场里「进程退不掉 / 端口没释放」
     // 的原因往往就是某个没人收的 listener。
     void disposeRemoteResources();
+    // 家居基座的 named pipe 监听 / WS 会话 / sqlite 句柄同理显式收掉。
+    disposeHomeResources();
     app.quit();
   });
 }

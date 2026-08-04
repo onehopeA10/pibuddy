@@ -52,6 +52,7 @@ import { remote } from "./remote.js";
 import { promptLibrary } from "./promptLibrary.js";
 import { officeSkills } from "./officeSkills.js";
 import { edu } from "./edu.js";
+import { home } from "./home.js";
 
 export const api = {
   pi,
@@ -102,6 +103,8 @@ export const api = {
   officeSkills,
   /** 儿童教育能力包（edu.kids）。档案与错题本三条窄通道，无路径与出题入口 */
   edu,
+  /** 智能家居基座（home.assistant）。端点配置/测试/只读快照，token 只进不出，无控制入口 */
+  home,
 };
 
 export type PiBuddyApi = typeof api;

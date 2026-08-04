@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import {
   NAlert,
   NButton,
@@ -14,12 +14,19 @@ import {
 } from "naive-ui";
 import { useAppStore } from "../stores/app";
 import { useProvidersStore } from "../stores/providers";
+import { useCapabilitiesStore } from "../stores/capabilities";
 import UpdateSettingsPanel from "./UpdateSettingsPanel.vue";
 import DiagnosticsPanel from "./DiagnosticsPanel.vue";
+import HomeAssistantSettings from "./HomeAssistantSettings.vue";
 
 const store = useAppStore();
 const providers = useProvidersStore();
+const capabilities = useCapabilitiesStore();
 const message = useMessage();
+
+// 智能家居区块的 UI 门控（home.assistant 的 settings.section 贡献）：判据来自
+// 主进程能力快照——「启用」= 五条 ha:* 通道已注册，未启用时区块整个不出现。
+const homeAssistantEnabled = computed(() => capabilities.isEnabled("home.assistant"));
 
 /**
  * 打开账号中心 / 用量页。
@@ -228,6 +235,9 @@ async function backToBundled(): Promise<void> {
       <n-button @click="openProviders">🔑 账号与模型</n-button>
       <n-button @click="openUsage">📊 用量与花费（仅本地统计）</n-button>
     </n-space>
+
+    <!-- 智能家居（home.assistant 能力包的 settings.section 贡献；能力关闭时不渲染） -->
+    <home-assistant-settings v-if="homeAssistantEnabled" />
 
     <update-settings-panel />
 
