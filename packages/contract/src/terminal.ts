@@ -3,9 +3,9 @@
  *
  * ## 这个文件在回答什么
  *
- * `coding.terminal` 这个**垂直能力**对外声明的十条窄通道：列出/新建/输入/
+ * `coding.terminal` 这个**垂直能力**对外声明的十一条窄通道：列出/新建/输入/
  * 缩放/取快照/清屏/杀/重启/重命名终端标签页，外加一条列出可用 shell 的
- * profiles。每条通道的入参只有不透明 workspaceId + 不透明 tabId + 用户键入
+ * profiles、一条查询 WSL 发行版（R5.1，仅 Windows 有实义）。每条通道的入参只有不透明 workspaceId + 不透明 tabId + 用户键入
  * 的字节 —— **没有任何绝对路径、shell 命令行或 argv 字段**：真正 spawn PTY
  * 的地方在主进程（`main/terminal/**`，经 node-pty），渲染进程在结构上表达
  * 不出「用这个 cwd 跑这条命令」。工作目录由主进程按 workspaceId 解析成
@@ -145,6 +145,42 @@ export type TerminalRenameRequest = z.infer<typeof terminalRenameRequestSchema>;
 
 // ---------------------------------------------------------------- 通道返回
 
+/**
+ * 一个已安装的 WSL 发行版（R5.1）。
+ *
+ * 字段来自 `wsl.exe -l -v` 的解析（注意其输出是 UTF-16LE，解析住在
+ * main/terminal/wsl.ts 的纯函数里）。`state`/`version` 原样透传字符串：
+ * WSL 的取值集合（Running/Stopped/Installing…）不归我们定义，枚举死了
+ * 反而会在 WSL 更新后校验失败。
+ */
+export const wslDistroSchema = z
+  .object({
+    /** 发行版名（如 Ubuntu-22.04、docker-desktop） */
+    name: z.string().min(1),
+    /** 是否默认发行版（wsl -l -v 里带 * 的那一行） */
+    isDefault: z.boolean(),
+    /** 运行态（Running / Stopped …），解析不出时为空串 */
+    state: z.string(),
+    /** WSL 版本（"1" / "2"），解析不出时为空串 */
+    version: z.string(),
+  })
+  .strict();
+export type WslDistro = z.infer<typeof wslDistroSchema>;
+
+/**
+ * `terminal:wsl-distros` 返回。
+ *
+ * 无 WSL / 非 Windows 机器上 `{available:false, distros:[]}`，**不抛错**：
+ * 这条通道的消费者是「要不要显示 WSL 选项」的 UI 判断，缺 WSL 不是异常。
+ */
+export const terminalWslDistrosResultSchema = z
+  .object({
+    available: z.boolean(),
+    distros: z.array(wslDistroSchema),
+  })
+  .strict();
+export type TerminalWslDistrosResult = z.infer<typeof terminalWslDistrosResultSchema>;
+
 export const terminalListResultSchema = z
   .object({ tabs: z.array(terminalTabMetaSchema) })
   .strict();
@@ -233,7 +269,7 @@ export type TerminalEventPayload = z.infer<typeof terminalEventPayloadSchema>;
 // ---------------------------------------------------------------- 契约分片
 
 /**
- * `coding.terminal` 的全部十条通道。
+ * `coding.terminal` 的全部十一条通道。
  *
  * 分片 id 是 capabilityId 的第二段（`coding.terminal` → `terminal`），drift
  * test 据此把「manifest 声明的通道」与「本分片的键集合」逐条对账。
@@ -279,6 +315,10 @@ export const terminalContractShard = defineContractShard("terminal", {
     request: terminalRenameRequestSchema,
     response: terminalTabMetaSchema,
   },
+  [CHANNELS.terminalWslDistros]: {
+    request: terminalWorkspaceRequestSchema,
+    response: terminalWslDistrosResultSchema,
+  },
 });
 
 /**
@@ -295,9 +335,10 @@ export const TERMINAL_PERMISSION = "process.shell";
  * 需要 process.shell 授权的全部终端通道（供 main/permission 的需求表派生）。
  *
  * 连只读的 list / profiles / snapshot 也在册：它们暴露「这个 workspace 有哪些
- * 终端会话、里面输出了什么」，未授权就不该被观测到。permission-store 的需求表
- * 由本数组 `map(...)` 派生，故扩这个数组即自动给新通道接上第五道闸，无需改动
- * main/permission 的任何决策逻辑。
+ * 终端会话、里面输出了什么」，未授权就不该被观测到。wsl-distros 同理在册：
+ * 枚举发行版本身要 spawn wsl.exe，且「这台机器装了哪些 WSL」也是环境信息。
+ * permission-store 的需求表由本数组 `map(...)` 派生，故扩这个数组即自动给新
+ * 通道接上第五道闸，无需改动 main/permission 的任何决策逻辑。
  */
 export const TERMINAL_GATED_CHANNELS = [
   CHANNELS.terminalList,
@@ -310,4 +351,5 @@ export const TERMINAL_GATED_CHANNELS = [
   CHANNELS.terminalKill,
   CHANNELS.terminalRestart,
   CHANNELS.terminalRename,
+  CHANNELS.terminalWslDistros,
 ] as const;

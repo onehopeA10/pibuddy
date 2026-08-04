@@ -502,13 +502,13 @@ export const CHANNELS = {
   /** 取当前活跃运行 + 近期历史快照。 */
   workflowRuns: "workflow:runs",
 
-  // ---- 终端能力包（coding.terminal，ADR-0002 垂直能力包 / PTY-101，恰 10 条） ----
+  // ---- 终端能力包（coding.terminal，ADR-0002 垂直能力包 / PTY-101，恰 11 条） ----
   //
-  // 第一个原生模块能力包（node-pty，方案 B）。十条通道的入参只有不透明
+  // 第一个原生模块能力包（node-pty，方案 B）。十一条通道的入参只有不透明
   // workspaceId + 不透明 tabId + 用户键入的字节，**没有任何 cwd / shell 命令行 /
   // argv 字段** —— 真正 spawn PTY 的地方在 main/terminal（node-pty），cwd 是
   // workspace 的 canonical root（主进程解析），渲染进程表达不出「用这个目录跑
-  // 这条命令」。十条全部登记在 main/permission 的需求表里、需要 process.shell
+  // 这条命令」。十一条全部登记在 main/permission 的需求表里、需要 process.shell
   // （开终端就是开 shell，继 git 之后第二个真实的危险权限消费者），未授权时被
   // ipc-guard 第五道闸挡在 handler 之外——连只读的 list/profiles/snapshot 也不
   // 例外。PTY 输出走 terminal:event 推送信封 + 主进程有界 ring buffer，reload 后
@@ -523,6 +523,13 @@ export const CHANNELS = {
   terminalKill: "terminal:kill",
   terminalRestart: "terminal:restart",
   terminalRename: "terminal:rename",
+  /**
+   * WSL 发行版查询（R5.1，仅 Windows 有实义）。返回 wsl.exe 是否可用与已安装
+   * 的发行版列表；非 Windows / 无 WSL 机器上恒返回 `{available:false, distros:[]}`
+   * 而不抛错。枚举是懒的：只有这条通道（或 terminal:profiles）被调用时才 spawn
+   * `wsl.exe -l -v`，不在启动路径上。
+   */
+  terminalWslDistros: "terminal:wsl-distros",
 
   // ---- Remote / PWA 远程访问（connector.remote / REM-101，恰 8 条） ----
   //

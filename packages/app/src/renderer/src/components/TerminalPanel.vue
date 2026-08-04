@@ -26,6 +26,7 @@ import {
   type PiEnvelope,
   type SequencedFrame,
   type TerminalEventPayload,
+  type TerminalWslDistrosResult,
 } from "@contract";
 import { useAppStore } from "../stores/app";
 import { useTerminalStore } from "../stores/terminal";
@@ -36,6 +37,22 @@ const store = useTerminalStore();
 const workspaceId = computed(() => app.workspaceId);
 const selectedProfile = ref<string | null>(null);
 const searchQuery = ref("");
+
+/**
+ * WSL 发行版信息（R5.1）。经 terminal:wsl-distros 查询通道取一次：无 WSL /
+ * 非 Windows 机器上主进程返回 {available:false}（不抛错），这里保持 null，
+ * 模板里因此不渲染任何 WSL 相关的字样——选项本身也不会出现（profiles 里
+ * 没有 wsl:* 条目）。
+ */
+const wslInfo = ref<TerminalWslDistrosResult | null>(null);
+
+/** 当前选中的 profile 若是 WSL 发行版，给一行去向提示。 */
+const selectedWslDistro = computed(() => {
+  const id = selectedProfile.value;
+  if (!id || !id.startsWith("wsl:")) return null;
+  const name = id.slice("wsl:".length);
+  return wslInfo.value?.distros.find((d) => d.name === name) ?? { name, isDefault: false, state: "", version: "" };
+});
 
 interface TermEntry {
   term: Terminal;
@@ -245,6 +262,14 @@ onMounted(async () => {
   if (ws) await store.init(ws);
   selectedProfile.value = store.defaultProfileId || null;
   unsubscribe = window.piBuddy.terminal.onEvent(onEvent);
+  if (ws) {
+    try {
+      const info = await window.piBuddy.terminal.wslDistros(ws);
+      wslInfo.value = info.available ? info : null;
+    } catch {
+      /* 未授权 process.shell：授权后 refreshProfiles 那条路径会再显形，这里保持无提示 */
+    }
+  }
 });
 
 onBeforeUnmount(() => {
@@ -275,6 +300,12 @@ onBeforeUnmount(() => {
       />
       <n-button size="tiny" quaternary title="上一个" @click="searchPrev">▲</n-button>
       <n-button size="tiny" quaternary title="下一个" @click="searchNext">▼</n-button>
+    </div>
+
+    <div v-if="selectedWslDistro" class="terminal-wsl-hint">
+      新终端将进入 WSL 发行版 {{ selectedWslDistro.name
+      }}<template v-if="selectedWslDistro.state">（{{ selectedWslDistro.state }}）</template>；
+      工作目录自动映射：Windows 盘符 → /mnt/*，本发行版内的目录 → 原 Linux 路径。
     </div>
 
     <div v-if="store.permissionDenied" class="terminal-authorize">
@@ -351,6 +382,12 @@ onBeforeUnmount(() => {
 .terminal-authorize {
   padding: 12px;
   text-align: center;
+}
+.terminal-wsl-hint {
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #9aa4ae;
+  border-bottom: 1px solid #333;
 }
 .terminal-tabs {
   display: flex;

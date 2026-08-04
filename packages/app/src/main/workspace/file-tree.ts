@@ -136,7 +136,13 @@ export async function listDir(
 // ---------------------------------------------------------------- watcher
 
 interface WatchEntry {
-  watcher: fs.FSWatcher;
+  /**
+   * null = 降级监听（R5.1）：WSL UNC（9P 网络文件系统）上 `fs.watch` 直接抛
+   * EISDIR（Win11 + Node 24 真机实测，9P 不支持变更通知）。这种目录仍然登记
+   * 一个空条目——引用计数照常、unwatch 照常，只是没有事件，文件树靠用户
+   * 手动刷新。抛错出去的话，渲染进程每展开一层 WSL 目录就报一次错。
+   */
+  watcher: fs.FSWatcher | null;
   refCount: number;
 }
 
@@ -171,11 +177,17 @@ export async function watchDir(workspaceId: string, relativePath: string): Promi
 
   // recursive:false 是刻意的：递归监听在 Windows 上会把整棵子树挂上去，
   // 一次 `npm install` 能打出几十万个事件。
-  const watcher = fs.watch(resolved.realPath, { persistent: false }, () => {
-    listener?.(workspaceId, posixRel);
-  });
-  // watcher 自身出错（目录被删/被移走）不该把主进程带崩
-  watcher.on("error", () => unwatchDir(workspaceId, relativePath));
+  let watcher: fs.FSWatcher | null = null;
+  try {
+    watcher = fs.watch(resolved.realPath, { persistent: false }, () => {
+      listener?.(workspaceId, posixRel);
+    });
+    // watcher 自身出错（目录被删/被移走）不该把主进程带崩
+    watcher.on("error", () => unwatchDir(workspaceId, relativePath));
+  } catch {
+    // 文件系统不支持变更通知（WSL UNC / 9P 抛 EISDIR，R5.1 真机实测）：
+    // 降级成无事件的空条目，展开 / 折叠 / 释放的记账照常走。
+  }
   watchers.set(key, { watcher, refCount: 1 });
 }
 
@@ -186,7 +198,7 @@ export function unwatchDir(workspaceId: string, relativePath: string): void {
   if (!entry) return;
   entry.refCount--;
   if (entry.refCount > 0) return;
-  entry.watcher.close();
+  entry.watcher?.close();
   watchers.delete(key);
 }
 
@@ -200,7 +212,7 @@ export function closeWatchers(workspaceId: string): number {
   let closed = 0;
   for (const [key, entry] of [...watchers]) {
     if (!key.startsWith(`${workspaceId}::`)) continue;
-    entry.watcher.close();
+    entry.watcher?.close();
     watchers.delete(key);
     closed++;
   }
@@ -210,7 +222,7 @@ export function closeWatchers(workspaceId: string): number {
 /** 关闭全部 watcher（应用退出）。 */
 export function closeAllWatchers(): number {
   const count = watchers.size;
-  for (const entry of watchers.values()) entry.watcher.close();
+  for (const entry of watchers.values()) entry.watcher?.close();
   watchers.clear();
   return count;
 }

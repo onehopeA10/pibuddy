@@ -34,6 +34,7 @@ import type { IPty } from "node-pty";
 import type { TerminalEventPayload, TerminalProfile, TerminalTabMeta } from "@pibuddy/contract";
 
 import { TerminalRingBuffer } from "./ring-buffer.js";
+import { planSpawn, wslShellProfile } from "./wsl.js";
 
 // createRequire 让本 ESM 模块能在运行期按需 require 原生 CJS 模块 node-pty，
 // 而不经 vite 的静态打包（原生 .node 不能被 bundle）。
@@ -163,6 +164,13 @@ export class PtyManager {
   }
 
   private resolveShell(profileId: string | null): ShellProfile {
+    // WSL profile（R5.1）：id 形如 `wsl:<distro>`，不在 buildProfiles 的静态表里
+    // （发行版列表是异步枚举的，见 terminal-ipc 的 profiles 合并）。名字非法 /
+    // 非 Windows / 无 wsl.exe 时返回 null，照常回落到默认 shell。
+    if (profileId !== null) {
+      const wsl = wslShellProfile(profileId);
+      if (wsl) return wsl;
+    }
     const built = this.buildProfiles();
     if (profileId !== null) {
       const found = built.find((p) => p.id === profileId);
@@ -190,11 +198,15 @@ export class PtyManager {
   }
 
   private spawnInto(s: Session, shell: ShellProfile): void {
-    const child = loadPty().spawn(shell.file, shell.args, {
+    // planSpawn 是纯函数：WSL profile 把起始目录改写成 `--cd <linux path>` 并把
+    // PTY 的 Windows cwd 换成主目录（ConPTY 对 UNC cwd 的兼容性不赌）；其余
+    // shell 原样透传（R5.1）。
+    const plan = planSpawn(shell, s.cwd);
+    const child = loadPty().spawn(plan.file, plan.args, {
       name: "xterm-256color",
       cols: s.cols,
       rows: s.rows,
-      cwd: s.cwd,
+      cwd: plan.cwd,
       env: this.controlledEnv(),
     });
     s.pty = child;

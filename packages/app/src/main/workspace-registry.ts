@@ -26,6 +26,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { writeJsonAtomic } from "./fs-atomic.js";
+import { normalizeWslUnc } from "./wsl-paths.js";
 
 export interface WorkspaceRecord {
   workspaceId: string;
@@ -109,9 +110,14 @@ export function registerWorkspace(absPath: string): WorkspaceRecord {
   if (!absPath || !path.isAbsolute(absPath)) {
     throw new Error(`WORKSPACE_INVALID_PATH: ${absPath}`);
   }
+  // WSL UNC 先归一（R5.1）：`\\wsl$\X` 与 `\\wsl.localhost\X` 是同一个目录的
+  // 两个名字，而 realpath 对两种形态都**原样返回**、不互相归一（Win11 + Node 24
+  // 真机实测）。不在这里收敛的话，同一个 WSL 目录会派生出两个 workspaceId，
+  // 各带一套 ignore 策略与历史会话。非 WSL 路径原样通过。
+  const normalized = normalizeWslUnc(absPath);
   // realpathSync.native 交给操作系统做规范化：符号链接、8.3 短名、大小写
   // 全部在这一步收敛，JS 侧的字符串处理做不到这件事。
-  const root = fs.realpathSync.native(absPath);
+  const root = fs.realpathSync.native(normalized);
   const stat = fs.statSync(root);
   if (!stat.isDirectory()) throw new Error(`WORKSPACE_NOT_A_DIRECTORY: ${absPath}`);
 

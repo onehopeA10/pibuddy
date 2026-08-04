@@ -24,17 +24,19 @@ export const terminalCapability = defineCapability({
   description:
     "内置多标签页终端：workspace 目录下开 shell，输入/缩放/清屏/搜索/复制粘贴、" +
     "退出码、重启、重命名、显式关闭。基于 node-pty（原生模块，随编码 Profile 装卸），" +
-    "输出走有界 ring buffer + 推送信封，reload 后可重连取快照。",
+    "输出走有界 ring buffer + 推送信封，reload 后可重连取快照。" +
+    "Windows 上可枚举 WSL 发行版并直接开 WSL shell（R5.1）。",
   // appMin 是 "0.0.0"：内置能力不可能比宿主更老，真正生效的是 contractMin/Max。
   compatibility: { appMin: "0.0.0", contractMin: 1, contractMax: 1 },
   // 终端不依赖任何其它可选能力：它要的只有 workspace 的 canonical root（内核
   // 设施 workspace-registry 解析），不经手别的能力域。
   dependencies: [],
-  // process.shell：本包的核心权限，十条通道全部要它（开 shell 就是 process.shell，
+  // process.shell：本包的核心权限，十一条通道全部要它（开 shell 就是 process.shell，
   // 连只读的 list/snapshot 也要——它们暴露「这个 workspace 有哪些终端会话、里面
-  // 输出了什么」）。**不申请 workspace.read/write**——cwd 由内核解析，终端本身
-  // 不读写用户文件（要读写是用户在 shell 里自己敲的事，那是 shell 的副作用，
-  // 不是 PiBuddy 主进程发起的文件操作）。
+  // 输出了什么」；wsl-distros 枚举同样要 spawn wsl.exe）。**不申请
+  // workspace.read/write**——cwd 由内核解析，终端本身不读写用户文件（要读写是
+  // 用户在 shell 里自己敲的事，那是 shell 的副作用，不是 PiBuddy 主进程发起的
+  // 文件操作）。
   permissions: ["process.shell"],
   channels: [
     CHANNELS.terminalList,
@@ -47,6 +49,7 @@ export const terminalCapability = defineCapability({
     CHANNELS.terminalKill,
     CHANNELS.terminalRestart,
     CHANNELS.terminalRename,
+    CHANNELS.terminalWslDistros,
   ],
   // 输出推送信封（复用 pi 那套 PiEnvelope 的代际 + 序号丢弃规则）。
   pushChannels: [PUSH_CHANNELS.terminalEvent],

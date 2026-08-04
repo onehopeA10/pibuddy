@@ -1,8 +1,9 @@
 /**
  * `window.piBuddy.terminal`（coding.terminal / PTY-101，第 25 个命名空间）。
  *
- * 十个方法、十条窄通道，外加一条输出推送订阅。渲染进程能表达的极限是「列出
- * 标签页 / 列出 shell / 开 / 输入 / 缩放 / 取快照 / 清屏 / 杀 / 重启 / 重命名」
+ * 十一个方法、十一条窄通道，外加一条输出推送订阅。渲染进程能表达的极限是「列出
+ * 标签页 / 列出 shell / 开 / 输入 / 缩放 / 取快照 / 清屏 / 杀 / 重启 / 重命名 /
+ * 查询 WSL 发行版」
  * ——**没有**任何能承载 cwd、shell 命令行或 argv 的形参，也没有
  * `invoke(channel, args)` 那种无约束入口（D4 规则 1）。真正 spawn shell 的地方
  * 在主进程（node-pty），cwd 是 workspace 的 canonical root，且每条通道都要
@@ -24,6 +25,7 @@ import type {
   TerminalProfilesResult,
   TerminalSnapshotResult,
   TerminalTabMeta,
+  TerminalWslDistrosResult,
 } from "@pibuddy/contract";
 import { invoke, subscribe } from "./bridge.js";
 
@@ -67,6 +69,10 @@ export const terminal = {
   /** 重命名 tab。 */
   rename: (workspaceId: string, tabId: string, title: string) =>
     invoke<TerminalTabMeta>(CHANNELS.terminalRename, { workspaceId, tabId, title }),
+
+  /** 查询 WSL 发行版（R5.1）。无 WSL / 非 Windows 返回 {available:false}，不抛错。 */
+  wslDistros: (workspaceId: string) =>
+    invoke<TerminalWslDistrosResult>(CHANNELS.terminalWslDistros, { workspaceId }),
 
   /** 订阅终端输出 / 退出推送（PiEnvelope<TerminalEventPayload>），返回退订闭包。 */
   onEvent: (cb: (e: PiEnvelope<TerminalEventPayload>) => void) =>

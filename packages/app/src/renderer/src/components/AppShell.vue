@@ -196,6 +196,18 @@ const workflowEnabled = computed(() => capabilities.isEnabled("common.workflow")
 // 是否出现；远程服务本身默认不监听，须在面板里显式开启。
 const remoteEnabled = computed(() => capabilities.isEnabled("connector.remote"));
 
+/**
+ * 当前工作文件夹是否在 WSL 内（R5.1）。
+ *
+ * 判据是显示路径的 `\\wsl$` / `\\wsl.localhost` 前缀——store.workspace 是主进程
+ * 下发的 displayPath，这里不需要（也拿不到）canonical root。命中时给一条常驻
+ * 提示：pi 运行时**仍在 Windows 侧**运行、经 UNC 路径读写 WSL 内文件（不做
+ * pi-in-WSL），且 WSL 共享不支持文件变更通知，文件树需手动刷新。
+ */
+const isWslWorkspace = computed(() =>
+  /^[\\/]{2}(wsl\$|wsl\.localhost)[\\/]/i.test(store.workspace ?? "")
+);
+
 onMounted(() => {
   void store.init();
   // 先取快照再订阅：窗口 reload 之后进度必须从 main 的快照原样恢复，
@@ -276,6 +288,14 @@ function onDrop(): void {
     </slot>
     <div class="main-col">
       <TopBar />
+
+      <!-- WSL workspace 提示（R5.1）：pi 仍跑在 Windows 侧，经 \\wsl.localhost
+           UNC 读写这个目录（不做 pi-in-WSL）；WSL 共享（9P）不支持变更通知，
+           文件树不会自动刷新。 -->
+      <div v-if="isWslWorkspace" class="wsl-workspace-banner">
+        🐧 当前工作文件夹在 WSL 内：pi 仍在 Windows 侧运行，经网络路径读写这个目录；
+        文件树不会自动刷新（WSL 共享不支持变更通知），终端可选择进入对应发行版。
+      </div>
 
       <template v-if="store.startError">
         <div class="onboarding">
