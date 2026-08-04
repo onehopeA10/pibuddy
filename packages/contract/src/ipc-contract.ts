@@ -73,6 +73,7 @@ import { remoteContractShard } from "./remote.js";
 import { promptLibraryContractShard } from "./prompt-library.js";
 import { eduContractShard } from "./edu.js";
 import { homeAssistantContractShard } from "./home-assistant.js";
+import { dashboardEventPayloadSchema, homeDashboardContractShard } from "./home-dashboard.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -818,6 +819,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   eduContractShard,
   homeAssistantContractShard,
   homeAdvisorContractShard,
+  homeDashboardContractShard,
 ];
 
 /**
@@ -873,6 +875,9 @@ export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   // terminal:event 推的是 PiEnvelope<TerminalEventPayload>；这里校验的是信封的
   // payload 位（一段 PTY 输出或一次退出）。
   [PUSH_CHANNELS.terminalEvent]: terminalEventPayloadSchema,
+  // dashboard:event 推的是 PiEnvelope<DashboardEventPayload>；这里校验的是信封
+  // 的 payload 位（一条实体状态增量或一次链路翻转）。
+  [PUSH_CHANNELS.dashboardEvent]: dashboardEventPayloadSchema,
 };
 
 /** channel 名是否在白名单内。ipc-guard 的第一道闸。 */
