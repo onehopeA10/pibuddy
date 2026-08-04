@@ -44,6 +44,7 @@ import { memory } from "./memory.js";
 import { agentPool } from "./agentPool.js";
 import { childAgent } from "./childAgent.js";
 import { git } from "./git.js";
+import { terminal } from "./terminal.js";
 import { tasks } from "./tasks.js";
 import { connector } from "./connector.js";
 import { workflow } from "./workflow.js";
@@ -81,6 +82,8 @@ export const api = {
   childAgent,
   /** Git 编码能力包（coding.git）。九个意图，无 argv 入口，每条通道要 process.git */
   git,
+  /** 终端能力包（coding.terminal）。node-pty 开 shell，无 cwd/argv 入口，每条通道要 process.shell */
+  terminal,
   /** 持久定时任务（common.tasks）。调度 headless，触发的是已落盘任务里冻结的配置 */
   tasks,
   /** Webhook 连接器（connector.webhook）。凭证只进不出，出站逐域名经权限授权 + safeFetch */

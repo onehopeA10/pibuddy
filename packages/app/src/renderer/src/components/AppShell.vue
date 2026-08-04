@@ -24,6 +24,7 @@ import MemoryPanel from "./MemoryPanel.vue";
 import PreviewPane from "./PreviewPane.vue";
 import SessionTreePanel from "./SessionTreePanel.vue";
 import GitPanel from "./GitPanel.vue";
+import TerminalPanel from "./TerminalPanel.vue";
 import TasksPanel from "./TasksPanel.vue";
 import ChildAgentPanel from "./ChildAgentPanel.vue";
 import ConnectorPanel from "./ConnectorPanel.vue";
@@ -132,6 +133,9 @@ const sessionTreeOpen = ref(false);
 // Git 面板（coding.git 垂直能力包）的开合。同样独立成 ref：它是第一个垂直
 // 能力域，默认只在「编码」Profile 里可见。
 const gitOpen = ref(false);
+// 终端面板（coding.terminal 垂直能力包，node-pty）的开合。独立成 ref：它是
+// 第一个原生模块能力域，与其它面板互不牵连，默认只在「编码」Profile 里可见。
+const terminalOpen = ref(false);
 // 子 Agent 编排面板（common.child-agent）的开合。独立成 ref：它是自己一个
 // 能力域（父子拓扑 / 结构化消息 / cancel 传播），与其它面板互不牵连。
 const childAgentOpen = ref(false);
@@ -164,6 +168,9 @@ const sessionTreeEnabled = computed(() => capabilities.isEnabled("common.session
 // coding.git 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
 // 它默认只在「编码」Profile 启用，因此在「通用办公」下这个开关与面板都不出现。
 const gitEnabled = computed(() => capabilities.isEnabled("coding.git"));
+// coding.terminal 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
+// 它默认只在「编码」Profile 启用，因此在「通用办公」下这个开关与面板都不出现。
+const terminalEnabled = computed(() => capabilities.isEnabled("coding.terminal"));
 const tasksEnabled = computed(() => capabilities.isEnabled("common.tasks"));
 // 子 Agent 编排的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
 const childAgentEnabled = computed(() => capabilities.isEnabled("common.child-agent"));
@@ -357,6 +364,15 @@ function onDrop(): void {
               🌿 Git
             </n-button>
             <n-button
+              v-if="terminalEnabled"
+              size="tiny"
+              :type="terminalOpen ? 'primary' : 'default'"
+              quaternary
+              @click="terminalOpen = !terminalOpen"
+            >
+              💻 终端
+            </n-button>
+            <n-button
               v-if="tasksEnabled"
               size="tiny"
               :type="tasks.panelOpen ? 'primary' : 'default'"
@@ -407,6 +423,7 @@ function onDrop(): void {
           <ChangesetPanel v-if="changesOpen && reviewEnabled" />
           <SessionTreePanel v-if="sessionTreeOpen && sessionTreeEnabled" />
           <GitPanel v-if="gitOpen && gitEnabled" />
+          <TerminalPanel v-if="terminalOpen && terminalEnabled" />
           <ChildAgentPanel v-if="childAgentOpen && childAgentEnabled" />
           <ConnectorPanel v-if="connectorOpen && connectorEnabled" />
           <ConnectorChannelsPanel v-if="channelsOpen && channelsEnabled" />

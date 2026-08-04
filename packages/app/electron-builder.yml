@@ -35,6 +35,14 @@ npmRebuild: false
 asarUnpack:
   - out/main/convert-worker.js
   - out/main/chunks/**
+  # node-pty（coding.terminal / ADR-0002 方案 B）：预编译原生二进制不能从 asar
+  # 的虚拟路径执行，必须外置。Electron 的 asar 层会把「已 unpack」成员的读取自动
+  # 重定向到 app.asar.unpacked，因此主进程 require("node-pty") 仍照常解析、其
+  # .node/.dll/.exe 从 unpacked 加载。漏掉任一后缀的表现都是「装完之后开终端
+  # 报 Module did not self-register / spawn-helper 找不到」，而 dev/单测全绿。
+  - "**/node_modules/node-pty/**/*.node"
+  - "**/node_modules/node-pty/**/*.dll"
+  - "**/node_modules/node-pty/**/*.exe"
 
 extraResources:
   - from: resources/pi-runtime

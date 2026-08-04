@@ -20,6 +20,7 @@ import { connectorFeishuCapability } from "./manifests/connector-feishu.manifest
 import { connectorSlackCapability } from "./manifests/connector-slack.manifest.js";
 import { connectorTelegramCapability } from "./manifests/connector-telegram.manifest.js";
 import { gitCapability } from "./manifests/git.manifest.js";
+import { terminalCapability } from "./manifests/terminal.manifest.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
@@ -43,6 +44,9 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // 第一个垂直能力包（coding tier）。它默认只进「编码」Profile，因此排在
   // common 能力之后——被依赖的 common.workspace-review 已在前面注册。
   gitCapability,
+  // 第一个原生模块能力包（coding tier，node-pty / ADR-0002 方案 B）。同属编码包，
+  // 排在 coding.git 之后——它不依赖任何其它可选能力。
+  terminalCapability,
   tasksCapability,
   // 子 Agent 编排（common tier，可关闭）。排在末尾——它调用后台池（内核）与
   // 权限引擎（内核），不依赖任何其它可选能力，装配顺序上无前置。
@@ -116,6 +120,9 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.memory",
       "common.mcp",
       "coding.git",
+      // 第一个原生模块能力包（node-pty）。与 coding.git 同属编码 Profile：切到
+      // 「编码」= 装上 Git + 终端；切走 = 卸下（PTY 进程一并清）。
+      "coding.terminal",
       "common.tasks",
       "common.child-agent",
       "common.workflow",
