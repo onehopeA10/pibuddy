@@ -36,7 +36,7 @@
  */
 import { z } from "zod";
 
-import { defineContractShard } from "./channel-contract.js";
+import { defineContractShard, voidRequestSchema } from "./channel-contract.js";
 import { CHANNELS } from "./channels.js";
 
 /** 连接器能力 id（四层边界表第四行，tier=connector）。 */
@@ -229,7 +229,7 @@ export type ConnectorResult = z.infer<typeof connectorResultSchema>;
  */
 export const connectorContractShard = defineContractShard("webhook", {
   [CHANNELS.connectorList]: {
-    request: z.void(),
+    request: voidRequestSchema,
     response: z.array(connectorViewSchema),
   },
   [CHANNELS.connectorCreate]: {
