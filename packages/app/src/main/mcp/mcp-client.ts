@@ -20,6 +20,8 @@
  *  - 进程一定被回收：无论握手成败，非 keepAlive 路径在 finally 里 kill。
  */
 import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 import type { McpServerInput } from "@pibuddy/contract";
 
@@ -51,6 +53,114 @@ interface JsonRpcMessage {
   method?: string;
 }
 
+/** 一次 spawn 的具体形态：可执行文件 + 参数（+ Windows 逐字参数标记）。 */
+export interface SpawnPlan {
+  file: string;
+  args: string[];
+  windowsVerbatimArguments: boolean;
+}
+
+/** cmd.exe 的元字符集合——这些字符在命令行里会被 cmd 解释，需逐个加 `^` 保字面量。 */
+const CMD_META = /[()%!^"<>&|]/g;
+
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Windows PATH + PATHEXT 解析：把一个命令名解析成一个具体存在的文件。
+ *
+ * `npx` → `npx.cmd`、`node` → `node.exe`。带路径分隔符的命令只在其所在目录里
+ * 找；裸命令名遍历 PATH。命令自带扩展名（`foo.cmd`）时优先按原名查。
+ * 解析不到返回 null —— 调用方按原样 spawn，让它像以前一样 ENOENT 失败。
+ */
+export function resolveWindowsExecutable(command: string): string | null {
+  const pathext = (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const hasDirSep = command.includes("/") || command.includes("\\");
+  const base = hasDirSep ? path.basename(command) : command;
+  const dirs = hasDirSep
+    ? [path.dirname(path.resolve(command))]
+    : (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  const existingExt = path.extname(base);
+  for (const dir of dirs) {
+    if (existingExt) {
+      const p = path.join(dir, base);
+      if (isFile(p)) return p;
+    }
+    for (const ext of pathext) {
+      const p = path.join(dir, base + ext);
+      if (isFile(p)) return p;
+    }
+  }
+  return null;
+}
+
+/**
+ * 供 `cmd.exe /c` 使用的参数转义（cross-spawn 多年验证的做法）：
+ *
+ *  1. 先按 CreateProcess 的引号规则把参数整体括进 `"…"`（引号前的反斜杠翻倍、
+ *     内部引号转义）；
+ *  2. 再对 cmd 元字符逐个加 `^`。批处理经 `cmd /c "…"` 外层还有一次 cmd 解析，
+ *     因此对 `.cmd` / `.bat` **双重**加 `^`（`&` → `^^&`）。
+ *
+ * 结果：参数里的 `;` `|` `&` `$()` `%VAR%` 全部保持字面量，不重新获得 shell
+ * 注入能力——`spawn(shell:false)` 的安全边界一分不放宽。
+ */
+export function escapeCmdArg(arg: string): string {
+  let s = arg.replace(/(\\*)"/g, '$1$1\\"');
+  s = s.replace(/(\\*)$/, "$1$1");
+  s = `"${s}"`;
+  // 元字符加 `^`，再加一次：`cmd /c "…"` 对批处理外层还有一次解析，需双重转义。
+  s = s.replace(CMD_META, "^$&").replace(CMD_META, "^$&");
+  return s;
+}
+
+function escapeCmdCommand(cmd: string): string {
+  return cmd.replace(CMD_META, "^$&");
+}
+
+/**
+ * 算出一次 spawn 的具体形态。
+ *
+ * ## 为什么需要它：Windows 上 `spawn(shell:false)` 跑不了 `.cmd`
+ *
+ * `spawn(shell:false)` 底层是 CreateProcess，它只能执行 PE 可执行文件，**不能**
+ * 直接跑 `.cmd` / `.bat`（那是 cmd.exe 的批处理脚本）。而 MCP 生态最常见的启动
+ * 命令 `npx`（`pnpm dlx` 同理）在 Windows 上正是 `npx.cmd` 这类批处理 shim ——
+ * 于是 `spawn("npx", …, {shell:false})` 直接 ENOENT（FEAT-mcp.md §5 risks 3）。
+ *
+ * 解决而**不放宽** shell:false 安全边界：
+ *   - 命令解析到 PE（`.exe` / `.com`）：spawn 该绝对路径，shell 仍 false；
+ *   - 命令解析到 `.cmd` / `.bat`：经 `cmd.exe /d /s /c` 执行，但用 `escapeCmdArg`
+ *     把每个用户参数括死 + `windowsVerbatimArguments` —— Node 不再二次加引号，
+ *     参数里的 shell 元字符全部字面量。
+ * 非 Windows、或解析不到的命令：按原样返回（行为不变）。
+ */
+export function planSpawn(command: string, args: readonly string[]): SpawnPlan {
+  const argv = [...args];
+  if (process.platform !== "win32") {
+    return { file: command, args: argv, windowsVerbatimArguments: false };
+  }
+  const resolved = resolveWindowsExecutable(command);
+  if (!resolved) {
+    return { file: command, args: argv, windowsVerbatimArguments: false };
+  }
+  const ext = path.extname(resolved).toLowerCase();
+  if (ext === ".cmd" || ext === ".bat") {
+    const comSpec = process.env.ComSpec || "cmd.exe";
+    const line = `"${[escapeCmdCommand(resolved), ...argv.map(escapeCmdArg)].join(" ")}"`;
+    return { file: comSpec, args: ["/d", "/s", "/c", line], windowsVerbatimArguments: true };
+  }
+  return { file: resolved, args: argv, windowsVerbatimArguments: false };
+}
+
 /**
  * 连接一台 stdio MCP 服务器并完成握手。
  *
@@ -73,13 +183,17 @@ export function connectStdio(
 
     let child: ChildProcess;
     try {
-      child = spawn(config.command, config.args, {
+      // Windows 上把 `npx`（实为 npx.cmd）等批处理 shim 解析成可 spawn 的形态，
+      // 但不放宽 shell:false（planSpawn 用逐字转义 + verbatim 挡住注入）。
+      const plan = planSpawn(config.command, config.args);
+      child = spawn(plan.file, plan.args, {
         // config.env 叠加在 process.env 之上：npx / node 需要 PATH 等继承变量，
         // 用户的 env 覆盖同名键。shell:false 是安全边界，不能动。
         env: { ...process.env, ...config.env },
         stdio: ["pipe", "pipe", "pipe"],
         shell: false,
         windowsHide: true,
+        windowsVerbatimArguments: plan.windowsVerbatimArguments,
       });
     } catch (err) {
       resolve({ child: null, probe: fail([`无法启动进程：${describe(err)}`]) });

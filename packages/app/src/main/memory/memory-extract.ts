@@ -72,7 +72,7 @@ function classifyCandidate(sentence: string): MemoryType | null {
   return null;
 }
 
-const defaultExtractor: FactExtractor = (turns) => {
+export const defaultExtractor: FactExtractor = (turns) => {
   const out: FactCandidate[] = [];
   const seen = new Set<string>();
   for (const turn of turns) {
