@@ -53,18 +53,67 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
 }
 
-/** 一个能力目录下的全部实现源码（拼成一串），已去注释。 */
+/**
+ * 权限扫描的显式豁免表（ISS-005）。
+ *
+ * ## 为什么要有这张表
+ *
+ * 扫描曾经只看能力目录的**顶层文件**，子目录整个是盲区——放进子目录就等于
+ * 免检，而免检是**隐式**的，没人批准过。现在扫描递归全部子目录，免检必须在
+ * 这里**显式**登记：每条豁免的 reason 要能回答「为什么这里的权限特征不算
+ * 主进程权限使用」。
+ *
+ * 粒度到文件或目录（目录 = 该目录整棵子树）。路径相对 APP_SRC，用 `/` 分隔，
+ * 与 manifest 里 exposure.module 的写法一致。
+ *
+ * 表自身的防恒真：下面 drift 3 里有一条断言钉住「每条豁免都指向磁盘上真实
+ * 存在的路径」——路径没了 = 豁免过期 = 红，过期条目不许留。
+ */
+const PERMISSION_SCAN_EXEMPTIONS: readonly { path: string; reason: string }[] = [
+  {
+    path: "main/remote/pwa-assets",
+    // 这些 .ts 只是**装浏览器端代码的字符串容器**：整段 HTML/JS 以模板字符串
+    // 形式发给手机浏览器执行（PWA 前端）。里面的 fetch() 等特征在手机浏览器里
+    // 运行，走的是 remote-server 的 HTTP 面（有自己的鉴权），从不在主进程执行，
+    // 因此不算主进程权限使用。
+    reason: "发给手机浏览器执行的 PWA 前端代码字符串，权限特征在浏览器端运行，不经主进程权限面",
+  },
+];
+
+/** rel（相对 APP_SRC、`/` 分隔）是否落在豁免表里（命中文件本身或其祖先目录）。 */
+function isExemptFromPermissionScan(rel: string): boolean {
+  return PERMISSION_SCAN_EXEMPTIONS.some(
+    (ex) => rel === ex.path || rel.startsWith(`${ex.path}/`)
+  );
+}
+
+/**
+ * 一个能力目录下的全部实现源码（拼成一串），已去注释。
+ *
+ * **递归**遍历全部子目录（ISS-005）：子目录不是盲区，想免检要上
+ * PERMISSION_SCAN_EXEMPTIONS 显式登记。node_modules 跳过；清单自身与单测
+ * 按既有惯例跳过。
+ */
 function capabilitySource(moduleRelative: string): string {
-  const dir = path.join(APP_SRC, path.dirname(moduleRelative));
   const parts: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
-    // 清单自身与单测不是实现：前者里写的是对实现的描述，后者里写的是构造出来
-    // 的场景，两者都会把不存在的调用喂给对账。
-    if (entry.name.endsWith(".capability.ts")) continue;
-    if (entry.name.endsWith(".test.ts") || entry.name.endsWith(".spec.ts")) continue;
-    parts.push(stripComments(fs.readFileSync(path.join(dir, entry.name), "utf8")));
-  }
+  const walk = (relDir: string): void => {
+    for (const entry of fs.readdirSync(path.join(APP_SRC, relDir), { withFileTypes: true })) {
+      const rel = `${relDir}/${entry.name}`;
+      if (isExemptFromPermissionScan(rel)) continue;
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules") continue;
+        walk(rel);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".ts")) continue;
+      // 清单自身与单测不是实现：前者里写的是对实现的描述，后者里写的是构造出来
+      // 的场景，两者都会把不存在的调用喂给对账。
+      if (entry.name.endsWith(".capability.ts")) continue;
+      if (entry.name.endsWith(".test.ts") || entry.name.endsWith(".spec.ts")) continue;
+      parts.push(stripComments(fs.readFileSync(path.join(APP_SRC, rel), "utf8")));
+    }
+  };
+  walk(path.dirname(moduleRelative));
   return parts.join("\n");
 }
 
@@ -228,6 +277,15 @@ describe("drift 2：清单声明的 UI 贡献 == 实际存在且被挂载的组�
 });
 
 describe("drift 3：清单声明的权限 == 实际发起的请求（双向）", () => {
+  it("豁免表每条都指向真实存在的路径且带非空理由（路径没了 = 豁免过期 = 红）", () => {
+    // 豁免表自己也不能恒真：指向已删除路径的豁免什么都豁免不了，却会在
+    // 同名路径将来复活时静默生效。过期条目必须删。
+    for (const ex of PERMISSION_SCAN_EXEMPTIONS) {
+      expect([ex.path, fs.existsSync(path.join(APP_SRC, ex.path))]).toEqual([ex.path, true]);
+      expect([ex.path, ex.reason.trim().length > 0]).toEqual([ex.path, true]);
+    }
+  });
+
   it("声明了的权限，源码里必须真的用到", () => {
     for (const manifest of BUILT_IN_CAPABILITIES) {
       const source = capabilitySource(manifest.exposure.module);
