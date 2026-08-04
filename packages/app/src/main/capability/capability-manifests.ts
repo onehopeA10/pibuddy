@@ -23,6 +23,7 @@ import { gitCapability } from "./manifests/git.manifest.js";
 import { terminalCapability } from "./manifests/terminal.manifest.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
+import { officeSkillsCapability } from "./manifests/office-skills.manifest.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
 import { tasksCapability } from "./manifests/tasks.manifest.js";
 import { workflowCapability } from "./manifests/workflow.manifest.js";
@@ -55,6 +56,10 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // 可视化工作流（common tier，可关闭）。排在末尾——它调用后台池（内核）触发
   // Agent 节点，不依赖任何其它可选能力，装配顺序上无前置。
   workflowCapability,
+  // 预置办公技能包（common tier，第一个内容型能力包，REQ-0001 R2）。真正的
+  // 载荷是 piResources.skills 的三个技能目录（R4 启停时物化 / 收回）；它不
+  // 依赖任何其它可选能力，装配顺序上无前置。
+  officeSkillsCapability,
   // 第一个 connector tier 能力包。排在最后——它不被任何 common 能力依赖，
   // 且默认进「通用办公」与「编码」两个 Profile（连接器是可组合的可选项）。
   connectorWebhookCapability,
@@ -99,6 +104,9 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.child-agent",
       // 可视化工作流：通用能力，默认进「通用办公」，可随时关掉。
       "common.workflow",
+      // 预置办公技能包：R2 的三个办公技能默认对办公用户开箱即用（启用后
+      // 首次启动对账即物化到 ~/.pi/agent/skills/），可随时关掉。
+      "common.office-skills",
       // 第一个 connector tier 能力包。连接器是可组合的可选项（ADR-0002：
       // 「通用文档 + 财务分析 + 飞书连接器」），默认进「通用办公」，可随时关掉。
       "connector.webhook",
@@ -134,6 +142,9 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.tasks",
       "common.child-agent",
       "common.workflow",
+      // 办公技能包在「编码」下也保留：写代码的人同样要整理文件、转文档；
+      // 且两个 Profile 同带它，切 Profile 不会让已物化的技能来回装卸。
+      "common.office-skills",
       "connector.webhook",
       "connector.feishu",
       "connector.slack",

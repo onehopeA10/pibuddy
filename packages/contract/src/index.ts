@@ -28,6 +28,7 @@ export * from "./tasks.js";
 export * from "./connector.js";
 export * from "./connector-channels.js";
 export * from "./workflow.js";
+export * from "./office-skills.js";
 export * from "./terminal.js";
 export * from "./remote.js";
 export * from "./ipc-contract.js";

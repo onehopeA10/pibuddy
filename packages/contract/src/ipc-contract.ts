@@ -66,6 +66,7 @@ import { previewContractShard } from "./preview.js";
 import { sessionTreeContractShard } from "./session-tree.js";
 import { tasksContractShard } from "./tasks.js";
 import { terminalContractShard, terminalEventPayloadSchema } from "./terminal.js";
+import { officeSkillsContractShard } from "./office-skills.js";
 import { workflowContractShard, workflowRunSnapshotSchema } from "./workflow.js";
 import { remoteContractShard } from "./remote.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
@@ -808,6 +809,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   workflowContractShard,
   terminalContractShard,
   remoteContractShard,
+  officeSkillsContractShard,
 ];
 
 /**
