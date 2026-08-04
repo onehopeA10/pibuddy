@@ -17,7 +17,15 @@ import type {
   GitActionResult,
   GitBranchListResult,
   GitCommitResult,
+  GitDiffHunksResult,
+  GitLogResult,
+  GitNetworkResult,
+  GitShowResult,
+  GitStashListResult,
   GitStatusResult,
+  GitWorktreeCompareResult,
+  GitWorktreeListResult,
+  GitWorktreeOpenResult,
 } from "@pibuddy/contract";
 import { invoke } from "./bridge.js";
 
@@ -57,4 +65,77 @@ export const git = {
   /** 切换分支。工作树有冲突时 git 自己会拒绝，如实返回原因。 */
   branchSwitch: (workspaceId: string, name: string) =>
     invoke<GitActionResult>(CHANNELS.gitBranchSwitch, { workspaceId, name }),
+
+  // ---- v2：网络（凭据由 git 子进程经 credential helper 处理，PiBuddy 不经手 token） ----
+  /** fetch。remote 省略走 git 默认。 */
+  fetch: (workspaceId: string, remote: string | null = null) =>
+    invoke<GitNetworkResult>(CHANNELS.gitFetch, { workspaceId, remote }),
+  /** pull（fetch + 合并）。 */
+  pull: (workspaceId: string, remote: string | null = null, branch: string | null = null) =>
+    invoke<GitNetworkResult>(CHANNELS.gitPull, { workspaceId, remote, branch }),
+  /** push（普通推送，非 force）。setUpstream=true 时带 -u。 */
+  push: (
+    workspaceId: string,
+    remote: string | null = null,
+    branch: string | null = null,
+    setUpstream = false
+  ) => invoke<GitNetworkResult>(CHANNELS.gitPush, { workspaceId, remote, branch, setUpstream }),
+
+  // ---- v2：危险操作（除 process.git 外，主进程再走一次原生二次确认） ----
+  /** force push（--force-with-lease）。主进程弹原生二次确认，列出精确范围。 */
+  forcePush: (workspaceId: string, remote: string, branch: string) =>
+    invoke<GitNetworkResult>(CHANNELS.gitForcePush, { workspaceId, remote, branch }),
+  /** reset --hard 到某 ref。主进程弹原生二次确认。 */
+  resetHard: (workspaceId: string, ref: string) =>
+    invoke<GitActionResult>(CHANNELS.gitResetHard, { workspaceId, ref }),
+  /** 强制删除分支（-D）。主进程弹原生二次确认。 */
+  branchDelete: (workspaceId: string, name: string) =>
+    invoke<GitActionResult>(CHANNELS.gitBranchDelete, { workspaceId, name }),
+
+  // ---- v2：stash ----
+  stashSave: (
+    workspaceId: string,
+    message: string | null = null,
+    includeUntracked = false
+  ) => invoke<GitActionResult>(CHANNELS.gitStashSave, { workspaceId, message, includeUntracked }),
+  stashList: (workspaceId: string) =>
+    invoke<GitStashListResult>(CHANNELS.gitStashList, { workspaceId }),
+  stashPop: (workspaceId: string, index: number) =>
+    invoke<GitActionResult>(CHANNELS.gitStashPop, { workspaceId, index }),
+  stashDrop: (workspaceId: string, index: number) =>
+    invoke<GitActionResult>(CHANNELS.gitStashDrop, { workspaceId, index }),
+
+  // ---- v2：history ----
+  log: (
+    workspaceId: string,
+    relativePath: string | null = null,
+    limit = 50,
+    skip = 0
+  ) => invoke<GitLogResult>(CHANNELS.gitLog, { workspaceId, relativePath, limit, skip }),
+  show: (workspaceId: string, ref: string) =>
+    invoke<GitShowResult>(CHANNELS.gitShow, { workspaceId, ref }),
+
+  // ---- v2：worktree（不透明 id，路径不外发） ----
+  worktreeCreate: (workspaceId: string, name: string, branch: string, newBranch = false) =>
+    invoke<GitActionResult>(CHANNELS.gitWorktreeCreate, { workspaceId, name, branch, newBranch }),
+  worktreeList: (workspaceId: string) =>
+    invoke<GitWorktreeListResult>(CHANNELS.gitWorktreeList, { workspaceId }),
+  /** open：把 worktree 注册成工作区，回 workspaceId 供切过去。 */
+  worktreeOpen: (workspaceId: string, id: string) =>
+    invoke<GitWorktreeOpenResult>(CHANNELS.gitWorktreeOpen, { workspaceId, id }),
+  worktreeRename: (workspaceId: string, id: string, newName: string) =>
+    invoke<GitActionResult>(CHANNELS.gitWorktreeRename, { workspaceId, id, newName }),
+  worktreeCompare: (workspaceId: string, id: string, otherId: string | null = null) =>
+    invoke<GitWorktreeCompareResult>(CHANNELS.gitWorktreeCompare, { workspaceId, id, otherId }),
+  /** remove：默认脏检查，脏则拒绝；force=true 时强制删。 */
+  worktreeRemove: (workspaceId: string, id: string, force = false) =>
+    invoke<GitActionResult>(CHANNELS.gitWorktreeRemove, { workspaceId, id, force }),
+
+  // ---- v2：hunk 级 stage ----
+  diffHunks: (workspaceId: string, relativePath: string, staged = false) =>
+    invoke<GitDiffHunksResult>(CHANNELS.gitDiffHunks, { workspaceId, relativePath, staged }),
+  stageHunk: (workspaceId: string, relativePath: string, hunkIndex: number) =>
+    invoke<GitActionResult>(CHANNELS.gitStageHunk, { workspaceId, relativePath, hunkIndex }),
+  unstageHunk: (workspaceId: string, relativePath: string, hunkIndex: number) =>
+    invoke<GitActionResult>(CHANNELS.gitUnstageHunk, { workspaceId, relativePath, hunkIndex }),
 };

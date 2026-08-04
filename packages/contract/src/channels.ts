@@ -365,6 +365,46 @@ export const CHANNELS = {
   gitBranchList: "git:branch-list",
   gitBranchCreate: "git:branch-create",
   gitBranchSwitch: "git:branch-switch",
+  // ---- Git 补完整（coding.git v2 / GIT-101·102 剩余，21 条） ----
+  //
+  // v1 刻意把网络类与危险类 deferred（见 FEAT-git.md §7）。本批补上，纪律不变：
+  // 一切仍走 main/git 的 runGit（execFile + shell:false + 只传 argv），渲染进程
+  // 拿到的仍只有不透明 workspaceId + 已校验的 ref / 相对路径 / 不透明 worktree id。
+  //
+  // 网络类（fetch/pull/push）：git 子进程自己经 credential helper / SSH 处理凭据，
+  // GIT_TERMINAL_PROMPT=0 让缺凭据立刻失败而非挂起，token 既不进 argv 也不进日志。
+  gitFetch: "git:fetch",
+  gitPull: "git:pull",
+  gitPush: "git:push",
+  // 危险类（force push / reset --hard / branch -D）：会丢用户提交或历史，除
+  // process.git 外，handler 内再走一次**主进程原生二次确认**，确认框逐字列出精确
+  // 范围（哪个 remote/branch、丢到哪个 ref），参照 SEC-003 的 allow-once 语义
+  // （每次现确认、用后即焚，不持久授权）。
+  gitForcePush: "git:force-push",
+  gitResetHard: "git:reset-hard",
+  gitBranchDelete: "git:branch-delete",
+  // stash：save/list/pop/drop。
+  gitStashSave: "git:stash-save",
+  gitStashList: "git:stash-list",
+  gitStashPop: "git:stash-pop",
+  gitStashDrop: "git:stash-drop",
+  // history：log（提交列表 / 文件历史）+ show（单个提交详情 + 改动文件）。
+  gitLog: "git:log",
+  gitShow: "git:show",
+  // worktree：create/list/open/rename/compare/remove。worktree 用不透明 id
+  // （sha256(worktreePath)）标识，路径只活在主进程；remove 前检查 dirty /
+  // untracked / unmerged，默认不 force。
+  gitWorktreeCreate: "git:worktree-create",
+  gitWorktreeList: "git:worktree-list",
+  gitWorktreeOpen: "git:worktree-open",
+  gitWorktreeRename: "git:worktree-rename",
+  gitWorktreeCompare: "git:worktree-compare",
+  gitWorktreeRemove: "git:worktree-remove",
+  // hunk 级 stage：v1 是文件级 stage + hunk 级 diff view；这里补逐 hunk 暂存
+  // （git apply --cached 造补丁）与其逆操作。
+  gitDiffHunks: "git:diff-hunks",
+  gitStageHunk: "git:stage-hunk",
+  gitUnstageHunk: "git:unstage-hunk",
   // ---- 持久定时任务（Durable Tasks，能力包 common.tasks，恰 11 条） ----
   //
   // 全部以不透明 workspaceId + taskId / runId 为入参：任务按 workspaceId 分区
