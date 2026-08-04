@@ -31,6 +31,31 @@ const NATIVE_SCRIPT_RE = /node-gyp|prebuild-install|node-pre-gyp|cmake-js|neon\b
 const INSTALL_HOOKS = ["preinstall", "install", "postinstall"];
 
 /**
+ * 原生模块白名单（ADR-0002 方案 B）。
+ *
+ * 这道闸的默认立场仍是「能力包必须纯 JS」——它保护的是「装卸无需编译、
+ * 不锁 ABI、跨平台无差别」这条承诺。白名单是**显式的破例**,不是把闸门
+ * 关掉:只有列在这里、且逐条写明理由的包才放行,其余照旧拦。
+ *
+ * 放行的硬前提(每个候选都要满足,否则不该进白名单):
+ *   1. 用 **N-API**(node-addon-api),而非 nan —— N-API 二进制 ABI 跨
+ *      Node/Electron 版本稳定,同一个 .node 直接能用,不需要为 Electron
+ *      rebuild,因此 `npmRebuild: false` 不必动、pi runtime 布局不受扰动。
+ *   2. 自带**多平台 prebuilds**,`npm install` 自动就位,不在用户机器上编译。
+ *   3. 打包时其 .node/.dll/.exe 已由 electron-builder.yml 的 asarUnpack 外置
+ *      (prebuilt 二进制不能从 asar 虚拟路径执行)。
+ *
+ * 每加一个都要在 review 里能回答「它满足上面三条吗、为什么非它不可」。
+ */
+const NATIVE_ALLOWLIST = new Set([
+  // 终端能力包(coding.terminal)。node-pty@1.1.0 用 node-addon-api@7,
+  // 自带 win32-x64/arm64 + darwin-x64/arm64 prebuilds,实测我们的
+  // Electron 43.2.0 直接 require + spawn 成功、无需 rebuild。
+  // 参考实现 hermes-studio / PiDeck-maestro 同样在 npmRebuild:false 下用它。
+  "node-pty",
+]);
+
+/**
  * `dependencies` 才算数，`devDependencies` 不算 —— 后者不进产物。
  * electron-builder 自己就依赖一堆带二进制的工具，把它算进来这个闸门永远红。
  */
@@ -77,6 +102,21 @@ export function scanDependencyClosure() {
     const name = queue.shift();
     if (seen.has(name)) continue;
     seen.add(name);
+
+    // 显式破例:白名单里的原生包不检测原生特征,但**仍继续遍历它的依赖**——
+    // 破例只覆盖这个包自己,不覆盖它意外拖进来的其它原生模块。
+    if (NATIVE_ALLOWLIST.has(name)) {
+      const wl = resolvePackageDir(name);
+      if (wl) {
+        try {
+          const wlMeta = JSON.parse(fs.readFileSync(path.join(wl, "package.json"), "utf8"));
+          for (const child of Object.keys(wlMeta.dependencies ?? {})) queue.push(child);
+        } catch {
+          /* 读不到就不展开,不影响主流程 */
+        }
+      }
+      continue;
+    }
 
     const dir = resolvePackageDir(name);
     if (!dir) continue; // 未安装（可选依赖 / 平台不匹配）——不是本闸门要管的事
