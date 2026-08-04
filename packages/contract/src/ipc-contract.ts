@@ -24,6 +24,7 @@ import {
 import {
   defineContractShard,
   sealChannelContracts,
+  voidRequestSchema,
   type ChannelContract,
   type ContractShard,
 } from "./channel-contract.js";
@@ -362,8 +363,9 @@ export const extensionUiResponseSchema = z.object({
 /** 只带一个能力凭证的通道（读附件 / 打开 / 定位）。 */
 export const tokenRequestSchema = z.object({ token: z.string().min(1) });
 
-/** 无参通道的入参 schema。 */
-export const voidRequestSchema = z.void();
+// 无参通道的入参 schema（voidRequestSchema）已移居 channel-contract.ts：
+// 各契约分片文件不能反向 import 本文件（会成环），而注册期的同一性核对
+// （ISS-001）要求全仓只有这一个实例。此处经 index.ts 的 `export *` 继续对外。
 
 /** 只带工作区不透明 id 的入参（会话枚举）。 */
 export const workspaceIdRequestSchema = z.object({

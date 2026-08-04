@@ -33,17 +33,28 @@
  * artifacts.ts / preview.ts…）一旦想自带分片就会与 ipc-contract.ts 成环。
  * 本文件只依赖 zod 的类型与 channels.ts。
  */
-import type { z } from "zod";
+import { z } from "zod";
 
 import { CHANNELS, type InvokeChannel } from "./channels.js";
 
 /** 一条 invoke 通道的请求 / 返回 schema。 */
 export interface ChannelContract {
-  /** invoke 的入参 schema；无参通道为 z.void() */
+  /** invoke 的入参 schema；无参通道为 voidRequestSchema */
   request: z.ZodType;
   /** invoke 的返回 schema */
   response: z.ZodType;
 }
+
+/**
+ * 无参通道的入参 schema。**全仓唯一实例。**
+ *
+ * ipc-guard 在注册期以**对象同一性**核对「调用点传的 schema 就是契约表里的
+ * 那一个」（ISS-001）。任何分片自己再 `z.void()` 一份，结构上与它无异，但
+ * 同一性核对会在启动时抛 IPC_SCHEMA_MISMATCH —— 两份实例正是漂移的起点。
+ * 因此它住在本文件（依赖图的叶端，各分片文件都能引），分片与 handler 一律
+ * import 同一个。
+ */
+export const voidRequestSchema = z.void();
 
 /**
  * 一个契约分片：一个命名的所有者 + 它声明的那几条通道。

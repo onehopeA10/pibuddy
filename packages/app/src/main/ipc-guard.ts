@@ -26,6 +26,7 @@
  */
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import {
+  CHANNEL_CONTRACTS,
   isKnownChannel,
   type InvokeChannel,
   type PermissionDecision,
@@ -303,12 +304,31 @@ export function __resetRegisteredChannels(): void {
  *
  * 四道闸的顺序在函数体内写死，handler 拿到的 payload 已经是校验过的类型，
  * 因此各 handler 文件里不会、也不需要再出现 assertMainFrame。
+ *
+ * ## 注册期契约核对（ISS-001）
+ *
+ * 闸 2 用的 schema 由调用点传入，但**必须就是** CHANNEL_CONTRACTS 里那一个
+ * 对象（同一性，不是结构等价）：结构相同的两份 schema 今天等价，明天有人
+ * 只改其中一份，gate2 实际校验的就悄悄偏离了契约表 —— 而契约表才是
+ * preload / 渲染层 / 策略面板共同引用的唯一真相源。同一性在注册期（也就是
+ * 应用启动 / 单测装配期）核对，不一致当场抛错，不存在「默默放过」的状态。
  */
 export function registerHandler<Req, Res>(
   channel: InvokeChannel,
   schema: RuntimeSchema<Req>,
   handler: GuardedHandler<Req, Res>
 ): void {
+  const contract = (
+    CHANNEL_CONTRACTS as Partial<Record<InvokeChannel, { request: unknown }>>
+  )[channel];
+  if (!contract) {
+    throw new Error(`IPC_CONTRACT_MISSING: ${channel} 不在 CHANNEL_CONTRACTS 里`);
+  }
+  if (contract.request !== (schema as unknown)) {
+    throw new Error(
+      `IPC_SCHEMA_MISMATCH: ${channel} 注册传入的 schema 不是 CHANNEL_CONTRACTS 里的那一个实例`
+    );
+  }
   registered.add(channel);
   ipcMain.handle(channel, async (event, raw: unknown) => {
     try {

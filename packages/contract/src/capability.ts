@@ -31,7 +31,7 @@
  */
 import { z } from "zod";
 
-import { defineContractShard } from "./channel-contract.js";
+import { defineContractShard, voidRequestSchema } from "./channel-contract.js";
 import { CHANNELS, PUSH_CHANNELS } from "./channels.js";
 
 /** manifest 结构自身的代际。改字段语义要 +1 并在宿主侧补兼容分支。 */
@@ -568,7 +568,7 @@ export type CapabilityToggleRequest = z.infer<typeof capabilityToggleRequestSche
 // 打开的入口，而那种状态在界面上只表现为一个再也点不开的开关。
 export const capabilitiesContractShard = defineContractShard("kernel-capabilities", {
   [CHANNELS.capabilitiesDescribe]: {
-    request: z.void(),
+    request: voidRequestSchema,
     response: capabilityStateSchema,
   },
   [CHANNELS.capabilitiesSetProfile]: {

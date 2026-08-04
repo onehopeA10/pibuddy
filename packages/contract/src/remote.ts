@@ -26,7 +26,7 @@
  */
 import { z } from "zod";
 
-import { defineContractShard } from "./channel-contract.js";
+import { defineContractShard, voidRequestSchema } from "./channel-contract.js";
 import { CHANNELS } from "./channels.js";
 
 /** 远程访问能力 id（四层边界表第四行，tier=connector）。 */
@@ -211,7 +211,7 @@ export type RemoteSetDeviceScopeRequest = z.infer<typeof remoteSetDeviceScopeReq
  */
 export const remoteContractShard = defineContractShard("remote", {
   [CHANNELS.remoteDescribe]: {
-    request: z.void(),
+    request: voidRequestSchema,
     response: remoteStateSchema,
   },
   [CHANNELS.remoteSetEnabled]: {
@@ -223,11 +223,11 @@ export const remoteContractShard = defineContractShard("remote", {
     response: remoteStateSchema,
   },
   [CHANNELS.remoteCreatePairing]: {
-    request: z.void(),
+    request: voidRequestSchema,
     response: remoteStateSchema,
   },
   [CHANNELS.remoteCancelPairing]: {
-    request: z.void(),
+    request: voidRequestSchema,
     response: remoteStateSchema,
   },
   [CHANNELS.remoteRevokeDevice]: {
