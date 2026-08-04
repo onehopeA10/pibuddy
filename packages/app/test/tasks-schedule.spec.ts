@@ -62,6 +62,43 @@ describe("DST 春季前跳（gap）：不存在的墙钟时间滚到 gap 之后"
     const p = zonedParts(next!, NY);
     expect([p.hour, p.minute]).toEqual([2, 30]);
   });
+
+  it("cron 30 2 * * * 在 gap 日与 daily 同语义：补偿到 03:30，不静默跳过整天", () => {
+    // ISS-003：旧实现按 epoch 逐分钟扫，gap 里的墙钟分钟在任何 epoch 投影里
+    // 都不出现，这天的运行被静默丢掉（下一次直接是 3/9 02:30）。
+    const from = Date.UTC(2026, 2, 8, 0, 0, 0);
+    const next = computeNextRun({ kind: "cron", expression: "30 2 * * *" }, NY, from);
+    expect(next).not.toBeNull();
+    const p = zonedParts(next!, NY);
+    expect([p.day, p.hour, p.minute]).toEqual([8, 3, 30]);
+    // 与 daily 02:30 落在同一 epoch——两种计划在 gap 日不再分叉。
+    const daily = computeNextRun({ kind: "daily", time: "02:30" }, NY, from);
+    expect(next).toBe(daily);
+  });
+
+  it("cron gap 补偿不早跑也不双跑：*/30 2-3 命中收敛到真实 03:00，一次", () => {
+    // 墙钟 2:00（gap，补偿=03:00）与真实 03:00 落到同一 epoch，只算一次；
+    // 下一次是 03:30（真实），而不是把 2:30 的补偿(03:30)再叠一遍。
+    const from = Date.UTC(2026, 2, 8, 0, 0, 0);
+    const expr = { kind: "cron" as const, expression: "*/30 2-3 * * *" };
+    const first = computeNextRun(expr, NY, from);
+    const p1 = zonedParts(first!, NY);
+    expect([p1.day, p1.hour, p1.minute]).toEqual([8, 3, 0]);
+    const second = computeNextRun(expr, NY, first!);
+    const p2 = zonedParts(second!, NY);
+    expect([p2.day, p2.hour, p2.minute]).toEqual([8, 3, 30]);
+    const third = computeNextRun(expr, NY, second!);
+    const p3 = zonedParts(third!, NY);
+    // 之后回到常规节奏：4:00 不在 2-3 时段，次日 02:00。
+    expect([p3.day, p3.hour, p3.minute]).toEqual([9, 2, 0]);
+  });
+
+  it("对拍：gap 之外 cron 30 2 * * * 正常落在本地 02:30", () => {
+    const from = Date.UTC(2026, 2, 9, 0, 0, 0);
+    const next = computeNextRun({ kind: "cron", expression: "30 2 * * *" }, NY, from);
+    const p = zonedParts(next!, NY);
+    expect([p.hour, p.minute]).toEqual([2, 30]);
+  });
 });
 
 describe("DST 秋季回拨（overlap）：重复的墙钟时间只取较早一次", () => {

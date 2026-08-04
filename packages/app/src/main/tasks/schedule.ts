@@ -209,48 +209,101 @@ function nextDailyOccurrence(
   return null;
 }
 
+/** 墙钟分钟（秒恒为 0，cron 的精度）。 */
+interface WallMinute {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+}
+
+/** 墙钟分钟 +1，进位走纯日历运算（与时区无关）。 */
+function addWallMinute(w: WallMinute): WallMinute {
+  if (w.minute < 59) return { ...w, minute: w.minute + 1 };
+  if (w.hour < 23) return { ...w, hour: w.hour + 1, minute: 0 };
+  return { ...addCalendarDays(w, 1), hour: 0, minute: 0 };
+}
+
+/** 同一时区内比较墙钟先后用的伪 epoch（仅作全序键，不是真实时刻）。 */
+function wallKey(w: WallMinute): number {
+  return Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute);
+}
+
 /**
- * cron 的下一次：从 fromMs 起按分钟推进，命中第一个满足表达式的墙钟分钟。
+ * cron 的下一次：在**墙钟空间**逐分钟推进（与 daily 的逐日墙钟扫描同构），
+ * 命中经 `wallToEpoch` 归一成 epoch——gap / overlap 策略因此与 daily 共用
+ * 同一处实现，语义不再分叉：
+ *
+ *   - gap（春季前跳）里的墙钟分钟（`30 2 * * *` 的 2:30 在切换日不存在）
+ *     不再被静默跳过，而是与 daily 一样补偿到「原墙钟 + 跳幅」（3:30）。
+ *     补偿时刻不立即返回：gap 结束到补偿时刻之间的**真实**命中分钟（若有）
+ *     更早，取两者中 epoch 较小者；同一时刻只算一次。
+ *   - overlap（秋季回拨）取较早一次；fromMs 已过较早一次时，同一墙钟槽位
+ *     不在回拨后的第二遍重跑（`epoch > fromMs` 判到的是归一后的较早时刻）。
  *
  * 不做「逐分钟 +1 一直扫到匹配」（Feb 30 那种永不匹配的表达式会扫穷）：
  * 先按字段跳（月不符跳到下月 1 号 0 点、日不符跳到次日 0 点、时不符跳到
  * 次时 0 分），把迭代次数压到几百量级；仍设一个安全上限，扫不到就返回 null
- * （表现为「这条任务没有下一次运行」，而不是卡住调度线程）。
+ * （表现为「这条任务没有下一次运行」，而不是卡住调度线程）。墙钟扫描的
+ * 非命中分钟不再需要 Intl 投影（旧的 epoch 扫描每分钟一次 zonedParts），
+ * 只有命中分钟才做时区换算。
  */
 function nextCronOccurrence(fromMs: number, timeZone: string, expr: CronExpr): number | null {
-  // 从 fromMs 的下一整分钟起（cron 精度是分钟；秒恒为 0）。
-  let cursor = fromMs + (60_000 - (fromMs % 60_000)) % 60_000;
-  if (cursor <= fromMs) cursor += 60_000;
+  // 从 fromMs 的墙钟下一分钟起扫。
+  const p0 = zonedParts(fromMs, timeZone);
+  let cur: WallMinute = addWallMinute({
+    year: p0.year,
+    month: p0.month,
+    day: p0.day,
+    hour: p0.hour,
+    minute: p0.minute,
+  });
+  // gap 补偿候选：epoch 为「原墙钟 + 跳幅」，limitKey 是它对应的墙钟——扫过
+  // 这个墙钟还没有更早的真实命中，就收口返回候选。
+  let pending: { epoch: number; limitKey: number } | null = null;
 
   for (let i = 0; i < 200_000; i++) {
-    const p = zonedParts(cursor, timeZone);
-    if (cronMatches(expr, p)) {
-      // 用 wallToEpoch 归一到该墙钟分钟的规范 epoch（DST overlap 时取较早），
-      // 避免回拨区间里同一墙钟分钟被算出两个 epoch。
-      const { epoch } = wallToEpoch({ ...p, second: 0 }, timeZone);
-      if (epoch > fromMs) return epoch;
-      cursor += 60_000;
+    if (pending !== null && wallKey(cur) > pending.limitKey) return pending.epoch;
+    const parts = { ...cur, weekday: weekdayOf(cur) };
+    if (cronMatches(expr, parts)) {
+      const { epoch, exists } = wallToEpoch({ ...cur, second: 0 }, timeZone);
+      if (epoch > fromMs) {
+        if (exists) {
+          // 真实命中。若已有 gap 补偿候选，取更早者（相同时刻自然去重）。
+          return pending !== null && pending.epoch < epoch ? pending.epoch : epoch;
+        }
+        // gap 命中：先记候选，继续扫——gap 之后、补偿时刻之前可能有更早的真实命中。
+        if (pending === null || epoch < pending.epoch) {
+          const lim = zonedParts(epoch, timeZone);
+          pending = { epoch, limitKey: wallKey(lim) };
+        }
+      }
+      cur = addWallMinute(cur);
       continue;
     }
-    // 按字段跳，压缩迭代。
-    if (!expr.months.has(p.month)) {
-      // 跳到下月 1 号 0:00。
-      const next = p.month === 12 ? { year: p.year + 1, month: 1, day: 1 } : { year: p.year, month: p.month + 1, day: 1 };
-      cursor = wallToEpoch({ ...next, hour: 0, minute: 0, second: 0 }, timeZone).epoch;
+    // 按字段跳，压缩迭代（纯日历运算，不触发时区换算）。
+    if (!expr.months.has(cur.month)) {
+      cur =
+        cur.month === 12
+          ? { year: cur.year + 1, month: 1, day: 1, hour: 0, minute: 0 }
+          : { year: cur.year, month: cur.month + 1, day: 1, hour: 0, minute: 0 };
       continue;
     }
-    if (!cronDayMatches(expr, p)) {
-      const nd = addCalendarDays({ year: p.year, month: p.month, day: p.day }, 1);
-      cursor = wallToEpoch({ ...nd, hour: 0, minute: 0, second: 0 }, timeZone).epoch;
+    if (!cronDayMatches(expr, parts)) {
+      cur = { ...addCalendarDays(cur, 1), hour: 0, minute: 0 };
       continue;
     }
-    if (!expr.hours.has(p.hour)) {
-      cursor += 60_000 * (60 - p.minute); // 跳到下一整点
+    if (!expr.hours.has(cur.hour)) {
+      cur =
+        cur.hour < 23
+          ? { ...cur, hour: cur.hour + 1, minute: 0 }
+          : { ...addCalendarDays(cur, 1), hour: 0, minute: 0 };
       continue;
     }
-    cursor += 60_000; // 分钟不符，前进一分钟
+    cur = addWallMinute(cur);
   }
-  return null;
+  return pending?.epoch ?? null;
 }
 
 /**

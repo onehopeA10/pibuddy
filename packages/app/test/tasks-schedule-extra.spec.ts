@@ -62,21 +62,21 @@ describe("weekly 落在春季 gap：不存在的墙钟时间滚到 gap 之后，
   });
 });
 
-describe("cron 落在春季 gap：与 daily/weekly 语义不同——cron 跳过不存在的墙钟分钟", () => {
-  // 记录一处真实的语义分歧（诚实标注，不擅自改 cron gap 行为）：
-  //   - daily / weekly 用 wallToEpoch，gap 时**滚到 gap 之后**（02:30→03:30）；
-  //   - cron 逐「真实墙钟分钟」扫描匹配，而 gap 那一分钟（02:30）根本不存在于
-  //     任何真实 epoch，于是 cron 直接**跳过这一次**，落到下一个真实存在的匹配
-  //     （下周日 02:30 EDT）。这不是 bug，是「cron 匹配的是真实发生过的墙钟分钟」
-  //     这一定义的自然结果——但它与 daily 的 roll-forward 不一致，值得钉住以防
-  //     日后有人无意改动其中一侧。
-  it("cron 30 2 * * 0 在 3/8（gap）→ 跳到下一个存在的周日 02:30（3/15 EDT，06:30 UTC）", () => {
+describe("cron 落在春季 gap：与 daily/weekly 同语义——补偿到「原墙钟 + 跳幅」", () => {
+  // ISS-003 之前这里钉的是一处语义分歧：cron 按真实 epoch 分钟扫描，gap 里的
+  // 墙钟分钟不存在于任何 epoch，于是整天被静默跳过（直接落到下周日）。现在
+  // cron 与 daily/weekly 一样在墙钟空间扫描、经同一个 wallToEpoch 归一，gap
+  // 命中补偿到 gap 之后（02:30→03:30），三种计划不再分叉。
+  it("cron 30 2 * * 0 在 3/8（gap）→ 补偿到当天 03:30 EDT（07:30 UTC），不再静默跳过", () => {
     const schedule: TaskSchedule = { kind: "cron", expression: "30 2 * * 0" };
     const from = Date.UTC(2026, 2, 8, 0, 0, 0);
     const next = computeNextRun(schedule, NY, from);
-    expect(next).toBe(Date.UTC(2026, 2, 15, 6, 30, 0));
+    expect(next).toBe(Date.UTC(2026, 2, 8, 7, 30, 0));
     const p = zonedParts(next!, NY);
-    expect([p.hour, p.minute, p.weekday]).toEqual([2, 30, 0]); // 02:30、周日、真实存在
+    expect([p.hour, p.minute, p.weekday]).toEqual([3, 30, 0]); // 03:30、仍是当周日
+    // 与 weekly 周日 02:30 的 gap 补偿落在同一 epoch——语义统一的直接证据。
+    const weekly = computeNextRun({ kind: "weekly", time: "02:30", weekdays: [0] }, NY, from);
+    expect(next).toBe(weekly);
   });
 });
 
