@@ -1,0 +1,6 @@
+# pi 资源资产:物化到 ~/.pi/agent 的字节必须与提交内容一致(LF)。
+# autocrlf 在 Windows checkout 时转 CRLF 会破坏 frontmatter 判据与真机验证过的状态。
+packages/app/resources/capability-assets/** text eol=lf
+packages/app/resources/prompt-library/** text eol=lf
+# 出题器核心与 extension 拷贝逐字节对账(edu-assets.spec),两侧行尾必须一致
+packages/app/src/main/edu/math-worksheet-core.ts text eol=lf
