@@ -26,5 +26,6 @@ export * from "./preview.js";
 export * from "./artifacts.js";
 export * from "./tasks.js";
 export * from "./connector.js";
+export * from "./workflow.js";
 export * from "./ipc-contract.js";
 export * from "./ports.js";

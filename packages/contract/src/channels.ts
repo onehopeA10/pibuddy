@@ -420,9 +420,33 @@ export const CHANNELS = {
   connectorTest: "connector:test",
   /** Agent 主动推送一条文本到外部平台 */
   connectorSend: "connector:send",
+
+  // ---- 可视化工作流（能力包 common.workflow，恰 8 条） ----
+  //
+  // 可视化工作流是**通用能力**（可关闭）：关掉它单会话对话与其它能力照常，
+  // 只是不能再编排 DAG 工作流。八条通道的入参一律带 workspaceId（数据按工作区
+  // 分区）+ 不透明 definitionId / runId + 可移植 JSON 文本，塞不进任何运行时
+  // 句柄。Agent 节点的真实进程派生走后台会话池（与 child 编排同一套触发机制），
+  // 本组只表达编排意图：列出 / 保存 / 删除 / 导出 / 导入定义、运行 / 停止 / 取历史。
+  /** 列出一个工作区的全部工作流定义。 */
+  workflowList: "workflow:list",
+  /** 新建或更新一个工作流定义（upsert）。 */
+  workflowSave: "workflow:save",
+  /** 删除一个工作流定义。 */
+  workflowDelete: "workflow:delete",
+  /** 导出一个定义为可移植 JSON 文本。 */
+  workflowExport: "workflow:export",
+  /** 从可移植 JSON 导入一个定义（校验后入库）。 */
+  workflowImport: "workflow:import",
+  /** 运行一个定义（再次调用即重跑）。 */
+  workflowRun: "workflow:run",
+  /** 停止一次运行。 */
+  workflowStop: "workflow:stop",
+  /** 取当前活跃运行 + 近期历史快照。 */
+  workflowRuns: "workflow:runs",
 } as const;
 
-/** 主进程单向推送通道（7 个）。 */
+/** 主进程单向推送通道（9 个）。 */
 export const PUSH_CHANNELS = {
   piEvent: "pi:event",
   piUiRequest: "pi:ui-request",
@@ -464,6 +488,14 @@ export const PUSH_CHANNELS = {
    * 不必另写一份序号比较。快照是全量的，晚到的旧快照被序号闸门丢弃。
    */
   childAgentEvent: "child-agent:event",
+  /**
+   * 工作流运行状态变更（common.workflow）。
+   *
+   * 载荷是 `PiEnvelope<WorkflowRunSnapshot>`：与池 / child 快照同一套信封，
+   * 渲染侧复用现成的 sequence（按本通道单调判）+ generation（全局判）丢弃规则
+   * 对齐运行状态，不必另写一份序号比较。快照是全量的，晚到的旧快照被序号闸门丢弃。
+   */
+  workflowEvent: "workflow:event",
 } as const;
 
 export type InvokeChannel = (typeof CHANNELS)[keyof typeof CHANNELS];

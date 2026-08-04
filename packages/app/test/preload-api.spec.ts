@@ -66,6 +66,7 @@ describe("api 聚合对象", () => {
       "stt",
       "tasks",
       "update",
+      "workflow",
       "workspace",
     ]);
   });

@@ -46,6 +46,7 @@ import { childAgent } from "./childAgent.js";
 import { git } from "./git.js";
 import { tasks } from "./tasks.js";
 import { connector } from "./connector.js";
+import { workflow } from "./workflow.js";
 
 export const api = {
   pi,
@@ -84,6 +85,8 @@ export const api = {
   tasks,
   /** Webhook 连接器（connector.webhook）。凭证只进不出，出站逐域名经权限授权 + safeFetch */
   connector,
+  /** 可视化工作流（common.workflow）。DAG 画布 / 运行 / 历史 / 导入导出，Agent 节点走后台池触发 */
+  workflow,
 };
 
 export type PiBuddyApi = typeof api;

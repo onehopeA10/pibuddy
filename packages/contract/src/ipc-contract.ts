@@ -58,6 +58,7 @@ import { mcpContractShard } from "./mcp.js";
 import { previewContractShard } from "./preview.js";
 import { sessionTreeContractShard } from "./session-tree.js";
 import { tasksContractShard } from "./tasks.js";
+import { workflowContractShard, workflowRunSnapshotSchema } from "./workflow.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -787,6 +788,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   gitContractShard,
   tasksContractShard,
   connectorContractShard,
+  workflowContractShard,
 ];
 
 /**
@@ -836,6 +838,9 @@ export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   // child-agent:event 推的是 PiEnvelope<ChildTopologySnapshot>；这里校验的是
   // 信封的 payload 位（整棵拓扑快照）。
   [PUSH_CHANNELS.childAgentEvent]: childTopologySnapshotSchema,
+  // workflow:event 推的是 PiEnvelope<WorkflowRunSnapshot>；这里校验的是信封的
+  // payload 位（整份运行快照）。
+  [PUSH_CHANNELS.workflowEvent]: workflowRunSnapshotSchema,
 };
 
 /** channel 名是否在白名单内。ipc-guard 的第一道闸。 */

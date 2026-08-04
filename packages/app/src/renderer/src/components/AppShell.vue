@@ -27,6 +27,7 @@ import GitPanel from "./GitPanel.vue";
 import TasksPanel from "./TasksPanel.vue";
 import ChildAgentPanel from "./ChildAgentPanel.vue";
 import ConnectorPanel from "./ConnectorPanel.vue";
+import WorkflowPanel from "./WorkflowPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -136,6 +137,9 @@ const childAgentOpen = ref(false);
 // 连接器面板（connector.webhook）的开合。独立成 ref：它是第一个 connector
 // 能力域，与其它面板互不牵连。
 const connectorOpen = ref(false);
+// 可视化工作流面板（common.workflow）的开合。独立成 ref：它是自己一个能力域
+// （DAG 画布 / 运行 / 历史），与其它面板互不牵连。
+const workflowOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -162,6 +166,8 @@ const childAgentEnabled = computed(() => capabilities.isEnabled("common.child-ag
 // connector.webhook 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道
 // 已注册）。默认进「通用办公」与「编码」两个 Profile，「精简」下不出现。
 const connectorEnabled = computed(() => capabilities.isEnabled("connector.webhook"));
+// 可视化工作流的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
+const workflowEnabled = computed(() => capabilities.isEnabled("common.workflow"));
 
 onMounted(() => {
   void store.init();
@@ -355,6 +361,15 @@ function onDrop(): void {
             >
               🔌 连接器
             </n-button>
+            <n-button
+              v-if="workflowEnabled"
+              size="tiny"
+              :type="workflowOpen ? 'primary' : 'default'"
+              quaternary
+              @click="workflowOpen = !workflowOpen"
+            >
+              🧩 工作流
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -372,6 +387,7 @@ function onDrop(): void {
           <GitPanel v-if="gitOpen && gitEnabled" />
           <ChildAgentPanel v-if="childAgentOpen && childAgentEnabled" />
           <ConnectorPanel v-if="connectorOpen && connectorEnabled" />
+          <WorkflowPanel v-if="workflowOpen && workflowEnabled" />
           <InputBar />
         </slot>
       </template>

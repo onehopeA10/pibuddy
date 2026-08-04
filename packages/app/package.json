@@ -26,6 +26,7 @@
     "@codemirror/view": "6.43.7",
     "@pibuddy/contract": "workspace:*",
     "@pibuddy/pi-sdk": "workspace:*",
+    "@vue-flow/core": "^1.48.2",
     "codemirror": "6.0.2",
     "electron-log": "5.4.4",
     "electron-updater": "6.8.9",
