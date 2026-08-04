@@ -1,5 +1,5 @@
 /**
- * 终端能力包的 IPC handler（coding.terminal / PTY-101）——**恰 10 条通道**。
+ * 终端能力包的 IPC handler（coding.terminal / PTY-101 + R5.1 WSL）——**恰 11 条通道**。
  *
  * 全部以不透明 workspaceId + 不透明 tabId + 用户键入的字节为入参：真正 spawn
  * shell 的地方在 pty-manager（node-pty），cwd 是 workspace 的 canonical root
@@ -35,6 +35,7 @@ import { BrowserWindow } from "electron";
 import { registerHandler } from "../ipc-guard.js";
 import { requireWorkspaceRoot } from "../workspace-registry.js";
 import { ptyManager, type TerminalEmit } from "./pty-manager.js";
+import { listWslDistros, wslTerminalProfiles } from "./wsl.js";
 
 /** 本域注册的全部通道。drift test / 单测据它逐条对账。 */
 export const TERMINAL_CHANNELS: InvokeChannel[] = [
@@ -48,6 +49,7 @@ export const TERMINAL_CHANNELS: InvokeChannel[] = [
   CHANNELS.terminalKill,
   CHANNELS.terminalRestart,
   CHANNELS.terminalRename,
+  CHANNELS.terminalWslDistros,
 ];
 
 /** 把 pty-manager 抛上来的一段输出 / 退出，包成 PiEnvelope 广播到所有窗口。 */
@@ -77,8 +79,19 @@ export function registerTerminalIpc(): void {
     tabs: ptyManager.list(payload.workspaceId),
   }));
 
-  registerHandler(CHANNELS.terminalProfiles, terminalWorkspaceRequestSchema, () =>
-    ptyManager.listProfiles()
+  registerHandler(CHANNELS.terminalProfiles, terminalWorkspaceRequestSchema, async () => {
+    // 本机 shell（同步）+ WSL 发行版（懒枚举 + 缓存，R5.1）。非 Windows / 无
+    // WSL 时后者恒为空数组，返回形状与原先完全一致。默认 id 仍取本机第一个
+    // shell：进 WSL 是显式选择，不做隐式默认。
+    const base = ptyManager.listProfiles();
+    const wsl = await wslTerminalProfiles();
+    return { profiles: [...base.profiles, ...wsl], defaultId: base.defaultId };
+  });
+
+  // WSL 发行版查询（R5.1）。懒检测：只有这条通道 / profiles 被调用时才 spawn
+  // `wsl.exe -l -v`；无 WSL 机器返回 {available:false} 而不抛错。
+  registerHandler(CHANNELS.terminalWslDistros, terminalWorkspaceRequestSchema, () =>
+    listWslDistros()
   );
 
   registerHandler(CHANNELS.terminalOpen, terminalOpenRequestSchema, (payload) => {
