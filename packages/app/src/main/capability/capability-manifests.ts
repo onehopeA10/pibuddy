@@ -16,6 +16,9 @@ import { previewCapability } from "../preview/preview.capability.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import { childAgentCapability } from "./manifests/child-agent.manifest.js";
 import { connectorWebhookCapability } from "./manifests/connector-webhook.manifest.js";
+import { connectorFeishuCapability } from "./manifests/connector-feishu.manifest.js";
+import { connectorSlackCapability } from "./manifests/connector-slack.manifest.js";
+import { connectorTelegramCapability } from "./manifests/connector-telegram.manifest.js";
 import { gitCapability } from "./manifests/git.manifest.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
@@ -46,6 +49,11 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // 第一个 connector tier 能力包。排在最后——它不被任何 common 能力依赖，
   // 且默认进「通用办公」与「编码」两个 Profile（连接器是可组合的可选项）。
   connectorWebhookCapability,
+  // 三个真实渠道适配器，各自 dependencies connector.webhook（基座）。排在基座之后：
+  // 被依赖者在前，resolve() 的输出因此仍是一个可直接照着 activate 的顺序。
+  connectorFeishuCapability,
+  connectorSlackCapability,
+  connectorTelegramCapability,
 ];
 
 /**
@@ -79,6 +87,10 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       // 第一个 connector tier 能力包。连接器是可组合的可选项（ADR-0002：
       // 「通用文档 + 财务分析 + 飞书连接器」），默认进「通用办公」，可随时关掉。
       "connector.webhook",
+      // 三个真实渠道适配器（各自依赖 connector.webhook，故须与基座同在本组）。
+      "connector.feishu",
+      "connector.slack",
+      "connector.telegram",
     ],
   },
   {
@@ -101,6 +113,9 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.tasks",
       "common.child-agent",
       "connector.webhook",
+      "connector.feishu",
+      "connector.slack",
+      "connector.telegram",
     ],
   },
   {

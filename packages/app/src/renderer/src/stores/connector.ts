@@ -12,9 +12,17 @@
  */
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
-import type { ConnectorResult, ConnectorView } from "@contract";
+import type { ConnectorKind, ConnectorResult, ConnectorView } from "@contract";
 
 import { usePermissionStore } from "./permission";
+
+/** kind → 出站授权所属的 capabilityId（与主进程 channel-delivery 的判定一致）。 */
+const CAPABILITY_OF_KIND: Record<ConnectorKind, string> = {
+  webhook: "connector.webhook",
+  feishu: "connector.feishu",
+  slack: "connector.slack",
+  telegram: "connector.telegram",
+};
 
 export const useConnectorStore = defineStore("connector", () => {
   const connectors = shallowRef<ConnectorView[]>([]);
@@ -52,20 +60,23 @@ export const useConnectorStore = defineStore("connector", () => {
 
   const create = (displayName: string, url: string) =>
     run(() => window.piBuddy.connector.create(displayName, url));
+  /** 新建一个指定渠道的连接器（域名上界按渠道判，在 create 这一步就拒未授权域名）。 */
+  const createChannel = (kind: ConnectorKind, displayName: string, url: string) =>
+    run(() => window.piBuddy.connector.create(displayName, url, kind));
   const update = (id: string, patch: { displayName?: string; url?: string }) =>
     run(() => window.piBuddy.connector.update(id, patch));
   const remove = (id: string) => run(() => window.piBuddy.connector.remove(id));
   const setEnabled = (id: string, enabled: boolean) =>
     run(() => window.piBuddy.connector.setEnabled(id, enabled));
 
-  /** 出站结果收口：被权限挡下则唤起裁决弹窗，其余只记结果。 */
+  /** 出站结果收口：被权限挡下则唤起裁决弹窗（capabilityId 按连接器 kind 判），其余只记结果。 */
   function handleResult(connectorId: string, result: ConnectorResult): ConnectorResult {
     lastResult.value = result;
     if (result.errorCode === "permission") {
       const c = connectors.value.find((x) => x.id === connectorId);
       if (c) {
         usePermissionStore().request({
-          capabilityId: "connector.webhook",
+          capabilityId: CAPABILITY_OF_KIND[c.kind],
           permission: `network:${c.domain}`,
           resource: null,
         });
@@ -99,6 +110,24 @@ export const useConnectorStore = defineStore("connector", () => {
     }
   }
 
+  /** 经指定渠道的平台通道推送（消息体按平台拼、授权按平台 capabilityId 判）。 */
+  async function sendVia(
+    kind: ConnectorKind,
+    connectorId: string,
+    workspaceId: string,
+    text: string
+  ): Promise<ConnectorResult> {
+    busy.value = true;
+    try {
+      return handleResult(
+        connectorId,
+        await window.piBuddy.connector.sendVia(kind, connectorId, workspaceId, text)
+      );
+    } finally {
+      busy.value = false;
+    }
+  }
+
   return {
     connectors,
     busy,
@@ -107,10 +136,12 @@ export const useConnectorStore = defineStore("connector", () => {
     hasAny,
     refresh,
     create,
+    createChannel,
     update,
     remove,
     setEnabled,
     test,
     send,
+    sendVia,
   };
 });

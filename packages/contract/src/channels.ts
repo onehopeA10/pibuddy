@@ -460,6 +460,21 @@ export const CHANNELS = {
   connectorTest: "connector:test",
   /** Agent 主动推送一条文本到外部平台 */
   connectorSend: "connector:send",
+  // ---- 真实渠道适配器（connector.feishu / connector.slack / connector.telegram） ----
+  //
+  // 三个渠道各自在通用 webhook 基座之上加一层平台适配：出站按平台文档拼消息体
+  // （飞书 msg_type/content、Slack text、Telegram chat_id+text），入站按平台事件
+  // 结构解析并**防回环**（飞书 sender_type、Slack bot_id、Telegram from.is_bot）。
+  // 每个渠道恰两条窄通道：`<平台>:send`（真实出站，穿出站三关）与
+  // `<平台>:receive`（把一条平台入站事件喂给共享入站守卫，做去重/防回环/限速/
+  // 尺寸判定，或应答平台的 url_verification 握手）。管理（增删改启停）复用上面
+  // 的 connector:* 七条通道（kind 决定用哪个适配器），不再各自重造一套 CRUD。
+  feishuSend: "feishu:send",
+  feishuReceive: "feishu:receive",
+  slackSend: "slack:send",
+  slackReceive: "slack:receive",
+  telegramSend: "telegram:send",
+  telegramReceive: "telegram:receive",
 } as const;
 
 /** 主进程单向推送通道（7 个）。 */

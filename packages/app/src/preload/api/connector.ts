@@ -11,17 +11,38 @@
  * CHANNELS 只能从 `@pibuddy/contract/channels` 引（那个子入口不依赖 zod），
  * 理由见 bridge.ts 的注释。
  */
-import { CHANNELS } from "@pibuddy/contract/channels";
-import type { ConnectorResult, ConnectorView } from "@pibuddy/contract";
+import { CHANNELS, type InvokeChannel } from "@pibuddy/contract/channels";
+import type {
+  ConnectorInboundResult,
+  ConnectorKind,
+  ConnectorResult,
+  ConnectorView,
+} from "@pibuddy/contract";
 import { invoke } from "./bridge.js";
+
+/** kind → 该渠道的 send / receive 通道名（基座 webhook 无平台通道，走 connector:send）。 */
+const CHANNEL_SEND: Record<ConnectorKind, InvokeChannel> = {
+  webhook: CHANNELS.connectorSend,
+  feishu: CHANNELS.feishuSend,
+  slack: CHANNELS.slackSend,
+  telegram: CHANNELS.telegramSend,
+};
+const CHANNEL_RECEIVE: Record<Exclude<ConnectorKind, "webhook">, InvokeChannel> = {
+  feishu: CHANNELS.feishuReceive,
+  slack: CHANNELS.slackReceive,
+  telegram: CHANNELS.telegramReceive,
+};
 
 export const connector = {
   /** 全部连接器实例（无凭证）。 */
   list: () => invoke<ConnectorView[]>(CHANNELS.connectorList),
 
-  /** 新建一个 webhook 连接器。url 是密令承载体，只进不出。 */
-  create: (displayName: string, url: string) =>
-    invoke<ConnectorView[]>(CHANNELS.connectorCreate, { kind: "webhook", displayName, url }),
+  /**
+   * 新建一个连接器。url 是密令承载体，只进不出。
+   * kind 省略 = 通用 webhook；给 feishu / slack / telegram 建对应渠道（域名上界按渠道判）。
+   */
+  create: (displayName: string, url: string, kind: ConnectorKind = "webhook") =>
+    invoke<ConnectorView[]>(CHANNELS.connectorCreate, { kind, displayName, url }),
 
   /** 改名与 / 或轮换凭证。url 省略 = 只改名，保留原凭证。 */
   update: (connectorId: string, patch: { displayName?: string; url?: string }) =>
@@ -39,7 +60,26 @@ export const connector = {
   test: (connectorId: string, workspaceId: string) =>
     invoke<ConnectorResult>(CHANNELS.connectorTest, { connectorId, workspaceId }),
 
-  /** Agent 主动推送一段文本。 */
+  /** Agent 主动推送一段文本（基座通道，按连接器自身 kind 的适配器出站）。 */
   send: (connectorId: string, workspaceId: string, text: string) =>
     invoke<ConnectorResult>(CHANNELS.connectorSend, { connectorId, workspaceId, text }),
+
+  /**
+   * 经**指定渠道的平台通道**推送一段文本（feishu:send / slack:send / telegram:send，
+   * webhook 回落到基座 connector:send）。消息体按平台文档拼、授权按平台 capabilityId 判。
+   */
+  sendVia: (kind: ConnectorKind, connectorId: string, workspaceId: string, text: string) =>
+    invoke<ConnectorResult>(CHANNEL_SEND[kind], { connectorId, workspaceId, text }),
+
+  /**
+   * 把一条平台入站事件喂给共享入站守卫（feishu / slack / telegram:receive）：解析 →
+   * 防回环 / 去重 / 限速 / 尺寸，或应答 url_verification 握手。用于框架自检 / 真机取证；
+   * v1 不开常驻入站端口，故入站由此显式喂入而非平台主动 POST。
+   */
+  receive: (
+    kind: Exclude<ConnectorKind, "webhook">,
+    connectorId: string,
+    workspaceId: string,
+    event: unknown
+  ) => invoke<ConnectorInboundResult>(CHANNEL_RECEIVE[kind], { connectorId, workspaceId, event }),
 };

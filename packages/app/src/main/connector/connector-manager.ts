@@ -18,11 +18,9 @@
  * URL 一个字符都不出现——它只在 `sendThroughConnector` 里从 secret-store 取出、
  * 直接喂给 safeFetch。
  */
-import {
-  CONNECTOR_SUPPORTED_DOMAINS,
-  type ConnectorView,
-} from "@pibuddy/contract";
+import { type ConnectorKind, type ConnectorView } from "@pibuddy/contract";
 
+import { resolveAdapter } from "./adapters/index.js";
 import {
   clearConnectorUrl,
   describeConnectorUrl,
@@ -40,18 +38,25 @@ export function ingestGuard(): IngestGuard {
   return sharedIngest;
 }
 
-/** 把 URL 拆成受支持的域名；不合法 / 不受支持时抛错。 */
-function domainFromUrl(url: string): string {
+/**
+ * 把 URL 拆成受支持的域名；不合法 / 不受该渠道支持时抛错。
+ *
+ * 域名上界按 **kind 对应的适配器**判：飞书连接器只认 open.feishu.cn、Slack 只认
+ * hooks.slack.com、Telegram 只认 api.telegram.org，通用 webhook 认那张多平台白名单。
+ * 「未授权域名被拒」在配置这一步就已生效——一个飞书连接器配了 slack 的 URL 当场被拒。
+ */
+function domainFromUrl(kind: ConnectorKind, url: string): string {
   let host: string;
   try {
     host = hostOf(normalizeEndpointUrl(url));
   } catch {
-    throw new Error("CONNECTOR_URL_INVALID: webhook 地址必须是合法的 https:// URL");
+    throw new Error("CONNECTOR_URL_INVALID: 地址必须是合法的 https:// URL");
   }
-  if (!(CONNECTOR_SUPPORTED_DOMAINS as readonly string[]).includes(host)) {
+  const domains = resolveAdapter(kind).domains;
+  if (!(domains as readonly string[]).includes(host)) {
     throw new Error(
-      `CONNECTOR_DOMAIN_UNSUPPORTED: ${host} 不在受支持的平台白名单内` +
-        `（${CONNECTOR_SUPPORTED_DOMAINS.join(" / ")}）`
+      `CONNECTOR_DOMAIN_UNSUPPORTED: ${host} 不在 ${kind} 渠道的受支持白名单内` +
+        `（${domains.join(" / ")}）`
     );
   }
   return host;
@@ -76,13 +81,13 @@ export function listConnectors(): ConnectorView[] {
   return connectorStore().list().map(toView);
 }
 
-/** 创建一个 webhook 连接器：拆域名 → 落配置 → 存凭证。 */
+/** 创建一个连接器：拆域名（按 kind 的适配器判上界）→ 落配置 → 存凭证。 */
 export function createConnector(input: {
-  kind: "webhook";
+  kind: ConnectorKind;
   displayName: string;
   url: string;
 }): ConnectorView[] {
-  const domain = domainFromUrl(input.url);
+  const domain = domainFromUrl(input.kind, input.url);
   const now = Date.now();
   const record = connectorStore().create(
     { kind: input.kind, displayName: input.displayName, domain },
@@ -109,7 +114,8 @@ export function updateConnector(input: {
   const patch: Partial<Pick<ConnectorRecord, "displayName" | "domain">> = {};
   if (input.displayName !== undefined) patch.displayName = input.displayName;
   if (input.url !== undefined) {
-    patch.domain = domainFromUrl(input.url); // 轮换可能换平台，域名随之更新
+    // 轮换凭证：域名按本连接器**既有 kind** 的适配器判上界（换 URL 不换渠道类型）。
+    patch.domain = domainFromUrl(current.kind, input.url);
   }
   if (Object.keys(patch).length > 0) {
     connectorStore().update(current.id, patch, Date.now());

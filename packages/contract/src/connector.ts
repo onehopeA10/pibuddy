@@ -43,6 +43,38 @@ import { CHANNELS } from "./channels.js";
 export const CONNECTOR_CAPABILITY_ID = "connector.webhook";
 
 /**
+ * 连接器实例的**类型**：通用 webhook（基座）或三个真实渠道适配器。
+ *
+ * 类型决定的是「出站消息体怎么拼、入站事件怎么解、目标域名限定在哪几个 host」
+ * ——这套差异全部收在 `main/connector/adapters/` 的适配器描述符里，contract 这里
+ * 只固定名字与派生常量。新增一个渠道 = 在这里加一个 kind + 在 adapters 加一个
+ * 描述符 + 一份 manifest，出站三关与权限引擎判定随之自动生效。
+ */
+export const CONNECTOR_KINDS = ["webhook", "feishu", "slack", "telegram"] as const;
+export type ConnectorKind = (typeof CONNECTOR_KINDS)[number];
+export const connectorKindSchema = z.enum(CONNECTOR_KINDS);
+
+/**
+ * 三个真实渠道适配器的能力 id 与目标域名（各自 manifest 的 `network:` 权限由
+ * 对应 domain 派生）。每个适配器只声明**自己**那一个 host——飞书连接器越不过
+ * `open.feishu.cn`、Slack 越不过 `hooks.slack.com`、Telegram 越不过
+ * `api.telegram.org`，跨平台发送在出站第一关（域名上界）当场被拒。
+ *
+ * 出站 API 形状取自各平台官方文档（不臆测）：
+ *   - 飞书自定义机器人：`POST open.feishu.cn/open-apis/bot/v2/hook/<token>`，
+ *     体 `{msg_type:"text",content:{text}}`，成功回 `{code:0}`（code≠0 即失败）。
+ *   - Slack incoming webhook：`POST hooks.slack.com/services/...`，体 `{text}`。
+ *   - Telegram：`POST api.telegram.org/bot<token>/sendMessage`，体 `{chat_id,text}`
+ *     （chat_id 随凭证 URL 的 query 一起落，出站体因此只带 `{text}`）。
+ */
+export const FEISHU_CAPABILITY_ID = "connector.feishu";
+export const FEISHU_DOMAIN = "open.feishu.cn";
+export const SLACK_CAPABILITY_ID = "connector.slack";
+export const SLACK_DOMAIN = "hooks.slack.com";
+export const TELEGRAM_CAPABILITY_ID = "connector.telegram";
+export const TELEGRAM_DOMAIN = "api.telegram.org";
+
+/**
  * 本连接器**声明能够访问**的目标域名（manifest 的 `network:` 权限由它派生）。
  *
  * 前五条是真实协作平台的自定义机器人 webhook host；`postman-echo.com` 是一个
@@ -80,7 +112,7 @@ export const CONNECTOR_NETWORK_PERMISSIONS: readonly string[] =
 export const connectorViewSchema = z
   .object({
     id: z.string().min(1),
-    kind: z.literal("webhook"),
+    kind: connectorKindSchema,
     displayName: z.string().min(1),
     /** 目标域名（webhook URL 的 host），非敏感 */
     domain: z.string().min(1),
@@ -105,7 +137,7 @@ export type ConnectorView = z.infer<typeof connectorViewSchema>;
  */
 export const connectorCreateRequestSchema = z
   .object({
-    kind: z.literal("webhook"),
+    kind: connectorKindSchema,
     displayName: z.string().min(1),
     url: z.string().min(1),
   })

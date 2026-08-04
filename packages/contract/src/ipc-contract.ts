@@ -51,6 +51,11 @@ import { childAgentContractShard, childTopologySnapshotSchema } from "./child-ag
 import { artifactContractShard } from "./artifacts.js";
 import { capabilitiesContractShard } from "./capability.js";
 import { connectorContractShard } from "./connector.js";
+import {
+  feishuContractShard,
+  slackContractShard,
+  telegramContractShard,
+} from "./connector-channels.js";
 import { gitContractShard } from "./git.js";
 import { permissionContractShard } from "./permission.js";
 import { memoryContractShard } from "./memory.js";
@@ -787,6 +792,9 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   gitContractShard,
   tasksContractShard,
   connectorContractShard,
+  feishuContractShard,
+  slackContractShard,
+  telegramContractShard,
 ];
 
 /**
