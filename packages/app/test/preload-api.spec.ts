@@ -65,6 +65,7 @@ describe("api 聚合对象", () => {
       "shell",
       "stt",
       "tasks",
+      "terminal",
       "update",
       "workflow",
       "workspace",

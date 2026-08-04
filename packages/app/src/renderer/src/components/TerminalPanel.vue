@@ -1,0 +1,411 @@
+<script setup lang="ts">
+/**
+ * 终端面板（coding.terminal / PTY-101）。
+ *
+ * 存在的理由：把一个真正的多标签页终端装进 PiBuddy，而**开 shell 这件事经主
+ * 进程的 process.shell 授权**——面板本身只发意图，未授权时主进程第五道闸挡下，
+ * 面板据此弹「授权终端」。
+ *
+ * ## 输出 / 重连
+ *
+ * 每个 tab 一个 xterm 实例。PTY 输出经 `terminal.onEvent` 推上来（
+ * PiEnvelope<TerminalEventPayload>），用 `shouldAcceptEnvelope` 的代际 + 序号
+ * 丢弃规则**逐 tab**对齐，丢掉上一代 PTY（restart 之后）的迟到输出。窗口 reload
+ * 之后内存全没，靠 `terminal.snapshot` 把主进程有界 ring buffer 的当前内容 + 最后
+ * 序号取回来重建屏幕，再从推送流里只接受更大序号的块——events 在 term 就绪前
+ * 先入队，snapshot 落定后再按同一条丢弃规则回放，避免重复。
+ */
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { NButton, NInput, NSelect } from "naive-ui";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import "@xterm/xterm/css/xterm.css";
+import {
+  shouldAcceptEnvelope,
+  type PiEnvelope,
+  type SequencedFrame,
+  type TerminalEventPayload,
+} from "@contract";
+import { useAppStore } from "../stores/app";
+import { useTerminalStore } from "../stores/terminal";
+
+const app = useAppStore();
+const store = useTerminalStore();
+
+const workspaceId = computed(() => app.workspaceId);
+const selectedProfile = ref<string | null>(null);
+const searchQuery = ref("");
+
+interface TermEntry {
+  term: Terminal;
+  fit: FitAddon;
+  search: SearchAddon;
+  el: HTMLElement;
+  lastFrame: SequencedFrame | null;
+  ready: boolean;
+  queue: PiEnvelope<TerminalEventPayload>[];
+  ro: ResizeObserver;
+}
+
+const entries = new Map<string, TermEntry>();
+let unsubscribe: (() => void) | null = null;
+
+const profileOptions = computed(() =>
+  store.profiles.map((p) => ({ label: p.label, value: p.id }))
+);
+
+function apply(entry: TermEntry, e: PiEnvelope<TerminalEventPayload>): void {
+  const frame: SequencedFrame = { generation: e.generation, sequence: e.sequence };
+  if (!shouldAcceptEnvelope(entry.lastFrame, frame)) return;
+  entry.lastFrame = frame;
+  if (e.payload.kind === "data") {
+    entry.term.write(e.payload.data);
+  } else {
+    const code = e.payload.exitCode;
+    entry.term.write(`\r\n\x1b[90m[进程已退出${code === null ? "" : `，退出码 ${code}`}]\x1b[0m\r\n`);
+  }
+}
+
+function onEvent(e: PiEnvelope<TerminalEventPayload>): void {
+  const entry = entries.get(e.payload.tabId);
+  if (!entry) return;
+  if (!entry.ready) {
+    entry.queue.push(e);
+    return;
+  }
+  apply(entry, e);
+}
+
+/** 从主进程 ring buffer 取快照重建屏幕，落定后回放入队事件（同一条丢弃规则去重）。 */
+async function seed(tabId: string, entry: TermEntry, reset: boolean): Promise<void> {
+  const ws = workspaceId.value;
+  if (!ws) return;
+  if (reset) entry.term.reset();
+  entry.ready = false;
+  entry.lastFrame = null;
+  try {
+    const snap = await window.piBuddy.terminal.snapshot(ws, tabId);
+    if (snap.found) {
+      if (snap.text) entry.term.write(snap.text);
+      entry.lastFrame = { generation: snap.generation, sequence: snap.sequence };
+    }
+  } catch {
+    /* 未授权 / tab 没了：留空即可，store 会处理授权态 */
+  }
+  entry.ready = true;
+  const queued = entry.queue;
+  entry.queue = [];
+  for (const e of queued) apply(entry, e);
+  doFit(tabId);
+}
+
+function doFit(tabId: string): void {
+  const entry = entries.get(tabId);
+  const ws = workspaceId.value;
+  if (!entry || !ws) return;
+  try {
+    entry.fit.fit();
+    void window.piBuddy.terminal.resize(ws, tabId, entry.term.cols, entry.term.rows);
+  } catch {
+    /* 容器还没布局好 */
+  }
+}
+
+function ensureTerm(tabId: string, el: HTMLElement): void {
+  if (entries.has(tabId)) return;
+  const ws = workspaceId.value;
+  if (!ws) return;
+  const term = new Terminal({
+    fontFamily: 'Menlo, Consolas, "Courier New", monospace',
+    fontSize: 13,
+    cursorBlink: true,
+    scrollback: 5000,
+    theme: { background: "#1e1e1e", foreground: "#d4d4d4" },
+  });
+  const fit = new FitAddon();
+  const search = new SearchAddon();
+  term.loadAddon(fit);
+  term.loadAddon(search);
+  term.open(el);
+  term.onData((data) => {
+    void window.piBuddy.terminal.input(ws, tabId, data);
+  });
+  // Ctrl+Shift+C 复制 / Ctrl+Shift+V 粘贴：终端里 Ctrl+C 是发 SIGINT，不能占用。
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type !== "keydown") return true;
+    if (ev.ctrlKey && ev.shiftKey && ev.code === "KeyC") {
+      void copySelection(tabId);
+      return false;
+    }
+    if (ev.ctrlKey && ev.shiftKey && ev.code === "KeyV") {
+      void pasteClipboard(tabId);
+      return false;
+    }
+    return true;
+  });
+  const ro = new ResizeObserver(() => doFit(tabId));
+  ro.observe(el);
+  const entry: TermEntry = { term, fit, search, el, lastFrame: null, ready: false, queue: [], ro };
+  entries.set(tabId, entry);
+  void seed(tabId, entry, false);
+}
+
+function disposeTerm(tabId: string): void {
+  const entry = entries.get(tabId);
+  if (!entry) return;
+  entry.ro.disconnect();
+  entry.term.dispose();
+  entries.delete(tabId);
+}
+
+function setEl(tabId: string, el: Element | null): void {
+  if (el instanceof HTMLElement) ensureTerm(tabId, el);
+}
+
+async function copySelection(tabId: string): Promise<void> {
+  const sel = entries.get(tabId)?.term.getSelection();
+  if (sel) {
+    try {
+      await navigator.clipboard.writeText(sel);
+    } catch {
+      /* 剪贴板不可用 */
+    }
+  }
+}
+
+async function pasteClipboard(tabId: string): Promise<void> {
+  const ws = workspaceId.value;
+  if (!ws) return;
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) await window.piBuddy.terminal.input(ws, tabId, text);
+  } catch {
+    /* 剪贴板不可用 */
+  }
+}
+
+async function openTerminal(): Promise<void> {
+  await store.open(selectedProfile.value ?? null);
+}
+
+async function killTab(tabId: string): Promise<void> {
+  await store.kill(tabId);
+  disposeTerm(tabId);
+}
+
+async function restartTab(tabId: string): Promise<void> {
+  const meta = await store.restart(tabId);
+  const entry = entries.get(tabId);
+  if (meta && entry) void seed(tabId, entry, true);
+}
+
+async function clearTab(tabId: string): Promise<void> {
+  const ws = workspaceId.value;
+  if (!ws) return;
+  entries.get(tabId)?.term.clear();
+  await window.piBuddy.terminal.clear(ws, tabId);
+}
+
+function renameTab(tabId: string): void {
+  const current = store.tabs.find((t) => t.tabId === tabId);
+  const next = window.prompt("终端标题", current?.title ?? "");
+  if (next && next.trim()) void store.rename(tabId, next.trim());
+}
+
+function searchNext(): void {
+  if (store.activeTabId && searchQuery.value) {
+    entries.get(store.activeTabId)?.search.findNext(searchQuery.value);
+  }
+}
+function searchPrev(): void {
+  if (store.activeTabId && searchQuery.value) {
+    entries.get(store.activeTabId)?.search.findPrevious(searchQuery.value);
+  }
+}
+
+async function authorize(): Promise<void> {
+  const ok = await store.requestPermission();
+  if (ok) {
+    await store.refreshProfiles();
+    await store.refresh();
+  }
+}
+
+// 活跃 tab 变了：给它一次 fit（v-show 的容器从 display:none 回来时尺寸才对）。
+watch(
+  () => store.activeTabId,
+  (id) => {
+    if (id) requestAnimationFrame(() => doFit(id));
+  }
+);
+
+onMounted(async () => {
+  const ws = workspaceId.value;
+  if (ws) await store.init(ws);
+  selectedProfile.value = store.defaultProfileId || null;
+  unsubscribe = window.piBuddy.terminal.onEvent(onEvent);
+});
+
+onBeforeUnmount(() => {
+  if (unsubscribe) unsubscribe();
+  for (const tabId of [...entries.keys()]) disposeTerm(tabId);
+  store.dispose();
+});
+</script>
+
+<template>
+  <div class="terminal-panel">
+    <div class="terminal-toolbar">
+      <n-select
+        v-model:value="selectedProfile"
+        size="tiny"
+        class="profile-select"
+        :options="profileOptions"
+        placeholder="Shell"
+      />
+      <n-button size="tiny" type="primary" @click="openTerminal">＋ 新建终端</n-button>
+      <div class="spacer" />
+      <n-input
+        v-model:value="searchQuery"
+        size="tiny"
+        class="search-box"
+        placeholder="搜索"
+        @keyup.enter="searchNext"
+      />
+      <n-button size="tiny" quaternary title="上一个" @click="searchPrev">▲</n-button>
+      <n-button size="tiny" quaternary title="下一个" @click="searchNext">▼</n-button>
+    </div>
+
+    <div v-if="store.permissionDenied" class="terminal-authorize">
+      <p>终端需要 <code>process.shell</code> 授权才能开 shell。</p>
+      <n-button size="small" type="primary" @click="authorize">授权终端（本次运行）</n-button>
+    </div>
+
+    <div class="terminal-tabs">
+      <div
+        v-for="tab in store.tabs"
+        :key="tab.tabId"
+        class="terminal-tab"
+        :class="{ active: tab.tabId === store.activeTabId, exited: !tab.running }"
+        @click="store.setActive(tab.tabId)"
+        @dblclick="renameTab(tab.tabId)"
+      >
+        <span class="tab-title">{{ tab.title }}</span>
+        <span v-if="!tab.running" class="tab-exit">已退出</span>
+        <span class="tab-close" title="关闭" @click.stop="killTab(tab.tabId)">✕</span>
+      </div>
+      <div v-if="store.tabs.length === 0" class="terminal-empty">还没有终端。点「新建终端」开一个。</div>
+    </div>
+
+    <div v-if="store.activeTabId" class="terminal-actions">
+      <n-button size="tiny" quaternary @click="clearTab(store.activeTabId)">清屏</n-button>
+      <n-button size="tiny" quaternary @click="restartTab(store.activeTabId)">重启</n-button>
+      <n-button size="tiny" quaternary @click="renameTab(store.activeTabId)">重命名</n-button>
+      <n-button size="tiny" quaternary @click="copySelection(store.activeTabId)">复制</n-button>
+      <n-button size="tiny" quaternary @click="pasteClipboard(store.activeTabId)">粘贴</n-button>
+    </div>
+
+    <div class="terminal-views">
+      <div
+        v-for="tab in store.tabs"
+        v-show="tab.tabId === store.activeTabId"
+        :key="tab.tabId"
+        class="terminal-view"
+        :ref="(el) => setEl(tab.tabId, el as Element | null)"
+      />
+    </div>
+
+    <div v-if="store.lastError && !store.permissionDenied" class="terminal-error">
+      {{ store.lastError }}
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 240px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+.terminal-toolbar,
+.terminal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #333;
+}
+.profile-select {
+  width: 160px;
+}
+.search-box {
+  width: 140px;
+}
+.spacer {
+  flex: 1;
+}
+.terminal-authorize {
+  padding: 12px;
+  text-align: center;
+}
+.terminal-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 8px 0;
+  overflow-x: auto;
+}
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 6px 6px 0 0;
+  background: #2a2a2a;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.terminal-tab.active {
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-bottom: none;
+}
+.terminal-tab.exited .tab-title {
+  color: #888;
+}
+.tab-exit {
+  font-size: 10px;
+  color: #c0714f;
+}
+.tab-close {
+  color: #888;
+}
+.tab-close:hover {
+  color: #fff;
+}
+.terminal-empty {
+  color: #888;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.terminal-views {
+  flex: 1;
+  position: relative;
+  min-height: 200px;
+  padding: 4px;
+}
+.terminal-view {
+  position: absolute;
+  inset: 4px;
+}
+.terminal-error {
+  padding: 4px 8px;
+  color: #e88;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+</style>

@@ -63,6 +63,7 @@ import { mcpContractShard } from "./mcp.js";
 import { previewContractShard } from "./preview.js";
 import { sessionTreeContractShard } from "./session-tree.js";
 import { tasksContractShard } from "./tasks.js";
+import { terminalContractShard, terminalEventPayloadSchema } from "./terminal.js";
 import { workflowContractShard, workflowRunSnapshotSchema } from "./workflow.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
@@ -797,6 +798,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   slackContractShard,
   telegramContractShard,
   workflowContractShard,
+  terminalContractShard,
 ];
 
 /**
@@ -849,6 +851,9 @@ export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   // workflow:event 推的是 PiEnvelope<WorkflowRunSnapshot>；这里校验的是信封的
   // payload 位（整份运行快照）。
   [PUSH_CHANNELS.workflowEvent]: workflowRunSnapshotSchema,
+  // terminal:event 推的是 PiEnvelope<TerminalEventPayload>；这里校验的是信封的
+  // payload 位（一段 PTY 输出或一次退出）。
+  [PUSH_CHANNELS.terminalEvent]: terminalEventPayloadSchema,
 };
 
 /** channel 名是否在白名单内。ipc-guard 的第一道闸。 */

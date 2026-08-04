@@ -30,6 +30,8 @@ import { disposeMcpResources, registerMcpIpc } from "../mcp/mcp-ipc.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { disposeGitResources, registerGitIpc } from "../git/git-ipc.js";
 import { gitCapability } from "./manifests/git.manifest.js";
+import { disposeTerminalResources, registerTerminalIpc } from "../terminal/terminal-ipc.js";
+import { terminalCapability } from "./manifests/terminal.manifest.js";
 import { disposeTasksResources, registerTasksIpc } from "../tasks/tasks-ipc.js";
 import { tasksCapability } from "./manifests/tasks.manifest.js";
 import {
@@ -115,6 +117,14 @@ capabilityRegistry.register({
   manifest: gitCapability,
   activate: registerGitIpc,
   deactivate: disposeGitResources,
+});
+// 第一个原生模块能力包（coding.terminal，node-pty / ADR-0002 方案 B）。同属编码
+// tier，默认只在「编码」Profile 启用；未启用时 activate 一次都不调用——它的十条
+// 通道因此不会进 ipc-guard 的注册表，node-pty 也不会被 require（懒加载在 open 时）。
+capabilityRegistry.register({
+  manifest: terminalCapability,
+  activate: registerTerminalIpc,
+  deactivate: disposeTerminalResources,
 });
 capabilityRegistry.register({
   manifest: tasksCapability,

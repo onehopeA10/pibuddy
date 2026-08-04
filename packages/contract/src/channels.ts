@@ -499,6 +499,28 @@ export const CHANNELS = {
   workflowStop: "workflow:stop",
   /** 取当前活跃运行 + 近期历史快照。 */
   workflowRuns: "workflow:runs",
+
+  // ---- 终端能力包（coding.terminal，ADR-0002 垂直能力包 / PTY-101，恰 10 条） ----
+  //
+  // 第一个原生模块能力包（node-pty，方案 B）。十条通道的入参只有不透明
+  // workspaceId + 不透明 tabId + 用户键入的字节，**没有任何 cwd / shell 命令行 /
+  // argv 字段** —— 真正 spawn PTY 的地方在 main/terminal（node-pty），cwd 是
+  // workspace 的 canonical root（主进程解析），渲染进程表达不出「用这个目录跑
+  // 这条命令」。十条全部登记在 main/permission 的需求表里、需要 process.shell
+  // （开终端就是开 shell，继 git 之后第二个真实的危险权限消费者），未授权时被
+  // ipc-guard 第五道闸挡在 handler 之外——连只读的 list/profiles/snapshot 也不
+  // 例外。PTY 输出走 terminal:event 推送信封 + 主进程有界 ring buffer，reload 后
+  // 由 terminal:snapshot 重连取回。
+  terminalList: "terminal:list",
+  terminalProfiles: "terminal:profiles",
+  terminalOpen: "terminal:open",
+  terminalInput: "terminal:input",
+  terminalResize: "terminal:resize",
+  terminalSnapshot: "terminal:snapshot",
+  terminalClear: "terminal:clear",
+  terminalKill: "terminal:kill",
+  terminalRestart: "terminal:restart",
+  terminalRename: "terminal:rename",
 } as const;
 
 /** 主进程单向推送通道（9 个）。 */
@@ -551,6 +573,16 @@ export const PUSH_CHANNELS = {
    * 对齐运行状态，不必另写一份序号比较。快照是全量的，晚到的旧快照被序号闸门丢弃。
    */
   workflowEvent: "workflow:event",
+  /**
+   * 终端 PTY 输出 / 退出（coding.terminal）。
+   *
+   * 载荷是 `PiEnvelope<TerminalEventPayload>`：信封的 sessionId 填 tabId、
+   * generation 填 tab 代际、sequence 填 chunk 序号，渲染侧因此能复用现成的
+   * `shouldAcceptEnvelope`（代际优先 + 同代际序号严格递增）丢弃上一代 PTY 的
+   * 迟到输出，不必另写一份序号比较。输出被主进程按帧合并成一段一段的 chunk
+   * 下发，配合有界 ring buffer + terminal:snapshot 支持 reload 后重连。
+   */
+  terminalEvent: "terminal:event",
 } as const;
 
 export type InvokeChannel = (typeof CHANNELS)[keyof typeof CHANNELS];

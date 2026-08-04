@@ -19,6 +19,9 @@ import {
   isDangerousPermission,
   PERMISSION_PROBE_CAPABILITY_ID,
   PERMISSION_PROBE_PERMISSION,
+  TERMINAL_CAPABILITY_ID,
+  TERMINAL_GATED_CHANNELS,
+  TERMINAL_PERMISSION,
   type CapabilityGrant,
   type InvokeChannel,
   type PermissionAuditEntry,
@@ -57,6 +60,17 @@ export const CHANNEL_PERMISSION_REQUIREMENTS: Partial<
     GIT_GATED_CHANNELS.map((channel) => [
       channel,
       { capabilityId: GIT_CAPABILITY_ID, permission: GIT_PERMISSION },
+    ])
+  ),
+  // 终端编码能力包（coding.terminal）——**第一个真实的 process.shell 消费者**。
+  // 与 git 同一接法：给每条终端通道在这张表里加一行
+  // `{capabilityId: coding.terminal, permission: process.shell}`，能力 manifest
+  // 声明 process.shell，引擎的上界校验与第五道闸的拦截**自动生效**，无需再动
+  // ipc-guard 的任何逻辑（本文件只往这张需求表追加行，不改既有决策逻辑）。
+  ...Object.fromEntries(
+    TERMINAL_GATED_CHANNELS.map((channel) => [
+      channel,
+      { capabilityId: TERMINAL_CAPABILITY_ID, permission: TERMINAL_PERMISSION },
     ])
   ),
 };
