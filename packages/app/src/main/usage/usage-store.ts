@@ -24,10 +24,16 @@ import { app } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { UsageQuery, UsageRecordRequest, UsageRow } from "@pibuddy/contract";
+import type { UsageQuery, UsageRecordRequest, UsageRow, UsageSessionRow } from "@pibuddy/contract";
 
-/** 表结构代际。改 DDL 必须 +1 并补一条迁移分支。 */
-export const USAGE_SCHEMA_VERSION = 1;
+/**
+ * 表结构代际。改 DDL 必须 +1 并补一条迁移分支。
+ *
+ * v1 → v2（R5.2）：新增 usage_session_daily（按 (sessionId, day) 的会话明细）。
+ * 纯增表，CREATE IF NOT EXISTS 即完成迁移；旧数据不回填 —— 历史会话的按日
+ * 明细无从考证，明细从升级后第一次上报开始积累，如实不造数。
+ */
+export const USAGE_SCHEMA_VERSION = 2;
 
 /** CSV 首行。列顺序被单测钉死，改动等于破坏用户已有的导入脚本。 */
 export const USAGE_CSV_HEADER =
@@ -98,6 +104,18 @@ export class UsageStore {
         input_total INTEGER NOT NULL DEFAULT 0,
         output_total INTEGER NOT NULL DEFAULT 0,
         cost_total  REAL    NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS usage_session_daily (
+        session_id     TEXT NOT NULL,
+        day            TEXT NOT NULL,
+        workspace_root TEXT NOT NULL,
+        provider       TEXT NOT NULL,
+        model_id       TEXT NOT NULL,
+        input_tokens   INTEGER NOT NULL DEFAULT 0,
+        output_tokens  INTEGER NOT NULL DEFAULT 0,
+        cost           REAL    NOT NULL DEFAULT 0,
+        failure_count  INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (session_id, day)
       );
     `);
     this.db
@@ -171,7 +189,73 @@ export class UsageStore {
         failure
       );
 
+    // 会话明细（R5.2）：同一套差值口径落到 (session_id, day)。
+    // 全零且无失败时不写行 —— 双源（前台 / 池后台）重复上报同一份累计快照
+    // 的增量为 0，不该为它凭空造出一行「今天 0 token」的明细。
+    if (inputDelta > 0 || outputDelta > 0 || costDelta > 0 || failure > 0) {
+      this.db
+        .prepare(
+          `INSERT INTO usage_session_daily
+             (session_id, day, workspace_root, provider, model_id, input_tokens, output_tokens, cost, failure_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(session_id, day) DO UPDATE SET
+             workspace_root = excluded.workspace_root,
+             provider       = excluded.provider,
+             model_id       = excluded.model_id,
+             input_tokens   = input_tokens  + excluded.input_tokens,
+             output_tokens  = output_tokens + excluded.output_tokens,
+             cost           = cost          + excluded.cost,
+             failure_count  = failure_count + excluded.failure_count`
+        )
+        .run(
+          input.sessionId,
+          day,
+          workspace,
+          input.provider,
+          input.modelId,
+          inputDelta,
+          outputDelta,
+          costDelta,
+          failure
+        );
+    }
+
     return { inputDelta, outputDelta, costDelta };
+  }
+
+  /** 会话明细：按日期区间与 workspace 过滤，按日期倒序 + 花费倒序。 */
+  querySessions(filter: UsageQuery = {}): UsageSessionRow[] {
+    const where: string[] = [];
+    const params: (string | number)[] = [];
+    if (filter.fromDay) {
+      where.push("day >= ?");
+      params.push(filter.fromDay);
+    }
+    if (filter.toDay) {
+      where.push("day <= ?");
+      params.push(filter.toDay);
+    }
+    if (filter.workspaceId) {
+      where.push("workspace_root = ?");
+      params.push(filter.workspaceId);
+    }
+    const sql =
+      "SELECT session_id, day, workspace_root, provider, model_id, input_tokens, output_tokens, cost, failure_count FROM usage_session_daily" +
+      (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
+      " ORDER BY day DESC, cost DESC";
+
+    const rows = this.db.prepare(sql).all(...params) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      sessionId: String(r.session_id),
+      day: String(r.day),
+      workspace: String(r.workspace_root),
+      provider: String(r.provider),
+      model: String(r.model_id),
+      inputTokens: Number(r.input_tokens),
+      outputTokens: Number(r.output_tokens),
+      cost: Number(r.cost),
+      failures: Number(r.failure_count),
+    }));
   }
 
   /** 按日期区间与 workspace 过滤，按日期倒序 + 花费倒序。 */

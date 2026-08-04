@@ -46,6 +46,7 @@ import {
   usageQuerySchema,
   usageRecordRequestSchema,
   usageRowSchema,
+  usageSessionRowSchema,
 } from "./providers.js";
 import { agentPoolContractShard, poolSnapshotSchema } from "./agent-pool.js";
 import { childAgentContractShard, childTopologySnapshotSchema } from "./child-agent.js";
@@ -748,6 +749,10 @@ export const providersContractShard = defineContractShard("providers", {
   [CHANNELS.usageRecord]: {
     request: usageRecordRequestSchema,
     response: z.void(),
+  },
+  [CHANNELS.usageSessions]: {
+    request: usageQuerySchema,
+    response: z.array(usageSessionRowSchema),
   },
 });
 
