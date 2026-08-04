@@ -56,6 +56,8 @@ import { disposeWorkflowResources, registerWorkflowIpc } from "../workflow/workf
 import { workflowCapability } from "./manifests/workflow.manifest.js";
 import { registerOfficeSkillsIpc } from "../office-skills/office-skills-ipc.js";
 import { officeSkillsCapability } from "./manifests/office-skills.manifest.js";
+import { registerHomeAdvisorIpc } from "../home-advisor/home-advisor-ipc.js";
+import { homeAdvisorCapability } from "./manifests/home-advisor.manifest.js";
 import { disposeRemoteResources, registerRemoteIpc } from "../remote/remote-ipc.js";
 import { remoteCapability } from "./manifests/remote.manifest.js";
 import { registerPromptLibraryIpc } from "../prompt-library/prompt-library-ipc.js";
@@ -170,6 +172,15 @@ capabilityRegistry.register({
 capabilityRegistry.register({
   manifest: officeSkillsCapability,
   activate: registerOfficeSkillsIpc,
+});
+// 智能家居场景/联动建议包（home.advisor，家居四包之四，纯 skill 内容包）。只注册
+// 一条只读状态通道，无 deactivate——它不持有 watcher / worker / 子进程（teardown
+// 为空，见 manifest）；技能文件的装卸由启动对账 syncCapabilityAssetsOnStartup 按
+// 启用集合统一处理。它 dependencies home.assistant：基座未注册/未启用时 resolve
+// 阶段直接拒绝（可读 reason 下发 UI），activate 一次都不会被调用。
+capabilityRegistry.register({
+  manifest: homeAdvisorCapability,
+  activate: registerHomeAdvisorIpc,
 });
 // 第一个 connector tier 能力包（connector.webhook）。默认在「通用办公」与
 // 「编码」Profile 启用，未启用时 activate 一次都不调用 —— 它的七条通道因此

@@ -274,7 +274,7 @@ describe("R4.1 manifest 扩展：字段可选缺省空，路径形态被钉死",
     // zod default 补出来的三个空数组——既有 manifest 一字不改仍合法。
     // home.assistant 只带 1 个 extension（回路内工具的注册端，实现全部经主进程
     // tool bridge）；其资产存在性由 verifyCapabilityAssets 对真实资源根统一校验。
-    const DECLARING_PACKS = ["common.office-skills", "edu.kids", "home.assistant"];
+    const DECLARING_PACKS = ["common.office-skills", "edu.kids", "home.assistant", "home.advisor"];
     for (const manifest of BUILT_IN_CAPABILITIES) {
       expect([manifest.id, validateCapabilityManifest(manifest)]).toEqual([manifest.id, []]);
       if (DECLARING_PACKS.includes(manifest.id)) continue;

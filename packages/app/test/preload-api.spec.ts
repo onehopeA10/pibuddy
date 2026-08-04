@@ -55,6 +55,7 @@ describe("api 聚合对象", () => {
       "file",
       "git",
       "home",
+      "homeAdvisor",
       "mcp",
       "memory",
       "officeSkills",

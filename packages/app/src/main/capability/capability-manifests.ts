@@ -24,6 +24,7 @@ import { gitCapability } from "./manifests/git.manifest.js";
 import { terminalCapability } from "./manifests/terminal.manifest.js";
 import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
+import { homeAdvisorCapability } from "./manifests/home-advisor.manifest.js";
 import { officeSkillsCapability } from "./manifests/office-skills.manifest.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
 import { tasksCapability } from "./manifests/tasks.manifest.js";
@@ -56,6 +57,11 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // Profile；它不依赖任何其它可选能力（档案在自有分区、错题本经内核收容读取），
   // 装配顺序上无前置。
   eduKidsCapability,
+  // 智能家居场景/联动建议包（vertical / home.advisor，家居四包里最轻的一个：
+  // 纯 skill 内容包）。dependencies: ["home.assistant"]——基座未注册/未启用时
+  // 装配期不动点拒绝（"依赖未注册/未启用"，reason 下发 UI），不静默降级；
+  // 不进任何内置 Profile，全经 overrides 启用。
+  homeAdvisorCapability,
   tasksCapability,
   // 子 Agent 编排（common tier，可关闭）。排在末尾——它调用后台池（内核）与
   // 权限引擎（内核），不依赖任何其它可选能力，装配顺序上无前置。

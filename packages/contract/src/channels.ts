@@ -588,6 +588,16 @@ export const CHANNELS = {
   promptLibraryDelete: "prompt-library:delete",
   promptLibrarySetFavorite: "prompt-library:set-favorite",
   promptLibrarySetHidden: "prompt-library:set-hidden",
+  // ---- 智能家居场景/联动建议包（home.advisor，恰 1 条） ----
+  //
+  // 家居四包里最轻的一个：纯 skill 内容包（场景建议 / 能耗回顾两个 pi 技能，
+  // capability-assets 随包分发、R4 启停时物化 / 收回到 ~/.pi/agent/skills/）。
+  // 这一条通道是它唯一的动作面：把「包里声明了哪些技能」与「归属账本里真的
+  // 物化了哪些文件」对到一起返回，供面板显示可证伪的物化状态。无入参、只读、
+  // 不接受任何路径——与 office-skills:list 同一口径。技能的执行发生在 pi
+  // agent 里（用的是 home.assistant 基座的工具），不经过任何 IPC。
+  advisorSkillsStatus: "advisor:skills-status",
+
   // ---- 儿童教育能力包（edu.kids，REQ-0001 R3 首个真内容垂直包，恰 3 条） ----
   //
   // 面板侧只有三个窄意图：读/写孩子档案（按 workspaceId 分区，D4 规则 3），
