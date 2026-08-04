@@ -47,6 +47,11 @@ asarUnpack:
 extraResources:
   - from: resources/pi-runtime
     to: pi-runtime
+  # 预置办公提示词库（common.prompt-library / REQ-0001 R1）：pi 原生 prompt
+  # 模板（frontmatter + Markdown），首启动物化到 ~/.pi/agent/prompts/。
+  # 只追加条目，不动 pi-runtime 的投递方式。
+  - from: resources/prompt-library
+    to: prompt-library
 
 # extraResources 会跳过被复制目录里的 node_modules（显式 filter 也无效），
 # 依赖必须由 afterPack 手动补齐，否则打包后 pi 启动即 ERR_MODULE_NOT_FOUND。

@@ -555,6 +555,22 @@ export const CHANNELS = {
   remoteRotateDevice: "remote:rotate-device",
   /** 按设备授予 / 收回一个危险 scope（owner 在主机上显式操作，默认全关） */
   remoteSetDeviceScope: "remote:set-device-scope",
+
+  // ---- 预置办公提示词库（common.prompt-library / REQ-0001 R1，恰 6 条） ----
+  //
+  // 提示词落盘为 **pi 原生 prompts 资源**（~/.pi/agent/prompts/*.md，frontmatter
+  // + Markdown 正文），不发明私有格式 —— pi 自己就能用 `/名字` 展开它们。六条
+  // 通道的入参只有不透明 entry id + 结构化文本字段，**没有任何路径 / 文件名
+  // 形参**：写到哪个文件由主进程按 id 从扫描结果换算，渲染进程表达不出「写
+  // 这个磁盘位置」。每个动作的返回都是权威快照（整库列表），与 providers /
+  // update 同一口径。预置条目带归属标记（frontmatter 的 pibuddy-preset），
+  // 只能隐藏不能删；用户自建条目可增删改。
+  promptLibraryList: "prompt-library:list",
+  promptLibraryCreate: "prompt-library:create",
+  promptLibraryUpdate: "prompt-library:update",
+  promptLibraryDelete: "prompt-library:delete",
+  promptLibrarySetFavorite: "prompt-library:set-favorite",
+  promptLibrarySetHidden: "prompt-library:set-hidden",
 } as const;
 
 /** 主进程单向推送通道（9 个）。 */

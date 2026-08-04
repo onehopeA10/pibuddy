@@ -27,6 +27,7 @@ import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
 import { tasksCapability } from "./manifests/tasks.manifest.js";
 import { workflowCapability } from "./manifests/workflow.manifest.js";
 import { remoteCapability } from "./manifests/remote.manifest.js";
+import { promptLibraryCapability } from "./manifests/prompt-library.manifest.js";
 
 /**
  * 全部内置能力，按装配顺序。
@@ -67,6 +68,9 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // 零暴露（服务默认不监听），排在最后：它不被任何 common 能力依赖，也不依赖
   // 其它可选能力（看会话 / 发 prompt 复用的是内核设施，不是 connector.webhook）。
   remoteCapability,
+  // 预置办公提示词库（common tier / REQ-0001 R1）。排在末尾——它只读写 pi 的
+  // prompts 目录与自己的偏好文件，不依赖任何其它可选能力，装配顺序上无前置。
+  promptLibraryCapability,
 ];
 
 /**
@@ -109,6 +113,9 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       // 远程访问：默认进「通用办公」。启用只是让管理面可用；远程服务本身默认
       // 不监听，须用户在面板里显式开启，且开启后默认只绑 loopback（对外零暴露）。
       "connector.remote",
+      // 预置办公提示词库（REQ-0001 R1）：面向非程序员的开箱内容资产，
+      // 默认进「通用办公」——它就是为这条 Profile 的用户准备的。
+      "common.prompt-library",
     ],
   },
   {
@@ -139,6 +146,8 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "connector.slack",
       "connector.telegram",
       "connector.remote",
+      // 提示词库同样进「编码」：办公提示词对写代码的人一样开箱可用。
+      "common.prompt-library",
     ],
   },
   {

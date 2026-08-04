@@ -54,6 +54,8 @@ import { disposeWorkflowResources, registerWorkflowIpc } from "../workflow/workf
 import { workflowCapability } from "./manifests/workflow.manifest.js";
 import { disposeRemoteResources, registerRemoteIpc } from "../remote/remote-ipc.js";
 import { remoteCapability } from "./manifests/remote.manifest.js";
+import { registerPromptLibraryIpc } from "../prompt-library/prompt-library-ipc.js";
+import { promptLibraryCapability } from "./manifests/prompt-library.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -177,6 +179,14 @@ capabilityRegistry.register({
   manifest: remoteCapability,
   activate: registerRemoteIpc,
   deactivate: disposeRemoteResources,
+});
+// 预置办公提示词库（common.prompt-library / REQ-0001 R1）。只注册六条通道，
+// 无 deactivate——它不持有 watcher / worker / 子进程等需要拆卸的运行期资源
+// （扫描缓存只是一张 Map，teardown 为空，见 manifest）。预置内容的物化挂在
+// list 通道的最前面（幂等），不在装配期做副作用。
+capabilityRegistry.register({
+  manifest: promptLibraryCapability,
+  activate: registerPromptLibraryIpc,
 });
 capabilityRegistry.seal();
 
