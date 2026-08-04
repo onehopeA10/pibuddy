@@ -557,6 +557,20 @@ export const CHANNELS = {
   remoteRotateDevice: "remote:rotate-device",
   /** 按设备授予 / 收回一个危险 scope（owner 在主机上显式操作，默认全关） */
   remoteSetDeviceScope: "remote:set-device-scope",
+
+  // ---- 儿童教育能力包（edu.kids，REQ-0001 R3 首个真内容垂直包，恰 3 条） ----
+  //
+  // 面板侧只有三个窄意图：读/写孩子档案（按 workspaceId 分区，D4 规则 3），
+  // 以及读工作区错题本（固定相对路径 edu-kids/mistakes.jsonl，入参没有任何
+  // 路径字段——文件位置是 SKILL.md 与主进程共同钉死的约定，渲染进程表达不出
+  // 「读任意文件」）。出题、讲解、复习卷生成都不在 IPC 面上：出题是 pi 回路内
+  // 工具（edu.kids.math_worksheet extension），讲解归 prompts/skills（模型侧）。
+  /** 读当前 workspace 的孩子档案（年级 / 科目）；没有档案时返回 null */
+  eduProfileGet: "edu:profile-get",
+  /** 写孩子档案（整份替换，主进程盖 updatedAt 时间戳） */
+  eduProfileSet: "edu:profile-set",
+  /** 读工作区错题本（edu-kids/mistakes.jsonl，坏行跳过、条数有界） */
+  eduMistakeList: "edu:mistake-list",
 } as const;
 
 /** 主进程单向推送通道（9 个）。 */

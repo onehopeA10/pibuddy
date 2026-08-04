@@ -266,9 +266,14 @@ describe("R4.2 移除：停用只收自己的，用户的东西一根手指都�
 });
 
 describe("R4.1 manifest 扩展：字段可选缺省空，路径形态被钉死", () => {
-  it("既有 manifest 一字不改仍合法：全部内置清单校验通过且 piResources 为空", () => {
+  it("既有 manifest 一字不改仍合法：未声明资源的清单缺省全空", () => {
+    // edu.kids（REQ-0001 R3）是第一个真的带货的包——它的 piResources 非空是
+    // 特性而非漂移，其内容与物化/收回判据在 edu-assets.spec.ts。这里继续钉住
+    // 的是另一半：**没声明**资源的既有清单，parse 之后缺省恒为三个空数组。
+    const carriers = new Set(["edu.kids"]);
     for (const manifest of BUILT_IN_CAPABILITIES) {
       expect([manifest.id, validateCapabilityManifest(manifest)]).toEqual([manifest.id, []]);
+      if (carriers.has(manifest.id)) continue;
       expect([manifest.id, manifest.piResources]).toEqual([
         manifest.id,
         { prompts: [], skills: [], extensions: [] },

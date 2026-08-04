@@ -49,6 +49,7 @@ import { tasks } from "./tasks.js";
 import { connector } from "./connector.js";
 import { workflow } from "./workflow.js";
 import { remote } from "./remote.js";
+import { edu } from "./edu.js";
 
 export const api = {
   pi,
@@ -93,6 +94,8 @@ export const api = {
   workflow,
   /** 远程访问管理面（connector.remote）。开关 / 配对 / 撤销 / 授危险 scope，token 只进不出 */
   remote,
+  /** 儿童教育能力包（edu.kids）。档案与错题本三条窄通道，无路径与出题入口 */
+  edu,
 };
 
 export type PiBuddyApi = typeof api;

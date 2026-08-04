@@ -31,6 +31,7 @@ import ConnectorPanel from "./ConnectorPanel.vue";
 import ConnectorChannelsPanel from "./ConnectorChannelsPanel.vue";
 import RemotePanel from "./RemotePanel.vue";
 import WorkflowPanel from "./WorkflowPanel.vue";
+import EduPanel from "./EduPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -152,6 +153,10 @@ const workflowOpen = ref(false);
 // 远程访问面板（connector.remote）的开合。独立成 ref：它管的是对外网络服务的
 // 开关 / 配对 / 设备，与其它面板互不牵连。
 const remoteOpen = ref(false);
+// 学习面板（edu.kids 垂直能力包，首个真内容垂直包）的开合。独立成 ref：
+// 它是自己一个能力域（档案 / 一键出卷 / 错题本），默认只在「家庭教育」
+// Profile 里可见。
+const eduOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -195,6 +200,9 @@ const workflowEnabled = computed(() => capabilities.isEnabled("common.workflow")
 // 远程访问（connector.remote）：唯一开对外网络监听的能力。门控只决定管理面板
 // 是否出现；远程服务本身默认不监听，须在面板里显式开启。
 const remoteEnabled = computed(() => capabilities.isEnabled("connector.remote"));
+// edu.kids 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
+// 它默认只在「家庭教育」Profile 启用，其它 Profile 下这个开关与面板都不出现。
+const eduEnabled = computed(() => capabilities.isEnabled("edu.kids"));
 
 onMounted(() => {
   void store.init();
@@ -424,6 +432,15 @@ function onDrop(): void {
             >
               📡 远程
             </n-button>
+            <n-button
+              v-if="eduEnabled"
+              size="tiny"
+              :type="eduOpen ? 'primary' : 'default'"
+              quaternary
+              @click="eduOpen = !eduOpen"
+            >
+              🎒 学习
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -445,6 +462,7 @@ function onDrop(): void {
           <ConnectorChannelsPanel v-if="channelsOpen && channelsEnabled" />
           <RemotePanel v-if="remoteOpen && remoteEnabled" />
           <WorkflowPanel v-if="workflowOpen && workflowEnabled" />
+          <EduPanel v-if="eduOpen && eduEnabled" />
           <InputBar />
         </slot>
       </template>
