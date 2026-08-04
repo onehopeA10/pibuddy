@@ -69,7 +69,13 @@ export function isPersistentDisposition(d: PermissionDisposition): boolean {
  * 已经被 workspace 收容原语（CT-18）与 shell 白名单夹住，再加一道原生框只会
  * 把日常操作拖成弹窗地狱。
  */
-export const DANGEROUS_PERMISSION_ATOMS = ["process.git", "process.shell"] as const;
+export const DANGEROUS_PERMISSION_ATOMS = [
+  "process.git",
+  "process.shell",
+  // network.local 能触达私网出站（SEC-004 扩展的 local 车道），与 network:*
+  // 同级危险：持久化授权（allow-workspace）必过主进程原生确认框。
+  "network.local",
+] as const;
 export const DANGEROUS_PERMISSION_PREFIXES = ["network", "secret"] as const;
 
 /** 这条权限申请是否属危险类。 */
@@ -78,6 +84,38 @@ export function isDangerousPermission(permission: string): boolean {
   const sep = permission.indexOf(":");
   if (sep <= 0) return false;
   return (DANGEROUS_PERMISSION_PREFIXES as readonly string[]).includes(permission.slice(0, sep));
+}
+
+// ---------------------------------------------------- network.local 的资源形态
+
+/**
+ * `network.local` 授权必须绑定的资源形态：`host:port`。
+ *
+ * SEC-004 原文：「允许本地网络时也应绑定用户确认的 host/port，而不是放开
+ * 整个内网」。这条正则就是那句话的机器化——host 只能是 IPv4 点分或主机名
+ * （写不出 CIDR、通配、IPv6、URL），port 必须显式给出。null-resource（通配）
+ * 由 `decidePermission` 在落库前拒绝，于是「授权整个内网」在结构上无处落笔。
+ *
+ * 端口的数值区间（1-65535）正则表达不划算，归 `parseLocalEndpointResource`。
+ */
+export const LOCAL_ENDPOINT_RESOURCE_RE =
+  /^(?:(?:\d{1,3}\.){3}\d{1,3}|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*):(\d{1,5})$/i;
+
+export interface LocalEndpointResource {
+  /** 小写化后的 host（IPv4 点分或主机名） */
+  host: string;
+  /** 1-65535 */
+  port: number;
+}
+
+/** 解析一条 `host:port` 资源；非法形态返回 null（与 capability.ts 的解析器同风格）。 */
+export function parseLocalEndpointResource(raw: string): LocalEndpointResource | null {
+  const m = LOCAL_ENDPOINT_RESOURCE_RE.exec(raw.trim());
+  if (!m) return null;
+  const port = Number.parseInt(m[1]!, 10);
+  if (port < 1 || port > 65535) return null;
+  const host = raw.trim().slice(0, raw.trim().lastIndexOf(":")).toLowerCase();
+  return { host, port };
 }
 
 // ---------------------------------------------------------------- 授权记录

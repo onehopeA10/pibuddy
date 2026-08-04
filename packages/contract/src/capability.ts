@@ -60,6 +60,11 @@ export const CAPABILITY_PERMISSION_ATOMS = [
   "process.git",
   "process.shell",
   "external.open",
+  // local-network 受控出站车道（SEC-004 扩展）：声明「本能力需要访问用户确认
+  // 过的私网 host:port」。它是无参原子——具体端点不写在 manifest 里，而是在
+  // 授权时绑进 grant.resource（形态由 permission.ts 的 LOCAL_ENDPOINT_RESOURCE_RE
+  // 强制，null-resource 通配在 decidePermission 里被结构性挡死）。
+  "network.local",
 ] as const;
 export type CapabilityPermissionAtom = (typeof CAPABILITY_PERMISSION_ATOMS)[number];
 

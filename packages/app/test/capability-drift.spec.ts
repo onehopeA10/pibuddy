@@ -136,6 +136,9 @@ const PERMISSION_MARKERS: Record<string, RegExp> = {
   "process.git": /\bsimpleGit\s*\(|\bnodegit\b|\brunGit\s*\(/,
   "external.open": /shell\.(openPath|showItemInFolder)\s*\(/,
   network: /\bsafeFetch\s*\(/,
+  // local 车道（SEC-004 扩展）：声明 network.local 的能力，其源码里必须真的
+  // 经这两个受控原语之一出站；反向对账同样生效——用了它们却没声明，红。
+  "network.local": /\bsafeLocalFetch\s*\(|\bopenLocalWebSocket\s*\(/,
   secret: /\b(readSecret|writeSecret)\s*\(/,
 };
 

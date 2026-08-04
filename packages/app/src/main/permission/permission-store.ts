@@ -17,6 +17,7 @@ import {
   GIT_GATED_CHANNELS,
   GIT_PERMISSION,
   isDangerousPermission,
+  parseLocalEndpointResource,
   PERMISSION_PROBE_CAPABILITY_ID,
   PERMISSION_PROBE_PERMISSION,
   TERMINAL_CAPABILITY_ID,
@@ -223,6 +224,21 @@ export async function decidePermission(req: PermissionDecideRequest): Promise<Pe
 
   if (disposition === "deny") {
     audit("denied", { capabilityId, permission, resource, disposition, detail: "用户拒绝" });
+    return describePermissions(workspaceId);
+  }
+
+  // network.local 的授权必须绑定具体端点（SEC-004：「绑定用户确认的 host/port，
+  // 而不是放开整个内网」）。null-resource 在 grantCovers 里是通配语义，对这条
+  // 权限等于「整个内网」，因此在任何 grant 落地之前就地拒绝——三档（once /
+  // session / workspace）一视同仁，通配授权在结构上无处落笔。
+  if (permission === "network.local" && parseLocalEndpointResource(resource ?? "") === null) {
+    audit("denied", {
+      capabilityId,
+      permission,
+      resource,
+      disposition,
+      detail: "network.local 必须绑定具体 host:port，不接受整个内网",
+    });
     return describePermissions(workspaceId);
   }
 
