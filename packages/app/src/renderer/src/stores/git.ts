@@ -11,8 +11,12 @@ import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import type {
   ChangesetDiff,
+  GitCommitSummary,
+  GitDiffHunksResult,
   GitFileEntry,
+  GitStashEntry,
   GitStatusResult,
+  GitWorktreeEntry,
 } from "@contract";
 
 import { usePermissionStore } from "./permission";
@@ -31,6 +35,14 @@ export const useGitStore = defineStore("git", () => {
   /** 上一次操作是否因缺 process.git 授权被挡下（供面板显示「去授权」）。 */
   const needsPermission = ref(false);
   const busy = ref(false);
+  // ---- v2 状态 ----
+  const commits = shallowRef<GitCommitSummary[]>([]);
+  const stashes = shallowRef<GitStashEntry[]>([]);
+  const worktrees = shallowRef<GitWorktreeEntry[]>([]);
+  /** fetch/pull/push 的最近一段输出（供面板显示「Fast-forward」「已是最新」等）。 */
+  const networkOutput = ref("");
+  /** hunk 级 diff 缓存，key 用 `${staged}:${relativePath}`。 */
+  const hunks = shallowRef<Record<string, GitDiffHunksResult>>({});
 
   const staged = computed(() => entries.value.filter((e) => e.staged));
   const unstaged = computed(() => entries.value.filter((e) => !e.staged || e.y !== " "));
@@ -133,6 +145,142 @@ export const useGitStore = defineStore("git", () => {
   const branchSwitch = (ws: string, name: string) =>
     run(ws, () => window.piBuddy.git.branchSwitch(ws, name));
 
+  // ---- v2：网络 ----
+
+  /** 跑一个返回 GitNetworkResult 的动作，记下它的输出再刷新状态。 */
+  async function runNetwork(
+    ws: string,
+    action: () => Promise<{ ok: boolean; message: string | null; output: string | null }>
+  ): Promise<boolean> {
+    busy.value = true;
+    try {
+      const res = await action();
+      networkOutput.value = res.output ?? "";
+      lastError.value = res.ok ? "" : res.message ?? "";
+      await refresh(ws);
+      return res.ok;
+    } catch (err) {
+      handleError(err);
+      return false;
+    } finally {
+      busy.value = false;
+    }
+  }
+
+  const fetch = (ws: string, remote: string | null = null) =>
+    runNetwork(ws, () => window.piBuddy.git.fetch(ws, remote));
+  const pull = (ws: string, remote: string | null = null, branch: string | null = null) =>
+    runNetwork(ws, () => window.piBuddy.git.pull(ws, remote, branch));
+  const push = (
+    ws: string,
+    remote: string | null = null,
+    branch: string | null = null,
+    setUpstream = false
+  ) => runNetwork(ws, () => window.piBuddy.git.push(ws, remote, branch, setUpstream));
+
+  // ---- v2：危险操作（主进程会再弹一次原生二次确认，此处只发意图） ----
+  const forcePush = (ws: string, remote: string, branch: string) =>
+    runNetwork(ws, () => window.piBuddy.git.forcePush(ws, remote, branch));
+  const resetHard = (ws: string, ref: string) =>
+    run(ws, () => window.piBuddy.git.resetHard(ws, ref));
+  const branchDelete = (ws: string, name: string) =>
+    run(ws, () => window.piBuddy.git.branchDelete(ws, name));
+
+  // ---- v2：stash ----
+  const stashSave = (ws: string, message: string | null = null, includeUntracked = false) =>
+    run(ws, () => window.piBuddy.git.stashSave(ws, message, includeUntracked));
+  async function loadStashes(ws: string): Promise<void> {
+    try {
+      const res = await window.piBuddy.git.stashList(ws);
+      stashes.value = res.entries;
+    } catch (err) {
+      handleError(err);
+    }
+  }
+  const stashPop = async (ws: string, index: number): Promise<boolean> => {
+    const ok = await run(ws, () => window.piBuddy.git.stashPop(ws, index));
+    await loadStashes(ws);
+    return ok;
+  };
+  const stashDrop = async (ws: string, index: number): Promise<boolean> => {
+    const ok = await run(ws, () => window.piBuddy.git.stashDrop(ws, index));
+    await loadStashes(ws);
+    return ok;
+  };
+
+  // ---- v2：history ----
+  async function loadLog(
+    ws: string,
+    relativePath: string | null = null,
+    limit = 50
+  ): Promise<void> {
+    try {
+      const res = await window.piBuddy.git.log(ws, relativePath, limit, 0);
+      commits.value = res.commits;
+    } catch (err) {
+      handleError(err);
+    }
+  }
+
+  // ---- v2：worktree ----
+  async function loadWorktrees(ws: string): Promise<void> {
+    try {
+      const res = await window.piBuddy.git.worktreeList(ws);
+      worktrees.value = res.worktrees;
+    } catch (err) {
+      handleError(err);
+    }
+  }
+  const worktreeCreate = async (
+    ws: string,
+    name: string,
+    branch: string,
+    newBranch = false
+  ): Promise<boolean> => {
+    const ok = await run(ws, () => window.piBuddy.git.worktreeCreate(ws, name, branch, newBranch));
+    await loadWorktrees(ws);
+    return ok;
+  };
+  const worktreeRemove = async (ws: string, id: string, force = false): Promise<boolean> => {
+    const ok = await run(ws, () => window.piBuddy.git.worktreeRemove(ws, id, force));
+    await loadWorktrees(ws);
+    return ok;
+  };
+  /** open 返回被打开 worktree 的 workspaceId（成功时），供上层切换工作区。 */
+  async function worktreeOpen(ws: string, id: string): Promise<string | null> {
+    try {
+      const res = await window.piBuddy.git.worktreeOpen(ws, id);
+      if (!res.opened) lastError.value = res.message ?? "打开失败";
+      return res.opened ? res.workspaceId : null;
+    } catch (err) {
+      handleError(err);
+      return null;
+    }
+  }
+
+  // ---- v2：hunk 级 stage ----
+  async function loadHunks(ws: string, relativePath: string, stagedSide: boolean): Promise<void> {
+    try {
+      const res = await window.piBuddy.git.diffHunks(ws, relativePath, stagedSide);
+      hunks.value = { ...hunks.value, [`${stagedSide}:${relativePath}`]: res };
+    } catch (err) {
+      handleError(err);
+    }
+  }
+  function hunksFor(relativePath: string, stagedSide: boolean): GitDiffHunksResult | undefined {
+    return hunks.value[`${stagedSide}:${relativePath}`];
+  }
+  const stageHunk = async (ws: string, relativePath: string, hunkIndex: number): Promise<boolean> => {
+    const ok = await run(ws, () => window.piBuddy.git.stageHunk(ws, relativePath, hunkIndex));
+    await loadHunks(ws, relativePath, false);
+    return ok;
+  };
+  const unstageHunk = async (ws: string, relativePath: string, hunkIndex: number): Promise<boolean> => {
+    const ok = await run(ws, () => window.piBuddy.git.unstageHunk(ws, relativePath, hunkIndex));
+    await loadHunks(ws, relativePath, true);
+    return ok;
+  };
+
   return {
     isRepo,
     branch,
@@ -155,5 +303,31 @@ export const useGitStore = defineStore("git", () => {
     commit,
     branchCreate,
     branchSwitch,
+    // v2 状态
+    commits,
+    stashes,
+    worktrees,
+    networkOutput,
+    hunks,
+    // v2 动作
+    fetch,
+    pull,
+    push,
+    forcePush,
+    resetHard,
+    branchDelete,
+    stashSave,
+    loadStashes,
+    stashPop,
+    stashDrop,
+    loadLog,
+    loadWorktrees,
+    worktreeCreate,
+    worktreeRemove,
+    worktreeOpen,
+    loadHunks,
+    hunksFor,
+    stageHunk,
+    unstageHunk,
   };
 });

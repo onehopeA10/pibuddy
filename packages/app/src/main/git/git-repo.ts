@@ -43,6 +43,44 @@ export function assertSafeBranchName(name: string): void {
   }
 }
 
+/**
+ * remote 名白名单：字母数字加 `._-`，不得以 `-` 开头。
+ *
+ * 与分支名同理——即便 shell:false，一个叫 `--upload-pack=…` 的「remote」会被 git
+ * 当选项。remote 名比分支名更严（不允许 `/`）。
+ */
+const REMOTE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function assertSafeRemoteName(name: string): void {
+  if (typeof name !== "string" || name.length === 0 || name.length > 255) {
+    throw new Error("GIT_REMOTE_NAME_REJECTED: remote 名为空或过长");
+  }
+  if (!REMOTE_NAME_RE.test(name)) {
+    throw new Error(`GIT_REMOTE_NAME_REJECTED: remote 名含非法字符或以 - 开头：${name}`);
+  }
+}
+
+/**
+ * ref 白名单（比分支名宽一档，允许 `~` `^` `@{}` 与 hash）。
+ *
+ * log/show/reset 的目标可以是 `HEAD~1` / `abc123` / `origin/main` 这类表达式，但
+ * 仍必须挡掉选项注入（以 `-` 开头）与命令替换字符。白名单收在这里，凡是接受
+ * 「用户给的 ref」的动作都过它。
+ */
+const REF_RE = /^[A-Za-z0-9][A-Za-z0-9._/~^@{}-]*$/;
+
+export function assertSafeRef(ref: string): void {
+  if (typeof ref !== "string" || ref.length === 0 || ref.length > 255) {
+    throw new Error("GIT_REF_REJECTED: ref 为空或过长");
+  }
+  if (ref.startsWith("-")) {
+    throw new Error(`GIT_REF_REJECTED: ref 不得以 - 开头（选项注入）：${ref}`);
+  }
+  if (!REF_RE.test(ref) || ref.includes("..")) {
+    throw new Error(`GIT_REF_REJECTED: 非法 ref：${ref}`);
+  }
+}
+
 /** 校验仓库相对路径：拒绝绝对路径与任何 `..` 段。命中即抛。 */
 export function assertRepoRelPath(relativePath: string): void {
   if (typeof relativePath !== "string" || relativePath.length === 0) {

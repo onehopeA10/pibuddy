@@ -56,6 +56,12 @@ export interface GitRunResult {
 
 export interface GitRunOptions {
   timeoutMs?: number;
+  /**
+   * 喂给子进程 stdin 的字节。hunk 级暂存要把一段构造好的补丁交给
+   * `git apply --cached`——补丁走 stdin 而不是拼进 argv：补丁里全是用户代码，
+   * 既不该进命令行也不该进日志。仍是 execFile + shell:false，只是多写一次 stdin。
+   */
+  input?: Buffer;
 }
 
 function truncate(text: string): string {
@@ -127,6 +133,14 @@ export function runGit(cwd: string, argv: string[], options: GitRunOptions = {})
       }
     );
     inflight.add(child);
+    // hunk 级暂存的补丁经 stdin 送进 `git apply --cached`。写完即 end，让
+    // git 读到 EOF 开始 apply；子进程已退出时 stdin 可能已不可写，吞掉 EPIPE。
+    if (options.input && child.stdin) {
+      child.stdin.on("error", () => {
+        /* EPIPE：子进程已退出，apply 的成败由 exit code 反映 */
+      });
+      child.stdin.end(options.input);
+    }
   });
 }
 
