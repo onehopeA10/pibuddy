@@ -260,6 +260,53 @@ export const capabilityRuntimeSchema = z
 export type CapabilityRuntime = z.infer<typeof capabilityRuntimeSchema>;
 
 /**
+ * 随包携带的 pi 资源声明（REQ-0001 R4.1）。
+ *
+ * 能力包可以带一批 **pi 原生格式**的资源（prompts / skills / extensions），
+ * 随应用经 electron-builder extraResources 分发到
+ * `resources/capability-assets/<capabilityId>/` 下；启用时由内核物化到 pi 的
+ * 用户级资源目录（`~/.pi/agent/{prompts,skills,extensions}/`，目录约定见
+ * pi docs 的 prompt-templates.md / skills.md / extensions.md），停用时收回。
+ *
+ * 三个数组里存的都是**相对 `capability-assets/<capabilityId>/` 的 posix 路径**：
+ *
+ *   - `prompts`：`.md` 文件（pi 的 prompts 目录非递归、只认 .md）；
+ *   - `skills`：含 `SKILL.md` 的目录，或单个根 `.md` 文件（skills.md 的两种发现形态）；
+ *   - `extensions`：`.ts`/`.js`/`.mjs` 文件，或含 `index.ts`/`index.js` 的目录。
+ *
+ * 这里只有**声明**，没有目标路径：落到哪里由物化器按 pi 的目录约定推导，
+ * manifest 写不出「把文件放到任意绝对路径」这种话——路径形态由
+ * `validateCapabilityManifest` 强制（相对、posix、不含 `..`）。
+ *
+ * R4.3 的结构性钉子也在校验器里：声明了 `extensions`（回路内工具）的包，
+ * `tools` 必须非空——工具的权限需求经由 tools[].permissions ⊆ permissions
+ * 的既有规则进入权限引擎（5 闸），资源物化本身不开任何权限旁路。
+ */
+export const capabilityPiResourcesSchema = z
+  .object({
+    /** pi prompt 模板：`.md` 文件相对路径 */
+    prompts: z.array(z.string().min(1)).readonly().default([]),
+    /** pi skill：含 SKILL.md 的目录或单个 `.md` 文件的相对路径 */
+    skills: z.array(z.string().min(1)).readonly().default([]),
+    /** pi extension：`.ts`/`.js`/`.mjs` 文件或含 index.ts 的目录的相对路径 */
+    extensions: z.array(z.string().min(1)).readonly().default([]),
+  })
+  .strict();
+export type CapabilityPiResources = z.infer<typeof capabilityPiResourcesSchema>;
+
+/**
+ * 缺省的空声明。单独导出给「未声明任何资源」的读取方兜底用。
+ *
+ * freeze 不是仪式：zod v4 的 `.default()` 短路返回**这同一个对象引用**，
+ * 所有未声明资源的 manifest 会共享它——可变的话，改一份等于改全部。
+ */
+export const EMPTY_CAPABILITY_PI_RESOURCES: CapabilityPiResources = Object.freeze({
+  prompts: Object.freeze([]) as readonly string[],
+  skills: Object.freeze([]) as readonly string[],
+  extensions: Object.freeze([]) as readonly string[],
+});
+
+/**
  * 主进程侧暴露点。
  *
  * 同样是 drift test 的 grep 目标：`register` 是装配期被调用的注册函数名，
@@ -333,6 +380,11 @@ export const capabilityManifestSchema = z
     dataSchemaVersion: z.number().int().nonnegative(),
     runtime: capabilityRuntimeSchema,
     exposure: capabilityExposureSchema,
+    /**
+     * 随包携带的 pi 资源（REQ-0001 R4.1）。可选、缺省全空——既有 manifest
+     * 一字不改仍合法；zod 的 default 在 parse 时补齐三个空数组。
+     */
+    piResources: capabilityPiResourcesSchema.default(EMPTY_CAPABILITY_PI_RESOURCES),
   })
   .strict();
 
@@ -469,7 +521,58 @@ export function validateCapabilityManifest(manifest: CapabilityManifest): string
     );
   }
 
+  // ---- 随包 pi 资源（R4.1 / R4.3）
+  //
+  // `??` 兜底不是多余：单测会绕过 zod 直接把手搓对象喂进来（sneaky 场景），
+  // 那种对象上没有 default 补出来的空声明。
+  const piResources = manifest.piResources ?? EMPTY_CAPABILITY_PI_RESOURCES;
+  const assetEntries: readonly (readonly [kind: string, rel: string])[] = [
+    ...piResources.prompts.map((p) => ["prompts", p] as const),
+    ...piResources.skills.map((p) => ["skills", p] as const),
+    ...piResources.extensions.map((p) => ["extensions", p] as const),
+  ];
+  const seenAssets = new Set<string>();
+  for (const [kind, rel] of assetEntries) {
+    // 相对 posix、不出目录：manifest 能写出的路径只能落在
+    // capability-assets/<id>/ 里面，写不出「物化到任意绝对路径」这句话。
+    if (!isSafeAssetRelativePath(rel)) {
+      errors.push(
+        `piResources.${kind} "${rel}" 不是安全的相对 posix 路径（不得含 \\、盘符、开头 /、"." 或 ".." 段）`
+      );
+      continue;
+    }
+    if (seenAssets.has(rel)) errors.push(`piResources 重复声明 "${rel}"`);
+    seenAssets.add(rel);
+  }
+  for (const rel of piResources.prompts) {
+    if (isSafeAssetRelativePath(rel) && !rel.endsWith(".md")) {
+      errors.push(`piResources.prompts "${rel}" 必须是 .md 文件（pi 的 prompts 目录只认 .md）`);
+    }
+  }
+  // R4.3：携带 extension 就是携带回路内工具，工具的权限需求必须经 tools 声明
+  // （tools[].permissions ⊆ permissions 由上方既有规则强制）。物化通道因此
+  // 不构成权限旁路：落盘是内核动作，工具的执行动作仍走权限引擎的 5 闸。
+  if (piResources.extensions.length > 0 && manifest.tools.length === 0) {
+    errors.push(
+      "piResources.extensions 非空却没有 tools：携带回路内工具必须在 tools 里声明其权限需求（R4.3）"
+    );
+  }
+
   return errors;
+}
+
+/**
+ * capability-assets 内相对路径的合法形态。
+ *
+ * 不用正则一把梭：`..` 这种判断按段做才不会把 `a..b` 误伤，而误伤的代价是
+ * 有人换个写法绕过去。
+ */
+function isSafeAssetRelativePath(rel: string): boolean {
+  if (rel.length === 0) return false;
+  if (rel.includes("\\")) return false;
+  if (rel.startsWith("/")) return false;
+  if (/^[a-zA-Z]:/.test(rel)) return false;
+  return rel.split("/").every((seg) => seg.length > 0 && seg !== "." && seg !== "..");
 }
 
 /** 校验并抛错的形态，给装配期用。 */

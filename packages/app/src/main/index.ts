@@ -12,6 +12,8 @@ import { armUpdateChecks, disposeUpdateService } from "./update/update-ipc.js";
 // 远程访问（connector.remote）：按持久配置恢复服务（若上次开着），退出时拆监听。
 // 从没配过远程的用户，restore 一个字节都不碰（默认对外零暴露）。
 import { disposeRemoteResources, restoreRemoteServerIfEnabled } from "./remote/remote-manager.js";
+// 能力包 pi 资源装卸（R4）：接线薄层，物化器本体是纯逻辑（capability-assets.ts）。
+import { syncCapabilityAssetsOnStartup } from "./capability/capability-assets-wiring.js";
 // 后台会话池：应用退出时必须把全部后台 pi runtime 收掉（窗口关闭 ≠ 停止，但
 // window-all-closed 在本应用即退出路径）。池状态机与派生 host 各收各的：
 // shutdownAll 走池的记账 + host.stop，stopAll 兜底清掉池外/迟到的 runtime。
@@ -113,6 +115,10 @@ if (!gotLock) {
     // 能力装配已在 registerIpc() 里完成，此处 isCapabilityEnabled 可信。恢复须
     // 在窗口存在之后：远程「发 prompt」复用的是聚焦窗口的 runtime client。
     void restoreRemoteServerIfEnabled();
+    // 能力包携带的 pi 资源装卸（REQ-0001 R4）：启用的物化到 ~/.pi/agent，
+    // 停用的收回。同样要求装配已完成（读 currentResolution）；旁路动作，
+    // 失败记日志不拦启动。
+    void syncCapabilityAssetsOnStartup();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
