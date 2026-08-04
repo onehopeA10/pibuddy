@@ -33,5 +33,6 @@ export * from "./terminal.js";
 export * from "./remote.js";
 export * from "./prompt-library.js";
 export * from "./edu.js";
+export * from "./home-advisor.js";
 export * from "./ipc-contract.js";
 export * from "./ports.js";

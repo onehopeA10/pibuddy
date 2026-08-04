@@ -51,6 +51,7 @@ import { workflow } from "./workflow.js";
 import { remote } from "./remote.js";
 import { promptLibrary } from "./promptLibrary.js";
 import { officeSkills } from "./officeSkills.js";
+import { homeAdvisor } from "./homeAdvisor.js";
 import { edu } from "./edu.js";
 
 export const api = {
@@ -100,6 +101,8 @@ export const api = {
   promptLibrary,
   /** 预置办公技能包（common.office-skills）。只读清单 + 物化状态，无执行 / 物化入口 */
   officeSkills,
+  /** 家居场景建议包（home.advisor）。只读清单 + 物化状态，无执行 / 控制入口 */
+  homeAdvisor,
   /** 儿童教育能力包（edu.kids）。档案与错题本三条窄通道，无路径与出题入口 */
   edu,
 };

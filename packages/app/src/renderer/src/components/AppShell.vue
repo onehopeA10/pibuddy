@@ -33,6 +33,7 @@ import RemotePanel from "./RemotePanel.vue";
 import WorkflowPanel from "./WorkflowPanel.vue";
 import PromptLibraryPanel from "./PromptLibraryPanel.vue";
 import OfficeSkillsPanel from "./OfficeSkillsPanel.vue";
+import HomeAdvisorPanel from "./HomeAdvisorPanel.vue";
 import EduPanel from "./EduPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
@@ -160,6 +161,9 @@ const remoteOpen = ref(false);
 // 办公技能面板（common.office-skills）的开合。独立成 ref：它是第一个内容型
 // 能力域（预置 pi 技能 + 物化状态），与其它面板互不牵连。
 const officeSkillsOpen = ref(false);
+// 家居建议面板（home.advisor 垂直能力包，纯 skill 内容包）的开合。独立成
+// ref：它是自己一个能力域（两个建议技能的物化状态），与其它面板互不牵连。
+const homeAdvisorOpen = ref(false);
 // 学习面板（edu.kids 垂直能力包，首个真内容垂直包）的开合。独立成 ref：
 // 它是自己一个能力域（档案 / 一键出卷 / 错题本），默认只在「家庭教育」
 // Profile 里可见。
@@ -225,6 +229,9 @@ const isWslWorkspace = computed(() =>
 // 办公技能包（common.office-skills）的 UI 门控：判据同样来自主进程能力快照。
 // 关掉它 = 面板与开关都不出现；物化的技能文件由下次启动对账收回。
 const officeSkillsEnabled = computed(() => capabilities.isEnabled("common.office-skills"));
+// home.advisor 的 UI 门控：判据同样来自主进程能力快照。它依赖 home.assistant
+// 基座，基座未启用时装配期就被拒绝（enabled=false），面板与开关都不出现。
+const homeAdvisorEnabled = computed(() => capabilities.isEnabled("home.advisor"));
 // edu.kids 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
 // 它默认只在「家庭教育」Profile 启用，其它 Profile 下这个开关与面板都不出现。
 const eduEnabled = computed(() => capabilities.isEnabled("edu.kids"));
@@ -489,6 +496,15 @@ function onDrop(): void {
               🗂️ 技能
             </n-button>
             <n-button
+              v-if="homeAdvisorEnabled"
+              size="tiny"
+              :type="homeAdvisorOpen ? 'primary' : 'default'"
+              quaternary
+              @click="homeAdvisorOpen = !homeAdvisorOpen"
+            >
+              🏠 家居建议
+            </n-button>
+            <n-button
               v-if="eduEnabled"
               size="tiny"
               :type="eduOpen ? 'primary' : 'default'"
@@ -519,6 +535,7 @@ function onDrop(): void {
           <RemotePanel v-if="remoteOpen && remoteEnabled" />
           <WorkflowPanel v-if="workflowOpen && workflowEnabled" />
           <OfficeSkillsPanel v-if="officeSkillsOpen && officeSkillsEnabled" />
+          <HomeAdvisorPanel v-if="homeAdvisorOpen && homeAdvisorEnabled" />
           <EduPanel v-if="eduOpen && eduEnabled" />
           <InputBar />
         </slot>
