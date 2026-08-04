@@ -1,0 +1,19 @@
+{"fragment_id":"HRV-5e551071","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"arch","title":"PI_IMPORT_ALLOWLIST 只减不增","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-9e0a2b1c","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"arch","title":"权限第五道闸决策模型","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-c4a11d2e","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"arch","title":"capabilityGrants 并列不复用","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-7b3f9a01","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"arch","title":"Remote 零依赖+sanctioned 入口","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-0d8e4f12","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"coding","title":"原生模块破例三前提","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-3a6b7c89","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"coding","title":"manifest 禁纯 UI 空壳","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-8f1e2d34","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"coding","title":"PTY 背压 ring buffer","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-b5c6d7e8","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"test","title":"数据驱动断言防恒真","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-1f2a3b4c","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"test","title":"运行期 seal 不用编译期穷举","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-6d7e8f90","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"debug","title":"禁 sed 跨括号","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-2b3c4d5e","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"debug","title":"worktree 相对路径铁律","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-9a0b1c2d","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"debug","title":"npx.cmd shell:false","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-4e5f6a7b","source_type":"scratchpad","source_id":"capability-research","target_store":"spec","category":"review","title":"app.asar 时间戳核对","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-e8f90a1b","source_type":"scratchpad","source_id":"capability-research","target_store":"issue","category":"medium","title":"ISS-001 registerHandler 查表","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-c2d3e4f5","source_type":"scratchpad","source_id":"capability-research","target_store":"issue","category":"medium","title":"ISS-002 池 spawn 占位","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-a7b8c9d0","source_type":"scratchpad","source_id":"capability-research","target_store":"issue","category":"low","title":"ISS-003 cron DST","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-f1a2b3c4","source_type":"scratchpad","source_id":"capability-research","target_store":"issue","category":"low","title":"ISS-004 remote 前台会话","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-d5e6f7a8","source_type":"scratchpad","source_id":"capability-research","target_store":"issue","category":"low","title":"ISS-005 drift 不递归","routed_at":"2026-08-04T06:59:01.429Z"}
+{"fragment_id":"HRV-a1b2c3d4","source_type":"scratchpad","source_id":"capability-research","target_store":"wiki-pending","category":"knowhow","title":"能力包集成协议","routed_at":"2026-08-04T06:59:01.429Z"}
