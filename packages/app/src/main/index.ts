@@ -12,6 +12,10 @@ import { armUpdateChecks, disposeUpdateService } from "./update/update-ipc.js";
 // 远程访问（connector.remote）：按持久配置恢复服务（若上次开着），退出时拆监听。
 // 从没配过远程的用户，restore 一个字节都不碰（默认对外零暴露）。
 import { disposeRemoteResources, restoreRemoteServerIfEnabled } from "./remote/remote-manager.js";
+// 后台会话池：应用退出时必须把全部后台 pi runtime 收掉（窗口关闭 ≠ 停止，但
+// window-all-closed 在本应用即退出路径）。池状态机与派生 host 各收各的：
+// shutdownAll 走池的记账 + host.stop，stopAll 兜底清掉池外/迟到的 runtime。
+import { agentPool, poolRuntimeHost } from "./agent-pool/pool.js";
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -119,6 +123,10 @@ if (!gotLock) {
     // 「进程退不掉」的原因往往就是某个没人清的 timer。
     disposeUpdateService();
     disposeAllWorkspaceResources();
+    // 后台池的全部 pi 子进程在退出前收掉——后台 runtime 没有窗口跟着陪葬，
+    // 不显式停就是任务管理器里越攒越多的孤儿 pi 进程（ISS-002 生命周期收尾）。
+    agentPool().shutdownAll();
+    poolRuntimeHost().stopAll();
     // 显式停远程监听 + 关 sqlite 句柄：崩溃现场里「进程退不掉 / 端口没释放」
     // 的原因往往就是某个没人收的 listener。
     void disposeRemoteResources();

@@ -30,8 +30,10 @@ import { registerHandler } from "../ipc-guard.js";
 import { createLogger, type Logger } from "../logger.js";
 import { workspaceStore } from "../workspace/workspace-store.js";
 import { systemClock } from "./clock.js";
+import { createPoolRunTrigger } from "./pool-run-trigger.js";
 import { nextRunAfter, Scheduler } from "./scheduler.js";
 import { evaluateScheduledPermissions } from "./task-permission.js";
+import { setAgentRunTrigger } from "./task-trigger.js";
 import { closeTaskStore, taskStore, type TaskStore } from "./task-store.js";
 
 /** 本域注册的全部通道。单测据它断言逐一出现在 ipc-guard 的注册表里。 */
@@ -279,6 +281,10 @@ export function registerTasksIpc(): void {
       return detailOf(store, copy.id);
     }
   );
+
+  // 真实触发接线（ISS-002）：把 task-trigger 的默认 stub 换成池化真实派生——
+  // scheduler 一行不动，只换这一个注入实现（task-trigger.ts 的设计承诺兑现）。
+  setAgentRunTrigger(createPoolRunTrigger());
 
   // 调度器：注册 handler 之后启动。它是 headless 常驻设施——用户关掉窗口，
   // tick 仍在主进程里推进。**测试进程里不起真实定时器**（VITEST 置位时跳过），

@@ -137,3 +137,119 @@ describe("后台真实派生 host", () => {
     expect(host.has("s1")).toBe(false);
   });
 });
+
+/**
+ * 前台回退网关（ISS-004）：deliver / stop 的三分支路由必须可证伪。
+ *
+ * 对拍方向：把 `deliver` 里 `activeSessionId() === sessionId` 的门拆掉（恒不
+ * 回退），「命中前台」分支变红；把池分支拆掉，「命中池」变红。
+ */
+describe("前台回退网关（ISS-004）", () => {
+  function makeGateway(active: string | null) {
+    return {
+      active,
+      delivered: [] as string[],
+      stopped: 0,
+      activeSessionId(): string | null {
+        return this.active;
+      },
+      deliver(text: string): void {
+        this.delivered.push(text);
+      },
+      stop(): void {
+        this.stopped++;
+      },
+    };
+  }
+
+  it("deliver：命中池托管会话 → 走池 client，网关不被触碰", () => {
+    const { host, clients } = makeHost();
+    const gw = makeGateway("fg-1");
+    host.setForegroundGateway(gw);
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    expect(host.deliver("s1", "给池")).toBe(true);
+    expect(clients[0].sent).toEqual([{ type: "prompt", message: "给池" }]);
+    expect(gw.delivered).toEqual([]);
+  });
+
+  it("deliver：不在池里但命中前台活跃会话 → 经网关投给 supervisor", () => {
+    const { host } = makeHost();
+    const gw = makeGateway("fg-1");
+    host.setForegroundGateway(gw);
+    expect(host.deliver("fg-1", "给前台")).toBe(true);
+    expect(gw.delivered).toEqual(["给前台"]);
+  });
+
+  it("deliver：两边都不中 → 返回 false（明确落空，不装作投出去了）", () => {
+    const { host } = makeHost();
+    const gw = makeGateway("fg-1");
+    host.setForegroundGateway(gw);
+    expect(host.deliver("nobody", "没人收")).toBe(false);
+    expect(gw.delivered).toEqual([]);
+  });
+
+  it("deliver：未注入网关时行为与从前一字不差（丢弃并返回 false）", () => {
+    const { host } = makeHost();
+    expect(host.deliver("fg-1", "无网关")).toBe(false);
+  });
+
+  it("stop：不在池里但命中前台活跃会话 → 网关 stop；不匹配 → 不触碰前台", () => {
+    const { host } = makeHost();
+    const gw = makeGateway("fg-1");
+    host.setForegroundGateway(gw);
+    host.stop("fg-1");
+    expect(gw.stopped).toBe(1);
+    host.stop("nobody");
+    expect(gw.stopped).toBe(1);
+  });
+
+  it("stop：池托管会话恒走池 client，即使网关声称同名前台会话", () => {
+    const { host, clients } = makeHost();
+    const gw = makeGateway("s1");
+    host.setForegroundGateway(gw);
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    host.stop("s1");
+    expect(clients[0].stopped).toBe(true);
+    expect(gw.stopped).toBe(0);
+  });
+});
+
+/** 会话级 tap（tasks 触发的观察口）：先挂后派生也不漏 ready / 事件 / 退出。 */
+describe("observeRuntime tap", () => {
+  it("ready 带真实 pi sessionId；事件与退出都进 tap；解除后不再收", async () => {
+    const { host, clients } = makeHost();
+    const ready: Array<string | null> = [];
+    const events: AgentEvent[] = [];
+    const exits: string[] = [];
+    const unobserve = host.observeRuntime("s1", {
+      onReady: (sid) => ready.push(sid),
+      onEvent: (e) => events.push(e),
+      onExit: (r) => exits.push(r),
+    });
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ready).toEqual(["pi-real-session"]);
+    clients[0].emitEvent(AGENT_START);
+    expect(events).toEqual([AGENT_START]);
+    host.stop("s1");
+    expect(exits).toEqual(["expected-stop"]);
+    unobserve();
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    clients[1].emitEvent(AGENT_START);
+    expect(events).toHaveLength(1); // 解除之后的事件不再进来
+  });
+
+  it("spawn 失败也走 tap.onExit(crash)，等待方不会永久悬挂", () => {
+    const exits: string[] = [];
+    const host = new PoolRuntimeHostImpl({
+      clientFactory: () => {
+        throw new Error("spawn 炸了");
+      },
+      resolveWorkspace: () => ({ cwd: "/ws", sessionDir: "/ws/.s" }),
+    });
+    host.bind({ onReady: vi.fn(), onEvent: vi.fn(), onExit: vi.fn() });
+    host.observeRuntime("s1", { onExit: (r) => exits.push(r) });
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    expect(exits).toEqual(["crash"]);
+  });
+});

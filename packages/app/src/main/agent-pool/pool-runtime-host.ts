@@ -116,6 +116,38 @@ export type ChildEventSink = (sessionId: string, event: AgentEvent) => void;
 /** 子 runtime 就绪通知（仅 origin:"child"；child 编排据此下发目标提示词）。 */
 export type ChildReadySink = (sessionId: string) => void;
 
+/**
+ * 前台 supervisor 的回退网关（由 **pi 域**在装配期注入，本文件不 import pi 域）。
+ *
+ * deliver / stop 的目标会话若不是池派生的后台 runtime，而恰好是前台 supervisor
+ * 当前的活跃会话（单窗口单活跃 runtime 那条老路），就经此网关路由过去——
+ * remote 的「发 prompt / 停止」因此也够得着前台会话，而 remote 域一行不改。
+ *
+ * 恒以 `activeSessionId()` 精确匹配为门：网关只对**此刻**前台活跃的那个会话
+ * 生效，绝不把别的会话的投递误路由到前台进程上。
+ */
+export interface ForegroundGateway {
+  /** 前台 supervisor 当前活跃会话的 sessionId；无活跃 runtime 时 null。 */
+  activeSessionId(): string | null;
+  /** 向前台活跃会话发一条提示词。 */
+  deliver(text: string): void;
+  /** 停止前台活跃会话（等价于用户在窗口里点「停止」）。 */
+  stop(): void;
+}
+
+/**
+ * 单个后台 runtime 的观察者（tasks 触发这类一次性驱动方用）。
+ *
+ * 与 childEventSink 的差别：child 汇聚是**全局**的、按 origin 过滤；tap 按
+ * sessionId 挂，谁派生谁观察，互不相扰。每会话至多一个 tap。
+ */
+export interface RuntimeTap {
+  /** 握手完成。`realSessionId` 是 pi 侧真实会话 id（会话历史用它定位）。 */
+  onReady?(realSessionId: string | null): void;
+  onEvent?(event: AgentEvent): void;
+  onExit?(reason: string): void;
+}
+
 /** 把不透明 workspaceId 解成真实工作目录（可注入，便于单测）。 */
 export type WorkspaceResolver = (workspaceId: string | null) => { cwd: string; sessionDir: string };
 
@@ -139,6 +171,8 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
   private sink: PoolHostSink | null = null;
   private childEventSink: ChildEventSink | null = null;
   private childReadySink: ChildReadySink | null = null;
+  private foreground: ForegroundGateway | null = null;
+  private taps = new Map<string, RuntimeTap>();
   private readonly clientFactory: PoolRuntimeClientFactory;
   private readonly resolveWorkspace: WorkspaceResolver;
 
@@ -162,13 +196,33 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
     this.childReadySink = sink;
   }
 
+  /** pi 域装配期注入前台回退网关（不装时行为与从前一字不差）。 */
+  setForegroundGateway(gateway: ForegroundGateway | null): void {
+    this.foreground = gateway;
+  }
+
+  /**
+   * 观察某会话的后台 runtime（就绪 / 事件 / 退出）。返回解除函数。
+   *
+   * 允许在 launch 之前挂（tasks 触发先挂 tap 再 requestSession，会话可能先
+   * 排队后派生，不能有「挂晚了漏掉 ready」的窗口）。每会话至多一个 tap。
+   */
+  observeRuntime(sessionId: string, tap: RuntimeTap): () => void {
+    this.taps.set(sessionId, tap);
+    return () => {
+      if (this.taps.get(sessionId) === tap) this.taps.delete(sessionId);
+    };
+  }
+
   /**
    * 派生一个后台 runtime。**同步返回**（与 host 契约一致）：spawn 之后的握手
    * 走一个不阻塞的异步尾巴，握手拿到状态才回填 onReady。
    */
   launch(req: PoolLaunchRequest): void {
-    // 已有则先停掉旧的（避免同 sessionId 双 runtime）。
-    this.stop(req.sessionId);
+    // 已有则先停掉旧的（避免同 sessionId 双 runtime）。**只停池内 runtime**：
+    // 这里绝不能走带前台回退的 stop()——重新派生一个恰与前台同名的会话时，
+    // 回退会把用户正在看的 supervisor runtime 误杀掉。
+    this.stopPoolRuntime(req.sessionId);
 
     let cwd: string;
     let sessionDir: string;
@@ -183,6 +237,7 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
       // 起不来当成一次崩溃反馈给池：池的崩溃预算据此处置，不留一个卡在
       // background 却没有进程的幽灵会话。
       this.sink?.onExit(req.sessionId, "crash");
+      this.taps.get(req.sessionId)?.onExit?.("crash");
       return;
     }
 
@@ -202,6 +257,7 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
         detail: err instanceof Error ? err.message : String(err),
       });
       this.sink?.onExit(req.sessionId, "crash");
+      this.taps.get(req.sessionId)?.onExit?.("crash");
       return;
     }
 
@@ -219,6 +275,7 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
       const env = wrapEnvelope(record.ctx, record.sequence++, e);
       this.sink?.onEvent(env);
       if (record.origin === "child") this.childEventSink?.(req.sessionId, e);
+      this.taps.get(req.sessionId)?.onEvent?.(e);
     });
     client.on("stderr", (text: string) => {
       log().warn("agent_pool_child_stderr", {
@@ -231,6 +288,7 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
       if (this.runtimes.get(req.sessionId) !== record) return;
       this.runtimes.delete(req.sessionId);
       this.sink?.onExit(req.sessionId, meta.reason);
+      this.taps.get(req.sessionId)?.onExit?.(meta.reason);
     });
 
     client.start();
@@ -246,10 +304,11 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
     // requestSession 时登记的键一致。
     void (async () => {
       try {
-        await client.getState();
+        const state = await client.getState();
         if (this.runtimes.get(req.sessionId) !== record) return;
         this.sink?.onReady(req.sessionId, { runtimeId: client.runtimeId, generation });
         if (record.origin === "child") this.childReadySink?.(req.sessionId);
+        this.taps.get(req.sessionId)?.onReady?.(state.sessionId ?? null);
       } catch (err) {
         log().warn("agent_pool_runtime_handshake_failed", {
           sessionId: req.sessionId,
@@ -259,29 +318,69 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
     })();
   }
 
-  /** 停一个后台 runtime 的进程。 */
-  stop(sessionId: string): void {
+  /** 停掉某会话的**池内** runtime（有则停并返回 true；没有不碰任何回退）。 */
+  private stopPoolRuntime(sessionId: string): boolean {
     const record = this.runtimes.get(sessionId);
-    if (!record) return;
+    if (!record) return false;
     this.runtimes.delete(sessionId);
     void Promise.resolve(record.client.stop()).catch(() => undefined);
     log().info("agent_pool_runtime_stopped", { sessionId, runtimeId: record.ctx.runtimeId });
+    return true;
   }
 
   /**
-   * 向一个后台会话发一条提示词（子 Agent 的目标下发 / 父回答续发）。
+   * 停一个 runtime 的进程。
    *
-   * 走既有 pi `prompt` 命令；没有活跃 runtime 时静默丢弃（会话已停）。
+   * 三分支路由：池派生的后台 runtime → 真停子进程；不在池里但命中前台
+   * supervisor 当前活跃会话 → 经注入的前台网关停（remote 停前台会话走到这）；
+   * 都不中 → 无事可做（会话本就没有进程），记一条日志便于诊断。
    */
-  deliver(sessionId: string, text: string): void {
+  stop(sessionId: string): void {
+    if (!this.stopPoolRuntime(sessionId)) {
+      if (this.foreground?.activeSessionId() === sessionId) {
+        this.foreground.stop();
+        log().info("agent_pool_stop_foreground_fallback", { sessionId });
+      } else {
+        log().info("agent_pool_stop_no_runtime", { sessionId });
+      }
+    }
+    this.taps.get(sessionId)?.onExit?.("expected-stop");
+  }
+
+  /**
+   * 向一个会话发一条提示词（子 Agent 的目标下发 / 父回答续发 / remote 发话）。
+   *
+   * 三分支路由：池派生的后台 runtime → 走池 client；不在池里但命中前台
+   * supervisor 当前活跃会话 → 经注入的前台网关投递；都不中 → 丢弃并返回
+   * false（会话已停，投不出去不能装作投出去了）。
+   */
+  deliver(sessionId: string, text: string): boolean {
     const record = this.runtimes.get(sessionId);
-    if (!record) return;
+    if (!record) {
+      if (this.foreground?.activeSessionId() === sessionId) {
+        this.foreground.deliver(text);
+        return true;
+      }
+      log().warn("agent_pool_deliver_no_runtime", { sessionId });
+      return false;
+    }
     void Promise.resolve(record.client.send({ type: "prompt", message: text })).catch((err) => {
       log().warn("agent_pool_deliver_failed", {
         sessionId,
         detail: err instanceof Error ? err.message : String(err),
       });
     });
+    return true;
+  }
+
+  /**
+   * 向某个**池派生**的后台会话发一条任意 RPC 命令并等响应（tasks 触发用它
+   * 下发冻结的 set_model / 收尾拉 get_session_stats）。无活跃 runtime 时 reject。
+   */
+  send(sessionId: string, message: unknown): Promise<unknown> {
+    const record = this.runtimes.get(sessionId);
+    if (!record) return Promise.reject(new Error(`会话无活跃后台 runtime：${sessionId}`));
+    return Promise.resolve(record.client.send(message));
   }
 
   /** 是否存在某会话的活跃后台 runtime。 */

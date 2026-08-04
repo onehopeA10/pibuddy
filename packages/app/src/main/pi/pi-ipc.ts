@@ -32,7 +32,7 @@ import {
 } from "@pibuddy/contract";
 
 import * as attachments from "../attachment-registry.js";
-import { agentPoolObserver } from "../agent-pool/pool.js";
+import { agentPoolObserver, poolRuntimeHost } from "../agent-pool/pool.js";
 import { isCapabilityEnabled } from "../capability/capability-state.js";
 import { MEMORY_CAPABILITY_ID } from "../capability/manifests/memory.manifest.js";
 import { injectMemory } from "../memory/memory-inject.js";
@@ -152,6 +152,31 @@ export function registerPiIpc(): void {
   // 与观测者形状都在内核侧，pi 域只负责把观测者装上去。放在最前面，保证从第一
   // 次会话握手（adoptSession）起，池就在观测当前会话。
   supervisor().setPoolObserver(agentPoolObserver());
+
+  // 前台回退网关（AGT-103 / ISS-004）：池的 deliver / stop 目标若命中前台
+  // supervisor 当前活跃会话，就路由到 supervisor 的 client——remote 的
+  // 「发 prompt / 停止」因此够得着前台会话，而 remote 域一行不改。网关形状
+  // 定义在内核侧（pool-runtime-host.ts），真实实现在**这里**（pi 域），依赖
+  // 方向仍是 pi → kernel，kernel-boundary 的 allowlist 一条不加。
+  poolRuntimeHost().setForegroundGateway({
+    activeSessionId: () => supervisor().currentActive()?.sessionId ?? null,
+    deliver: (text) => {
+      const active = supervisor().currentActive();
+      if (!active) return;
+      void active.client.send({ type: "prompt", message: text }).catch((err: unknown) => {
+        log().warn("pi_foreground_deliver_failed", {
+          sessionId: active.sessionId,
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      });
+    },
+    stop: () => {
+      const active = supervisor().currentActive();
+      if (!active) return;
+      // 与用户在窗口里点「停止」同一条路：作废挂起弹窗、停进程、清索引。
+      disposeClientFor(active.targetId);
+    },
+  });
 
   // ------------------------------------------------------------ 生命周期
 
