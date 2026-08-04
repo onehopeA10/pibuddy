@@ -80,3 +80,14 @@ connector:webhook
   - 预留未做(child-agent 起点,非缺陷,合并时标 summary):① `PoolRuntimeHost.launch/stop` 是记账占位,真实后台进程 spawn 未做,supervisor 仍单活动 runtime ② inbox→引擎闭环只审计未接副作用 ③ `AgentPool.vue` 未挂 AppShell slot。
 - Git(`abf7599`)、Durable(`a4baef`,续跑中)两个 worktree 仍在跑,分支停在 43d20c1。
 - 集成策略确认:等三个都完成 → 共享树 `git checkout -- .`(丢污染,perf.json 除外)→ 逐个 merge 三分支进 main → 每合过全量门禁 → 真机 → 一次推 origin。教训补记:worktree agent 必须只在自己 worktree 内用相对路径改文件,禁止绝对路径写共享 checkout。
+
+## 追赶批(2026-08-04,对标 hermes/CodePilot 差距)
+用户选 1/2/3/5 并行,4(终端)待讨论。按文件域切成 4 个 worktree agent:
+- A 渠道扩展(飞书/Slack/Telegram)—— main/connector/**  [运行中]
+- B Git 补完整(worktree/stash/history/push/hunk-stage/危险审批)—— main/git/**  [运行中]
+- C 可视化工作流(Vue Flow 画布)—— 新建 main/workflow/**  [运行中]
+- ✅ D 深度打磨(memory-v2/mcp/tasks 端到端+测试)—— `f351826`,127 文件 1161 测试
+  - mcp 修真 bug:npx.cmd 在 shell:false 不可 spawn,用 cmd.exe + 双层转义 windowsVerbatimArguments 括死参数,安全边界未放宽
+  - 诚实保留:http/OAuth deferred(会破 SEC-004 内网阻断);后台池真实派生也是 stub 故 tasks 触发用替身钉死
+  - 诚实记录未擅改的现状 bug:cron 落 DST 春季 gap 语义与 daily 不一致
+- 合并策略:等 A/B/C 齐 → 一次集成(D 域独立不冲突,一起合)→ catalog/AppShell 冲突**一律人工修括号/标签,不 sed 盲删**(前两批吞括号教训)→ 全量门禁+真机 → 推送

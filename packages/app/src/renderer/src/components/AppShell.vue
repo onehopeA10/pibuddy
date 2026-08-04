@@ -28,6 +28,7 @@ import TasksPanel from "./TasksPanel.vue";
 import ChildAgentPanel from "./ChildAgentPanel.vue";
 import ConnectorPanel from "./ConnectorPanel.vue";
 import ConnectorChannelsPanel from "./ConnectorChannelsPanel.vue";
+import WorkflowPanel from "./WorkflowPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -140,6 +141,9 @@ const connectorOpen = ref(false);
 // 真实渠道面板（connector.feishu / slack / telegram）的开合。独立成 ref：它是
 // 三个真实渠道能力包的共享面板，与通用 webhook 面板互不牵连。
 const channelsOpen = ref(false);
+// 可视化工作流面板（common.workflow）的开合。独立成 ref：它是自己一个能力域
+// （DAG 画布 / 运行 / 历史），与其它面板互不牵连。
+const workflowOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -175,6 +179,8 @@ const telegramEnabled = computed(() => capabilities.isEnabled("connector.telegra
 const channelsEnabled = computed(
   () => feishuEnabled.value || slackEnabled.value || telegramEnabled.value
 );
+// 可视化工作流的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
+const workflowEnabled = computed(() => capabilities.isEnabled("common.workflow"));
 
 onMounted(() => {
   void store.init();
@@ -377,6 +383,15 @@ function onDrop(): void {
             >
               💬 渠道
             </n-button>
+            <n-button
+              v-if="workflowEnabled"
+              size="tiny"
+              :type="workflowOpen ? 'primary' : 'default'"
+              quaternary
+              @click="workflowOpen = !workflowOpen"
+            >
+              🧩 工作流
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -395,6 +410,7 @@ function onDrop(): void {
           <ChildAgentPanel v-if="childAgentOpen && childAgentEnabled" />
           <ConnectorPanel v-if="connectorOpen && connectorEnabled" />
           <ConnectorChannelsPanel v-if="channelsOpen && channelsEnabled" />
+          <WorkflowPanel v-if="workflowOpen && workflowEnabled" />
           <InputBar />
         </slot>
       </template>

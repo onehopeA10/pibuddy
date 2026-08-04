@@ -24,6 +24,7 @@ import { mcpCapability } from "./manifests/mcp.manifest.js";
 import { memoryCapability } from "./manifests/memory.manifest.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
 import { tasksCapability } from "./manifests/tasks.manifest.js";
+import { workflowCapability } from "./manifests/workflow.manifest.js";
 
 /**
  * 全部内置能力，按装配顺序。
@@ -46,6 +47,9 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // 子 Agent 编排（common tier，可关闭）。排在末尾——它调用后台池（内核）与
   // 权限引擎（内核），不依赖任何其它可选能力，装配顺序上无前置。
   childAgentCapability,
+  // 可视化工作流（common tier，可关闭）。排在末尾——它调用后台池（内核）触发
+  // Agent 节点，不依赖任何其它可选能力，装配顺序上无前置。
+  workflowCapability,
   // 第一个 connector tier 能力包。排在最后——它不被任何 common 能力依赖，
   // 且默认进「通用办公」与「编码」两个 Profile（连接器是可组合的可选项）。
   connectorWebhookCapability,
@@ -84,6 +88,8 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "common.mcp",
       "common.tasks",
       "common.child-agent",
+      // 可视化工作流：通用能力，默认进「通用办公」，可随时关掉。
+      "common.workflow",
       // 第一个 connector tier 能力包。连接器是可组合的可选项（ADR-0002：
       // 「通用文档 + 财务分析 + 飞书连接器」），默认进「通用办公」，可随时关掉。
       "connector.webhook",
@@ -112,6 +118,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "coding.git",
       "common.tasks",
       "common.child-agent",
+      "common.workflow",
       "connector.webhook",
       "connector.feishu",
       "connector.slack",

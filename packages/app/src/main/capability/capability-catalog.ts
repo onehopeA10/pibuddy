@@ -48,6 +48,8 @@ import { connectorWebhookCapability } from "./manifests/connector-webhook.manife
 import { connectorFeishuCapability } from "./manifests/connector-feishu.manifest.js";
 import { connectorSlackCapability } from "./manifests/connector-slack.manifest.js";
 import { connectorTelegramCapability } from "./manifests/connector-telegram.manifest.js";
+import { disposeWorkflowResources, registerWorkflowIpc } from "../workflow/workflow-ipc.js";
+import { workflowCapability } from "./manifests/workflow.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -125,6 +127,13 @@ capabilityRegistry.register({
   manifest: childAgentCapability,
   activate: registerChildAgentIpc,
   deactivate: disposeChildAgentResources,
+});
+// 可视化工作流（common tier）。activate 时注册八条通道；deactivate 时停活跃运行、
+// 摘广播、关 sqlite 句柄（工作流定义 / 历史留在磁盘不动）。
+capabilityRegistry.register({
+  manifest: workflowCapability,
+  activate: registerWorkflowIpc,
+  deactivate: disposeWorkflowResources,
 });
 // 第一个 connector tier 能力包（connector.webhook）。默认在「通用办公」与
 // 「编码」Profile 启用，未启用时 activate 一次都不调用 —— 它的七条通道因此
