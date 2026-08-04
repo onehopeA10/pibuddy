@@ -47,6 +47,12 @@ asarUnpack:
 extraResources:
   - from: resources/pi-runtime
     to: pi-runtime
+  # 能力包携带的 pi 资源（REQ-0001 R4.1）：manifest.piResources 声明的
+  # prompts/skills/extensions 源文件，按 <capabilityId>/ 分目录。启用时由
+  # capability-assets.ts 物化到 ~/.pi/agent，停用时收回。与 pi-runtime 同一
+  # 投递面（不进 asar：files 里的 "!resources/**" 已排除）。
+  - from: resources/capability-assets
+    to: capability-assets
 
 # extraResources 会跳过被复制目录里的 node_modules（显式 filter 也无效），
 # 依赖必须由 afterPack 手动补齐，否则打包后 pi 启动即 ERR_MODULE_NOT_FOUND。
