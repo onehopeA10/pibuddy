@@ -29,6 +29,7 @@ import TasksPanel from "./TasksPanel.vue";
 import ChildAgentPanel from "./ChildAgentPanel.vue";
 import ConnectorPanel from "./ConnectorPanel.vue";
 import ConnectorChannelsPanel from "./ConnectorChannelsPanel.vue";
+import RemotePanel from "./RemotePanel.vue";
 import WorkflowPanel from "./WorkflowPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
@@ -148,6 +149,9 @@ const channelsOpen = ref(false);
 // 可视化工作流面板（common.workflow）的开合。独立成 ref：它是自己一个能力域
 // （DAG 画布 / 运行 / 历史），与其它面板互不牵连。
 const workflowOpen = ref(false);
+// 远程访问面板（connector.remote）的开合。独立成 ref：它管的是对外网络服务的
+// 开关 / 配对 / 设备，与其它面板互不牵连。
+const remoteOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -188,6 +192,9 @@ const channelsEnabled = computed(
 );
 // 可视化工作流的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
 const workflowEnabled = computed(() => capabilities.isEnabled("common.workflow"));
+// 远程访问（connector.remote）：唯一开对外网络监听的能力。门控只决定管理面板
+// 是否出现；远程服务本身默认不监听，须在面板里显式开启。
+const remoteEnabled = computed(() => capabilities.isEnabled("connector.remote"));
 
 onMounted(() => {
   void store.init();
@@ -408,6 +415,15 @@ function onDrop(): void {
             >
               🧩 工作流
             </n-button>
+            <n-button
+              v-if="remoteEnabled"
+              size="tiny"
+              :type="remoteOpen ? 'primary' : 'default'"
+              quaternary
+              @click="remoteOpen = !remoteOpen"
+            >
+              📡 远程
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -427,6 +443,7 @@ function onDrop(): void {
           <ChildAgentPanel v-if="childAgentOpen && childAgentEnabled" />
           <ConnectorPanel v-if="connectorOpen && connectorEnabled" />
           <ConnectorChannelsPanel v-if="channelsOpen && channelsEnabled" />
+          <RemotePanel v-if="remoteOpen && remoteEnabled" />
           <WorkflowPanel v-if="workflowOpen && workflowEnabled" />
           <InputBar />
         </slot>

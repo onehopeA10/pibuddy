@@ -52,6 +52,8 @@ import { connectorSlackCapability } from "./manifests/connector-slack.manifest.j
 import { connectorTelegramCapability } from "./manifests/connector-telegram.manifest.js";
 import { disposeWorkflowResources, registerWorkflowIpc } from "../workflow/workflow-ipc.js";
 import { workflowCapability } from "./manifests/workflow.manifest.js";
+import { disposeRemoteResources, registerRemoteIpc } from "../remote/remote-ipc.js";
+import { remoteCapability } from "./manifests/remote.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -167,6 +169,14 @@ capabilityRegistry.register({
 capabilityRegistry.register({
   manifest: connectorTelegramCapability,
   activate: registerTelegramIpc,
+});
+// 远程访问（connector tier）。activate 只注册八条管理通道（不起服务）；服务本身
+// 默认不监听，须用户在面板里显式开启。deactivate 停监听 + 断全部活跃连接 + 关
+// sqlite 句柄（设备与配置留在磁盘不动）。
+capabilityRegistry.register({
+  manifest: remoteCapability,
+  activate: registerRemoteIpc,
+  deactivate: disposeRemoteResources,
 });
 capabilityRegistry.seal();
 

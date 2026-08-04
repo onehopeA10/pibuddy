@@ -9,6 +9,9 @@ import { log } from "./log.js";
 import { runPostUpdateHealthCheck } from "./health/startup-health.js";
 import { applyWindowPolicy } from "./security/window-policy.js";
 import { armUpdateChecks, disposeUpdateService } from "./update/update-ipc.js";
+// 远程访问（connector.remote）：按持久配置恢复服务（若上次开着），退出时拆监听。
+// 从没配过远程的用户，restore 一个字节都不碰（默认对外零暴露）。
+import { disposeRemoteResources, restoreRemoteServerIfEnabled } from "./remote/remote-manager.js";
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -103,6 +106,9 @@ if (!gotLock) {
     });
     registerIpc();
     createWindow();
+    // 能力装配已在 registerIpc() 里完成，此处 isCapabilityEnabled 可信。恢复须
+    // 在窗口存在之后：远程「发 prompt」复用的是聚焦窗口的 runtime client。
+    void restoreRemoteServerIfEnabled();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -113,6 +119,9 @@ if (!gotLock) {
     // 「进程退不掉」的原因往往就是某个没人清的 timer。
     disposeUpdateService();
     disposeAllWorkspaceResources();
+    // 显式停远程监听 + 关 sqlite 句柄：崩溃现场里「进程退不掉 / 端口没释放」
+    // 的原因往往就是某个没人收的 listener。
+    void disposeRemoteResources();
     app.quit();
   });
 }

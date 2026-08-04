@@ -60,6 +60,7 @@ describe("api 聚合对象", () => {
       "piResources",
       "preview",
       "providers",
+      "remote",
       "sessions",
       "settings",
       "shell",
