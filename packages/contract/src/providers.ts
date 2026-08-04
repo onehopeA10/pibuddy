@@ -174,6 +174,26 @@ export const usageRowSchema = z.object({
 });
 export type UsageRow = z.infer<typeof usageRowSchema>;
 
+/**
+ * 按会话明细的一行（REQ-0001 R5.2）。
+ *
+ * 粒度是 (sessionId, day)：跨日的长会话按天各成一行，每行只记当天新增的
+ * 增量 —— 与 usage_daily 同一套差值口径，双源（前台渲染进程 / 池后台）
+ * 重复上报同一份累计快照时增量为 0，不会重复计数。
+ */
+export const usageSessionRowSchema = z.object({
+  sessionId: z.string(),
+  day: z.string(),
+  workspace: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  cost: z.number(),
+  failures: z.number(),
+});
+export type UsageSessionRow = z.infer<typeof usageSessionRowSchema>;
+
 export const usageExportRequestSchema = usageQuerySchema.extend({
   format: z.enum(["csv", "json"]),
 });

@@ -20,8 +20,10 @@
  *     超预算会在 run 日志里如实标注。
  *   - **artifactIds 恒空**：产物登记要等 artifacts 域给后台会话开采集口。
  */
+import type { UsageRecordRequest } from "@pibuddy/contract";
 import { agentPool, poolRuntimeHost } from "../agent-pool/pool.js";
 import type { RuntimeTap } from "../agent-pool/pool-runtime-host.js";
+import { usageStore } from "../usage/usage-store.js";
 import type { AgentRunTrigger, TriggerContext, TriggerOutcome } from "./task-trigger.js";
 
 /** 触发实现需要的池动作面（可注入，便于单测证伪）。 */
@@ -47,6 +49,22 @@ const productionPort: PoolTriggerPort = {
   send: (sessionId, message) => poolRuntimeHost().send(sessionId, message),
 };
 
+/** 用量入账口（R5.2）。注入以便单测证伪「后台会话的用量真的进了账」。 */
+export type UsageRecorder = (input: UsageRecordRequest) => void;
+
+/**
+ * 生产入账：直接写本地 usage 库。与前台（渲染进程经 usage:record）同一套
+ * 差值口径 —— store 按 sessionId 记累计基线，双源重复上报增量为 0。
+ * 记不上不影响 run 成败（与拉统计同一条 best-effort 纪律）。
+ */
+const productionRecordUsage: UsageRecorder = (input) => {
+  try {
+    usageStore().record(input);
+  } catch {
+    /* 用量记不上不影响 run 成败 */
+  }
+};
+
 interface Deferred {
   promise: Promise<void>;
   resolve: () => void;
@@ -58,7 +76,10 @@ function deferred(): Deferred {
   return { promise, resolve };
 }
 
-export function createPoolRunTrigger(port: PoolTriggerPort = productionPort): AgentRunTrigger {
+export function createPoolRunTrigger(
+  port: PoolTriggerPort = productionPort,
+  recordUsage: UsageRecorder = productionRecordUsage
+): AgentRunTrigger {
   return {
     async trigger(ctx: TriggerContext): Promise<TriggerOutcome> {
       // 池键用 runId 铸：每条 run 一个独立后台会话，幂等键的唯一性顺带保证
@@ -179,13 +200,31 @@ export function createPoolRunTrigger(port: PoolTriggerPort = productionPort): Ag
         }
 
         // 成本：收尾拉一次会话统计（best-effort，拉不到不改变成败）。
+        // 同一份统计顺手结账进本地用量库（R5.2）：后台会话没有渲染进程替它
+        // 上报，这里是它唯一的入账点。拉不到统计就不入账 —— 不造数。
         let costUsd: number | null = null;
         try {
           const stats = (await port.send(poolKey, { type: "get_session_stats" })) as {
             success?: boolean;
-            data?: { cost?: number };
+            data?: { cost?: number; tokens?: { input?: number; output?: number } };
           } | null;
-          if (stats?.success && typeof stats.data?.cost === "number") costUsd = stats.data.cost;
+          if (stats?.success && stats.data) {
+            if (typeof stats.data.cost === "number") costUsd = stats.data.cost;
+            recordUsage({
+              // 结账记在真实 pi sessionId 上（与会话历史同一把键）；握手异常
+              // 拿不到时退回池键，宁可有一条对不上历史的账，不丢账。
+              sessionId: realSessionId ?? poolKey,
+              workspaceId: ctx.workspaceId,
+              // 冻结输入里的 provider/model 可能为空串（未冻结时由 pi 用默认
+              // 模型跑）——如实空着，不猜一个名字填进去。
+              provider: ctx.input.provider,
+              modelId: ctx.input.model,
+              inputTokens: stats.data.tokens?.input ?? 0,
+              outputTokens: stats.data.tokens?.output ?? 0,
+              cost: typeof stats.data.cost === "number" ? stats.data.cost : 0,
+              failed: eventError !== null,
+            });
+          }
         } catch {
           /* 统计拉不到不影响 run 成败 */
         }

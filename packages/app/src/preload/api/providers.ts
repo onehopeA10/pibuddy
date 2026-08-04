@@ -21,6 +21,7 @@ import type {
   UsageQuery,
   UsageRecordRequest,
   UsageRow,
+  UsageSessionRow,
 } from "@pibuddy/contract";
 import { invoke } from "./bridge.js";
 
@@ -47,5 +48,8 @@ export const providers = {
       invoke<UsageExportResult>(CHANNELS.usageExport, request),
     /** agent_settled 之后上报会话累计量，由主进程做差值入库 */
     record: (payload: UsageRecordRequest) => invoke<void>(CHANNELS.usageRecord, payload),
+    /** 按 (sessionId, day) 的会话明细（R5.2） */
+    sessions: (filter: UsageQuery = {}) =>
+      invoke<UsageSessionRow[]>(CHANNELS.usageSessions, filter),
   },
 };

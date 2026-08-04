@@ -226,7 +226,7 @@ async function backToBundled(): Promise<void> {
     -->
     <n-space style="margin: 4px 0 16px">
       <n-button @click="openProviders">🔑 账号与模型</n-button>
-      <n-button @click="openUsage">📊 用量与花费</n-button>
+      <n-button @click="openUsage">📊 用量与花费（仅本地统计）</n-button>
     </n-space>
 
     <update-settings-panel />

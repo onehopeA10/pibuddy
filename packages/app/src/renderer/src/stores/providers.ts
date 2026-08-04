@@ -16,7 +16,9 @@ import type {
   ProviderView,
   UsageQuery,
   UsageRow,
+  UsageSessionRow,
 } from "@contract";
+import { localDayOf, summarizeUsage } from "../usage-summary";
 
 /** 一次「测试连接」的界面态。`pending` 期间按钮转圈且不可重复点。 */
 export interface TestState {
@@ -38,6 +40,10 @@ export const useProvidersStore = defineStore("providers", () => {
 
   const usageRows = ref<UsageRow[]>([]);
   const usageFilter = ref<UsageQuery>({});
+  /** 按 (sessionId, day) 的会话明细（R5.2），跟随 usageFilter。 */
+  const usageSessionRows = ref<UsageSessionRow[]>([]);
+  /** 不带日期过滤的全量按日行 —— 「今日 / 近 7 日 / 累计」从它算。 */
+  const usageAllRows = ref<UsageRow[]>([]);
 
   /** 至少配好了一个可用凭据 —— 首启向导据它判断「能不能发第一条消息」。 */
   const hasAnyConfigured = computed(() => providers.value.some((p) => p.configured));
@@ -129,7 +135,16 @@ export const useProvidersStore = defineStore("providers", () => {
   async function refreshUsage(filter: UsageQuery = usageFilter.value): Promise<void> {
     usageFilter.value = filter;
     try {
-      usageRows.value = await window.piBuddy.providers.usage.query(filter);
+      // 汇总档（今日 / 近 7 日 / 累计）刻意不吃日期筛选：用户框选了上个月
+      // 也不该让「今日」变成 0。workspace 维度跟随筛选（分区铁律）。
+      const allFilter: UsageQuery = filter.workspaceId
+        ? { workspaceId: filter.workspaceId }
+        : {};
+      [usageRows.value, usageSessionRows.value, usageAllRows.value] = await Promise.all([
+        window.piBuddy.providers.usage.query(filter),
+        window.piBuddy.providers.usage.sessions(filter),
+        window.piBuddy.providers.usage.query(allFilter),
+      ]);
     } catch (err) {
       lastError.value = err instanceof Error ? err.message : String(err);
     }
@@ -160,6 +175,9 @@ export const useProvidersStore = defineStore("providers", () => {
     usageRows.value.reduce((sum, row) => sum + row.failures, 0)
   );
 
+  /** 今日 / 近 7 日 / 累计（R5.2），从不带日期过滤的全量行汇总。 */
+  const usageSummary = computed(() => summarizeUsage(usageAllRows.value, localDayOf()));
+
   return {
     providers,
     permissionEnforced,
@@ -170,6 +188,8 @@ export const useProvidersStore = defineStore("providers", () => {
     tests,
     usageRows,
     usageFilter,
+    usageSessionRows,
+    usageSummary,
     hasAnyConfigured,
     totalCost,
     totalFailures,

@@ -232,6 +232,8 @@ export const CHANNELS = {
   usageExport: "usage:export",
   /** 一次 agent_settled 之后上报会话累计量，由主进程做差值入库 */
   usageRecord: "usage:record",
+  /** 按 (sessionId, day) 的会话明细（R5.2），与日汇总同一套差值口径 */
+  usageSessions: "usage:sessions",
 
   // ---- 能力包与 Profile（ADR-0002 第一阶段，恰 3 条） ----
   //

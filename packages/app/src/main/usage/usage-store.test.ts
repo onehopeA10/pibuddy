@@ -178,6 +178,96 @@ describe("增量不出负数（pi 压缩后重置统计）", () => {
   });
 });
 
+describe("按 (sessionId, day) 的会话明细（R5.2）", () => {
+  /** 真实形状的 get_session_stats 快照（tokens.input/output + cost 的口径）。 */
+  const SNAPSHOT = { inputTokens: 22319, outputTokens: 512, cost: 0.1117 };
+
+  it("同一会话同一天多轮上报，明细累加成一行", async () => {
+    const { store } = await freshStore();
+    store.record(record({ inputTokens: 1000, outputTokens: 100, cost: 0.01 }), at("2026-08-01"));
+    store.record(record({ inputTokens: 3000, outputTokens: 400, cost: 0.05 }), at("2026-08-01"));
+
+    const rows = store.querySessions();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].sessionId).toBe("s1");
+    expect(rows[0].day).toBe("2026-08-01");
+    expect(rows[0].inputTokens).toBe(3000);
+    expect(rows[0].outputTokens).toBe(400);
+    expect(rows[0].cost).toBeCloseTo(0.05, 6);
+    store.close();
+  });
+
+  it("[双源去重] 前台与池后台上报同一份累计快照，只计一次", async () => {
+    const { store } = await freshStore();
+    // 前台（渲染进程经 usage:record）先结账
+    store.record(record(SNAPSHOT), at("2026-08-01"));
+    // 池后台对同一 sessionId 用同一份 get_session_stats 再结一次账
+    store.record(record(SNAPSHOT), at("2026-08-01"));
+
+    const sessions = store.querySessions();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].inputTokens).toBe(22319); // 不是 44638
+    expect(sessions[0].outputTokens).toBe(512);
+    expect(sessions[0].cost).toBeCloseTo(0.1117, 6);
+    // 日汇总同样只计一次
+    expect(store.query()[0].inputTokens).toBe(22319);
+    store.close();
+  });
+
+  it("[跨日] 跨过午夜的长会话按天各成一行，每行只记当天增量", async () => {
+    const { store } = await freshStore();
+    store.record(record({ inputTokens: 1000, outputTokens: 100, cost: 0.1 }), at("2026-08-01"));
+    // 次日继续：累计 1500 → 当天增量 500
+    store.record(record({ inputTokens: 1500, outputTokens: 130, cost: 0.16 }), at("2026-08-02"));
+
+    const rows = store.querySessions(); // day DESC
+    expect(rows).toHaveLength(2);
+    expect(rows[0].day).toBe("2026-08-02");
+    expect(rows[0].inputTokens).toBe(500);
+    expect(rows[0].outputTokens).toBe(30);
+    expect(rows[0].cost).toBeCloseTo(0.06, 6);
+    expect(rows[1].day).toBe("2026-08-01");
+    expect(rows[1].inputTokens).toBe(1000);
+    store.close();
+  });
+
+  it("[分区] 按 workspaceId 过滤，各文件夹的账互不可见", async () => {
+    const { store } = await freshStore();
+    store.record(record({ inputTokens: 10, cost: 0.001 }), at("2026-08-01"));
+    store.record(
+      record({ sessionId: "s2", workspaceId: "ws-b", inputTokens: 20, cost: 0.002 }),
+      at("2026-08-01")
+    );
+
+    expect(store.querySessions({ workspaceId: "ws-a" }).map((r) => r.sessionId)).toEqual(["s1"]);
+    expect(store.querySessions({ workspaceId: "ws-b" }).map((r) => r.sessionId)).toEqual(["s2"]);
+    expect(store.querySessions()).toHaveLength(2);
+    store.close();
+  });
+
+  it("重复快照（增量全零且无失败）不为当天凭空造一行明细", async () => {
+    const { store } = await freshStore();
+    store.record(record(SNAPSHOT), at("2026-08-01"));
+    // 次日重复上报同一份累计快照（例如双源都结了账但会话没有新活动）
+    store.record(record(SNAPSHOT), at("2026-08-02"));
+
+    const rows = store.querySessions();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].day).toBe("2026-08-01");
+    store.close();
+  });
+
+  it("失败轮记入 failure_count，token 增量为零也如实落一行", async () => {
+    const { store } = await freshStore();
+    store.record(record({ failed: true }), at("2026-08-01"));
+    const rows = store.querySessions();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].failures).toBe(1);
+    expect(rows[0].inputTokens).toBe(0);
+    store.close();
+  });
+});
+
 describe("CSV 导出", () => {
   it("首行是约定好的表头，一个字都不能改（用户的导入脚本认它）", async () => {
     const { mod, store } = await freshStore();

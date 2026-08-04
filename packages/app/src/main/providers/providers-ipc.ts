@@ -64,6 +64,7 @@ export const USAGE_CHANNELS: InvokeChannel[] = [
   CHANNELS.usageQuery,
   CHANNELS.usageExport,
   CHANNELS.usageRecord,
+  CHANNELS.usageSessions,
 ];
 
 /**
@@ -231,6 +232,10 @@ export function registerProvidersIpc(): void {
 export function registerUsageIpc(): void {
   registerHandler(CHANNELS.usageQuery, usageQuerySchema, (filter) =>
     usageStore().query(filter)
+  );
+
+  registerHandler(CHANNELS.usageSessions, usageQuerySchema, (filter) =>
+    usageStore().querySessions(filter)
   );
 
   registerHandler(CHANNELS.usageExport, usageExportRequestSchema, (request) => {

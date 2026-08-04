@@ -45,6 +45,15 @@ watch(
 watch([range, onlyThisWorkspace], () => void applyFilter());
 
 const rows = computed(() => providers.usageRows);
+const sessionRows = computed(() => providers.usageSessionRows);
+const summary = computed(() => providers.usageSummary);
+
+/** 三档汇总的展示行（R5.2）：今日 / 近 7 日 / 累计，input/output 分列。 */
+const summaryRows = computed(() => [
+  { label: "今日", bucket: summary.value.today },
+  { label: "近 7 日", bucket: summary.value.last7 },
+  { label: "累计", bucket: summary.value.total },
+]);
 </script>
 
 <template>
@@ -57,8 +66,29 @@ const rows = computed(() => providers.usageRows);
     aria-labelledby="usage-panel-title"
   >
     <p id="usage-panel-title" class="intro">
-      按天统计每个模型用掉的 token 与花费。数据只保存在你自己的电脑上。
+      按天统计每个模型用掉的 token 与花费。仅本地统计：数据只保存在你自己的电脑上，不上报。
     </p>
+
+    <!-- R5.2：今日 / 近 7 日 / 累计。汇总不吃日期筛选（用户框选上个月也不该
+         让「今日」归零），workspace 维度跟随「只看当前文件夹」。 -->
+    <table class="usage-table summary-table" data-testid="usage-summary-table">
+      <thead>
+        <tr>
+          <th scope="col"></th>
+          <th scope="col">输入 token</th>
+          <th scope="col">输出 token</th>
+          <th scope="col">花费</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="item in summaryRows" :key="item.label">
+          <td>{{ item.label }}</td>
+          <td>{{ item.bucket.inputTokens.toLocaleString() }}</td>
+          <td>{{ item.bucket.outputTokens.toLocaleString() }}</td>
+          <td>${{ item.bucket.cost.toFixed(4) }}</td>
+        </tr>
+      </tbody>
+    </table>
 
     <n-space align="center" style="margin-bottom: 12px">
       <n-date-picker
@@ -120,6 +150,38 @@ const rows = computed(() => providers.usageRows);
 
     <n-empty v-else description="这个时间段还没有用量记录" style="margin: 24px 0" />
 
+    <!-- R5.2：按会话明细。粒度是 (sessionId, day)：跨日的长会话按天各一行，
+         每行只记当天新增的增量，与上面的按日汇总同一套差值口径。 -->
+    <template v-if="sessionRows.length">
+      <h4 class="section-title">按会话明细</h4>
+      <table class="usage-table" data-testid="usage-session-table">
+        <thead>
+          <tr>
+            <th scope="col">日期</th>
+            <th scope="col">会话</th>
+            <th scope="col">服务商</th>
+            <th scope="col">模型</th>
+            <th scope="col">输入</th>
+            <th scope="col">输出</th>
+            <th scope="col">花费</th>
+            <th scope="col">失败</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in sessionRows" :key="`${row.sessionId}-${row.day}`">
+            <td>{{ row.day }}</td>
+            <td class="session-id" :title="row.sessionId">{{ row.sessionId }}</td>
+            <td>{{ row.provider }}</td>
+            <td>{{ row.model }}</td>
+            <td>{{ row.inputTokens.toLocaleString() }}</td>
+            <td>{{ row.outputTokens.toLocaleString() }}</td>
+            <td>${{ row.cost.toFixed(4) }}</td>
+            <td>{{ row.failures }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </template>
+
     <n-space justify="end" style="margin-top: 12px">
       <n-button @click="providers.usagePanelOpen = false">关闭</n-button>
     </n-space>
@@ -150,5 +212,23 @@ const rows = computed(() => providers.usageRows);
 .usage-table thead th {
   color: #8a8f98;
   font-weight: 500;
+}
+.summary-table {
+  margin-bottom: 12px;
+}
+.summary-table td:first-child,
+.summary-table th:first-child {
+  text-align: left;
+}
+.section-title {
+  margin: 18px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.session-id {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
