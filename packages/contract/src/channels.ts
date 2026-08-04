@@ -521,6 +521,40 @@ export const CHANNELS = {
   terminalKill: "terminal:kill",
   terminalRestart: "terminal:restart",
   terminalRename: "terminal:rename",
+
+  // ---- Remote / PWA 远程访问（connector.remote / REM-101，恰 8 条） ----
+  //
+  // 四层边界里唯一会**开一个对外网络监听**的能力，因此也是唯一一个「安全设计
+  // 的疏忽 = 真实远程攻击面」的能力。这八条通道是**主机侧管理面**（渲染进程 ↔
+  // 主进程）：开关服务、看/改监听范围、配对（生成单次短时 challenge）、看设备、
+  // 撤销 / 轮换设备、按设备授予危险 scope。**注意它们与远程 HTTP/WS 服务本身
+  // 是两个完全不同的入口**：这八条走 ipc-guard 的四道闸（主 frame + 校验 + 尺寸
+  // + 限流），只有本机主窗口能发；远程设备走的是另一套统一鉴权中间件
+  // （main/remote/remote-auth.ts），token + origin/CSRF + 限速 + 尺寸 + 审计，
+  // 二者无任何共享放行路径。
+  //
+  // 入参一律不含任何原始 token / 监听地址字符串：set-bind-scope 只收一个枚举
+  // （loopback / lan），create-pairing 不收参数（challenge 由主进程随机生成、
+  // 用一次即失效），设备操作只收不透明 deviceId。渲染进程既表达不出「监听某个
+  // 我指定的地址」，也拿不回任何设备的长期 token（配对时 token 只发给设备本身、
+  // 主进程只存 hash）。每个动作都回**权威快照** RemoteState（与 connector /
+  // providers 同一口径）。
+  /** 当前远程服务态：开关 / 监听范围 / 实际地址 / 设备列表 / 活跃配对 / 审计 */
+  remoteDescribe: "remote:describe",
+  /** 开 / 关远程服务（关 = 停监听 + 断开全部活跃连接，token 立即失效于连接层） */
+  remoteSetEnabled: "remote:set-enabled",
+  /** 切换监听范围：loopback（默认，对外零暴露）/ lan（主动开启，显示范围） */
+  remoteSetBindScope: "remote:set-bind-scope",
+  /** 生成一次配对：单次、短时的随机 challenge，用一次即失效（QR / 手动码承载） */
+  remoteCreatePairing: "remote:create-pairing",
+  /** 取消当前未消费的配对 challenge */
+  remoteCancelPairing: "remote:cancel-pairing",
+  /** 撤销一台设备：删其 token hash + 断开它的活跃连接（立即失效） */
+  remoteRevokeDevice: "remote:revoke-device",
+  /** 轮换一台设备的凭证：旧 token 立即失效，生成一次新配对供该设备重新取 token */
+  remoteRotateDevice: "remote:rotate-device",
+  /** 按设备授予 / 收回一个危险 scope（owner 在主机上显式操作，默认全关） */
+  remoteSetDeviceScope: "remote:set-device-scope",
 } as const;
 
 /** 主进程单向推送通道（9 个）。 */

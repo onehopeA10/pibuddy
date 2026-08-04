@@ -26,6 +26,7 @@ import { memoryCapability } from "./manifests/memory.manifest.js";
 import { sessionTreeCapability } from "./manifests/session-tree.manifest.js";
 import { tasksCapability } from "./manifests/tasks.manifest.js";
 import { workflowCapability } from "./manifests/workflow.manifest.js";
+import { remoteCapability } from "./manifests/remote.manifest.js";
 
 /**
  * 全部内置能力，按装配顺序。
@@ -62,6 +63,10 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   connectorFeishuCapability,
   connectorSlackCapability,
   connectorTelegramCapability,
+  // 远程访问（connector tier）。四层边界里唯一开对外网络监听的能力——默认对外
+  // 零暴露（服务默认不监听），排在最后：它不被任何 common 能力依赖，也不依赖
+  // 其它可选能力（看会话 / 发 prompt 复用的是内核设施，不是 connector.webhook）。
+  remoteCapability,
 ];
 
 /**
@@ -101,6 +106,9 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "connector.feishu",
       "connector.slack",
       "connector.telegram",
+      // 远程访问：默认进「通用办公」。启用只是让管理面可用；远程服务本身默认
+      // 不监听，须用户在面板里显式开启，且开启后默认只绑 loopback（对外零暴露）。
+      "connector.remote",
     ],
   },
   {
@@ -130,6 +138,7 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "connector.feishu",
       "connector.slack",
       "connector.telegram",
+      "connector.remote",
     ],
   },
   {

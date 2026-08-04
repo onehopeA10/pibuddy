@@ -48,6 +48,7 @@ import { terminal } from "./terminal.js";
 import { tasks } from "./tasks.js";
 import { connector } from "./connector.js";
 import { workflow } from "./workflow.js";
+import { remote } from "./remote.js";
 
 export const api = {
   pi,
@@ -90,6 +91,8 @@ export const api = {
   connector,
   /** 可视化工作流（common.workflow）。DAG 画布 / 运行 / 历史 / 导入导出，Agent 节点走后台池触发 */
   workflow,
+  /** 远程访问管理面（connector.remote）。开关 / 配对 / 撤销 / 授危险 scope，token 只进不出 */
+  remote,
 };
 
 export type PiBuddyApi = typeof api;
