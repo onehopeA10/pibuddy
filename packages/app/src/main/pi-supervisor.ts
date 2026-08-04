@@ -146,6 +146,25 @@ export class PiSupervisor implements PiRuntimeSupervisor {
   }
 
   /**
+   * 当前活跃 runtime 的前台视图（AGT-103：池 deliver/stop 的前台回退网关用）。
+   *
+   * 只认**仍在索引里**的当前代际记录：`latest` 句柄在 runtime 退出后是陈旧的，
+   * 必须经 byRuntimeId 再验一次，否则回退网关会把投递发给一个已死的 client。
+   * 注意 sessionId 在握手 adoptSession 之前是占位值（sessionPath / runtimeId），
+   * 那段窗口里它不会与任何真实会话 id 匹配——回退因此天然只在握手完成后生效。
+   */
+  currentActive(): { sessionId: string; targetId: number; client: PiRpcClient } | null {
+    if (!this.latest) return null;
+    const record = this.byRuntimeId.get(this.latest.runtimeId);
+    if (!record) return null;
+    return {
+      sessionId: record.ctx.sessionId,
+      targetId: record.target.id,
+      client: record.client,
+    };
+  }
+
+  /**
    * 同步启动一个新 runtime。
    *
    * 之所以必须同步返回 client：调用方要在**任何 await 之前**把它登记进自己的
