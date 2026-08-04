@@ -13,6 +13,7 @@
  * 断言写死为：
  *
  *     rg --no-filename -c '\bfetch\(' packages/app/src/main \
+ *        -g '!net/outbound-local-guard.ts' \
  *        -g '*.ts' -g '!net/outbound-guard.ts' | awk '{s+=$1} END{print s+0}'   # 必须为 0
  *
  * ## 判定链
