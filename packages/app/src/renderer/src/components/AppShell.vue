@@ -31,6 +31,7 @@ import ConnectorPanel from "./ConnectorPanel.vue";
 import ConnectorChannelsPanel from "./ConnectorChannelsPanel.vue";
 import RemotePanel from "./RemotePanel.vue";
 import WorkflowPanel from "./WorkflowPanel.vue";
+import PromptLibraryPanel from "./PromptLibraryPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -38,6 +39,7 @@ import { useArtifactsStore } from "../stores/artifacts";
 import { useMemoryStore } from "../stores/memory";
 import { useTasksStore } from "../stores/tasks";
 import { useCapabilitiesStore } from "../stores/capabilities";
+import { usePromptLibraryStore } from "../stores/promptLibrary";
 import {
   createDirtyDialog,
   setDirtyPrompt,
@@ -53,6 +55,7 @@ const artifacts = useArtifactsStore();
 const memory = useMemoryStore();
 const tasks = useTasksStore();
 const capabilities = useCapabilitiesStore();
+const promptLibrary = usePromptLibraryStore();
 const message = useMessage();
 const dialog = useDialog();
 store.setNotifier(message);
@@ -195,6 +198,9 @@ const workflowEnabled = computed(() => capabilities.isEnabled("common.workflow")
 // 远程访问（connector.remote）：唯一开对外网络监听的能力。门控只决定管理面板
 // 是否出现；远程服务本身默认不监听，须在面板里显式开启。
 const remoteEnabled = computed(() => capabilities.isEnabled("connector.remote"));
+// 提示词库（common.prompt-library / REQ-0001 R1）的 UI 门控：判据同样来自
+// 主进程能力快照（「启用」= 六条通道已注册）。
+const promptLibraryEnabled = computed(() => capabilities.isEnabled("common.prompt-library"));
 
 /**
  * 当前工作文件夹是否在 WSL 内（R5.1）。
@@ -216,6 +222,11 @@ onMounted(() => {
   // 能力快照：没回来之前 isEnabled() 一律放行，因此这一行的迟到不会让
   // 界面先闪一下空壳（理由见 stores/capabilities.ts 的文件头）。
   void capabilities.refresh();
+  // 提示词库拉一次快照：list 通道的实现会先把预置提示词物化到
+  // ~/.pi/agent/prompts/（幂等），因此**首启动**这里就是「全新用户零配置、
+  // 库非空」（R1.4）的触发点，而不是等用户第一次点开面板。能力被关掉时
+  // 通道未注册，refresh 把错误折进 store.lastError，不打断启动。
+  void promptLibrary.refresh();
 });
 
 /**
@@ -444,6 +455,15 @@ function onDrop(): void {
             >
               📡 远程
             </n-button>
+            <n-button
+              v-if="promptLibraryEnabled"
+              size="tiny"
+              :type="promptLibrary.panelOpen ? 'primary' : 'default'"
+              quaternary
+              @click="promptLibrary.panelOpen = !promptLibrary.panelOpen"
+            >
+              📋 提示词
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -482,6 +502,7 @@ function onDrop(): void {
       <ArtifactLibrary v-if="artifactsEnabled" />
       <MemoryPanel v-if="memoryEnabled" />
       <TasksPanel v-if="tasksEnabled" />
+      <PromptLibraryPanel v-if="promptLibraryEnabled" />
     </slot>
   </div>
 </template>

@@ -59,6 +59,7 @@ describe("api 聚合对象", () => {
       "pi",
       "piResources",
       "preview",
+      "promptLibrary",
       "providers",
       "remote",
       "sessions",

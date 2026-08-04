@@ -49,6 +49,7 @@ import { tasks } from "./tasks.js";
 import { connector } from "./connector.js";
 import { workflow } from "./workflow.js";
 import { remote } from "./remote.js";
+import { promptLibrary } from "./promptLibrary.js";
 
 export const api = {
   pi,
@@ -93,6 +94,8 @@ export const api = {
   workflow,
   /** 远程访问管理面（connector.remote）。开关 / 配对 / 撤销 / 授危险 scope，token 只进不出 */
   remote,
+  /** 预置办公提示词库（common.prompt-library）。六个意图，无路径 / 文件名入口 */
+  promptLibrary,
 };
 
 export type PiBuddyApi = typeof api;
