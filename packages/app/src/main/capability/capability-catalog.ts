@@ -60,6 +60,8 @@ import { disposeRemoteResources, registerRemoteIpc } from "../remote/remote-ipc.
 import { remoteCapability } from "./manifests/remote.manifest.js";
 import { registerPromptLibraryIpc } from "../prompt-library/prompt-library-ipc.js";
 import { promptLibraryCapability } from "./manifests/prompt-library.manifest.js";
+import { disposeHomeResources, registerHomeIpc } from "../home/home-ipc.js";
+import { homeAssistantCapability } from "./manifests/home-assistant.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -207,6 +209,15 @@ capabilityRegistry.register({
 capabilityRegistry.register({
   manifest: promptLibraryCapability,
   activate: registerPromptLibraryIpc,
+});
+// 智能家居基座（connector tier / home.assistant，智能家居 Phase B）。不进任何
+// 内置 Profile（全经 overrides 启用）；activate 注册五条通道 + 起 tool bridge
+// （named pipe 入站监听）+ 挂 pi 子进程 env 贡献；deactivate 摘 env 贡献、停
+// bridge、拆 WS 会话与缓存定时器、关 sqlite 句柄（配置与快照数据留在磁盘不动）。
+capabilityRegistry.register({
+  manifest: homeAssistantCapability,
+  activate: registerHomeIpc,
+  deactivate: disposeHomeResources,
 });
 capabilityRegistry.seal();
 

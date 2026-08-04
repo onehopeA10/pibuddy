@@ -30,6 +30,7 @@ import { tasksCapability } from "./manifests/tasks.manifest.js";
 import { workflowCapability } from "./manifests/workflow.manifest.js";
 import { remoteCapability } from "./manifests/remote.manifest.js";
 import { promptLibraryCapability } from "./manifests/prompt-library.manifest.js";
+import { homeAssistantCapability } from "./manifests/home-assistant.manifest.js";
 
 /**
  * 全部内置能力，按装配顺序。
@@ -81,6 +82,11 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // 预置办公提示词库（common tier / REQ-0001 R1）。排在末尾——它只读写 pi 的
   // prompts 目录与自己的偏好文件，不依赖任何其它可选能力，装配顺序上无前置。
   promptLibraryCapability,
+  // 智能家居基座（connector tier / 智能家居 Phase B）。不进任何内置 Profile
+  // （全经 overrides 启用），排在最后——它不依赖任何其它可选能力；将来的
+  // home.dashboard / home.automation / home.advisor 各自 dependencies 本包，
+  // 须排在它之后。
+  homeAssistantCapability,
 ];
 
 /**

@@ -127,6 +127,25 @@ export interface ResolvedPiRuntime {
 }
 
 /**
+ * 能力包对 pi 子进程环境的追加贡献。
+ *
+ * 当前唯一登记方：home.assistant 的 tool bridge（activate 时挂上，注入
+ * PIBUDDY_HOME_BRIDGE / PIBUDDY_HOME_BRIDGE_TOKEN；deactivate 摘掉）。包未
+ * 启用时贡献者不存在，env 一个字节都不多——「按需启用 = 零注入」在结构上
+ * 成立，不需要在这里判断任何能力开关。
+ *
+ * 贡献值来自主进程自己（不是从父进程环境继承），因此不过 ENV_ALLOWLIST；
+ * ELECTRON_RUN_AS_NODE 在贡献合并**之后**显式覆盖，贡献者写不掉它。
+ */
+export type PiChildEnvContribution = () => Record<string, string>;
+
+let childEnvContribution: PiChildEnvContribution | null = null;
+
+export function setPiChildEnvContribution(contribution: PiChildEnvContribution | null): void {
+  childEnvContribution = contribution;
+}
+
+/**
  * 构造 pi 子进程的环境变量。
  *
  * 显式构造一个全新对象，绝不做 `{ ...process.env }` 展开 —— 展开会把
@@ -143,6 +162,9 @@ export function buildChildEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Pro
     if (!ENV_ALLOWLIST_PATTERNS.some((re) => re.test(key))) continue;
     const value = base[key];
     if (typeof value === "string") env[key] = value;
+  }
+  if (childEnvContribution) {
+    for (const [key, value] of Object.entries(childEnvContribution())) env[key] = value;
   }
   env.ELECTRON_RUN_AS_NODE = "1";
   return env;
