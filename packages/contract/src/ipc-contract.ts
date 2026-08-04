@@ -70,6 +70,7 @@ import { officeSkillsContractShard } from "./office-skills.js";
 import { workflowContractShard, workflowRunSnapshotSchema } from "./workflow.js";
 import { remoteContractShard } from "./remote.js";
 import { promptLibraryContractShard } from "./prompt-library.js";
+import { eduContractShard } from "./edu.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -812,6 +813,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   remoteContractShard,
   promptLibraryContractShard,
   officeSkillsContractShard,
+  eduContractShard,
 ];
 
 /**

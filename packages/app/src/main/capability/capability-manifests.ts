@@ -15,6 +15,7 @@ import { workspaceReviewCapability } from "../changeset/workspace-review.capabil
 import { previewCapability } from "../preview/preview.capability.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import { childAgentCapability } from "./manifests/child-agent.manifest.js";
+import { eduKidsCapability } from "./manifests/edu-kids.manifest.js";
 import { connectorWebhookCapability } from "./manifests/connector-webhook.manifest.js";
 import { connectorFeishuCapability } from "./manifests/connector-feishu.manifest.js";
 import { connectorSlackCapability } from "./manifests/connector-slack.manifest.js";
@@ -50,6 +51,10 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // 第一个原生模块能力包（coding tier，node-pty / ADR-0002 方案 B）。同属编码包，
   // 排在 coding.git 之后——它不依赖任何其它可选能力。
   terminalCapability,
+  // 首个真内容垂直包（vertical / edu.kids，REQ-0001 R3）。默认只进「家庭教育」
+  // Profile；它不依赖任何其它可选能力（档案在自有分区、错题本经内核收容读取），
+  // 装配顺序上无前置。
+  eduKidsCapability,
   tasksCapability,
   // 子 Agent 编排（common tier，可关闭）。排在末尾——它调用后台池（内核）与
   // 权限引擎（内核），不依赖任何其它可选能力，装配顺序上无前置。
@@ -159,6 +164,32 @@ export const AGENT_PROFILES: readonly AgentProfile[] = [
       "connector.remote",
       // 提示词库同样进「编码」：办公提示词对写代码的人一样开箱可用。
       "common.prompt-library",
+    ],
+  },
+  {
+    id: "education",
+    displayName: "家庭教育",
+    // 在通用能力之上叠加首个真内容垂直包 edu.kids（REQ-0001 R3）——与「编码」
+    // 叠加 Git/终端同构：切到本 Profile = 装上儿童教育（提示词/技能/出题器
+    // 经 R4 物化到 pi），切走 = 卸下（资源经账本收回，零残留）。
+    description: "在通用能力之上叠加儿童教育垂直包（辅导提示词、练习卷与错题本、数学出题器）。",
+    capabilityIds: [
+      "common.workspace-files",
+      "common.workspace-review",
+      "common.preview",
+      "common.artifacts",
+      "common.session-tree",
+      "common.memory",
+      "common.mcp",
+      "common.tasks",
+      "common.child-agent",
+      "common.workflow",
+      "connector.webhook",
+      "connector.feishu",
+      "connector.slack",
+      "connector.telegram",
+      "connector.remote",
+      "edu.kids",
     ],
   },
   {

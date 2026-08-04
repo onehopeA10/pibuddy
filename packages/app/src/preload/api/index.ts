@@ -51,6 +51,7 @@ import { workflow } from "./workflow.js";
 import { remote } from "./remote.js";
 import { promptLibrary } from "./promptLibrary.js";
 import { officeSkills } from "./officeSkills.js";
+import { edu } from "./edu.js";
 
 export const api = {
   pi,
@@ -99,6 +100,8 @@ export const api = {
   promptLibrary,
   /** 预置办公技能包（common.office-skills）。只读清单 + 物化状态，无执行 / 物化入口 */
   officeSkills,
+  /** 儿童教育能力包（edu.kids）。档案与错题本三条窄通道，无路径与出题入口 */
+  edu,
 };
 
 export type PiBuddyApi = typeof api;

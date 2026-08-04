@@ -32,5 +32,6 @@ export * from "./office-skills.js";
 export * from "./terminal.js";
 export * from "./remote.js";
 export * from "./prompt-library.js";
+export * from "./edu.js";
 export * from "./ipc-contract.js";
 export * from "./ports.js";

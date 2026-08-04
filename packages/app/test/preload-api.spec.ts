@@ -51,6 +51,7 @@ describe("api 聚合对象", () => {
       "connector",
       "diagnostics",
       "dialog",
+      "edu",
       "file",
       "git",
       "mcp",

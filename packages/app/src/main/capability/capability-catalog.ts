@@ -32,6 +32,8 @@ import { disposeGitResources, registerGitIpc } from "../git/git-ipc.js";
 import { gitCapability } from "./manifests/git.manifest.js";
 import { disposeTerminalResources, registerTerminalIpc } from "../terminal/terminal-ipc.js";
 import { terminalCapability } from "./manifests/terminal.manifest.js";
+import { registerEduIpc } from "../edu/edu-ipc.js";
+import { eduKidsCapability } from "./manifests/edu-kids.manifest.js";
 import { disposeTasksResources, registerTasksIpc } from "../tasks/tasks-ipc.js";
 import { tasksCapability } from "./manifests/tasks.manifest.js";
 import {
@@ -131,6 +133,14 @@ capabilityRegistry.register({
   manifest: terminalCapability,
   activate: registerTerminalIpc,
   deactivate: disposeTerminalResources,
+});
+// 首个真内容垂直包（edu.kids，REQ-0001 R3）。默认只在「家庭教育」Profile 启用，
+// 未启用时 activate 一次都不调用——它的三条通道因此不会进 ipc-guard 的注册表。
+// 无 deactivate：不持有 watcher / worker / 子进程（teardown 为空，见 manifest）；
+// 它携带的 pi 资源（prompts/skills/extension）由启动对账按启用集合物化 / 收回。
+capabilityRegistry.register({
+  manifest: eduKidsCapability,
+  activate: registerEduIpc,
 });
 capabilityRegistry.register({
   manifest: tasksCapability,
