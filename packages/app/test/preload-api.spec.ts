@@ -49,6 +49,7 @@ describe("api 聚合对象", () => {
       "capabilities",
       "childAgent",
       "connector",
+      "dashboard",
       "diagnostics",
       "dialog",
       "edu",

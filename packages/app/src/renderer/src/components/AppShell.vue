@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useDialog, useMessage, NButton, NSpin } from "naive-ui";
 import { useAppStore } from "../stores/app";
 import Sidebar from "./Sidebar.vue";
@@ -35,6 +35,16 @@ import PromptLibraryPanel from "./PromptLibraryPanel.vue";
 import OfficeSkillsPanel from "./OfficeSkillsPanel.vue";
 import HomeAdvisorPanel from "./HomeAdvisorPanel.vue";
 import EduPanel from "./EduPanel.vue";
+
+/**
+ * 家居监控面板（home.dashboard）——**首个 loading:"lazy" 能力包的渲染侧一半**。
+ *
+ * 静态 import 会把组件打进主 chunk，manifest 里的 lazy 声明就成了一句空话；
+ * 这里用 defineAsyncComponent + 动态 import：electron-vite 据此单独拆 chunk，
+ * 不开面板不加载（manifest.runtime.entry 指向的就是这个文件，bundleBudgetKb
+ * 是它的预算上界）。
+ */
+const HomeDashboardPanel = defineAsyncComponent(() => import("./HomeDashboardPanel.vue"));
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -168,6 +178,10 @@ const homeAdvisorOpen = ref(false);
 // 它是自己一个能力域（档案 / 一键出卷 / 错题本），默认只在「家庭教育」
 // Profile 里可见。
 const eduOpen = ref(false);
+// 家居监控面板（home.dashboard 垂直能力包，首个 lazy 包）的开合。独立成 ref：
+// 它是自己一个能力域（实体状态总览 + 消费者信令），与家居建议面板互不牵连。
+// 面板的挂载/卸载就是基座实体缓存消费者的登记/释放（诚实遗留 #7 的落点）。
+const homeDashboardOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -235,6 +249,9 @@ const homeAdvisorEnabled = computed(() => capabilities.isEnabled("home.advisor")
 // edu.kids 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
 // 它默认只在「家庭教育」Profile 启用，其它 Profile 下这个开关与面板都不出现。
 const eduEnabled = computed(() => capabilities.isEnabled("edu.kids"));
+// home.dashboard 的 UI 门控：判据同样来自主进程能力快照。它依赖 home.assistant
+// 基座，基座未启用时装配期就被拒绝（enabled=false），面板与开关都不出现。
+const homeDashboardEnabled = computed(() => capabilities.isEnabled("home.dashboard"));
 
 onMounted(() => {
   void store.init();
@@ -505,6 +522,15 @@ function onDrop(): void {
               🏠 家居建议
             </n-button>
             <n-button
+              v-if="homeDashboardEnabled"
+              size="tiny"
+              :type="homeDashboardOpen ? 'primary' : 'default'"
+              quaternary
+              @click="homeDashboardOpen = !homeDashboardOpen"
+            >
+              📊 家居面板
+            </n-button>
+            <n-button
               v-if="eduEnabled"
               size="tiny"
               :type="eduOpen ? 'primary' : 'default'"
@@ -536,6 +562,9 @@ function onDrop(): void {
           <WorkflowPanel v-if="workflowOpen && workflowEnabled" />
           <OfficeSkillsPanel v-if="officeSkillsOpen && officeSkillsEnabled" />
           <HomeAdvisorPanel v-if="homeAdvisorOpen && homeAdvisorEnabled" />
+          <!-- 懒加载组件（首个 lazy 包）：v-if 为假时连 chunk 都不请求；挂载即
+               subscribe（登记基座缓存消费者），卸载即 unsubscribe（释放）。 -->
+          <HomeDashboardPanel v-if="homeDashboardOpen && homeDashboardEnabled" />
           <EduPanel v-if="eduOpen && eduEnabled" />
           <InputBar />
         </slot>

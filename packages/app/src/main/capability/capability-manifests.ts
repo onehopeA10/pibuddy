@@ -32,6 +32,7 @@ import { workflowCapability } from "./manifests/workflow.manifest.js";
 import { remoteCapability } from "./manifests/remote.manifest.js";
 import { promptLibraryCapability } from "./manifests/prompt-library.manifest.js";
 import { homeAssistantCapability } from "./manifests/home-assistant.manifest.js";
+import { homeDashboardCapability } from "./manifests/home-dashboard.manifest.js";
 
 /**
  * 全部内置能力，按装配顺序。
@@ -93,6 +94,11 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // home.dashboard / home.automation / home.advisor 各自 dependencies 本包，
   // 须排在它之后。
   homeAssistantCapability,
+  // 智能家居监控面板（vertical / home.dashboard）。dependencies home.assistant，
+  // 因此必须排在基座之后（被依赖者在前，resolve() 的输出才是可直接照着
+  // activate 的顺序）。不进任何内置 Profile（与基座同口径，全经 overrides
+  // 启用）。首个 loading:"lazy" 包：面板组件独立 chunk，开面板才加载。
+  homeDashboardCapability,
 ];
 
 /**

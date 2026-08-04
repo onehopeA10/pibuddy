@@ -64,6 +64,11 @@ import { registerPromptLibraryIpc } from "../prompt-library/prompt-library-ipc.j
 import { promptLibraryCapability } from "./manifests/prompt-library.manifest.js";
 import { disposeHomeResources, registerHomeIpc } from "../home/home-ipc.js";
 import { homeAssistantCapability } from "./manifests/home-assistant.manifest.js";
+import {
+  disposeHomeDashboardResources,
+  registerHomeDashboardIpc,
+} from "../home-dashboard/home-dashboard-ipc.js";
+import { homeDashboardCapability } from "./manifests/home-dashboard.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -229,6 +234,16 @@ capabilityRegistry.register({
   manifest: homeAssistantCapability,
   activate: registerHomeIpc,
   deactivate: disposeHomeResources,
+});
+// 智能家居监控面板（vertical / home.dashboard，基座诚实遗留 #7 的落点）。
+// activate 注册三条通道（subscribe/unsubscribe/snapshot）；deactivate 释放
+// 全部面板消费者 + 摘缓存变更监听——不释放的话基座引用计数永不归零，WS
+// 长连接成「面板关了还连着」的死角。它 dependencies home.assistant：基座
+// 未注册/未启用时 resolve 阶段直接拒绝，activate 一次都不会被调用。
+capabilityRegistry.register({
+  manifest: homeDashboardCapability,
+  activate: registerHomeDashboardIpc,
+  deactivate: disposeHomeDashboardResources,
 });
 capabilityRegistry.seal();
 

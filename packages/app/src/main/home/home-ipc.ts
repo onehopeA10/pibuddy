@@ -99,6 +99,18 @@ function service(): HomeAssistantService {
   return serviceInstance;
 }
 
+/**
+ * 基座域服务的进程内访问口（home.dashboard 用；最小追加）。
+ *
+ * dashboard 的面板消费者信令（subscribe = cache.acquire / unsubscribe = 释放）
+ * 必须落在**同一个** HomeAssistantService 实例的缓存上，否则计数就是两本账。
+ * 只暴露实例，不暴露装配细节；dashboard 依赖本包（manifest.dependencies），
+ * 装配期不动点保证基座未启用时 dashboard 根本不会被 activate。
+ */
+export function homeAssistantService(): HomeAssistantService {
+  return service();
+}
+
 // ---------------------------------------------------------------- tool bridge
 
 let bridge: HomeToolBridge | null = null;

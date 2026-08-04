@@ -631,6 +631,21 @@ export const CHANNELS = {
   haEntities: "ha:entities",
   /** 运行状态：配置/授权/WS 会话/消费者计数/实体数 */
   haStatus: "ha:status",
+
+  // ---- 智能家居监控面板（home.dashboard，vertical tier，恰 3 条） ----
+  //
+  // home.assistant 基座之上的第一个消费者信令方（基座诚实遗留 #7）：面板
+  // 打开 = subscribe 向基座实体缓存登记一个引用计数消费者（计数 > 0 期间
+  // 基座维持 WS 实时订阅），关闭 = unsubscribe 释放（归零后按 linger 拆线）。
+  // 三条通道的入参只有 workspaceId + 有界 limit，**没有任何控制字段**：面板
+  // 是只读的，设备控制走会话对话（pi 回路内工具，经 tool bridge 三道关），
+  // 不给渲染进程留第二条控制通道。增量经 dashboard:event 推送信封下发。
+  /** 登记面板消费者（按 workspaceId 幂等）并返回当前实体快照 + 推送代际 */
+  dashboardSubscribe: "dashboard:subscribe",
+  /** 释放面板消费者（重复释放幂等；归零后基座 5min linger 拆 WS） */
+  dashboardUnsubscribe: "dashboard:unsubscribe",
+  /** 只读快照（不登记消费者；resync 后面板重拉全量用） */
+  dashboardSnapshot: "dashboard:snapshot",
 } as const;
 
 /** 主进程单向推送通道（9 个）。 */
@@ -693,6 +708,16 @@ export const PUSH_CHANNELS = {
    * 下发，配合有界 ring buffer + terminal:snapshot 支持 reload 后重连。
    */
   terminalEvent: "terminal:event",
+  /**
+   * 家居实体状态增量 / 链路翻转（home.dashboard）。
+   *
+   * 载荷是 `PiEnvelope<DashboardEventPayload>`：与 terminal:event 同一套单向
+   * 广播信封，sessionId 填 workspaceId、generation 填订阅代际（每建立一次
+   * 面板消费者 +1）、sequence 按订阅单调递增——渲染侧复用现成的
+   * `shouldAcceptEnvelope` 丢弃上一次订阅的迟到增量，不必另写序号比较。
+   * 只在有面板消费者时才有事件产生：没人订阅时基座连 WS 都不持有。
+   */
+  dashboardEvent: "dashboard:event",
 } as const;
 
 export type InvokeChannel = (typeof CHANNELS)[keyof typeof CHANNELS];

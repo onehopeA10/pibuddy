@@ -47,6 +47,17 @@ export interface CachedEntity {
   area: string | null;
 }
 
+/**
+ * 缓存的变更通知（home.dashboard 增量推送的数据源；最小追加，不改既有行为）。
+ *
+ *   - state：一条实体状态增量（state=null 表示实体被移除）；
+ *   - link：链路状态翻转。stale=true 断线；stale=false 表示一次全量 resync
+ *     完成——断线窗口内丢失的增量只能靠全量补，订阅方收到后应重拉快照。
+ */
+export type EntityCacheChange =
+  | { kind: "state"; entityId: string; state: string | null; name: string | null }
+  | { kind: "link"; stale: boolean };
+
 /** WS 会话的窄视图（生产 = HaWsSession；单测给假实现）。 */
 export interface EntityCacheSession {
   start(): void;
@@ -160,6 +171,28 @@ export class EntityCache {
 
   private releaseToolConsumer: (() => void) | null = null;
 
+  // ------------------------------------------------------------ 变更通知
+
+  private readonly changeListeners = new Set<(e: EntityCacheChange) => void>();
+
+  /** 登记一个变更监听（home.dashboard 增量推送用）；返回幂等的摘除函数。 */
+  onChange(listener: (e: EntityCacheChange) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private emitChange(e: EntityCacheChange): void {
+    for (const listener of [...this.changeListeners]) {
+      try {
+        listener(e);
+      } catch {
+        /* 监听方的错误不反噬缓存 */
+      }
+    }
+  }
+
   private scheduleLinger(): void {
     if (this.cancelLinger || this.session === null) return;
     this.cancelLinger = this.deps.schedule(() => {
@@ -188,11 +221,13 @@ export class EntityCache {
       this.wsSubscribed = false;
       // 断线标 stale：面板与工具都能看到「这份数据可能过期」。
       this.stale = true;
+      this.emitChange({ kind: "link", stale: true });
     });
     session.on("state_changed", (e) => {
       this.lastEventAt = this.deps.now();
       if (e.state === null) {
         this.entities.delete(e.entityId);
+        this.emitChange({ kind: "state", entityId: e.entityId, state: null, name: e.name });
         return;
       }
       const existing = this.entities.get(e.entityId);
@@ -207,6 +242,7 @@ export class EntityCache {
           registryName: null,
         });
       }
+      this.emitChange({ kind: "state", entityId: e.entityId, state: e.state, name: e.name });
     });
     session.on("registry", (rows) => {
       for (const row of rows) {
@@ -266,9 +302,13 @@ export class EntityCache {
         if (!seen.has(id)) this.entities.delete(id);
       }
       this.lastPullAt = this.deps.now();
+      const wasStale = this.stale;
       this.stale = false;
       this.fromSnapshotOnly = false;
       this.persistSnapshot();
+      // stale → 清除的那一次全量（重连 resync）要通知订阅方：断线窗口内丢的
+      // 增量只能靠全量补，面板收到 link stale=false 后重拉快照。
+      if (wasStale) this.emitChange({ kind: "link", stale: false });
     })().finally(() => {
       this.pulling = null;
     });
@@ -388,6 +428,7 @@ export class EntityCache {
     if (this.cancelToolWindow) this.cancelToolWindow();
     this.cancelLinger = null;
     this.cancelToolWindow = null;
+    this.changeListeners.clear();
     this.teardownSession();
   }
 }
