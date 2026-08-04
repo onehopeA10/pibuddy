@@ -43,6 +43,7 @@ import {
   type SafeFetchResult,
 } from "../net/outbound-guard.js";
 import { redactSecrets } from "../logger-redact.js";
+import { resolveAdapter } from "./adapters/index.js";
 import type { ConnectorRecord } from "./connector-store.js";
 
 /** safeFetch 的形状（供依赖注入）。 */
@@ -96,6 +97,10 @@ export async function sendThroughConnector(
   // 引用）：连接器的出站必须经守卫，这一点是 drift 权限对账（network → 一次
   // safeFetch 调用）的 grep 目标，也是「守卫外裸出站命中数为 0」的落地。
   const fetchImpl: ConnectorFetch = deps.fetch ?? ((url, init) => safeFetch(url, init));
+  // 按 kind 取适配器：域名上界、消息体拼装、响应判读三处平台差异全从它来。
+  // 通用 webhook 是其中一个适配器（body={text}、域名=多平台白名单），因此这条
+  // 出站路径对基座与三个真实渠道同构，没有一条 `if (kind === …)` 特例。
+  const adapter = resolveAdapter(connector.kind);
 
   const fail = (
     errorCode: ConnectorResult["errorCode"],
@@ -130,9 +135,11 @@ export async function sendThroughConnector(
     return fail("config", redactMessage(err));
   }
 
-  // 关 1：域名上界。不在 manifest 白名单 → 直接拒（未授权域名被拒）。
-  if (!isSupportedDomain(host)) {
-    return fail("domain", `目标域名 ${host} 不在受支持的平台白名单内`);
+  // 关 1：域名上界。不在**该适配器**声明的白名单 → 直接拒（未授权域名被拒）。
+  // 用 adapter.domains 而非全局白名单：飞书连接器越不过 open.feishu.cn，即便某个
+  // host 在别的渠道的白名单里也不行——跨平台发送在这一关当场被拒。
+  if (!(adapter.domains as readonly string[]).includes(host)) {
+    return fail("domain", `目标域名 ${host} 不在 ${connector.kind} 渠道的受支持白名单内`);
   }
 
   // 关 2：workspace 授权（经引擎授权那一段）。
@@ -153,18 +160,21 @@ export async function sendThroughConnector(
         // 不再回灌给 Agent（见 connector-ingest.ts）。
         "x-pibuddy-connector": connector.id,
       },
-      body: JSON.stringify({ text }),
+      // 消息体按平台文档拼（飞书 msg_type/content、Slack/Telegram/webhook 各自）。
+      body: JSON.stringify(adapter.formatBody(text)),
     });
     const latencyMs = Math.max(0, now() - started);
-    if (resp.ok) {
+    // 响应判读也归适配器：HTTP 200 不等于业务成功（飞书看 code、Telegram 看 ok）。
+    const verdict = adapter.checkResponse(resp);
+    if (verdict.ok) {
       return { ok: true, status: resp.status, errorCode: "ok", redactedMessage: "已送达", latencyMs };
     }
-    const detail = redactMessage(resp.bodyText).slice(0, 200);
+    const detail = redactMessage(verdict.detail ?? resp.bodyText).slice(0, 200);
     return {
       ok: false,
       status: resp.status,
       errorCode: "network",
-      redactedMessage: `HTTP ${resp.status}${detail ? ` · ${detail}` : ""}`,
+      redactedMessage: detail || `HTTP ${resp.status}`,
       latencyMs,
     };
   } catch (err) {

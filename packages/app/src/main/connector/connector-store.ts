@@ -21,6 +21,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import type { ConnectorKind } from "@pibuddy/contract";
+
 /** 表结构代际。改 DDL 必须 +1 并在 migrate() 里补分支。 */
 export const CONNECTOR_STORE_SCHEMA_VERSION = 1;
 
@@ -53,7 +55,7 @@ function dbPath(): string {
 /** 一条连接器实例（非敏感部分）。 */
 export interface ConnectorRecord {
   id: string;
-  kind: "webhook";
+  kind: ConnectorKind;
   displayName: string;
   domain: string;
   enabled: boolean;
@@ -74,7 +76,7 @@ interface ConnectorRow {
 function fromRow(row: ConnectorRow): ConnectorRecord {
   return {
     id: row.id,
-    kind: row.kind as "webhook",
+    kind: row.kind as ConnectorKind,
     displayName: row.display_name,
     domain: row.domain,
     enabled: row.enabled !== 0,
@@ -84,7 +86,7 @@ function fromRow(row: ConnectorRow): ConnectorRecord {
 }
 
 export interface NewConnector {
-  kind: "webhook";
+  kind: ConnectorKind;
   displayName: string;
   domain: string;
 }

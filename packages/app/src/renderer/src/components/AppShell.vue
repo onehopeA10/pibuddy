@@ -27,6 +27,7 @@ import GitPanel from "./GitPanel.vue";
 import TasksPanel from "./TasksPanel.vue";
 import ChildAgentPanel from "./ChildAgentPanel.vue";
 import ConnectorPanel from "./ConnectorPanel.vue";
+import ConnectorChannelsPanel from "./ConnectorChannelsPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -136,6 +137,9 @@ const childAgentOpen = ref(false);
 // 连接器面板（connector.webhook）的开合。独立成 ref：它是第一个 connector
 // 能力域，与其它面板互不牵连。
 const connectorOpen = ref(false);
+// 真实渠道面板（connector.feishu / slack / telegram）的开合。独立成 ref：它是
+// 三个真实渠道能力包的共享面板，与通用 webhook 面板互不牵连。
+const channelsOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -162,6 +166,15 @@ const childAgentEnabled = computed(() => capabilities.isEnabled("common.child-ag
 // connector.webhook 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道
 // 已注册）。默认进「通用办公」与「编码」两个 Profile，「精简」下不出现。
 const connectorEnabled = computed(() => capabilities.isEnabled("connector.webhook"));
+// 三个真实渠道能力包各自的 UI 门控（判据同样来自主进程能力快照）。它们各自
+// dependencies connector.webhook，因此基座被关掉时也随之判为未启用。共享同一个
+// ConnectorChannelsPanel，面板 / 工具栏按钮只要任一渠道启用就出现。
+const feishuEnabled = computed(() => capabilities.isEnabled("connector.feishu"));
+const slackEnabled = computed(() => capabilities.isEnabled("connector.slack"));
+const telegramEnabled = computed(() => capabilities.isEnabled("connector.telegram"));
+const channelsEnabled = computed(
+  () => feishuEnabled.value || slackEnabled.value || telegramEnabled.value
+);
 
 onMounted(() => {
   void store.init();
@@ -355,6 +368,15 @@ function onDrop(): void {
             >
               🔌 连接器
             </n-button>
+            <n-button
+              v-if="channelsEnabled"
+              size="tiny"
+              :type="channelsOpen ? 'primary' : 'default'"
+              quaternary
+              @click="channelsOpen = !channelsOpen"
+            >
+              💬 渠道
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -372,6 +394,7 @@ function onDrop(): void {
           <GitPanel v-if="gitOpen && gitEnabled" />
           <ChildAgentPanel v-if="childAgentOpen && childAgentEnabled" />
           <ConnectorPanel v-if="connectorOpen && connectorEnabled" />
+          <ConnectorChannelsPanel v-if="channelsOpen && channelsEnabled" />
           <InputBar />
         </slot>
       </template>

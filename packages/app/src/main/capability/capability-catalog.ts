@@ -41,7 +41,13 @@ import {
   disposeConnectorResources,
   registerConnectorIpc,
 } from "../connector/connector-ipc.js";
+import { registerFeishuIpc } from "../connector/feishu-ipc.js";
+import { registerSlackIpc } from "../connector/slack-ipc.js";
+import { registerTelegramIpc } from "../connector/telegram-ipc.js";
 import { connectorWebhookCapability } from "./manifests/connector-webhook.manifest.js";
+import { connectorFeishuCapability } from "./manifests/connector-feishu.manifest.js";
+import { connectorSlackCapability } from "./manifests/connector-slack.manifest.js";
+import { connectorTelegramCapability } from "./manifests/connector-telegram.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -127,6 +133,21 @@ capabilityRegistry.register({
   manifest: connectorWebhookCapability,
   activate: registerConnectorIpc,
   deactivate: disposeConnectorResources,
+});
+// 三个真实渠道适配器：只注册各自的两条平台通道（feishu/slack/telegram:send/receive）。
+// 无 deactivate——它们复用基座的库与入站守卫，运行期资源由基座的
+// disposeConnectorResources 一并收（且各自 dependencies connector.webhook，同启同停）。
+capabilityRegistry.register({
+  manifest: connectorFeishuCapability,
+  activate: registerFeishuIpc,
+});
+capabilityRegistry.register({
+  manifest: connectorSlackCapability,
+  activate: registerSlackIpc,
+});
+capabilityRegistry.register({
+  manifest: connectorTelegramCapability,
+  activate: registerTelegramIpc,
 });
 capabilityRegistry.seal();
 
