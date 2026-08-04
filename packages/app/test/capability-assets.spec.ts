@@ -266,14 +266,37 @@ describe("R4.2 移除：停用只收自己的，用户的东西一根手指都�
 });
 
 describe("R4.1 manifest 扩展：字段可选缺省空，路径形态被钉死", () => {
-  it("既有 manifest 一字不改仍合法：全部内置清单校验通过且 piResources 为空", () => {
+  it("全部内置清单校验通过；未声明资源的 manifest 缺省补空（一字不改仍合法）", () => {
+    // R2 起 common.office-skills 成为第一个真声明 piResources 的内置包，
+    // 「全员为空」的断言从此过时。改成两半：声明了的包名单**显式锁死**
+    // （新包想带资源必须来改这一行，顺便被人审一眼），其余包仍必须是
+    // zod default 补出来的三个空数组——既有 manifest 一字不改仍合法。
+    const DECLARING_PACKS = ["common.office-skills"];
     for (const manifest of BUILT_IN_CAPABILITIES) {
       expect([manifest.id, validateCapabilityManifest(manifest)]).toEqual([manifest.id, []]);
+      if (DECLARING_PACKS.includes(manifest.id)) continue;
       expect([manifest.id, manifest.piResources]).toEqual([
         manifest.id,
         { prompts: [], skills: [], extensions: [] },
       ]);
     }
+    const declared = BUILT_IN_CAPABILITIES.filter((m) => {
+      const p = m.piResources;
+      return p.prompts.length + p.skills.length + p.extensions.length > 0;
+    }).map((m) => m.id);
+    expect(declared.sort()).toEqual([...DECLARING_PACKS].sort());
+  });
+
+  it("R2：办公技能包恰声明三个技能目录，且是纯技能包（无 prompts / extensions）", () => {
+    const office = BUILT_IN_CAPABILITIES.find((m) => m.id === "common.office-skills");
+    expect(office).toBeDefined();
+    expect([...office!.piResources.skills]).toEqual([
+      "skills/office-file-organize",
+      "skills/office-table-clean",
+      "skills/office-doc-convert",
+    ]);
+    expect([...office!.piResources.prompts]).toEqual([]);
+    expect([...office!.piResources.extensions]).toEqual([]);
   });
 
   it("路径逃逸一律拒绝：..、开头 /、反斜杠、盘符", () => {

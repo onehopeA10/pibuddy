@@ -32,6 +32,7 @@ import ConnectorChannelsPanel from "./ConnectorChannelsPanel.vue";
 import RemotePanel from "./RemotePanel.vue";
 import WorkflowPanel from "./WorkflowPanel.vue";
 import PromptLibraryPanel from "./PromptLibraryPanel.vue";
+import OfficeSkillsPanel from "./OfficeSkillsPanel.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useProvidersStore } from "../stores/providers";
@@ -155,6 +156,9 @@ const workflowOpen = ref(false);
 // 远程访问面板（connector.remote）的开合。独立成 ref：它管的是对外网络服务的
 // 开关 / 配对 / 设备，与其它面板互不牵连。
 const remoteOpen = ref(false);
+// 办公技能面板（common.office-skills）的开合。独立成 ref：它是第一个内容型
+// 能力域（预置 pi 技能 + 物化状态），与其它面板互不牵连。
+const officeSkillsOpen = ref(false);
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -213,6 +217,9 @@ const promptLibraryEnabled = computed(() => capabilities.isEnabled("common.promp
 const isWslWorkspace = computed(() =>
   /^[\\/]{2}(wsl\$|wsl\.localhost)[\\/]/i.test(store.workspace ?? "")
 );
+// 办公技能包（common.office-skills）的 UI 门控：判据同样来自主进程能力快照。
+// 关掉它 = 面板与开关都不出现；物化的技能文件由下次启动对账收回。
+const officeSkillsEnabled = computed(() => capabilities.isEnabled("common.office-skills"));
 
 onMounted(() => {
   void store.init();
@@ -464,6 +471,15 @@ function onDrop(): void {
             >
               📋 提示词
             </n-button>
+            <n-button
+              v-if="officeSkillsEnabled"
+              size="tiny"
+              :type="officeSkillsOpen ? 'primary' : 'default'"
+              quaternary
+              @click="officeSkillsOpen = !officeSkillsOpen"
+            >
+              🗂️ 技能
+            </n-button>
           </div>
           <ChatView />
           <FileEditorPane v-if="filesOpen && filesEnabled" />
@@ -485,6 +501,7 @@ function onDrop(): void {
           <ConnectorChannelsPanel v-if="channelsOpen && channelsEnabled" />
           <RemotePanel v-if="remoteOpen && remoteEnabled" />
           <WorkflowPanel v-if="workflowOpen && workflowEnabled" />
+          <OfficeSkillsPanel v-if="officeSkillsOpen && officeSkillsEnabled" />
           <InputBar />
         </slot>
       </template>

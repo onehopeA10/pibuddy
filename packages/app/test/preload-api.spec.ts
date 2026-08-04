@@ -55,6 +55,7 @@ describe("api 聚合对象", () => {
       "git",
       "mcp",
       "memory",
+      "officeSkills",
       "permission",
       "pi",
       "piResources",

@@ -52,6 +52,8 @@ import { connectorSlackCapability } from "./manifests/connector-slack.manifest.j
 import { connectorTelegramCapability } from "./manifests/connector-telegram.manifest.js";
 import { disposeWorkflowResources, registerWorkflowIpc } from "../workflow/workflow-ipc.js";
 import { workflowCapability } from "./manifests/workflow.manifest.js";
+import { registerOfficeSkillsIpc } from "../office-skills/office-skills-ipc.js";
+import { officeSkillsCapability } from "./manifests/office-skills.manifest.js";
 import { disposeRemoteResources, registerRemoteIpc } from "../remote/remote-ipc.js";
 import { remoteCapability } from "./manifests/remote.manifest.js";
 import { registerPromptLibraryIpc } from "../prompt-library/prompt-library-ipc.js";
@@ -148,6 +150,14 @@ capabilityRegistry.register({
   manifest: workflowCapability,
   activate: registerWorkflowIpc,
   deactivate: disposeWorkflowResources,
+});
+// 预置办公技能包（common.office-skills，第一个内容型能力包）。只注册一条只读
+// 状态通道，无 deactivate——它不持有 watcher / worker / 子进程（teardown 为空，
+// 见 manifest）；技能文件的装卸由启动对账 syncCapabilityAssetsOnStartup 按
+// 启用集合统一处理，不在 activate/deactivate 里各自为政。
+capabilityRegistry.register({
+  manifest: officeSkillsCapability,
+  activate: registerOfficeSkillsIpc,
 });
 // 第一个 connector tier 能力包（connector.webhook）。默认在「通用办公」与
 // 「编码」Profile 启用，未启用时 activate 一次都不调用 —— 它的七条通道因此

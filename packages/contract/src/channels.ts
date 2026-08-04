@@ -531,6 +531,14 @@ export const CHANNELS = {
    */
   terminalWslDistros: "terminal:wsl-distros",
 
+  // ---- 预置办公技能包（common.office-skills / REQ-0001 R2，恰 1 条） ----
+  //
+  // 第一个内容型能力包：真正的载荷是三个 pi 技能目录（capability-assets 随包
+  // 分发、R4 启停时物化 / 收回到 ~/.pi/agent/skills/）。这一条通道是它唯一的
+  // 动作面：把「包里声明了哪些技能」与「归属账本里真的物化了哪些文件」对到
+  // 一起返回，供面板显示可证伪的物化状态。无入参、只读、不接受任何路径。
+  officeSkillsList: "office-skills:list",
+
   // ---- Remote / PWA 远程访问（connector.remote / REM-101，恰 8 条） ----
   //
   // 四层边界里唯一会**开一个对外网络监听**的能力，因此也是唯一一个「安全设计
