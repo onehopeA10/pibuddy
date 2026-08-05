@@ -99,6 +99,16 @@ function service(): HomeAssistantService {
   return serviceInstance;
 }
 
+/**
+ * 【追加（home.automation）】上层家居包取同一台域服务的入口：共享实体缓存 /
+ * WS 会话 / 出站纪律（executeTool 内部每次都重过 authorizeLocalEndpoint）。
+ * automation 依赖本基座（manifest.dependencies），基座未启用时它根本不会被
+ * activate，因此这里不需要「基座还没装配」的分支。
+ */
+export function homeAssistantService(): HomeAssistantService {
+  return service();
+}
+
 // ---------------------------------------------------------------- tool bridge
 
 let bridge: HomeToolBridge | null = null;

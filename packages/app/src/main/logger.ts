@@ -49,7 +49,8 @@ export type LogScope =
   | "permission"
   | "tasks"
   | "connector"
-  | "home";
+  | "home"
+  | "home-automation";
 
 export interface LoggerOptions {
   /** 日志目录，通常是 app.getPath("userData")/logs */

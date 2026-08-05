@@ -64,6 +64,11 @@ import { registerPromptLibraryIpc } from "../prompt-library/prompt-library-ipc.j
 import { promptLibraryCapability } from "./manifests/prompt-library.manifest.js";
 import { disposeHomeResources, registerHomeIpc } from "../home/home-ipc.js";
 import { homeAssistantCapability } from "./manifests/home-assistant.manifest.js";
+import {
+  disposeAutomationResources,
+  registerAutomationIpc,
+} from "../home-automation/automation-ipc.js";
+import { homeAutomationCapability } from "./manifests/home-automation.manifest.js";
 import { workspaceFilesCapability } from "../workspace/workspace-files.capability.js";
 import {
   disposeAllWorkspaceResources,
@@ -229,6 +234,17 @@ capabilityRegistry.register({
   manifest: homeAssistantCapability,
   activate: registerHomeIpc,
   deactivate: disposeHomeResources,
+});
+// 智能家居自动化规则包（vertical / home.automation）。dependencies:
+// ["home.assistant", "common.tasks"]，任一未启用时 resolve 阶段直接拒绝
+// （可读 reason 下发 UI），activate 一次都不会被调用。activate 注册四条通道 +
+// 把 manage_rule 挂进基座 bridge 的跨包注册表 + 拉起有规则工作区的 headless
+// 引擎；deactivate 摘 bridge 工具、停引擎 / 订阅 / 消费者、关 sqlite 句柄
+// （规则数据留在磁盘不动）。须排在两个被依赖者之后。
+capabilityRegistry.register({
+  manifest: homeAutomationCapability,
+  activate: registerAutomationIpc,
+  deactivate: disposeAutomationResources,
 });
 capabilityRegistry.seal();
 

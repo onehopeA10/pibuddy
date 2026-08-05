@@ -191,8 +191,11 @@ export class EntityCache {
     });
     session.on("state_changed", (e) => {
       this.lastEventAt = this.deps.now();
+      // 【追加（home.automation）】先增量维护缓存（既有逻辑），两个出口各补一次
+      // notifyStateListeners——订阅者读到的缓存因此恒为已更新的。
       if (e.state === null) {
         this.entities.delete(e.entityId);
+        this.notifyStateListeners(e);
         return;
       }
       const existing = this.entities.get(e.entityId);
@@ -207,6 +210,7 @@ export class EntityCache {
           registryName: null,
         });
       }
+      this.notifyStateListeners(e);
     });
     session.on("registry", (rows) => {
       for (const row of rows) {
@@ -218,6 +222,38 @@ export class EntityCache {
       this.persistSnapshot();
     });
     session.start();
+  }
+
+  // ------------------------------------------------ 状态事件订阅（追加）
+
+  // 【追加（home.automation）】状态触发源的订阅口：把会话的 state_changed 转发
+  // 给进程内订阅者（home.automation 的规则引擎挂在这里）。只在 WS 会话活着时
+  // 有事件——订阅者若要保证会话活着，用 acquire() 登记消费者（引用计数模型
+  // 不变，本段不开旁路）。listener 抛错不打断缓存维护。
+  private readonly stateListeners = new Set<
+    (e: { entityId: string; state: string | null; name: string | null }) => void
+  >();
+
+  /** 订阅 state_changed（返回退订函数）。 */
+  onStateChanged(
+    fn: (e: { entityId: string; state: string | null; name: string | null }) => void
+  ): () => void {
+    this.stateListeners.add(fn);
+    return () => this.stateListeners.delete(fn);
+  }
+
+  private notifyStateListeners(e: {
+    entityId: string;
+    state: string | null;
+    name: string | null;
+  }): void {
+    for (const fn of this.stateListeners) {
+      try {
+        fn(e);
+      } catch {
+        /* 订阅者的错误不反噬缓存 */
+      }
+    }
   }
 
   private teardownSession(): void {

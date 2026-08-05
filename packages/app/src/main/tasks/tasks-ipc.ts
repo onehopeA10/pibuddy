@@ -24,6 +24,7 @@ import {
   type TaskListResult,
   type TaskUpdateRequest,
   type RunIdRequest,
+  type RunRecord,
 } from "@pibuddy/contract";
 
 import { registerHandler } from "../ipc-guard.js";
@@ -292,6 +293,20 @@ export function registerTasksIpc(): void {
   if (!process.env.VITEST) {
     scheduler().start();
   }
+}
+
+/**
+ * 【追加（home.automation）】`kind:"event"` 计划的外部投递口——schedule.ts 那个
+ * 「不由时钟驱动，等外部投递」语义位的兑现，首个事件源是 home.automation 的
+ * Agent 动作。刻意复用 runNow 的完整纪律，不另起一条执行路：权限只认
+ * workspace 预授权（绝不继承交互会话授权）、独立 idempotency key、经池化
+ * 触发真实派生后台会话、成本与日志照常落 run（审计 / 预算全继承）。只接受
+ * active 且 kind:"event" 的任务——别的计划自有时钟驱动，不给事件源代跑。
+ */
+export async function deliverTaskEvent(taskId: string): Promise<RunRecord | null> {
+  const task = taskStore().getTask(taskId);
+  if (!task || task.status !== "active" || task.schedule.kind !== "event") return null;
+  return scheduler().runNow(task);
 }
 
 /**

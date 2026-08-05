@@ -54,6 +54,7 @@ import { officeSkills } from "./officeSkills.js";
 import { homeAdvisor } from "./homeAdvisor.js";
 import { edu } from "./edu.js";
 import { home } from "./home.js";
+import { homeAutomation } from "./homeAutomation.js";
 
 export const api = {
   pi,
@@ -108,6 +109,8 @@ export const api = {
   edu,
   /** 智能家居基座（home.assistant）。端点配置/测试/只读快照，token 只进不出，无控制入口 */
   home,
+  /** 家居自动化规则（home.automation）。列表/启停/删除/整份 upsert，无执行与出站入口 */
+  homeAutomation,
 };
 
 export type PiBuddyApi = typeof api;

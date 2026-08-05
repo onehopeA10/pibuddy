@@ -35,5 +35,6 @@ export * from "./prompt-library.js";
 export * from "./edu.js";
 export * from "./home-assistant.js";
 export * from "./home-advisor.js";
+export * from "./home-automation.js";
 export * from "./ipc-contract.js";
 export * from "./ports.js";
