@@ -311,6 +311,105 @@ export const EMPTY_CAPABILITY_PI_RESOURCES: CapabilityPiResources = Object.freez
   extensions: Object.freeze([]) as readonly string[],
 });
 
+/** `piResources` 的三个键。门控声明按 `kind + path` 定位到其中恰一条。 */
+export const CAPABILITY_PI_RESOURCE_KINDS = ["prompts", "skills", "extensions"] as const;
+export type CapabilityPiResourceKind = (typeof CAPABILITY_PI_RESOURCE_KINDS)[number];
+
+/**
+ * 一条 pi 资源的**宿主门控**声明（REQ-0001 R4.5）。
+ *
+ * ## 它解决的缺口
+ *
+ * `home.advisor` 的 `home-scene-advisor` 技能，其操作规程的最后一步要调
+ * `home.automation.manage_rule`。automation 包关着时，这个技能照样被物化、
+ * 照样进 pi 的技能目录、照样把 name+description 塞进每一轮上下文，而模型
+ * 照着规程走下去会调一个不存在的工具。原先的兜底是在 SKILL.md 正文里写一句
+ * 「工具不可用时如实告知用户去启用」——**散文兜底**：它只在模型真的读到、
+ * 真的照做时才生效，而且上下文成本已经付掉了。这里换成机制兜底：门控不满足
+ * 的资源**根本不物化**，pi 看不见它，零上下文浪费、零失败工具调用。
+ *
+ * ## 三层模型（照 maka `skills-context.ts:61-70, 204-222`）
+ *
+ *   - `manifest.tools[]` —— **仅信息性**的声明面（maka 的 `allowedTools`）：
+ *     它说的是「本包提供哪些工具」，不构成任何门控判据；
+ *   - `requiredTools` —— 所需工具在本次装配的宿主工具面里缺席 → **硬门控**；
+ *   - `requiredCapabilities` —— 所需能力包本次未启用 → **硬门控**。
+ *
+ * ## 与 `manifest.dependencies` 的分工：整包级 vs 单资源级
+ *
+ * `dependencies` 是**整包**判据，在装配期由 `CapabilityRegistry.resolve()` 跑到
+ * 不动点：不满足时整个包拒绝启用，一条通道都不注册、一个资源都不物化。
+ * 本字段是**单个资源条目**级判据，在物化层生效：包本身正常启用、其余资源
+ * 照常物化，只有声明了门控的那一条缺席。
+ *
+ * `home.advisor` 同时用到两者，而且**不重复**：整包 `dependencies:
+ * ["home.assistant"]`（两个技能都以基座的三个只读/控制工具为前提，没有基座
+ * 时本包毫无意义）；`home-scene-advisor` 这一条**额外**要 `home.automation`
+ * （没有它，建议照样能给，只是落不了地——把它提到整包 dependencies 会把
+ * 「只想要建议」的用户一起拦在门外）。两级的判据集合被
+ * `validateCapabilityManifest` 强制互斥：已经在 `dependencies` 里的能力再写进
+ * `requiredCapabilities` 是恒真的噪声，直接报错。
+ */
+export const capabilityResourceGateSchema = z
+  .object({
+    /** 被门控的声明落在 piResources 的哪个键下 */
+    kind: z.enum(CAPABILITY_PI_RESOURCE_KINDS),
+    /** 被门控的声明本身，必须逐字等于 `piResources[kind]` 里的某一条 */
+    path: z.string().min(1),
+    /** 所需能力包（capabilityId）。任一未启用 → 本条资源不物化 */
+    requiredCapabilities: z.array(z.string()).readonly().default([]),
+    /** 所需工具（带 capabilityId 前缀的全名）。任一缺席 → 本条资源不物化 */
+    requiredTools: z.array(z.string()).readonly().default([]),
+  })
+  .strict();
+export type CapabilityResourceGate = z.infer<typeof capabilityResourceGateSchema>;
+
+// ------------------------------------------------------- 资源级装配决策报告
+
+/**
+ * 一条资源**没进（或进了）pi 上下文**的确切原因（照 maka `SkillSelectionReport`
+ * / `skills-context.ts:83-104`）。
+ *
+ * 对比现状：pi 对同名技能的策略是「先加载的赢」且**静默**——用户看到的只是
+ * 「这个技能怎么不在」。我们自己物化的这一部分至少要可解释，因此每条声明在
+ * 每次启动对账里都恰好落一个 reason，没有「不知道为什么」这一档。
+ *
+ *   - `materialized`            —— 已落盘到 `~/.pi/agent/` 下
+ *   - `capability_disabled`     —— 所属能力包本次未启用（整包级）
+ *   - `required_capability_missing` —— 门控要的能力包未启用（单资源级）
+ *   - `required_tool_missing`   —— 门控要的工具在本次宿主工具面里缺席
+ *   - `invalid`                 —— 声明指空 / 目录缺 SKILL.md / 读不出来
+ *   - `shadowed`                —— 目标被用户文件或另一个包占着，拒绝覆盖
+ */
+export const CAPABILITY_RESOURCE_DECISION_REASONS = [
+  "materialized",
+  "capability_disabled",
+  "required_capability_missing",
+  "required_tool_missing",
+  "invalid",
+  "shadowed",
+] as const;
+export type CapabilityResourceDecisionReason =
+  (typeof CAPABILITY_RESOURCE_DECISION_REASONS)[number];
+
+export const capabilityResourceDecisionSchema = z
+  .object({
+    capabilityId: z.string(),
+    kind: z.enum(CAPABILITY_PI_RESOURCE_KINDS),
+    /** manifest 里那条声明的原文（相对 capability-assets/<id>/ 的 posix 路径） */
+    path: z.string(),
+    reason: z.enum(CAPABILITY_RESOURCE_DECISION_REASONS),
+    /**
+     * reason 的确切依据：缺的能力 id / 工具名、占位的包、失败的那句话。
+     * 没有额外依据时为 null——`materialized` 就是这一类。
+     */
+    detail: z.string().nullable().default(null),
+    /** `materialized` 时该条声明名下落盘的文件数；其余 reason 恒 0 */
+    fileCount: z.number().int().nonnegative().default(0),
+  })
+  .strict();
+export type CapabilityResourceDecision = z.infer<typeof capabilityResourceDecisionSchema>;
+
 /**
  * 主进程侧暴露点。
  *
@@ -390,6 +489,23 @@ export const capabilityManifestSchema = z
      * 一字不改仍合法；zod 的 default 在 parse 时补齐三个空数组。
      */
     piResources: capabilityPiResourcesSchema.default(EMPTY_CAPABILITY_PI_RESOURCES),
+    /**
+     * 单个资源条目的宿主门控（REQ-0001 R4.5）。可选、缺省空数组。
+     *
+     * ## 为什么放在 manifest 顶层，而不是塞进 `piResources` 的元素里
+     *
+     *   1. **两个轴**：`piResources` 回答「这个包里装了什么」（一份静态清单，
+     *      随包出厂就定死）；门控回答「宿主处于什么状态时它才该出现」（每次
+     *      装配现算）。塞进同一个数组等于把两件各自演进的事绑在一个形状上。
+     *   2. **不动既有形状**：内联的写法要把 `skills: string[]` 变成
+     *      `(string | {path, ...})[]`，于是每一个读取点都要先窄化一次类型；
+     *      而现在 19 个不带资源的 manifest 的 `piResources` 仍然逐字节等于
+     *      三个空数组，`EMPTY_CAPABILITY_PI_RESOURCES` 的共享冻结语义不变。
+     *   3. **引用完整性可校验**：平铺一层的代价是「path 可能指向一条不存在的
+     *      声明」，而这恰恰是可以被校验器抓住并给出确切错误的——比一个悄悄
+     *      没生效的内联字段好。
+     */
+    piResourceGates: z.array(capabilityResourceGateSchema).readonly().default([]),
   })
   .strict();
 
@@ -563,6 +679,62 @@ export function validateCapabilityManifest(manifest: CapabilityManifest): string
     );
   }
 
+  // ---- 资源级门控（R4.5）
+  //
+  // 门控是一条**会让资源消失**的判据，因此它自身的每一种「写了等于没写」的
+  // 形态都必须报错，而不是静默生效成一扇恒开的门。
+  const gates = manifest.piResourceGates ?? [];
+  const ownTools = new Set(manifest.tools.map((tool) => tool.name));
+  const declaredDeps = new Set(manifest.dependencies);
+  const seenGateKeys = new Set<string>();
+  for (const gate of gates) {
+    const where = `piResourceGates.${gate.kind} "${gate.path}"`;
+    // 引用完整性：指向一条不存在的声明的门控什么都门不住，却看上去很像在门。
+    if (!piResources[gate.kind].includes(gate.path)) {
+      errors.push(`${where} 没有对应的 piResources.${gate.kind} 声明`);
+    }
+    const key = `${gate.kind}:${gate.path}`;
+    if (seenGateKeys.has(key)) errors.push(`${where} 被声明了两次`);
+    seenGateKeys.add(key);
+
+    if (gate.requiredCapabilities.length === 0 && gate.requiredTools.length === 0) {
+      errors.push(`${where} 既没有 requiredCapabilities 也没有 requiredTools：空门控是噪声`);
+    }
+
+    const seenCaps = new Set<string>();
+    for (const cap of gate.requiredCapabilities) {
+      if (!CAPABILITY_ID_RE.test(cap)) {
+        errors.push(`${where} requiredCapabilities "${cap}" 不是合法 capabilityId`);
+      }
+      if (cap === id) errors.push(`${where} requiredCapabilities 不得包含自身 "${id}"`);
+      // 整包级已经拦过的，单资源级再拦一次是恒真判据（依赖不满足时整个包
+      // 都不会启用，本条资源根本走不到门控）。两级分工必须互斥。
+      if (declaredDeps.has(cap)) {
+        errors.push(
+          `${where} requiredCapabilities "${cap}" 已是整包 dependencies：` +
+            "整包级不满足时本包直接拒绝启用，单资源级再写一遍恒真"
+        );
+      }
+      if (seenCaps.has(cap)) errors.push(`${where} requiredCapabilities 重复声明 "${cap}"`);
+      seenCaps.add(cap);
+    }
+
+    const seenTools = new Set<string>();
+    for (const tool of gate.requiredTools) {
+      // 工具名带 capabilityId 前缀是 D4 规则 6 的硬性要求，因此一个不含点的
+      // 名字必定指向一个永远不会存在的工具——那扇门永远关着。
+      if (!tool.includes(".") || /\s/.test(tool)) {
+        errors.push(`${where} requiredTools "${tool}" 不是带 capabilityId 前缀的工具全名`);
+      }
+      // 自家的工具随包同生共死：包启用时它必在，包不启用时资源本来就不物化。
+      if (ownTools.has(tool)) {
+        errors.push(`${where} requiredTools "${tool}" 是本包自己的工具：包启用时它必在，恒真`);
+      }
+      if (seenTools.has(tool)) errors.push(`${where} requiredTools 重复声明 "${tool}"`);
+      seenTools.add(tool);
+    }
+  }
+
   return errors;
 }
 
@@ -644,6 +816,15 @@ export const capabilityDescriptorSchema = z.object({
   uiContributions: z.array(
     z.object({ slot: z.enum(CAPABILITY_UI_SLOTS), id: z.string(), title: z.string() })
   ),
+  /**
+   * 本次启动对账里，本能力每条 pi 资源声明的**装配决策**（R4.5）。
+   *
+   * 空数组的含义是「本进程还没跑过启动对账」（单测、或对账在 describe 之前
+   * 尚未完成），不是「没有资源」——两者在渲染层都表现为无可展示的决策，但
+   * 前者会在对账跑完后的下一次 describe 里填上。声明了资源却拿到空决策，
+   * 说明对账没跑成，那本身就是要看见的事实。
+   */
+  resourceDecisions: z.array(capabilityResourceDecisionSchema).default([]),
 });
 export type CapabilityDescriptor = z.infer<typeof capabilityDescriptorSchema>;
 

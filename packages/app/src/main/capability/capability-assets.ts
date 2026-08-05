@@ -39,7 +39,14 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { EMPTY_CAPABILITY_PI_RESOURCES, type CapabilityManifest } from "@pibuddy/contract";
+import {
+  EMPTY_CAPABILITY_PI_RESOURCES,
+  type CapabilityManifest,
+  type CapabilityPiResourceKind,
+  type CapabilityResourceDecision,
+  type CapabilityResourceDecisionReason,
+  type CapabilityResourceGate,
+} from "@pibuddy/contract";
 
 /** extraResources 投递到 process.resourcesPath 下的目录名；dev 下在 resources/ 里同名。 */
 export const CAPABILITY_ASSETS_DIR_NAME = "capability-assets";
@@ -179,8 +186,97 @@ function posixJoin(...parts: string[]): string {
   return parts.join("/");
 }
 
+// ---------------------------------------------------------------- 宿主门控面
+
 /**
- * 把一个包的 piResources 声明折成「应当存在于 pi 目录里的文件集合」。
+ * 门控判据要看的那点宿主事实（R4.5）。
+ *
+ * 只有两件：本次装配启用了哪些能力包、宿主工具面上有哪些工具名。**不含**
+ * 权限、不含用户偏好——门控回答的是「这个资源现在有没有意义存在」，不是
+ * 「允不允许它做什么」。后者始终归权限引擎，物化层一行都不碰。
+ */
+export interface AssetHostSurface {
+  readonly enabledCapabilityIds: ReadonlySet<string>;
+  readonly toolNames: ReadonlySet<string>;
+}
+
+/**
+ * 从「本次构建的包 + 启用集合」推出宿主面。
+ *
+ * 工具面取的是**启用包的 manifest.tools[].name 并集**，不是运行期真的注册上
+ * 的工具：manifest 是装配期唯一可信的声明面，而物化发生在启动装配之后、
+ * pi 子进程加载 extension 之前——那个时刻还不存在「运行期工具表」。
+ */
+export function deriveAssetHostSurface(
+  packs: readonly { manifest: CapabilityManifest; enabled: boolean }[]
+): AssetHostSurface {
+  const enabledCapabilityIds = new Set<string>();
+  const toolNames = new Set<string>();
+  for (const { manifest, enabled } of packs) {
+    if (!enabled) continue;
+    enabledCapabilityIds.add(manifest.id);
+    for (const tool of manifest.tools) toolNames.add(tool.name);
+  }
+  return { enabledCapabilityIds, toolNames };
+}
+
+/**
+ * 一条门控的判定：通过时返回 null，否则给出出局原因与确切依据。
+ *
+ * `host === undefined` 表示**不做门控**（结构断言那条路用它：声明的资源必须
+ * 真实存在于 capability-assets，这与宿主此刻开着什么无关）。
+ */
+function gateVerdict(
+  gate: CapabilityResourceGate | undefined,
+  host: AssetHostSurface | undefined
+): { reason: CapabilityResourceDecisionReason; detail: string } | null {
+  if (gate === undefined || host === undefined) return null;
+  const missingCapabilities = gate.requiredCapabilities.filter(
+    (cap) => !host.enabledCapabilityIds.has(cap)
+  );
+  if (missingCapabilities.length > 0) {
+    return {
+      reason: "required_capability_missing",
+      detail: `所需能力包未启用：${missingCapabilities.join("、")}`,
+    };
+  }
+  const missingTools = gate.requiredTools.filter((tool) => !host.toolNames.has(tool));
+  if (missingTools.length > 0) {
+    return {
+      reason: "required_tool_missing",
+      detail: `所需工具在本次宿主工具面里缺席：${missingTools.join("、")}`,
+    };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- 期望文件集
+
+/** 一条 piResources 声明的解析结果。 */
+interface ResolvedEntry {
+  kind: CapabilityPiResourceKind;
+  /** manifest 里那条声明的原文 */
+  path: string;
+  files: DesiredFile[];
+  /** 非 null = 这条声明在落盘之前就已经出局 */
+  blocked: { reason: CapabilityResourceDecisionReason; detail: string } | null;
+}
+
+/** 一个包声明了哪些资源条目（不看磁盘、不看宿主，纯读 manifest）。 */
+function declaredResourceEntries(
+  manifest: CapabilityManifest
+): { kind: CapabilityPiResourceKind; path: string }[] {
+  const declared = manifest.piResources ?? EMPTY_CAPABILITY_PI_RESOURCES;
+  return [
+    ...declared.prompts.map((p) => ({ kind: "prompts" as const, path: p })),
+    ...declared.skills.map((p) => ({ kind: "skills" as const, path: p })),
+    ...declared.extensions.map((p) => ({ kind: "extensions" as const, path: p })),
+  ];
+}
+
+/**
+ * 把一个包的 piResources 声明折成「应当存在于 pi 目录里的文件集合」，**逐条
+ * 声明**地给出结论。
  *
  * 目标路径的推导就是 pi 的发现规则本身（调研结论钉在这里）：
  *
@@ -190,81 +286,116 @@ function posixJoin(...parts: string[]): string {
  *     skill 单文件 `skills/quick.md` → `skills/quick.md`（根 .md 即技能）；
  *   - extension 文件 `ext/tool.ts` → `extensions/tool.ts`；extension 目录
  *     `ext/tool` → `extensions/tool/**`（pi 认 extensions/*.ts 与 extensions/星/index.ts）。
+ *
+ * 门控（R4.5）在存在性检查**之前**：门关着的资源本轮压根不该落盘，为它报一句
+ * 「文件不存在」只会把日志变成噪声。结构断言那条路传 `host === undefined`，
+ * 因此存在性检查对全部声明照跑不误。
  */
-async function desiredFilesFor(
+async function resolveResourceEntries(
   manifest: CapabilityManifest,
   assetsRoot: string,
   ops: AssetFileOps,
-  errors: string[]
-): Promise<DesiredFile[]> {
+  errors: string[],
+  host?: AssetHostSurface
+): Promise<ResolvedEntry[]> {
   const declared = manifest.piResources ?? EMPTY_CAPABILITY_PI_RESOURCES;
+  const gates = manifest.piResourceGates ?? [];
   const packRoot = path.join(assetsRoot, manifest.id);
-  const out: DesiredFile[] = [];
-  const seenDest = new Set<string>();
+  const entries: ResolvedEntry[] = [];
+  /** dest → 先占住它的那条声明，同包内冲突判定用 */
+  const seenDest = new Map<string, string>();
 
-  const push = (source: string, dest: string): void => {
+  const gateOf = (kind: CapabilityPiResourceKind, rel: string): CapabilityResourceGate | undefined =>
+    gates.find((gate) => gate.kind === kind && gate.path === rel);
+
+  /** 起一条声明；门关着时直接带着结论返回，调用方据 `blocked` 短路。 */
+  const start = (kind: CapabilityPiResourceKind, rel: string): ResolvedEntry => {
+    const entry: ResolvedEntry = {
+      kind,
+      path: rel,
+      files: [],
+      blocked: gateVerdict(gateOf(kind, rel), host),
+    };
+    entries.push(entry);
+    return entry;
+  };
+
+  const invalid = (entry: ResolvedEntry, message: string): void => {
+    errors.push(`${manifest.id}: ${message}`);
+    entry.blocked ??= { reason: "invalid", detail: message };
+  };
+
+  const push = (entry: ResolvedEntry, source: string, dest: string): void => {
     // 同包内两条声明落到同一个目标（如 a/x.md 与 b/x.md 都想当 prompts/x.md）
     // 是声明错误，不是可以静默选边的事。
-    if (seenDest.has(dest)) {
+    const holder = seenDest.get(dest);
+    if (holder !== undefined) {
       errors.push(`${manifest.id}: 两条 piResources 声明落到同一目标 "${dest}"，后者被跳过`);
+      entry.blocked ??= { reason: "shadowed", detail: `目标 "${dest}" 已被同包的 "${holder}" 占住` };
       return;
     }
-    seenDest.add(dest);
-    out.push({ source, dest });
+    seenDest.set(dest, entry.path);
+    entry.files.push({ source, dest });
   };
 
   for (const rel of declared.prompts) {
+    const entry = start("prompts", rel);
+    if (entry.blocked !== null) continue;
     const source = path.join(packRoot, rel);
     if (!(await ops.isFile(source))) {
-      errors.push(`${manifest.id}: piResources.prompts "${rel}" 在 capability-assets 里不存在`);
+      invalid(entry, `piResources.prompts "${rel}" 在 capability-assets 里不存在`);
       continue;
     }
-    push(source, posixJoin("prompts", path.posix.basename(rel)));
+    push(entry, source, posixJoin("prompts", path.posix.basename(rel)));
   }
 
   for (const rel of declared.skills) {
+    const entry = start("skills", rel);
+    if (entry.blocked !== null) continue;
     const source = path.join(packRoot, rel);
     const base = path.posix.basename(rel);
     if (await ops.isDirectory(source)) {
       const files = (await ops.listFiles(source)) ?? [];
       if (!files.includes("SKILL.md")) {
-        errors.push(`${manifest.id}: piResources.skills "${rel}" 目录里没有 SKILL.md`);
+        invalid(entry, `piResources.skills "${rel}" 目录里没有 SKILL.md`);
         continue;
       }
-      for (const f of files) push(path.join(source, f), posixJoin("skills", base, f));
+      for (const f of files) push(entry, path.join(source, f), posixJoin("skills", base, f));
     } else if (await ops.isFile(source)) {
       if (!rel.endsWith(".md")) {
-        errors.push(`${manifest.id}: piResources.skills "${rel}" 是文件却不是 .md（单文件技能只认根 .md）`);
+        invalid(entry, `piResources.skills "${rel}" 是文件却不是 .md（单文件技能只认根 .md）`);
         continue;
       }
-      push(source, posixJoin("skills", base));
+      push(entry, source, posixJoin("skills", base));
     } else {
-      errors.push(`${manifest.id}: piResources.skills "${rel}" 在 capability-assets 里不存在`);
+      invalid(entry, `piResources.skills "${rel}" 在 capability-assets 里不存在`);
     }
   }
 
   for (const rel of declared.extensions) {
+    const entry = start("extensions", rel);
+    if (entry.blocked !== null) continue;
     const source = path.join(packRoot, rel);
     const base = path.posix.basename(rel);
     if (await ops.isDirectory(source)) {
       const files = (await ops.listFiles(source)) ?? [];
       if (!files.some((f) => f === "index.ts" || f === "index.js")) {
-        errors.push(`${manifest.id}: piResources.extensions "${rel}" 目录里没有 index.ts / index.js`);
+        invalid(entry, `piResources.extensions "${rel}" 目录里没有 index.ts / index.js`);
         continue;
       }
-      for (const f of files) push(path.join(source, f), posixJoin("extensions", base, f));
+      for (const f of files) push(entry, path.join(source, f), posixJoin("extensions", base, f));
     } else if (await ops.isFile(source)) {
       if (!EXTENSION_FILE_SUFFIXES.some((s) => rel.endsWith(s))) {
-        errors.push(`${manifest.id}: piResources.extensions "${rel}" 不是 .ts/.js/.mjs 文件`);
+        invalid(entry, `piResources.extensions "${rel}" 不是 .ts/.js/.mjs 文件`);
         continue;
       }
-      push(source, posixJoin("extensions", base));
+      push(entry, source, posixJoin("extensions", base));
     } else {
-      errors.push(`${manifest.id}: piResources.extensions "${rel}" 在 capability-assets 里不存在`);
+      invalid(entry, `piResources.extensions "${rel}" 在 capability-assets 里不存在`);
     }
   }
 
-  return out;
+  return entries;
 }
 
 // ---------------------------------------------------------------- 装卸
@@ -279,6 +410,14 @@ export interface AssetSyncReport {
   /** 目标已被用户或别的包占着、拒绝覆盖的目标 */
   conflicts: string[];
   errors: string[];
+  /**
+   * 逐条 piResources 声明的装配决策（R4.5）。
+   *
+   * 覆盖**全部**在册包的**全部**声明（含未启用的包），每条恰一个 reason。
+   * 这是「为什么这个技能没进 pi 上下文」的可审计答案面——对比 pi 自己对
+   * 同名技能的「先加载的赢且静默」，我们自己物化的这一部分不留哑口。
+   */
+  decisions: CapabilityResourceDecision[];
 }
 
 function sha256(data: Buffer): string {
@@ -300,14 +439,21 @@ export async function syncCapabilityAssets(args: {
   /** pi 用户资源目录（~/.pi/agent） */
   piAgentDir: string;
   ops?: AssetFileOps;
+  /**
+   * 门控要看的宿主面（R4.5）。省略时由 `packs` 的启用标记推导——调用方本来
+   * 就把「谁开着」传进来了，再要求它单独算一遍只会多一处可能对不上的地方。
+   */
+  host?: AssetHostSurface;
 }): Promise<AssetSyncReport> {
   const ops = args.ops ?? nodeAssetFileOps;
+  const host = args.host ?? deriveAssetHostSurface(args.packs);
   const report: AssetSyncReport = {
     written: [],
     removed: [],
     keptEdited: [],
     conflicts: [],
     errors: [],
+    decisions: [],
   };
 
   const ledgerPath = path.join(args.piAgentDir, ASSET_LEDGER_FILENAME);
@@ -325,49 +471,96 @@ export async function syncCapabilityAssets(args: {
   const vanished = Object.keys(ledger.packs).filter((id) => !known.has(id));
 
   for (const { manifest, enabled } of args.packs) {
-    const desired = enabled ? await desiredFilesFor(manifest, args.assetsRoot, ops, report.errors) : [];
     const oldEntry = ledger.packs[manifest.id];
     const nextFiles: Record<string, string> = {};
+    const decide = (
+      kind: CapabilityPiResourceKind,
+      rel: string,
+      reason: CapabilityResourceDecisionReason,
+      detail: string | null,
+      fileCount: number
+    ): void => {
+      report.decisions.push({ capabilityId: manifest.id, kind, path: rel, reason, detail, fileCount });
+    };
 
-    // ---- 物化 / 升级
-    for (const { source, dest } of desired) {
-      const data = await ops.readFile(source);
-      if (data === null) {
-        report.errors.push(`${manifest.id}: 读取资源失败 ${source}`);
-        continue;
+    if (!enabled) {
+      // 整包未启用：它的每条声明都有同一个确切原因，而不是「不在报告里」。
+      for (const { kind, path: rel } of declaredResourceEntries(manifest)) {
+        decide(kind, rel, "capability_disabled", null, 0);
       }
-      const wantHash = sha256(data);
-      const owned = owner.get(dest);
-      const ledgerHash = oldEntry?.files[dest];
+    } else {
+      const entries = await resolveResourceEntries(
+        manifest,
+        args.assetsRoot,
+        ops,
+        report.errors,
+        host
+      );
 
-      if (ledgerHash === undefined) {
-        if (owned !== undefined && owned !== manifest.id) {
-          report.conflicts.push(`${dest}（已属 ${owned}，${manifest.id} 拒绝覆盖）`);
+      // ---- 物化 / 升级
+      for (const entry of entries) {
+        if (entry.blocked !== null) {
+          decide(entry.kind, entry.path, entry.blocked.reason, entry.blocked.detail, 0);
           continue;
         }
-        if (await ops.isFile(path.join(args.piAgentDir, dest))) {
-          // 不在任何账上却已存在 = 用户手放的文件。绝不覆盖。
-          report.conflicts.push(`${dest}（用户已有同名文件，${manifest.id} 拒绝覆盖）`);
-          continue;
+        /** 目标被别人占着、拒绝覆盖的 */
+        const refused: string[] = [];
+        /** 源文件读不出来的 */
+        const failed: string[] = [];
+        let placed = 0;
+
+        for (const { source, dest } of entry.files) {
+          const data = await ops.readFile(source);
+          if (data === null) {
+            report.errors.push(`${manifest.id}: 读取资源失败 ${source}`);
+            failed.push(dest);
+            continue;
+          }
+          const wantHash = sha256(data);
+          const owned = owner.get(dest);
+          const ledgerHash = oldEntry?.files[dest];
+
+          if (ledgerHash === undefined) {
+            if (owned !== undefined && owned !== manifest.id) {
+              report.conflicts.push(`${dest}（已属 ${owned}，${manifest.id} 拒绝覆盖）`);
+              refused.push(`${dest} 已属 ${owned}`);
+              continue;
+            }
+            if (await ops.isFile(path.join(args.piAgentDir, dest))) {
+              // 不在任何账上却已存在 = 用户手放的文件。绝不覆盖。
+              report.conflicts.push(`${dest}（用户已有同名文件，${manifest.id} 拒绝覆盖）`);
+              refused.push(`${dest} 已被用户同名文件占住`);
+              continue;
+            }
+            await ops.writeFile(path.join(args.piAgentDir, dest), data);
+            report.written.push(dest);
+          } else if (ledgerHash !== wantHash) {
+            // 升级：源内容变了就覆盖。用户对旧版的手改随升级让位——账上 hash
+            // 换成新版，之后停用时按新账判断。
+            await ops.writeFile(path.join(args.piAgentDir, dest), data);
+            report.written.push(dest);
+          } else if (!(await ops.isFile(path.join(args.piAgentDir, dest)))) {
+            // 在账、内容没变、文件却没了：自愈重建。包处于启用态，它声明的资源
+            // 就该在；用户删文件的受支持做法是停用这个包。
+            await ops.writeFile(path.join(args.piAgentDir, dest), data);
+            report.written.push(dest);
+          }
+          nextFiles[dest] = wantHash;
+          owner.set(dest, manifest.id);
+          placed += 1;
         }
-        await ops.writeFile(path.join(args.piAgentDir, dest), data);
-        report.written.push(dest);
-      } else if (ledgerHash !== wantHash) {
-        // 升级：源内容变了就覆盖。用户对旧版的手改随升级让位——账上 hash
-        // 换成新版，之后停用时按新账判断。
-        await ops.writeFile(path.join(args.piAgentDir, dest), data);
-        report.written.push(dest);
-      } else if (!(await ops.isFile(path.join(args.piAgentDir, dest)))) {
-        // 在账、内容没变、文件却没了：自愈重建。包处于启用态，它声明的资源
-        // 就该在；用户删文件的受支持做法是停用这个包。
-        await ops.writeFile(path.join(args.piAgentDir, dest), data);
-        report.written.push(dest);
+
+        if (refused.length > 0) {
+          decide(entry.kind, entry.path, "shadowed", refused.join("；"), placed);
+        } else if (failed.length > 0) {
+          decide(entry.kind, entry.path, "invalid", `读取失败：${failed.join("、")}`, placed);
+        } else {
+          decide(entry.kind, entry.path, "materialized", null, placed);
+        }
       }
-      nextFiles[dest] = wantHash;
-      owner.set(dest, manifest.id);
     }
 
-    // ---- 移除（停用的包走全量；启用的包走「声明收窄」差集）
+    // ---- 移除（停用的包走全量；启用的包走「声明收窄 / 门关上」差集）
     for (const [dest, ledgerHash] of Object.entries(oldEntry?.files ?? {})) {
       if (nextFiles[dest] !== undefined) continue;
       await removeOwnedFile(dest, ledgerHash, args.piAgentDir, ops, report);
@@ -433,6 +626,10 @@ async function removeOwnedFile(
  * 返回全部错误而不是第一条（与 validateCapabilityManifest 同一取舍）。
  * drift 测试拿 BUILT_IN_CAPABILITIES + 真实资源根跑它；单测拿 fixture
  * 分别验证「存在 → 空」与「指空 → 红」，防这条断言恒真。
+ *
+ * **不传 host**：门控是运行期宿主状态，而这条断言问的是「盒子里的东西齐不齐」。
+ * 让门控参与进来的话，一个门关着的资源文件被删掉将永远不会变红——那正是这条
+ * 断言要防的那种静默。
  */
 export async function verifyCapabilityAssets(
   manifests: readonly CapabilityManifest[],
@@ -449,9 +646,9 @@ export async function verifyCapabilityAssets(
     ) {
       continue;
     }
-    // desiredFilesFor 的存在性检查就是这条断言的实现：清单指空、目录缺
+    // resolveResourceEntries 的存在性检查就是这条断言的实现：清单指空、目录缺
     // SKILL.md、extension 目录缺 index，全部折成错误。
-    await desiredFilesFor(manifest, assetsRoot, ops, errors);
+    await resolveResourceEntries(manifest, assetsRoot, ops, errors);
   }
   return errors;
 }

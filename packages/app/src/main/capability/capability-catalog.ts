@@ -13,6 +13,7 @@ import { app } from "electron";
 import {
   CAPABILITY_HOST_CONTRACT_VERSION,
   type CapabilityDescriptor,
+  type CapabilityResourceDecision,
   type CapabilityState,
 } from "@pibuddy/contract";
 
@@ -271,6 +272,17 @@ capabilityRegistry.seal();
  */
 let lastResolution: CapabilityResolution | null = null;
 
+/**
+ * 本次启动对账给出的资源级装配决策（R4.5），由
+ * `syncCapabilityAssetsOnStartup()` 在对账跑完后写入一次。
+ *
+ * 与 `lastResolution` 同一性质：记的是**这个进程实际把什么物化成了什么样**，
+ * 而不是磁盘上现在写着什么。因此 describe() 里它不随偏好重算——偏好改了但
+ * 还没重启时，界面看到的仍是本次进程的事实，`restartRequired` 负责说明差异。
+ * 空数组 = 对账还没跑过（单测路径、或 describe 早于对账），不是「没有资源」。
+ */
+let lastResourceDecisions: readonly CapabilityResourceDecision[] = [];
+
 function hostInfo(): { appVersion: string; contractVersion: number } {
   return {
     // app.getVersion() 在打包后取 package.json 的 version；单测里 electron
@@ -300,6 +312,18 @@ export function assembleCapabilities(): CapabilityResolution {
 /** 装配结果的只读视图；未装配时为 null。 */
 export function currentResolution(): CapabilityResolution | null {
   return lastResolution;
+}
+
+/** 启动对账完成后写入一次；之后 describe() 逐能力切片下发给渲染层。 */
+export function applyCapabilityResourceDecisions(
+  decisions: readonly CapabilityResourceDecision[]
+): void {
+  lastResourceDecisions = [...decisions];
+}
+
+/** 本次进程的资源级装配决策；对账未跑过时为空数组。 */
+export function currentResourceDecisions(): readonly CapabilityResourceDecision[] {
+  return lastResourceDecisions;
 }
 
 /**
@@ -342,6 +366,9 @@ function describe(prefs: CapabilityPrefs): CapabilityState {
       id: c.id,
       title: c.title,
     })),
+    // R4.5：这个包的每条 pi 资源声明本次为什么进了（或没进）pi 的上下文。
+    // 渲染层据它把「技能怎么不在」变成一句有依据的话，而不是一个空面板。
+    resourceDecisions: lastResourceDecisions.filter((d) => d.capabilityId === manifest.id),
   }));
 
   return {
@@ -396,4 +423,5 @@ export function setCapabilityEnabled(capabilityId: string, enabled: boolean): Ca
 /** 仅供单测：清掉装配痕迹。 */
 export function __resetCapabilityAssembly(): void {
   lastResolution = null;
+  lastResourceDecisions = [];
 }

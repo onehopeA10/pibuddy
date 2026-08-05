@@ -25,7 +25,11 @@ import {
   CAPABILITY_ASSETS_DIR_NAME,
   syncCapabilityAssets,
 } from "./capability-assets.js";
-import { capabilityRegistry, currentResolution } from "./capability-catalog.js";
+import {
+  applyCapabilityResourceDecisions,
+  capabilityRegistry,
+  currentResolution,
+} from "./capability-catalog.js";
 
 /** capability-assets 根目录（dev / 打包两种形态）。 */
 export function capabilityAssetsRoot(): string {
@@ -54,6 +58,10 @@ export async function syncCapabilityAssetsOnStartup(): Promise<void> {
       assetsRoot: capabilityAssetsRoot(),
       piAgentDir: path.join(os.homedir(), ".pi", "agent"),
     });
+    // 决策报告进能力快照（R4.5）：capabilities:describe 之后能逐条回答
+    // 「这个技能为什么没进 pi 上下文」。写在日志之前——日志失败也不该
+    // 让快照丢掉这份事实。
+    applyCapabilityResourceDecisions(report.decisions);
     // 无条件记一行：「没跑」与「跑了但无事可做」在日志上必须可分。
     log().info("capability_assets_sync", {
       written: report.written,
@@ -61,6 +69,10 @@ export async function syncCapabilityAssetsOnStartup(): Promise<void> {
       keptEdited: report.keptEdited,
       conflicts: report.conflicts,
       errors: report.errors,
+      // 未物化的那些才是要能查的：全物化时这一行是空数组。
+      blocked: report.decisions
+        .filter((d) => d.reason !== "materialized")
+        .map((d) => `${d.capabilityId}/${d.kind}/${d.path}: ${d.reason}`),
     });
   } catch (err) {
     log().warn("capability_assets_sync_failed", { error: String(err) });
