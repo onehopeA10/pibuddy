@@ -29,7 +29,7 @@ import {
 
 import { registerHandler } from "../ipc-guard.js";
 import { createLogger, type Logger } from "../logger.js";
-import { workspaceStore } from "../workspace/workspace-store.js";
+import { reviewedWorkspaceGrants } from "../permission/permission-store.js";
 import { systemClock } from "./clock.js";
 import { createPoolRunTrigger } from "./pool-run-trigger.js";
 import { nextRunAfter, Scheduler } from "./scheduler.js";
@@ -58,9 +58,15 @@ function log(): Logger {
   return logger;
 }
 
-/** 某工作区落盘的能力授权表——scheduler 与列表判定「缺哪些预授权」的只读数据源。 */
+/**
+ * 某工作区落盘的能力授权表——scheduler 与列表判定「缺哪些预授权」的只读数据源。
+ *
+ * 经 `reviewedWorkspaceGrants` 而不是直接读 `WorkspaceProfile.capabilityGrants`：
+ * 后者是一列未经校验的 JSON 文本，而无人值守的定时任务恰恰是最不该信任它的
+ * 消费者——凌晨自动触发的那次 run，背后没有人能发现那条授权是被手改进去的。
+ */
 function workspaceGrants(workspaceId: string): readonly CapabilityGrant[] {
-  return workspaceStore().get(workspaceId)?.capabilityGrants ?? [];
+  return reviewedWorkspaceGrants(workspaceId);
 }
 
 let sched: Scheduler | null = null;
