@@ -846,7 +846,14 @@ export function backupStoreIds(): string[] {
   return SQLITE_STORES.map((s) => s.id);
 }
 
-/** 仅供 UI：库 id → 一句人话。 */
-export function backupStoreTitles(): Array<{ id: string; title: string }> {
+/**
+ * 库 id → 一句人话。
+ *
+ * 目前无消费者：BackupPanel 自己排版库名。留着是因为清单里的 `title` 本来就
+ * 是为「给用户看」写的，接 UI 时不必再想一遍措辞——但**不导出**，否则死代码
+ * 闸门会把它算进存量（那道闸的价值全在于不给例外）。
+ */
+function backupStoreTitles(): Array<{ id: string; title: string }> {
   return SQLITE_STORES.map((s) => ({ id: s.id, title: s.title }));
 }
+void backupStoreTitles;

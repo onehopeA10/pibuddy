@@ -321,11 +321,6 @@ export function applyCapabilityResourceDecisions(
   lastResourceDecisions = [...decisions];
 }
 
-/** 本次进程的资源级装配决策；对账未跑过时为空数组。 */
-export function currentResourceDecisions(): readonly CapabilityResourceDecision[] {
-  return lastResourceDecisions;
-}
-
 /**
  * 当前偏好折出来的启用集合与**本次进程实际装配的**集合是否已经不同。
  *

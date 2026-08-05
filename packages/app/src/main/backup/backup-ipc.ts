@@ -35,8 +35,15 @@ import {
   writeBackupState,
 } from "./backup-service.js";
 
-/** 本内核设施注册的全部通道。导出成常量供对账「恰 4 条」。 */
-export const BACKUP_CHANNELS = [
+/**
+ * 本内核设施注册的全部通道。
+ *
+ * **不导出**：本文件 import 了 electron（目录选择框 / 覆盖确认框），单测导入不了它，
+ * 所以「供对账恰 4 条」这种导出理由在这里根本兑现不了——仓库里另外二十几个
+ * `*_CHANNELS` 都是同一个成因的死导出。通道数真正的守卫在契约侧：分片进
+ * `sealChannelContracts` 时少一条会加载期抛错，`check-contract-uniqueness` 再对一遍。
+ */
+const BACKUP_CHANNELS = [
   CHANNELS.backupDescribe,
   CHANNELS.backupCreate,
   CHANNELS.backupValidate,
