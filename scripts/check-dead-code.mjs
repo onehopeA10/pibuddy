@@ -16,6 +16,14 @@
  *   node scripts/check-dead-code.mjs --check     # CI 用，超基线则 1
  *   node scripts/check-dead-code.mjs --update    # 重写基线为当前实测值
  *
+ * ── knip.json 的 `ignore` 为什么有那两条 ──────────────────────────────
+ * `.claude/worktrees/**` 与 `source/**` **只存在于主 checkout**，git worktree
+ * 里都没有。基线因此是在一个看不见它们的环境里生成的，主 checkout 上一跑就
+ * 对不上：worktrees 里是本仓代码的副本，同一处死代码会按活跃 worktree 数量
+ * 翻倍上报（实测 binaries 从 1 涨到 22）；`source/` 是外部参考项目（pi /
+ * maka-agent / codex 等）的只读副本，压根不是本仓的评估对象。
+ * 排除它们不是放宽判据，是把扫描面收回到「本仓自己的代码」。
+ *
  * ── 基线里几条已知的 knip 误判（存量数字包含它们，刻意不加豁免）────────
  *   - 根 devDependencies 的 naive-ui / pinia：组件测试从仓库根跑（CT-21 的
  *     单一 vitest 配置），import 语句却写在 packages/app 的 spec 里。knip 按
