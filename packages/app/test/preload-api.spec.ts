@@ -46,6 +46,7 @@ describe("api 聚合对象", () => {
     expect(Object.keys(api).sort()).toEqual([
       "agentPool",
       "artifacts",
+      "backup",
       "capabilities",
       "childAgent",
       "connector",

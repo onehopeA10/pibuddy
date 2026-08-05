@@ -659,6 +659,24 @@ export const CHANNELS = {
   autoRuleUpsert: "automation:rule-upsert",
   autoRuleDelete: "automation:rule-delete",
   autoRuleSetEnabled: "automation:rule-set-enabled",
+  // ---- SQLite 备份 / 恢复（BKP-101，平台内核，恰 4 条） ----
+  //
+  // 四条通道**都不接受路径形参**：备份写到哪、从哪个目录恢复，一律由主进程
+  // 弹出的目录选择框决定（与 diagnostics 三条同一条纪律）。渲染进程若能给出
+  // 路径，「备份」就退化成一条「把任意目录复制到任意目录」的通用旁路，而
+  // 「恢复」更是退化成「用任意目录的内容覆盖应用数据」。
+  //
+  // 恢复**不当场生效**：12 个 sqlite 句柄此刻正被各 store 持有，在 Windows 上
+  // 连 rename 覆盖都会 EPERM。restore 只把校验通过的副本落到 userData 下的
+  // pending-restore 暂存区并写 marker，下次启动在任何 store 打开之前套用。
+  /** 备份 / 恢复的当前状态：上次备份时间、上次校验结论、是否有待套用的恢复 */
+  backupDescribe: "backup:describe",
+  /** 弹目录选择框 → 逐库在线 backup() → 归一 → 校验 → 原子 rename 就位 */
+  backupCreate: "backup:create",
+  /** 弹目录选择框 → 只读校验一份既有备份（sha256 + 完整性 + 版本 + 缺表） */
+  backupValidate: "backup:validate",
+  /** 弹目录选择框 → 校验 → 落到 pending-restore 暂存区 → 提示重启后生效 */
+  backupRestore: "backup:restore",
 } as const;
 
 /** 主进程单向推送通道（9 个）。 */

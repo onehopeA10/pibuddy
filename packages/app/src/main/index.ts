@@ -21,6 +21,10 @@ import { syncCapabilityAssetsOnStartup } from "./capability/capability-assets-wi
 // window-all-closed 在本应用即退出路径）。池状态机与派生 host 各收各的：
 // shutdownAll 走池的记账 + host.stop，stopAll 兜底清掉池外/迟到的 runtime。
 import { agentPool, poolRuntimeHost } from "./agent-pool/pool.js";
+// 备份恢复的套用点（BKP-101）。必须跑在 registerIpc() 之前：那之后任意一个
+// store 都可能被打开，而 Windows 上对已打开的 sqlite 文件 rename 覆盖会 EPERM，
+// 表现是「恢复成功了但数据没变」。
+import { applyPendingRestoreOnStartup } from "./backup/backup-ipc.js";
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -108,11 +112,13 @@ if (!gotLock) {
     }
   });
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     log().info("app_ready", {
       version: app.getVersion(),
       platform: process.platform,
     });
+    // 待套用的恢复（若有）在这里生效，**必须 await 且必须在 registerIpc 之前**。
+    await applyPendingRestoreOnStartup();
     registerIpc();
     createWindow();
     // 能力装配已在 registerIpc() 里完成，此处 isCapabilityEnabled 可信。恢复须

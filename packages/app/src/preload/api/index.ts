@@ -56,6 +56,7 @@ import { edu } from "./edu.js";
 import { home } from "./home.js";
 import { dashboard } from "./dashboard.js";
 import { homeAutomation } from "./homeAutomation.js";
+import { backup } from "./backup.js";
 
 export const api = {
   pi,
@@ -114,6 +115,8 @@ export const api = {
   dashboard,
   /** 家居自动化规则（home.automation）。列表/启停/删除/整份 upsert，无执行与出站入口 */
   homeAutomation,
+  /** SQLite 备份 / 恢复（BKP-101，内核）。四个方法零形参，目录一律由主进程选 */
+  backup,
 };
 
 export type PiBuddyApi = typeof api;

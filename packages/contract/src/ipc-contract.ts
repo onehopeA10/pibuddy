@@ -75,6 +75,7 @@ import { eduContractShard } from "./edu.js";
 import { homeAssistantContractShard } from "./home-assistant.js";
 import { dashboardEventPayloadSchema, homeDashboardContractShard } from "./home-dashboard.js";
 import { homeAutomationContractShard } from "./home-automation.js";
+import { backupContractShard } from "./backup.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -822,6 +823,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   homeAdvisorContractShard,
   homeDashboardContractShard,
   homeAutomationContractShard,
+  backupContractShard,
 ];
 
 /**
