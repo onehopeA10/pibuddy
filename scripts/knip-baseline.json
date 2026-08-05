@@ -11,6 +11,6 @@
     "types": 12,
     "unlisted": 1
   },
-  "$staged": "2026-08-05 抬基线的唯一原因：tool-recovery/ 与 model-errors/ 两个域是刻意分阶段落地的——原语先进仓、接线在后一批（T1/T2 接进 tool-bridge / tasks / home-automation；retry-policy 接进 tasks 的任务级重试）。接线完成后必须跑一次 --update 把这两处降回去；降不下去说明那批原语没人用，那才是真的该删。",
-  "$staged-tool-recovery": "2026-08-05 T1/T2 接线完成，exports 68 → 67：tool-recovery/ 名下唯一那条未接线导出 RuntimeCommitBoundaryError 已被 dispatch-guard 消费。**只手改了 exports 这一个键，没有跑 --update**——`--update` 会整份重写，而 devDependencies 这一类在 git worktree 里恒比主 checkout 多 1（`source/hermes-studio` 声明了 naive-ui，主 checkout 上 knip 据它认为根 devDeps 的 naive-ui 有人用；worktree 里没有 source/ 就多报一条）。收紧基线必须在主 checkout 上做，否则会把一个只在 worktree 成立的数字钉进来。model-errors/ 的 11 条导出 + 3 条类型仍未接线，属另一批的账。"
+  "$staged": "分阶段落地欠下的账（还清后跑 --update 收紧）：① tool-recovery/ —— 已还清：W3-8 接线后 RuntimeCommitBoundaryError 有了消费者，exports 68→67。② model-errors/ —— 未还：11 条导出 + 3 个类型仍无生产调用点。retry-policy 的判据要等 tasks 的任务级重试改成按错误类别决策（现在是固定 backoffMs，不看类别也不看是否已有可见输出）；providers/connectivity.ts 是唯一手握 statusCode + 响应头的真实调用点，拓宽它的 errorCode 词汇是下一个接入口。届时降不下来，说明那批判据没人用。",
+  "$fragile": "devDependencies 这一类依赖 source/ 存在：source/hermes-studio/package.json 声明了 naive-ui，knip 据此认为根 devDeps 的 naive-ui 有消费者。git worktree 里没有 source/，会多报一条。所以**收紧基线只能在主 checkout 上做**；worktree 里跑 --update 会把只在那儿成立的数字钉进来。"
 }
