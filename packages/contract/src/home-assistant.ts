@@ -28,7 +28,8 @@ export const HOME_ASSISTANT_CAPABILITY_ID = "home.assistant";
 
 /**
  * 常驻工具恰 3 个（上下文预算核心：实体 id 参数化，绝不每设备一工具），外加
- * 1 个 setup 引导工具（端点未配置时 extension 只注册它，3→1）。
+ * 1 个 setup 引导工具（端点未配置时 extension 只注册它，3→1），以及大结果
+ * 护栏的恢复读取口 read_archived_result（见下）。
  *
  * 名字带 capabilityId 前缀是 manifest 校验的硬性要求（D4 规则 6）；extension
  * （resources/capability-assets/home.assistant/extensions/ha-tools.ts）与
@@ -38,6 +39,18 @@ export const HOME_TOOL_LIST_ENTITIES = "home.assistant.list_entities";
 export const HOME_TOOL_GET_STATE = "home.assistant.get_state";
 export const HOME_TOOL_CALL_SERVICE = "home.assistant.call_service";
 export const HOME_TOOL_SETUP = "home.assistant.setup";
+
+/**
+ * 大结果护栏的恢复读取工具（tool-archive）。
+ *
+ * 桥的回包路径上，超阈值的工具结果会先完整落归档、回包只留一个带 ref 的
+ * 占位符。这个工具是把原文读回来的**唯一**入口——归档不在工作区里，模型
+ * 用文件搜索找不到它（占位符的 readInstructions 里明写了这一条）。
+ *
+ * 它不经 HomeAssistantService（零网络、零 HA 访问），因此不在
+ * HOME_BRIDGE_TOOLS 里：主进程侧用 registerBridgeTool 挂进桥的跨包注册表。
+ */
+export const HOME_TOOL_READ_ARCHIVE = "home.assistant.read_archived_result";
 
 /** 经 tool bridge 转发执行的三个常驻工具（setup 是纯文本引导，不过桥）。 */
 export const HOME_BRIDGE_TOOLS = [
@@ -96,6 +109,23 @@ export const homeCallServiceArgsSchema = z
   })
   .strict();
 export type HomeCallServiceArgs = z.infer<typeof homeCallServiceArgsSchema>;
+
+/**
+ * `home.assistant.read_archived_result` 的入参。
+ *
+ * `limit` 是**请求上界而不是保证**：真正的上界是响应侧按估算 token 二分
+ * 收敛出来的（见 main/tool-archive/archive-read.ts）——读归档的响应必须
+ * 严格有界，否则读一次归档就会触发新一轮归档，死循环。
+ */
+export const HOME_ARCHIVE_READ_MAX_LIMIT = 6000;
+export const homeReadArchivedResultArgsSchema = z
+  .object({
+    ref: z.string().min(1).max(2048),
+    offset: z.number().int().nonnegative().optional(),
+    limit: z.number().int().positive().max(HOME_ARCHIVE_READ_MAX_LIMIT).optional(),
+  })
+  .strict();
+export type HomeReadArchivedResultArgs = z.infer<typeof homeReadArchivedResultArgsSchema>;
 
 // ---------------------------------------------------------------- 配置
 

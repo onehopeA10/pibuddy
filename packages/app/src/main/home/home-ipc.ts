@@ -27,6 +27,7 @@ import {
   CHANNELS,
   HOME_ASSISTANT_CAPABILITY_ID,
   HOME_BRIDGE_TOOLS,
+  HOME_TOOL_READ_ARCHIVE,
   haConfigGetRequestSchema,
   haConfigSetRequestSchema,
   haEntitiesRequestSchema,
@@ -56,7 +57,8 @@ import {
 } from "./ha-config.js";
 import { closeHomeStore, homeStore } from "./ha-store.js";
 import { HomeAssistantService } from "./home-service.js";
-import { HomeToolBridge } from "./tool-bridge.js";
+import { HomeToolBridge, registerBridgeTool } from "./tool-bridge.js";
+import { readArchivedToolResult } from "../tool-archive/archive-read.js";
 
 /** 本能力注册的全部通道。导出成常量供对账「恰 5 条」。 */
 export const HOME_CHANNELS = [
@@ -174,6 +176,24 @@ async function executeBridgeTool(tool: string, args: unknown, cwd: string | null
   return service().executeTool(tool, args, workspaceId);
 }
 
+/**
+ * 大结果护栏的恢复读取（tool-archive）。
+ *
+ * **不经 HomeAssistantService**：零网络、零 HA 访问，只从
+ * `<userData>/tool-archive/<workspaceId>/` 读回自己写下的归档，因此
+ * manifest 里它的 permissions 为空。工作区照 `workspaceIdOfCwd` 同一口径
+ * 解析（只认已注册工作区）——归档按工作区分目录存放，这一步就是隔离本身。
+ * 响应严格有界（archive-read.ts 按估算 token 二分），读归档不会触发新一轮
+ * 归档。
+ */
+async function executeReadArchivedResult(
+  _tool: string,
+  args: unknown,
+  cwd: string | null
+): Promise<unknown> {
+  return readArchivedToolResult(workspaceIdOfCwd(cwd), args);
+}
+
 // ---------------------------------------------------------------- 状态视图
 
 /**
@@ -209,6 +229,7 @@ function configState(workspaceId: string): HaConfigState {
 /** 禁用 / 退出时的拆卸（runtime.teardown:["listener"]）。数据留在磁盘不动。 */
 export function disposeHomeResources(): void {
   setPiChildEnvContribution(null);
+  registerBridgeTool(HOME_TOOL_READ_ARCHIVE, null);
   if (bridge) {
     void bridge.stop();
     bridge = null;
@@ -224,6 +245,10 @@ export function registerHomeIpc(): void {
   // tool bridge：入站 named pipe 监听 + pi 子进程 env 贡献。只在本能力
   // activate 时发生——未启用的构建里这两样都不存在。
   bridge = new HomeToolBridge(executeBridgeTool);
+  // 恢复读取工具挂进桥的跨包注册表（与 home.automation 的 manage_rule 同一
+  // 手法）：它不是 HOME_BRIDGE_TOOLS 里那三个走域服务的工具，执行面完全在
+  // tool-archive 域内，因此不该经 executeBridgeTool 的 network.local 判定。
+  registerBridgeTool(HOME_TOOL_READ_ARCHIVE, executeReadArchivedResult);
   const active = bridge;
   active
     .start()
