@@ -561,13 +561,16 @@ describe("extension 资产与 manifest 逐字对账", () => {
     expect(await verifyCapabilityAssets([homeAssistantCapability], ASSETS_ROOT)).toEqual([]);
   });
 
-  it("manifest tools 恰 3+1，且 extension 逐字注册同名工具", () => {
+  it("manifest tools 恰 3+1+1，且 extension 逐字注册同名工具", () => {
     const declared = homeAssistantCapability.tools.map((t) => t.name);
     expect(declared).toEqual([
       "home.assistant.list_entities",
       "home.assistant.get_state",
       "home.assistant.call_service",
       "home.assistant.setup",
+      // 大结果护栏（tool-archive）的恢复读取口：常驻工具面 3 个不变，
+      // setup 是引导态，read_archived_result 只在占位符出现后才被用到。
+      "home.assistant.read_archived_result",
     ]);
     const source = fs.readFileSync(EXTENSION_FILE, "utf8");
     for (const name of declared) {

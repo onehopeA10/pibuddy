@@ -35,6 +35,8 @@ import path from "node:path";
 
 import { HOME_BRIDGE_ENV_PATH, HOME_BRIDGE_ENV_TOKEN } from "@pibuddy/contract";
 
+import { guardBridgeToolResult } from "../tool-archive/bridge-guard.js";
+
 /** 单个工具调用的执行上限。 */
 export const HOME_BRIDGE_TIMEOUT_MS = 10000;
 /** 单行请求的字节上限（工具入参都是小 JSON，256KB 已经宽裕）。 */
@@ -199,7 +201,17 @@ export class HomeToolBridge {
       // 【追加（home.automation）】跨包工具先查注册表，查不到落回基座执行面。
       const handler = crossPackageTools.get(req.tool) ?? this.execute;
       const result = await Promise.race([handler(req.tool, req.args, cwd), timeout]);
-      if (!timedOut) this.reply(socket, { id, ok: true, result });
+      // 【追加（tool-archive）——合并风险点】回包路径上唯一的一处改动：超阈值
+      // 的结果先完整落归档（文件旁路，不受 256KB 限制），回包换成带 ref 的
+      // 占位符；未超阈值或归档失败一律原样回原文。guardBridgeToolResult 承诺
+      // 永不抛——否则外面这层 catch 会把一次成功的调用改写成 {ok:false}。
+      if (!timedOut) {
+        this.reply(socket, {
+          id,
+          ok: true,
+          result: await guardBridgeToolResult(req.tool, cwd, result),
+        });
+      }
     } catch (err) {
       this.reply(socket, {
         id,

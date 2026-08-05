@@ -49,13 +49,19 @@ function bridgeCall(tool: string, args: unknown): Promise<unknown> {
       () => finish(() => reject(new Error(`PiBuddy home bridge 超时（${BRIDGE_TIMEOUT_MS / 1000}s）`))),
       BRIDGE_TIMEOUT_MS
     );
+    // setEncoding 而不是逐 chunk 的 chunk.toString("utf8")：一个 3 字节的汉字
+    // 会被切在两个 chunk 之间，逐 chunk 解码把它变成两个 U+FFFD——中文结果
+    // 一大就必然撞见。大结果护栏（tool-archive）归档失败时回的正是完整原文，
+    // 「证据一字不丢」要求这条解码路径也不能丢字。setEncoding 内部用
+    // StringDecoder 跨 chunk 保留半个字符，这是唯一正确的做法。
+    socket.setEncoding("utf8");
     socket.on("connect", () => {
       socket.write(
         `${JSON.stringify({ id, token: BRIDGE_TOKEN, tool, args, cwd: process.cwd() })}\n`
       );
     });
-    socket.on("data", (chunk: Buffer) => {
-      buffer += chunk.toString("utf8");
+    socket.on("data", (chunk: string) => {
+      buffer += chunk;
       const nl = buffer.indexOf("\n");
       if (nl < 0) return;
       const line = buffer.slice(0, nl);
@@ -170,6 +176,38 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params) {
       return viaBridge("home.assistant.call_service", params);
+    },
+  });
+
+  // 大结果护栏（tool-archive）的恢复读取口。
+  //
+  // 桥的回包路径上，超阈值的工具结果会先完整落归档、回包只留一个带 ref 的
+  // 占位符（占位符自带 readInstructions，里面明写「不要用 Glob 去找归档」）。
+  // 这是把原文读回来的唯一入口。
+  //
+  // description 里写死那条**自指约束**：响应严格有界（主进程侧按估算 token
+  // 二分收敛，恒低于归档阈值），所以读归档不会再触发一次归档——不写清楚，
+  // 模型会担心「读回来又太大」而不敢用它。
+  pi.registerTool({
+    name: "home.assistant.read_archived_result",
+    label: "读回归档的工具结果",
+    description:
+      "Read back a tool result that was archived because it was too large. Pass the `ref` from the " +
+      "placeholder object, optionally with offset/limit, to page through the original text. " +
+      "Responses are strictly bounded, so reading an archive can never trigger another archive. " +
+      "Do not use Glob or file search to find the archive — it lives outside the workspace and is " +
+      "only reachable through this tool.",
+    parameters: Type.Object({
+      ref: Type.String({ description: "占位符里的 ref（pibuddy://tool-archive/...）" }),
+      offset: Type.Optional(
+        Type.Integer({ minimum: 0, description: "起始字符偏移，默认 0；续读传上一页的 nextOffset" })
+      ),
+      limit: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: 6000, description: "请求页宽（字符），实际可能被收窄" })
+      ),
+    }),
+    async execute(_toolCallId, params) {
+      return viaBridge("home.assistant.read_archived_result", params);
     },
   });
 }

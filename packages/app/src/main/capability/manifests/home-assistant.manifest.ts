@@ -9,8 +9,11 @@
  * ## 工具面 = 上下文预算核心
  *
  * 常驻工具恰 3 个，实体 id 参数化，绝不每设备一工具：list_entities /
- * get_state / call_service 以单工具 1:1 覆盖 HA 全部控制面。第 4 个 setup
- * 只在端点未配置时由 extension 注册（3→1 引导态）。extension 自身零 fetch
+ * get_state / call_service 以单工具 1:1 覆盖 HA 全部控制面。setup 只在端点
+ * 未配置时由 extension 注册（3→1 引导态）。read_archived_result 是大结果
+ * 护栏的恢复读取口——它存在的前提正是「工具面要省上下文」：超阈值的结果
+ * 先完整落归档、回包只留占位符，模型需要细节时才用它按页读回来（响应严格
+ * 有界，读归档不会再触发一次归档）。extension 自身零 fetch
  * 零直连 HA——全部经主进程 tool bridge（验一次性 token → 按本清单
  * tools[].permissions evaluate → safeLocalFetch / 缓存查询）。
  *
@@ -29,6 +32,7 @@ import {
   HOME_TOOL_CALL_SERVICE,
   HOME_TOOL_GET_STATE,
   HOME_TOOL_LIST_ENTITIES,
+  HOME_TOOL_READ_ARCHIVE,
   HOME_TOOL_SETUP,
 } from "@pibuddy/contract";
 
@@ -81,6 +85,16 @@ export const homeAssistantCapability = defineCapability({
       name: HOME_TOOL_SETUP,
       description:
         "智能家居尚未配置时的引导：提示用户到 PiBuddy 设置面填写 Home Assistant 地址与访问令牌并完成授权。纯文本，零 IO。",
+      permissions: [],
+    },
+    {
+      // 大结果护栏的恢复读取（tool-archive）。零网络、零 HA 访问——只读
+      // 本应用自己写下的归档，因此 permissions 为空。描述里写死了那条
+      // **自指约束**：响应严格有界，所以读归档不会触发新一轮归档。
+      name: HOME_TOOL_READ_ARCHIVE,
+      description:
+        "读回被归档的大工具结果：传入占位符里的 ref（可选 offset/limit）分页取原文。" +
+        "响应严格有界（按估算 token 二分收敛，恒低于归档阈值），因此读归档本身不会再触发一次归档。零网络、零 IO 越界：只读本应用的归档目录。",
       permissions: [],
     },
   ],
