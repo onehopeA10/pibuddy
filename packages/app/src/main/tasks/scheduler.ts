@@ -34,9 +34,29 @@ import { computeNextRun } from "./schedule.js";
 import { evaluateScheduledPermissions } from "./task-permission.js";
 import { agentRunTrigger, type AgentRunTrigger } from "./task-trigger.js";
 import type { TaskStore } from "./task-store.js";
+import {
+  resolveToolDispatchVerdict,
+  type ToolDispatchBoundary,
+  type ToolDispatchLedger,
+  type ToolDispatchVerdict,
+} from "../tool-recovery/dispatch-guard.js";
+import { uncertainOutcomeFromError } from "../tool-recovery/tool-guards.js";
 
 /** run 的 lease 有效期：一次 run 正常远小于此；超过即视为孤儿（进程崩了没人收尾）。 */
 export const LEASE_TTL_MS = 5 * 60_000;
+
+/**
+ * 工具账本接线（可选）。**不注入时行为与从前一字不差**：孤儿 run 一律判死。
+ *
+ * 注入之后，触发实现被夹在 T1 / T2 之间，`recover` 因此第一次有了判据去分辨
+ * 「压根没跑」与「可能跑过了」—— 前者可以安全自动重跑，后者仍然判死。
+ */
+export interface SchedulerRecovery {
+  /** T1/T2 夹逼（含派发护栏）。 */
+  boundary: ToolDispatchBoundary;
+  /** 恢复判据要读的账本（只读一个方法）。 */
+  ledger: Pick<ToolDispatchLedger, "readLedger">;
+}
 
 export interface SchedulerDeps {
   store: TaskStore;
@@ -47,6 +67,23 @@ export interface SchedulerDeps {
   workspaceGrants: (workspaceId: string) => readonly CapabilityGrant[];
   /** 审计日志（可选，不 import electron 才能被单测直跑） */
   log?: (event: string, fields: Record<string, unknown>) => void;
+  /** 崩溃恢复账本（可选，见 {@link SchedulerRecovery}） */
+  recovery?: SchedulerRecovery;
+}
+
+/**
+ * 一次 run 的某一次尝试在工具账本里的身份。
+ *
+ * `invocationId` 钉 run（跨尝试不变，账本的 spine 校验因此成立），
+ * `providerToolCallId` 钉尝试次数（每次尝试是一次独立派发，各有各的 T1/T2）。
+ * 两者都能在崩溃后从 run 记录上重算出来 —— 这正是 operationId 必须确定性派生
+ * 的理由（见 operation-id.ts 文件头）。
+ */
+function runDispatchIdentity(runId: string, attempt: number): {
+  invocationId: string;
+  providerToolCallId: string;
+} {
+  return { invocationId: `task-run:${runId}`, providerToolCallId: `attempt-${attempt}` };
 }
 
 function snapshotOf(task: TaskRecord): RunInputSnapshot {
@@ -102,27 +139,86 @@ export class Scheduler {
   // ------------------------------------------------------------ 崩溃恢复
 
   /**
-   * 崩溃恢复：把上次进程崩溃时留下的孤儿 run（running/pending 且 lease 过期）
-   * 判死。
+   * 崩溃恢复：处理上次进程崩溃时留下的孤儿 run（running/pending 且 lease 过期）。
    *
-   * 不盲目重跑——重跑一个「可能已经产生过副作用」的非幂等 run 正是要防的事。
-   * 判死为 failed 并留原因；用户可在界面上对它点「重试」（那会走幂等 key 之外
-   * 的新 key，是一次**显式**的、他知情的重来）。
+   * ## 从「一律判死」到「按判据分两半」
+   *
+   * 从前这里一律判死，注释写着「未自动重跑，避免重复副作用」——保守的一端：
+   * 压根没跑的 run 也被误杀，用户得手动重试。接上工具账本之后，「不知道」被
+   * 拆成两半（判据全文见 recovery-resolver.ts 文件头）：
+   *
+   *   - `definitely_not_dispatched`：账本上有协议标记、却没有这次执行的派发
+   *     事实。而 T1 严格早于触发实现，所以它**一定没被调用过** —— 自动重跑
+   *     不可能产生第二次副作用，可以安全重跑。
+   *   - `indeterminate` / `parked` / `corruption`：证据不足以断言「没发生」。
+   *     维持判死，并把 resolver 给出的**确切理由**写进 run 的 error 文案 ——
+   *     用户据它知道为什么这一条没被自动重试，而不是只看到一句「判定为失败」。
+   *
+   * 没接账本时（`deps.recovery` 未注入）行为与从前一字不差：全部判死。
    */
   recover(now: number): number {
     const stale = this.deps.store.staleRuns(now);
+    const resumable: RunRecord[] = [];
     for (const run of stale) {
+      const verdict = this.dispatchVerdict(run);
+      if (verdict?.retrySafe) {
+        this.deps.store.updateRun(run.id, {
+          status: "pending",
+          startedAt: null,
+          finishedAt: null,
+          error: null,
+          appendLog: `crash-recovery：${verdict.explain}，自动重跑`,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+        });
+        resumable.push(run);
+        continue;
+      }
+      // 判死时给出确切理由。没有判据（未接账本 / 读账本失败）时也如实说明，
+      // 不假装我们知道。
+      const why = verdict?.explain ?? "尚未接入工具账本，无法证明它没有执行过";
       this.deps.store.updateRun(run.id, {
         status: "failed",
         finishedAt: now,
-        error: "进程中断后恢复：该 run 的 lease 已过期，判定为失败（未自动重跑，避免重复副作用）",
-        appendLog: "crash-recovery：lease 过期，判死",
+        error: `进程中断后恢复：该 run 的 lease 已过期，判定为失败（未自动重跑，避免重复副作用）——${why}`,
+        appendLog: `crash-recovery：lease 过期，判死（${why}）`,
         leaseOwner: null,
         leaseExpiresAt: null,
       });
     }
-    if (stale.length > 0) this.log("tasks_recover", { count: stale.length, owner: this.owner });
+    if (stale.length > 0) {
+      this.log("tasks_recover", {
+        count: stale.length,
+        resumed: resumable.length,
+        owner: this.owner,
+      });
+    }
+    // 可安全重跑的立刻重跑。不 await：recover 是 start() 的同步前置，而一次
+    // 重跑要跑多久由触发实现决定，不该把启动挡在这里。
+    for (const run of resumable) {
+      const task = this.deps.store.getTask(run.taskId);
+      const latest = this.deps.store.getRun(run.id);
+      if (task && latest) void this.executeRun(task, latest, now);
+    }
     return stale.length;
+  }
+
+  /**
+   * 一条孤儿 run 的恢复判据。未接账本、或账本读不动时返回 null（= 无判据，
+   * 走保守分支）。**绝不因为读不到证据就假设它没跑。**
+   */
+  private dispatchVerdict(run: RunRecord): ToolDispatchVerdict | null {
+    const recovery = this.deps.recovery;
+    if (!recovery) return null;
+    try {
+      return resolveToolDispatchVerdict({
+        events: recovery.ledger.readLedger(run.workspaceId),
+        identity: runDispatchIdentity(run.id, run.attempt),
+        dispatchedNotBefore: run.startedAt ?? run.createdAt,
+      });
+    } catch {
+      return null;
+    }
   }
 
   // ------------------------------------------------------------ 主循环
@@ -236,23 +332,29 @@ export class Scheduler {
       });
 
       let outcome;
+      // 「不知道有没有生效」独立于「失败」：它禁止自动重试（见 tool-guards）。
+      let uncertain = false;
       try {
-        outcome = await this.trigger().trigger({
-          runId: run.id,
-          taskId: task.id,
-          workspaceId: task.workspaceId,
-          input: run.input,
-          timeoutMs: task.timeoutMs,
-          budgetUsd: task.budgetUsd,
-        });
+        outcome = await this.dispatch(task, run, attempt, () =>
+          this.trigger().trigger({
+            runId: run.id,
+            taskId: task.id,
+            workspaceId: task.workspaceId,
+            input: run.input,
+            timeoutMs: task.timeoutMs,
+            budgetUsd: task.budgetUsd,
+          })
+        );
       } catch (err) {
+        const unknown = uncertainOutcomeFromError(err);
+        uncertain = unknown !== undefined;
         outcome = {
           status: "failed" as const,
           sessionId: null,
           artifactIds: [],
           costUsd: null,
-          error: (err as Error).message,
-          note: "触发实现抛错",
+          error: unknown?.detail ?? (err as Error).message,
+          note: uncertain ? "结算事实未落地：这次执行的结果不确定，不自动重试" : "触发实现抛错",
         };
       }
 
@@ -280,7 +382,8 @@ export class Scheduler {
       }
 
       // 失败：还有尝试次数就继续循环（递增 attempt），否则收尾为 failed。
-      const isLast = tries >= maxTries;
+      // 不确定档一律当作最后一次：`retrySafe:false` 的字面意思就是不许自动重跑。
+      const isLast = uncertain || tries >= maxTries;
       this.deps.store.updateRun(run.id, {
         status: isLast ? "failed" : "running",
         finishedAt: isLast ? finishedAt : null,
@@ -296,6 +399,45 @@ export class Scheduler {
       attempt++;
       run = this.deps.store.requireRun(run.id);
     }
+  }
+
+  /**
+   * 把一次触发夹进 T1 / T2。
+   *
+   * 未接账本时**直接调 impl**，与从前逐字一致。接了账本时：T1 先落派发事实，
+   * 失败直接抛（异常穿透到 executeRun 的 catch，那次 run 整体失败）——绝不
+   * 在这里 catch 成一个「继续往下跑」的分支，那样就会产生一次没有派发事实的
+   * 真实副作用，而恢复时它会被判成「没跑过」再跑一遍。
+   */
+  private dispatch<T>(
+    task: TaskRecord,
+    run: RunRecord,
+    attempt: number,
+    impl: () => Promise<T>
+  ): Promise<T> {
+    const recovery = this.deps.recovery;
+    if (!recovery) return impl();
+    return recovery.boundary.run(
+      {
+        workspaceId: task.workspaceId,
+        sessionId: `task:${task.id}`,
+        ...runDispatchIdentity(run.id, attempt),
+        runId: run.id,
+        // 同一条 run 的所有尝试共用一条执行脊（账本的 invocation 身份校验要求
+        // 同 invocationId 的事实落在同一条 (session, run, turn) 上）。
+        turnId: "run",
+        toolName: "tasks.run",
+        args: {
+          taskId: task.id,
+          runId: run.id,
+          attempt,
+          provider: run.input.provider,
+          model: run.input.model,
+          prompt: run.input.prompt,
+        },
+      },
+      impl
+    );
   }
 
   private recordSkipped(
