@@ -1,0 +1,14 @@
+{
+  "$comment": "knip 死代码基线：CI 只保证各类不增长，不要求归零。收敛后用 `node scripts/check-dead-code.mjs --update` 收紧。已知误判见 scripts/check-dead-code.mjs 文件头。",
+  "version": 1,
+  "max": {
+    "binaries": 1,
+    "dependencies": 2,
+    "devDependencies": 2,
+    "duplicates": 1,
+    "exports": 56,
+    "files": 3,
+    "types": 9,
+    "unlisted": 1
+  }
+}

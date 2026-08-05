@@ -17,6 +17,8 @@
     "verify:artifacts": "node scripts/verify-release-artifacts.mjs",
     "verify:packaged": "node scripts/verify-packaged-app.mjs",
     "check-pure-js-deps": "node scripts/check-pure-js-deps.mjs",
+    "check-stale-dist": "node scripts/check-stale-dist.mjs",
+    "check-copy": "node scripts/check-copy.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run --root ../..",
     "postinstall": "node scripts/fix-pty-permissions.js"
