@@ -4,11 +4,12 @@
   "max": {
     "binaries": 1,
     "dependencies": 2,
-    "devDependencies": 2,
+    "devDependencies": 1,
     "duplicates": 1,
-    "exports": 56,
-    "files": 3,
-    "types": 9,
+    "exports": 68,
+    "files": 4,
+    "types": 12,
     "unlisted": 1
-  }
+  },
+  "$staged": "2026-08-05 抬基线的唯一原因：tool-recovery/ 与 model-errors/ 两个域是刻意分阶段落地的——原语先进仓、接线在后一批（T1/T2 接进 tool-bridge / tasks / home-automation；retry-policy 接进 tasks 的任务级重试）。接线完成后必须跑一次 --update 把这两处降回去；降不下去说明那批原语没人用，那才是真的该删。"
 }
