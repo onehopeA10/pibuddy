@@ -17,6 +17,7 @@ import { useProvidersStore } from "../stores/providers";
 import { useCapabilitiesStore } from "../stores/capabilities";
 import UpdateSettingsPanel from "./UpdateSettingsPanel.vue";
 import DiagnosticsPanel from "./DiagnosticsPanel.vue";
+import BackupPanel from "./BackupPanel.vue";
 import HomeAssistantSettings from "./HomeAssistantSettings.vue";
 
 const store = useAppStore();
@@ -243,6 +244,9 @@ async function backToBundled(): Promise<void> {
 
     <!-- 「关于与更新」下的诊断区块：出问题时用户从这里一键导出诊断包 -->
     <diagnostics-panel />
+
+    <!-- 备份与恢复（BKP-101，内核设施，不受 Profile 影响） -->
+    <backup-panel />
 
     <n-space justify="end" style="margin-top: 12px">
       <n-button @click="store.settingsOpen = false">取消</n-button>

@@ -40,5 +40,6 @@ export * from "./home-assistant.js";
 export * from "./home-advisor.js";
 export * from "./home-dashboard.js";
 export * from "./home-automation.js";
+export * from "./backup.js";
 export * from "./ipc-contract.js";
 export * from "./ports.js";

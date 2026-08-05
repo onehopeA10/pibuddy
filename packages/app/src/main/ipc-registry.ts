@@ -16,6 +16,7 @@
  * 「谁持有 client」这件事在注册顺序上也表达一次，日后读代码少绕一圈。
  */
 import { registerAgentPoolIpc } from "./agent-pool/agent-pool-ipc.js";
+import { registerBackupIpc } from "./backup/backup-ipc.js";
 import { assembleCapabilities, capabilityRegistry } from "./capability/capability-catalog.js";
 import { registerCapabilityIpc } from "./capability/capability-ipc.js";
 import { registerDiagnosticsIpc } from "./diagnostics/diagnostics-ipc.js";
@@ -37,6 +38,9 @@ export function registerAllIpc(): void {
   registerUsageIpc();
   registerUpdateIpc();
   registerDiagnosticsIpc();
+  // 备份 / 恢复：内核设施，恒注册。「数据能不能备份」不该是一个可以被
+  // Profile 关掉的选项——一个关得掉的备份等于没有备份。
+  registerBackupIpc();
   registerCapabilityIpc();
   // 后台会话池：内核设施（会话 / runtime），恒注册。挂到 supervisor 上观测当前
   // 会话，并起维护节拍。放在 pi-ipc 之后——池观测的是 supervisor 的生命周期。
