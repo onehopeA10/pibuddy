@@ -40,6 +40,7 @@ import {
 } from "./pi/event-forwarder.js";
 import { agentActivity } from "./lifecycle/graceful-shutdown.js";
 import { observeToolEvent } from "./changeset/tool-watch.js";
+import { modelErrorFromAgentEvent, modelErrorFromExit } from "./model-errors/index.js";
 import type { PoolObserver } from "./agent-pool/pool-core.js";
 
 /** 转发目标同时要能被按 id 索引（生产即 Electron 的 WebContents.id）。 */
@@ -215,6 +216,12 @@ export class PiSupervisor implements PiRuntimeSupervisor {
       const env = this.nextEnvelope(record, e);
       this.poolObserver?.onEvent(env);
       forwarder.push(env);
+      // provider 错误的归一化结论（MDL-101）。走**自己的通道**而不是改写
+      // 上面那条事件：AgentEvent 的形状归 pi-sdk 所有，往里塞一个我们算出来
+      // 的 kind，等于让契约对上游协议撒谎。归一失败不该让对话停下来 ——
+      // 这一层只是加解释，原文那条路径一个字节都没改。
+      const report = modelErrorFromAgentEvent(e);
+      if (report) sendPush(target, PUSH_CHANNELS.piModelError, this.nextEnvelope(record, report));
     });
     client.on("ui_request", (r: ExtensionUiRequest) => {
       if (!this.isCurrent(record) || target.isDestroyed()) return;
@@ -242,6 +249,12 @@ export class PiSupervisor implements PiRuntimeSupervisor {
         return;
       }
       forwarder.flush();
+      // 崩溃退出携带的正文同样过一遍归一化：ENOENT / 鉴权 / provider 5xx
+      // 三种崩法的下一步动作完全不同。主动停止（expected-stop）不产出报告。
+      const exitReport = modelErrorFromExit({ reason: meta.reason, error: meta.error });
+      if (exitReport) {
+        sendPush(target, PUSH_CHANNELS.piModelError, this.nextEnvelope(record, exitReport));
+      }
       sendPush(
         target,
         PUSH_CHANNELS.piExit,

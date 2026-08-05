@@ -76,6 +76,7 @@ import { homeAssistantContractShard } from "./home-assistant.js";
 import { dashboardEventPayloadSchema, homeDashboardContractShard } from "./home-dashboard.js";
 import { homeAutomationContractShard } from "./home-automation.js";
 import { backupContractShard } from "./backup.js";
+import { piModelErrorPayloadSchema } from "./model-error.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -861,6 +862,9 @@ export const PUSH_CONTRACTS: Record<PushChannel, z.ZodType> = {
   [PUSH_CHANNELS.piEvent]: rpcEnvelopeLikeSchema,
   [PUSH_CHANNELS.piUiRequest]: rpcEnvelopeLikeSchema,
   [PUSH_CHANNELS.piExit]: piExitPayloadSchema,
+  // pi:model-error 推的是 PiEnvelope<PiModelErrorPayload>；这里校验的是信封的
+  // payload 位（一次已归一化的模型失败结论）。
+  [PUSH_CHANNELS.piModelError]: piModelErrorPayloadSchema,
   [PUSH_CHANNELS.piUiExpire]: piUiExpirePayloadSchema,
   [PUSH_CHANNELS.piUiExpireAll]: piUiExpireAllPayloadSchema,
   // update:event 推的是完整信封（不是裸 payload）：代际与序号必须送到渲染

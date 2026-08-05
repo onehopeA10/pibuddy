@@ -6,6 +6,7 @@ import Sidebar from "./Sidebar.vue";
 import TopBar from "./TopBar.vue";
 import ChatView from "./ChatView.vue";
 import InputBar from "./InputBar.vue";
+import ModelErrorHint from "./ModelErrorHint.vue";
 import ExtensionUiHost from "./ExtensionUiHost.vue";
 import SettingsModal from "./SettingsModal.vue";
 import UpdateBanner from "./UpdateBanner.vue";
@@ -583,6 +584,9 @@ function onDrop(): void {
           <HomeDashboardPanel v-if="homeDashboardOpen && homeDashboardEnabled" />
           <RulesPanel v-if="rulesOpen && homeAutomationEnabled" />
           <EduPanel v-if="eduOpen && eduEnabled" />
+          <!-- 紧贴输入框上方：这条提示要回答的是「我下一句话还能不能发出去」，
+               放在对话流里会随着历史一起被滚走。 -->
+          <ModelErrorHint />
           <InputBar />
         </slot>
       </template>

@@ -16,6 +16,7 @@ import type {
   ExtensionUiRespondResult,
   PiEnvelope,
   PiExitPayload,
+  PiModelErrorPayload,
   PiStartParams,
   PiUiExpireAllPayload,
   PiUiExpirePayload,
@@ -101,7 +102,7 @@ export const pi = {
     stop: () => invoke<void>(CHANNELS.piStop),
   },
 
-  /** 五个通道传的都是完整的 PiEnvelope，由渲染进程 parseEnvelope 后解包。 */
+  /** 六个通道传的都是完整的 PiEnvelope，由渲染进程 parseEnvelope 后解包。 */
   events: {
     onEvent: (cb: (e: PiEnvelope<AgentEvent>) => void) =>
       subscribe(PUSH_CHANNELS.piEvent, cb as (p: unknown) => void),
@@ -109,6 +110,15 @@ export const pi = {
       subscribe(PUSH_CHANNELS.piUiRequest, cb as (p: unknown) => void),
     onExit: (cb: (e: PiEnvelope<PiExitPayload>) => void) =>
       subscribe(PUSH_CHANNELS.piExit, cb as (p: unknown) => void),
+    /**
+     * 一次模型 / provider 失败的归一化结论（MDL-101）。
+     *
+     * 与 onEvent 并列而不是嵌在它里面：原文那条路径一个字节都没改（消息卡
+     * 上的「出错了」仍然展示 provider 原话），这条通道只额外送来一个 `kind`，
+     * 界面据此给出可操作的下一步。
+     */
+    onModelError: (cb: (e: PiEnvelope<PiModelErrorPayload>) => void) =>
+      subscribe(PUSH_CHANNELS.piModelError, cb as (p: unknown) => void),
     /**
      * 某条扩展弹窗已失效。
      *
