@@ -646,6 +646,19 @@ export const CHANNELS = {
   dashboardUnsubscribe: "dashboard:unsubscribe",
   /** 只读快照（不登记消费者；resync 后面板重拉全量用） */
   dashboardSnapshot: "dashboard:snapshot",
+  // ---- 智能家居自动化规则（home.automation，vertical / 智能家居 Phase B，恰 4 条） ----
+  //
+  // 规则按 workspaceId 分区，入参只有 workspaceId + 不透明规则 id + 结构化
+  // spec（trigger/condition/actions 全是受 zod 钉死形态的纯数据，没有任何
+  // URL / 路径 / 命令字段）。规则的**执行**不在 IPC 面上：确定性动作由主进程
+  // rule-engine 经 home.assistant 基座的受控出站执行（每次执行前重新过授权），
+  // Agent 动作落成 tasks 域 kind:"event" 的真 task。面板 v1 只做列表 / 启停 /
+  // 删除；创建与修改主要走会话里的 manage_rule 工具（经 tool bridge）。
+  // 每个动作的返回都是权威快照（整表列表），与 tasks / providers 同一口径。
+  autoRulesList: "automation:rules-list",
+  autoRuleUpsert: "automation:rule-upsert",
+  autoRuleDelete: "automation:rule-delete",
+  autoRuleSetEnabled: "automation:rule-set-enabled",
 } as const;
 
 /** 主进程单向推送通道（9 个）。 */

@@ -47,6 +47,23 @@ export type HomeBridgeExecutor = (
   cwd: string | null
 ) => Promise<unknown>;
 
+// ---------------------------------------------------------------- 跨包工具注册
+//
+// 【追加（home.automation）——合并风险点】桥仍归 home.assistant 所有；上层家居
+// 包（首个使用方 home.automation 的 manage_rule）把自己的工具 handler 挂进这张
+// 模块级表：activate 时挂、deactivate 时摘（传 null）。请求按工具名先查这张表，
+// 查不到才落回桥自建时注入的执行面——基座自己的 3 个工具路径零改动。凭证与
+// 超时与基座工具完全同一道闸（同一个 token、同一个 onLine）。若与其它并行
+// 分支冲突，本段 + onLine 里的一行 resolve 是仅有的两处改动。
+
+const crossPackageTools = new Map<string, HomeBridgeExecutor>();
+
+/** 注册 / 注销（handler 传 null）一个跨包 bridge 工具。 */
+export function registerBridgeTool(toolName: string, handler: HomeBridgeExecutor | null): void {
+  if (handler === null) crossPackageTools.delete(toolName);
+  else crossPackageTools.set(toolName, handler);
+}
+
 function newPipePath(): string {
   const rand = randomBytes(8).toString("hex");
   return process.platform === "win32"
@@ -179,7 +196,9 @@ export class HomeToolBridge {
       cancelTimer = () => clearTimeout(timer);
     });
     try {
-      const result = await Promise.race([this.execute(req.tool, req.args, cwd), timeout]);
+      // 【追加（home.automation）】跨包工具先查注册表，查不到落回基座执行面。
+      const handler = crossPackageTools.get(req.tool) ?? this.execute;
+      const result = await Promise.race([handler(req.tool, req.args, cwd), timeout]);
       if (!timedOut) this.reply(socket, { id, ok: true, result });
     } catch (err) {
       this.reply(socket, {

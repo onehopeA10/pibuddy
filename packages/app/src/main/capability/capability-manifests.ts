@@ -33,6 +33,7 @@ import { remoteCapability } from "./manifests/remote.manifest.js";
 import { promptLibraryCapability } from "./manifests/prompt-library.manifest.js";
 import { homeAssistantCapability } from "./manifests/home-assistant.manifest.js";
 import { homeDashboardCapability } from "./manifests/home-dashboard.manifest.js";
+import { homeAutomationCapability } from "./manifests/home-automation.manifest.js";
 
 /**
  * 全部内置能力，按装配顺序。
@@ -99,6 +100,11 @@ export const BUILT_IN_CAPABILITIES: readonly CapabilityManifest[] = [
   // activate 的顺序）。不进任何内置 Profile（与基座同口径，全经 overrides
   // 启用）。首个 loading:"lazy" 包：面板组件独立 chunk，开面板才加载。
   homeDashboardCapability,
+  // 智能家居自动化规则包（vertical / home.automation，家居四包之二）。
+  // dependencies: ["home.assistant", "common.tasks"]——两个被依赖者都在前面，
+  // resolve() 的输出因此仍是一个可直接照着 activate 的顺序；不进任何内置
+  // Profile，全经 overrides 启用。
+  homeAutomationCapability,
 ];
 
 /**

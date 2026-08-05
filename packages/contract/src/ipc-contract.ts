@@ -74,6 +74,7 @@ import { promptLibraryContractShard } from "./prompt-library.js";
 import { eduContractShard } from "./edu.js";
 import { homeAssistantContractShard } from "./home-assistant.js";
 import { dashboardEventPayloadSchema, homeDashboardContractShard } from "./home-dashboard.js";
+import { homeAutomationContractShard } from "./home-automation.js";
 import { appSettingsSchema, appSettingsPatchSchema } from "./settings.js";
 import {
   draftRecordSchema,
@@ -820,6 +821,7 @@ export const CHANNEL_CONTRACT_SHARDS: readonly ContractShard[] = [
   homeAssistantContractShard,
   homeAdvisorContractShard,
   homeDashboardContractShard,
+  homeAutomationContractShard,
 ];
 
 /**

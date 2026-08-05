@@ -34,6 +34,7 @@ import WorkflowPanel from "./WorkflowPanel.vue";
 import PromptLibraryPanel from "./PromptLibraryPanel.vue";
 import OfficeSkillsPanel from "./OfficeSkillsPanel.vue";
 import HomeAdvisorPanel from "./HomeAdvisorPanel.vue";
+import RulesPanel from "./RulesPanel.vue";
 import EduPanel from "./EduPanel.vue";
 
 /**
@@ -174,6 +175,9 @@ const officeSkillsOpen = ref(false);
 // 家居建议面板（home.advisor 垂直能力包，纯 skill 内容包）的开合。独立成
 // ref：它是自己一个能力域（两个建议技能的物化状态），与其它面板互不牵连。
 const homeAdvisorOpen = ref(false);
+// 自动化规则面板（home.automation 垂直能力包）的开合。独立成 ref：它是自己
+// 一个能力域（规则列表 / 启停 / 删除），与其它面板互不牵连。
+const rulesOpen = ref(false);
 // 学习面板（edu.kids 垂直能力包，首个真内容垂直包）的开合。独立成 ref：
 // 它是自己一个能力域（档案 / 一键出卷 / 错题本），默认只在「家庭教育」
 // Profile 里可见。
@@ -246,6 +250,9 @@ const officeSkillsEnabled = computed(() => capabilities.isEnabled("common.office
 // home.advisor 的 UI 门控：判据同样来自主进程能力快照。它依赖 home.assistant
 // 基座，基座未启用时装配期就被拒绝（enabled=false），面板与开关都不出现。
 const homeAdvisorEnabled = computed(() => capabilities.isEnabled("home.advisor"));
+// home.automation 的 UI 门控：判据同样来自主进程能力快照。它依赖 home.assistant
+// 与 common.tasks，任一未启用时装配期就被拒绝（enabled=false），面板与开关都不出现。
+const homeAutomationEnabled = computed(() => capabilities.isEnabled("home.automation"));
 // edu.kids 的 UI 门控：判据同样来自主进程能力快照（「启用」= 通道已注册）。
 // 它默认只在「家庭教育」Profile 启用，其它 Profile 下这个开关与面板都不出现。
 const eduEnabled = computed(() => capabilities.isEnabled("edu.kids"));
@@ -531,6 +538,15 @@ function onDrop(): void {
               📊 家居面板
             </n-button>
             <n-button
+              v-if="homeAutomationEnabled"
+              size="tiny"
+              :type="rulesOpen ? 'primary' : 'default'"
+              quaternary
+              @click="rulesOpen = !rulesOpen"
+            >
+              ⚙️ 自动化
+            </n-button>
+            <n-button
               v-if="eduEnabled"
               size="tiny"
               :type="eduOpen ? 'primary' : 'default'"
@@ -565,6 +581,7 @@ function onDrop(): void {
           <!-- 懒加载组件（首个 lazy 包）：v-if 为假时连 chunk 都不请求；挂载即
                subscribe（登记基座缓存消费者），卸载即 unsubscribe（释放）。 -->
           <HomeDashboardPanel v-if="homeDashboardOpen && homeDashboardEnabled" />
+          <RulesPanel v-if="rulesOpen && homeAutomationEnabled" />
           <EduPanel v-if="eduOpen && eduEnabled" />
           <InputBar />
         </slot>

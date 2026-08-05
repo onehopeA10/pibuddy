@@ -55,6 +55,7 @@ import { homeAdvisor } from "./homeAdvisor.js";
 import { edu } from "./edu.js";
 import { home } from "./home.js";
 import { dashboard } from "./dashboard.js";
+import { homeAutomation } from "./homeAutomation.js";
 
 export const api = {
   pi,
@@ -111,6 +112,8 @@ export const api = {
   home,
   /** 家居监控面板（home.dashboard）。消费者信令 + 只读快照 + 增量订阅，无控制入口 */
   dashboard,
+  /** 家居自动化规则（home.automation）。列表/启停/删除/整份 upsert，无执行与出站入口 */
+  homeAutomation,
 };
 
 export type PiBuddyApi = typeof api;

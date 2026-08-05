@@ -106,6 +106,10 @@ function service(): HomeAssistantService {
  * 必须落在**同一个** HomeAssistantService 实例的缓存上，否则计数就是两本账。
  * 只暴露实例，不暴露装配细节；dashboard 依赖本包（manifest.dependencies），
  * 装配期不动点保证基座未启用时 dashboard 根本不会被 activate。
+ * 【追加（home.automation）】上层家居包取同一台域服务的入口：共享实体缓存 /
+ * WS 会话 / 出站纪律（executeTool 内部每次都重过 authorizeLocalEndpoint）。
+ * automation 依赖本基座（manifest.dependencies），基座未启用时它根本不会被
+ * activate，因此这里不需要「基座还没装配」的分支。
  */
 export function homeAssistantService(): HomeAssistantService {
   return service();
