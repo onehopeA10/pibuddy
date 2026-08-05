@@ -6,10 +6,11 @@
     "dependencies": 2,
     "devDependencies": 1,
     "duplicates": 1,
-    "exports": 68,
+    "exports": 67,
     "files": 4,
     "types": 12,
     "unlisted": 1
   },
-  "$staged": "2026-08-05 抬基线的唯一原因：tool-recovery/ 与 model-errors/ 两个域是刻意分阶段落地的——原语先进仓、接线在后一批（T1/T2 接进 tool-bridge / tasks / home-automation；retry-policy 接进 tasks 的任务级重试）。接线完成后必须跑一次 --update 把这两处降回去；降不下去说明那批原语没人用，那才是真的该删。"
+  "$staged": "2026-08-05 抬基线的唯一原因：tool-recovery/ 与 model-errors/ 两个域是刻意分阶段落地的——原语先进仓、接线在后一批（T1/T2 接进 tool-bridge / tasks / home-automation；retry-policy 接进 tasks 的任务级重试）。接线完成后必须跑一次 --update 把这两处降回去；降不下去说明那批原语没人用，那才是真的该删。",
+  "$staged-tool-recovery": "2026-08-05 T1/T2 接线完成，exports 68 → 67：tool-recovery/ 名下唯一那条未接线导出 RuntimeCommitBoundaryError 已被 dispatch-guard 消费。**只手改了 exports 这一个键，没有跑 --update**——`--update` 会整份重写，而 devDependencies 这一类在 git worktree 里恒比主 checkout 多 1（`source/hermes-studio` 声明了 naive-ui，主 checkout 上 knip 据它认为根 devDeps 的 naive-ui 有人用；worktree 里没有 source/ 就多报一条）。收紧基线必须在主 checkout 上做，否则会把一个只在 worktree 成立的数字钉进来。model-errors/ 的 11 条导出 + 3 条类型仍未接线，属另一批的账。"
 }

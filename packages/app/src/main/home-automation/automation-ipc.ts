@@ -31,6 +31,7 @@
  * 消费者、关 sqlite 句柄。**规则数据留在磁盘不动**（D4 规则 5）。
  */
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 
 import {
   AUTOMATION_TOOL_MANAGE_RULE,
@@ -52,7 +53,15 @@ import { lookupWorkspace, workspaceIdFor } from "../workspace-registry.js";
 import { deliverTaskEvent } from "../tasks/tasks-ipc.js";
 import { taskStore } from "../tasks/task-store.js";
 import { homeAssistantService } from "../home/home-ipc.js";
-import { registerBridgeTool } from "../home/tool-bridge.js";
+import {
+  registerBridgeTool,
+  setBridgeDispatchGuard,
+  type HomeBridgeDispatchGuard,
+} from "../home/tool-bridge.js";
+import {
+  closeToolRecoveryLedger,
+  toolDispatchBoundary,
+} from "../tool-recovery/recovery-ledger.js";
 import {
   AutomationService,
   type AutomationHomePort,
@@ -158,6 +167,9 @@ function service(): AutomationService {
       home: productionHomePort,
       tasks: productionTaskPort,
       log: (event, fields) => log().info(event, fields),
+      // 确定性动作（开灯 / 关锁 / 推通知）夹进 T1/T2：这些是真实世界的副作用，
+      // 重复执行的代价实实在在。
+      recovery: toolDispatchBoundary(),
     });
   }
   return serviceInstance;
@@ -186,6 +198,49 @@ function workspaceIdOfCwd(cwd: string | null): string {
   }
   return workspaceId;
 }
+
+// ------------------------------------------------------------ bridge 派发闸
+
+/**
+ * 桥的派发闸（T1/T2 + 派发护栏）。
+ *
+ * **装在这里而不是基座**：闸保护的是「真实世界副作用」，而基座桥上跑的
+ * `call_service` 与本包的 `manage_rule` 都属于这一类，本包又是唯一因为副作用
+ * 代价而存在的家居包。代价说清楚：本包被禁用时闸随之卸掉，基座工具回到零夹逼
+ * 的原行为。要让它与基座同生死，得把这段搬进 home-ipc（不在本次文件域内）。
+ *
+ * 身份：一次运行的随机段 + 单调序号。桥的线协议里没有 invocation / tool_call
+ * 标识（那是 extension 侧的事），因此这里只保证**不撞号**，不保证崩溃后可重算
+ * ——桥这条路上没有需要与在途调用对号入座的恢复流程。
+ */
+const bridgeScope = randomUUID().slice(0, 8);
+let bridgeSeq = 0;
+
+const bridgeDispatchGuard: HomeBridgeDispatchGuard = (request, impl) => {
+  let workspaceId: string;
+  try {
+    workspaceId = workspaceIdOfCwd(request.cwd);
+  } catch {
+    // 解不出工作区就没有账本分区键。降级成不夹逼直接执行，把「为什么不行」
+    // 留给工具自己去报 —— 闸不该把一条本来就要失败的调用改写成另一种失败。
+    return impl();
+  }
+  return toolDispatchBoundary().run(
+    {
+      workspaceId,
+      sessionId: `home-bridge:${bridgeScope}`,
+      // invocationId 带上 workspaceId：账本要求同 invocation 的事实落在同一条
+      // (workspace, session, run, turn) 脊上，而一条桥会服务多个工作区。
+      invocationId: `home-bridge:${bridgeScope}:${workspaceId}`,
+      runId: bridgeScope,
+      turnId: "bridge",
+      providerToolCallId: `req-${++bridgeSeq}`,
+      toolName: request.tool,
+      args: request.args ?? null,
+    },
+    impl
+  );
+};
 
 function requireRuleId(parsed: ManageRuleArgs): string {
   if (parsed.rule_id === undefined) {
@@ -264,17 +319,24 @@ function snapshot(workspaceId: string): AutomationRulesResult {
 /** 禁用 / 退出时的拆卸（runtime.teardown:["listener"]）。规则数据不动。 */
 export function disposeAutomationResources(): void {
   registerBridgeTool(AUTOMATION_TOOL_MANAGE_RULE, null);
+  setBridgeDispatchGuard(null);
   if (serviceInstance) {
     serviceInstance.dispose();
     serviceInstance = null;
   }
   closeAutomationStore();
+  // 账本只关句柄，数据一个字节不动（惰性单例，tasks 之后再用会自己重开）。
+  closeToolRecoveryLedger();
 }
 
 export function registerAutomationIpc(): void {
   // manage_rule 挂进基座 bridge 的跨包注册表：extension 经同一条管道、同一个
   // 一次性 token 调进来。依赖关系（home.assistant）保证 bridge 一定在。
   registerBridgeTool(AUTOMATION_TOOL_MANAGE_RULE, executeManageRule);
+
+  // 桥的派发闸：装上之后桥上每次工具执行都被 T1/T2 夹住，并过循环闸与参数
+  // 违规回执。装 / 卸的取舍见 bridgeDispatchGuard 的说明。
+  setBridgeDispatchGuard(bridgeDispatchGuard);
 
   // headless 引擎：有规则的工作区在 activate 时就把状态订阅 / 对齐 tick 拉起
   // 来——用户不开面板、不开会话，规则照样触发。**测试进程里不拉**（VITEST

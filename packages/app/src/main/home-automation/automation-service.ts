@@ -25,8 +25,11 @@
  * （维持 WS 订阅，state_changed 才有得听）；没有了就 release（缓存的引用
  * 计数 / linger 语义不变，本域不开旁路）。
  */
+import { randomUUID } from "node:crypto";
+
 import type { AutomationAction, AutomationRule, AutomationRuleSpec } from "@pibuddy/contract";
 
+import type { ToolDispatchBoundary } from "../tool-recovery/dispatch-guard.js";
 import {
   RULE_TICK_INTERVAL_MS,
   RuleEngine,
@@ -79,6 +82,15 @@ export interface AutomationServiceDeps {
   /** 引擎对齐 tick 间隔（E2E 压缩用）。 */
   tickIntervalMs?: number;
   log?(event: string, fields: Record<string, unknown>): void;
+  /**
+   * T1/T2 夹逼（可选）。**不注入时行为一字不变。**
+   *
+   * 只夹**确定性动作**（service / notify）：开灯、关锁、推通知是真实世界的
+   * 副作用，重复执行的代价实实在在。Agent 动作不在这里夹 —— 它落到 tasks 域
+   * 的 run 上，那条路自己已经夹过一遍，再套一层只会造出两个互不相干的
+   * operation 去描述同一次执行。
+   */
+  recovery?: ToolDispatchBoundary;
 }
 
 interface EngineEntry {
@@ -108,6 +120,17 @@ export class AutomationService {
   private readonly now: () => number;
   private readonly schedule: (fn: () => void, ms: number) => () => void;
   private readonly tickIntervalMs: number;
+  /**
+   * 一次命中的账本身份前缀：进程实例随机段 + 单调序号。
+   *
+   * 不用 `(ruleId, slot)`：状态触发的 slot 是毫秒级的 now，同一毫秒内的两次
+   * 命中会撞成同一个 operationId，第二次直接被 T1 判成「重复派发」而拒执行 ——
+   * 一次本该发生的开灯就这么没了。随机段还挡住了重启后与上一进程撞号。
+   * 代价是命中身份不可在崩溃后重算（规则命中不需要：它没有需要与在途调用
+   * 对号入座的恢复流程，账本在这里的作用是留下「这盏灯到底开没开」的证据）。
+   */
+  private readonly fireScope = randomUUID().slice(0, 8);
+  private fireSeq = 0;
 
   constructor(private readonly deps: AutomationServiceDeps) {
     this.now = deps.now ?? Date.now;
@@ -330,10 +353,11 @@ export class AutomationService {
       }
     }
 
+    const fireId = `${rule.id}:${slot}:${cause}:${this.fireScope}-${++this.fireSeq}`;
     let lastError: string | null = null;
     for (const [index, action] of rule.actions.entries()) {
       try {
-        await this.runAction(workspaceId, rule, index, action);
+        await this.runAction(workspaceId, rule, index, action, fireId);
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err);
         this.log("automation_action_failed", { ruleId, index, detail: lastError });
@@ -347,26 +371,35 @@ export class AutomationService {
     workspaceId: string,
     rule: StoredRule,
     index: number,
-    action: AutomationAction
+    action: AutomationAction,
+    fireId: string
   ): Promise<void> {
     switch (action.kind) {
-      case "service":
-        await this.deps.home.callService(workspaceId, {
+      case "service": {
+        const args = {
           domain: action.domain,
           service: action.service,
           ...(action.entityId !== undefined ? { entity_id: action.entityId } : {}),
           ...(action.data !== undefined ? { data: action.data } : {}),
-        });
+        };
+        await this.dispatch(workspaceId, rule, index, fireId, "home.automation.service", args, () =>
+          this.deps.home.callService(workspaceId, args)
+        );
         return;
-      case "notify":
+      }
+      case "notify": {
         // 通知也是确定性动作：落成 HA 的 persistent_notification.create，
         // 走与 service 完全同一条受控出站路（同样每次重过授权）。
-        await this.deps.home.callService(workspaceId, {
+        const args = {
           domain: "persistent_notification",
           service: "create",
           data: { message: action.message, title: `PiBuddy 自动化：${rule.name}` },
-        });
+        };
+        await this.dispatch(workspaceId, rule, index, fireId, "home.automation.notify", args, () =>
+          this.deps.home.callService(workspaceId, args)
+        );
         return;
+      }
       case "agent": {
         const taskId = rule.agentTaskIds[String(index)];
         if (taskId === undefined) {
@@ -376,6 +409,41 @@ export class AutomationService {
         return;
       }
     }
+  }
+
+  /**
+   * 把一次确定性动作夹进 T1 / T2。未注入账本时直接调 impl（行为一字不变）。
+   *
+   * T1 失败直接抛：异常穿透到 fireRule 的 per-action catch，那条动作记为失败
+   * 并写进 lastError。**这里没有「记一笔然后照样执行」的分支** —— 那样会产生
+   * 一次没有派发事实的开灯，而恢复判据会据「没有派发事实」断言它没发生。
+   */
+  private dispatch<T>(
+    workspaceId: string,
+    rule: StoredRule,
+    index: number,
+    fireId: string,
+    toolName: string,
+    args: unknown,
+    impl: () => Promise<T>
+  ): Promise<T> {
+    const boundary = this.deps.recovery;
+    if (!boundary) return impl();
+    return boundary.run(
+      {
+        workspaceId,
+        sessionId: `automation:${rule.id}`,
+        invocationId: `automation-fire:${fireId}`,
+        runId: rule.id,
+        // 一次命中的所有动作共用一条执行脊（账本要求同 invocationId 的事实
+        // 落在同一条 (session, run, turn) 上）。
+        turnId: "fire",
+        providerToolCallId: `action-${index}`,
+        toolName,
+        args,
+      },
+      impl
+    );
   }
 
   // ------------------------------------------------------------ 拆卸

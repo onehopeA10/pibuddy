@@ -64,6 +64,31 @@ export function registerBridgeTool(toolName: string, handler: HomeBridgeExecutor
   else crossPackageTools.set(toolName, handler);
 }
 
+// -------------------------------------------------------------- 派发闸（T1/T2）
+//
+// 【追加（T1/T2 接线）——合并风险点】桥的派发路径上唯一的接缝：装上之后，
+// 每次工具执行被夹在 T1（派发事实）与 T2（结算事实）之间，中间还挂着循环闸
+// 与参数违规回执。**不装时行为一字不变**（下面那行 `guard ? ... : call()`）。
+// 闸的实现不在本文件（它要解 cwd→workspaceId、要持有账本），本文件只认这个
+// 函数形状。若与其它并行分支冲突，本段 + onLine 里那三行是仅有的两处改动。
+
+/**
+ * 夹逼一次工具执行。**必须**在 impl 之前落 T1、之后落 T2，且 T1 失败时直接
+ * 抛（绝不 catch 成 `{ok:false}` 结果——那样 impl 仍会在某条路径上跑，产生一次
+ * 没有 dispatch 事实的副作用）。
+ */
+export type HomeBridgeDispatchGuard = <T>(
+  request: { tool: string; args: unknown; cwd: string | null; requestId: string | number | null },
+  impl: () => Promise<T>
+) => Promise<T>;
+
+let dispatchGuard: HomeBridgeDispatchGuard | null = null;
+
+/** 装 / 卸（传 null）派发闸。卸掉后桥回到零夹逼的原行为。 */
+export function setBridgeDispatchGuard(guard: HomeBridgeDispatchGuard | null): void {
+  dispatchGuard = guard;
+}
+
 function newPipePath(): string {
   const rand = randomBytes(8).toString("hex");
   return process.platform === "win32"
@@ -184,6 +209,9 @@ export class HomeToolBridge {
       return;
     }
     const cwd = typeof req.cwd === "string" && req.cwd !== "" ? req.cwd : null;
+    // 【追加（T1/T2 接线）】定住工具名：下面的执行被包进闭包后，对 req.tool
+    // 这个可变属性的类型收窄不再成立。
+    const tool: string = req.tool;
 
     let timedOut = false;
     let cancelTimer: (() => void) | null = null;
@@ -197,8 +225,13 @@ export class HomeToolBridge {
     });
     try {
       // 【追加（home.automation）】跨包工具先查注册表，查不到落回基座执行面。
-      const handler = crossPackageTools.get(req.tool) ?? this.execute;
-      const result = await Promise.race([handler(req.tool, req.args, cwd), timeout]);
+      const handler = crossPackageTools.get(tool) ?? this.execute;
+      // 【追加（T1/T2 接线）】装了派发闸就走夹逼路径；没装则与从前逐字一致。
+      const call = (): Promise<unknown> => Promise.race([handler(tool, req.args, cwd), timeout]);
+      const guard = dispatchGuard;
+      const result = await (guard
+        ? guard({ tool, args: req.args, cwd, requestId: id }, call)
+        : call());
       if (!timedOut) this.reply(socket, { id, ok: true, result });
     } catch (err) {
       this.reply(socket, {

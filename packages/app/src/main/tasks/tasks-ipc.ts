@@ -36,6 +36,11 @@ import { nextRunAfter, Scheduler } from "./scheduler.js";
 import { evaluateScheduledPermissions } from "./task-permission.js";
 import { setAgentRunTrigger } from "./task-trigger.js";
 import { closeTaskStore, taskStore, type TaskStore } from "./task-store.js";
+import {
+  closeToolRecoveryLedger,
+  toolDispatchBoundary,
+  toolRecoveryLedger,
+} from "../tool-recovery/recovery-ledger.js";
 
 /** 本域注册的全部通道。单测据它断言逐一出现在 ipc-guard 的注册表里。 */
 export const TASKS_CHANNELS: InvokeChannel[] = [
@@ -77,6 +82,9 @@ function scheduler(): Scheduler {
       clock: systemClock,
       workspaceGrants,
       log: (event, fields) => log().info(event, fields),
+      // 工具账本接线：触发实现被夹进 T1/T2，崩溃恢复因此能分辨「压根没跑」
+      // 与「可能跑过了」——前者自动重跑，后者仍然判死并说清理由。
+      recovery: { boundary: toolDispatchBoundary(), ledger: toolRecoveryLedger() },
     });
   }
   return sched;
@@ -323,4 +331,7 @@ export function disposeTasksResources(): void {
   sched?.stop();
   sched = null;
   closeTaskStore();
+  // 工具账本同样只关句柄。它是「上次到底跑没跑」的唯一依据，数据一个字节不动；
+  // 单例是惰性的，别的域（home.automation）之后再用会自己重新打开。
+  closeToolRecoveryLedger();
 }
