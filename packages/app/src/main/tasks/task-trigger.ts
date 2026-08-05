@@ -40,6 +40,20 @@ export interface TriggerOutcome {
   error: string | null;
   /** 追加到 run 日志的一行说明 */
   note: string;
+  /**
+   * 本次尝试**是否已经产生了用户可见的输出**（assistant 消息 / 产物）。
+   *
+   * 调度器的重试判据要它（`shouldRetryProviderFailure` 的四条合取前置条件之一）：
+   * 一次已经吐过字的尝试再重试，用户在会话里看到的是同一段话被说了两遍。
+   *
+   * `sessionId` 不能代替它 —— 会话被派生出来只说明「有个壳」，还没说过任何话
+   * 的失败（设不上 model、投递落空、握手超时）重跑是安全的。**只有真的说过话
+   * 才不能重来**，所以这是一个独立字段，而不是从别的字段推。
+   *
+   * 缺省视为 false：报不出来的实现按「没产出」处理，最坏是多重试一次，而反过来
+   * 猜成 true 会让本该自动重试的失败静默不再重试。
+   */
+  observableOutput?: boolean;
 }
 
 export interface AgentRunTrigger {

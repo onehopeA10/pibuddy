@@ -107,6 +107,44 @@ export const providerCustomRequestSchema = z.object({
 export type ProviderCustomRequest = z.infer<typeof providerCustomRequestSchema>;
 
 /**
+ * 连通性测试的错误词汇。
+ *
+ * ## 为什么它等于 `ModelErrorKind`（去 abort）再加一个 `model`
+ *
+ * 收敛前这里只有四项（auth / network / model / unknown），于是 429、402、413
+ * **全落 unknown** —— 而「被限流」「余额不够」「请求体超上限」的下一步动作彼此
+ * 完全不同，一句「未知问题」等于什么都没说。连通性探测又恰好是全仓**唯一**
+ * 手握显式 statusCode 与响应正文的调用点，判据在这里最该发挥。
+ *
+ * 因此词汇与 `MODEL_ERROR_KINDS` 同源：
+ *   - 去掉 `abort` —— 一次自动的探测请求不存在「用户主动中止」这一档；
+ *   - 补一个 `model` —— 探测路径特有：`GET {base}/models` 回 404 说明端点路径
+ *     或模型名不对，它在通用的模型错误词汇里没有对应项。
+ *
+ * 同源不是为了整齐：渲染层因此可以**直接复用** `model-error-advice.ts` 的那张
+ * 中文可操作提示表，而不必为 provider 测试再写第二套文案（两套文案的失败形态
+ * 是同一个错误在两个界面上被说成两件事）。
+ *
+ * ## 旧值的含义没有变，只是变窄了
+ *
+ * `auth`（401/403）、`model`（404）、`unknown` 逐字照旧。`network` 从前兼管
+ * 5xx，现在 5xx 归 `provider_unavailable` —— 这不是给 `network` 换意思，而是
+ * 把「你这边连不上」和「服务商那边挂了」分开：前者的提示是「检查网络或地址」，
+ * 对一个 503 来说是把用户引去做一件没用的事。
+ */
+export const PROVIDER_TEST_ERROR_CODES = [
+  "auth",
+  "network",
+  "model",
+  "unknown",
+  "rate_limit",
+  "provider_billing",
+  "context_overflow",
+  "provider_unavailable",
+  "timeout",
+] as const;
+
+/**
  * 连通性测试结果。
  *
  * `redactedMessage` 是**已经过 logger-redact 的 redactSecrets**的文本：
@@ -115,7 +153,7 @@ export type ProviderCustomRequest = z.infer<typeof providerCustomRequestSchema>;
 export const providerTestResultSchema = z.object({
   ok: z.boolean(),
   latencyMs: z.number(),
-  errorCode: z.enum(["auth", "network", "model", "unknown"]).optional(),
+  errorCode: z.enum(PROVIDER_TEST_ERROR_CODES).optional(),
   redactedMessage: z.string().optional(),
 });
 export type ProviderTestResult = z.infer<typeof providerTestResultSchema>;

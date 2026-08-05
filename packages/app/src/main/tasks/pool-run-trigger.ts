@@ -88,6 +88,15 @@ export function createPoolRunTrigger(
       let realSessionId: string | null = null;
       let eventError: string | null = null;
       let exitReason: string | null = null;
+      /**
+       * 本次尝试是否已经有 assistant 说过话。
+       *
+       * 调度器据它决定失败后还要不要自动重试（见 `TriggerOutcome.observableOutput`）。
+       * 判据取 `message_end` 且 `role === "assistant"`：那一刻这条消息已经落进会话
+       * 历史、用户在界面上看得见。**不看 stopReason** —— 以错误收场的消息同样是
+       * 已经吐出去的字，重跑会让它出现第二遍。
+       */
+      let sawAssistantOutput = false;
 
       const ready = deferred();
       const settledTurn = deferred();
@@ -99,12 +108,11 @@ export function createPoolRunTrigger(
         },
         onEvent: (e) => {
           const ev = e as { type?: string; message?: { role?: string; stopReason?: string } };
-          if (
-            ev.type === "message_end" &&
-            ev.message?.role === "assistant" &&
-            ev.message.stopReason === "error"
-          ) {
-            eventError = "助手回复以错误结束（stopReason=error）";
+          if (ev.type === "message_end" && ev.message?.role === "assistant") {
+            sawAssistantOutput = true;
+            if (ev.message.stopReason === "error") {
+              eventError = "助手回复以错误结束（stopReason=error）";
+            }
           }
           if (ev.type === "agent_settled") settledTurn.resolve();
         },
@@ -148,6 +156,7 @@ export function createPoolRunTrigger(
         costUsd: null,
         error,
         note,
+        observableOutput: sawAssistantOutput,
       });
 
       try {
@@ -237,6 +246,7 @@ export function createPoolRunTrigger(
             costUsd,
             error: eventError,
             note: "后台会话跑完了，但助手回复以错误收场",
+            observableOutput: sawAssistantOutput,
           };
         }
 
@@ -247,6 +257,7 @@ export function createPoolRunTrigger(
           artifactIds: [],
           costUsd,
           error: null,
+          observableOutput: sawAssistantOutput,
           note: overBudget
             ? `后台会话完成；成本 $${costUsd} 已超预算 $${ctx.budgetUsd}（预算目前只在收尾核对，不做执行中截断）`
             : "后台会话完成",

@@ -191,13 +191,12 @@ describe("SSRF：新增的两条出站路径同样被拦", () => {
 });
 
 describe("错误分类", () => {
-  it("401/403 → auth，404 → model，5xx → network，其余 unknown", async () => {
+  it("401/403 → auth，404 → model，其余 unknown", async () => {
     const { conn } = await freshModules();
     const table: [number, ProviderTestResult["errorCode"]][] = [
       [401, "auth"],
       [403, "auth"],
       [404, "model"],
-      [500, "network"],
       [418, "unknown"],
     ];
     for (const [status, expected] of table) {
@@ -205,7 +204,43 @@ describe("错误分类", () => {
     }
   });
 
-  it("网络类错误（ENOTFOUND / 超时 / 被守卫拦）归到 network", async () => {
+  /**
+   * MDL-101 接线的核心断言：这三个状态码**从前全落 unknown**，而它们各自
+   * 对应一个完全不同的下一步动作（等一会儿 / 去充值 / 压缩输入）。
+   *
+   * 对拍：把 classifyStatus 里的分类器换回 `return "unknown"`，这三条全红。
+   */
+  it("429 → rate_limit、402 → provider_billing、413 → context_overflow", async () => {
+    const { conn } = await freshModules();
+    expect(conn.classifyStatus(429)).toBe("rate_limit");
+    expect(conn.classifyStatus(402)).toBe("provider_billing");
+    expect(conn.classifyStatus(413)).toBe("context_overflow");
+  });
+
+  it("5xx 归 provider_unavailable 而不再混进 network（「你连不上」≠「它挂了」）", async () => {
+    const { conn } = await freshModules();
+    expect(conn.classifyStatus(500)).toBe("provider_unavailable");
+    expect(conn.classifyStatus(503)).toBe("provider_unavailable");
+  });
+
+  it("响应正文里的结构化 provider code 压过泛型 5xx（LiteLLM 把溢出包成 503）", async () => {
+    const { conn } = await freshModules();
+    // 代理原样转发了 provider 的错误 JSON，自己回了个 503
+    const body = JSON.stringify({ error: { code: "context_length_exceeded", message: "…" } });
+    expect(conn.classifyStatus(503, body)).toBe("context_overflow");
+    // 没有正文时它就是一个普通的 503
+    expect(conn.classifyStatus(503)).toBe("provider_unavailable");
+  });
+
+  it("正文里的限流措辞不会被误读成上下文溢出（否决表生效）", async () => {
+    const { conn } = await freshModules();
+    const body = JSON.stringify({
+      error: { message: "Rate limit reached: maximum context length is 131072 tokens" },
+    });
+    expect(conn.classifyStatus(400, body)).toBe("rate_limit");
+  });
+
+  it("网络类错误（ENOTFOUND / 超时 / 被守卫拦）仍然归到 network", async () => {
     const { conn, guard } = await freshModules();
     expect(conn.classifyError(new guard.OutboundBlockedError("x"))).toBe("network");
     expect(conn.classifyError(new guard.OutboundDnsError("h"))).toBe("network");
@@ -214,6 +249,27 @@ describe("错误分类", () => {
     );
     expect(conn.classifyError(new Error("OUTBOUND_TIMEOUT: 请求超时"))).toBe("network");
     expect(conn.classifyError(new Error("什么都不像"))).toBe("unknown");
+  });
+
+  it("出站层之外抛出的错误交给分类器，不再一律 unknown", async () => {
+    const { conn } = await freshModules();
+    const rateLimited = Object.assign(new Error("Too Many Requests"), { statusCode: 429 });
+    expect(conn.classifyError(rateLimited)).toBe("rate_limit");
+  });
+});
+
+describe("errorCode 词汇与 ModelErrorKind 同源", () => {
+  it("契约里的每个新值都能在渲染层的中文建议表里查到（不另起一套文案）", async () => {
+    const { PROVIDER_TEST_ERROR_CODES } = await import("@pibuddy/contract");
+    const advice = fs.readFileSync(
+      path.join(import.meta.dirname, "../../renderer/src/model-error-advice.ts"),
+      "utf8"
+    );
+    // `model` 是探测路径特有的一类，不在 ModelErrorKind 里；其余必须逐条有文案。
+    for (const code of PROVIDER_TEST_ERROR_CODES) {
+      if (code === "model") continue;
+      expect(advice, code).toContain(`${code}:`);
+    }
   });
 });
 

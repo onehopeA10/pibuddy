@@ -26,6 +26,8 @@ import {
   NSpace,
   NTag,
 } from "naive-ui";
+import type { ProviderTestResult } from "@contract";
+import { adviseModelError } from "../model-error-advice";
 import { useProvidersStore } from "../stores/providers";
 import { useAppStore } from "../stores/app";
 
@@ -98,6 +100,25 @@ async function addCustom(): Promise<void> {
 }
 
 /**
+ * 失败 errorCode → 一句可操作的中文。
+ *
+ * **不在这里另写一张表**：errorCode 除 `model` 外逐字就是 `ModelErrorKind`
+ *（见契约里 PROVIDER_TEST_ERROR_CODES 的说明），因此直接问 model-error-advice
+ * 要那句话。两边词汇一旦分叉，下面这行 `adviseModelError(code)` 编译不过 ——
+ * 这是本文件里唯一能防住「同一个错误在两个界面上被说成两件事」的机制。
+ *
+ * `title` 说的是**发生了什么**，`hint` 说的是**现在该做什么**。测试连接的结果
+ * 行两句都要：只给前者等于回到「连接失败」那种没内容的话。
+ */
+function testHint(code: ProviderTestResult["errorCode"]): string {
+  if (!code) return "未知问题";
+  // 探测路径特有的一类，不在 ModelErrorKind 里
+  if (code === "model") return "端点地址或模型名不对——检查 baseUrl 与模型名";
+  const advice = adviseModelError(code);
+  return `${advice.title}——${advice.hint}`;
+}
+
+/**
  * 「测试连接」的结果文案。
  *
  * 成功时必须含「成功」，失败时必须含 HTTP 状态码或 errno —— 这两条是
@@ -110,15 +131,7 @@ function testText(providerId: string): string {
   if (!result) return "";
   if (result.ok) return `连接成功（${result.latencyMs}ms）`;
   const detail = result.redactedMessage ?? "";
-  const hint =
-    result.errorCode === "auth"
-      ? "API Key 不对或没有权限"
-      : result.errorCode === "network"
-        ? "网络不通或地址有误"
-        : result.errorCode === "model"
-          ? "端点地址或模型名不对"
-          : "未知问题";
-  return `连接失败：${hint}${detail ? ` · ${detail}` : ""}`;
+  return `连接失败：${testHint(result.errorCode)}${detail ? ` · ${detail}` : ""}`;
 }
 
 /** 当前模型能力标签，展示 context 与单价，供用户判断该不该用它。 */

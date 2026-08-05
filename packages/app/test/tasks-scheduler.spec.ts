@@ -53,14 +53,28 @@ const okTrigger: AgentRunTrigger = {
 function makeScheduler(clock: InstanceType<typeof ManualClock>, opts: {
   trigger?: AgentRunTrigger;
   grants?: CapabilityGrant[];
+  sleep?: (ms: number) => Promise<void>;
 } = {}) {
   return new Scheduler({
     store,
     clock,
     trigger: () => opts.trigger ?? okTrigger,
     workspaceGrants: () => opts.grants ?? [],
+    ...(opts.sleep ? { sleep: opts.sleep } : {}),
   });
 }
+
+/** 恒失败的触发实现：`fail` 决定这一次以什么形态失败。 */
+function failingTrigger(fail: () => never | Promise<never>): AgentRunTrigger {
+  return { async trigger() { return fail(); } };
+}
+
+/** 抛出一个带 provider 证据字段的错误（statusCode / responseHeaders）。 */
+function providerError(message: string, fields: Record<string, unknown> = {}): never {
+  throw Object.assign(new Error(message), fields);
+}
+
+const RETRY_3: NewTask["failurePolicy"] = { retry: true, maxAttempts: 3, backoffMs: 0 };
 
 beforeEach(() => {
   store = new TaskStore(tmpDb());
@@ -246,6 +260,168 @@ describe("失败重试（同一条 run 上递增 attempt）", () => {
     const run = await sched.runNow(t);
     expect(run?.status).toBe("succeeded");
     expect(run?.attempt).toBe(2);
+  });
+});
+
+/**
+ * MDL-101 接线：任务级重试改成**按错误类别**决策。
+ *
+ * 从前这里只认「maxAttempts 用完没有」，于是 401 / 402 / 上下文溢出都要把三次
+ * 尝试烧完才收尾 —— 三次全都必然再失败。下面每一条都断言**没有耗尽 maxAttempts**
+ * （`attempt` 停在 1），而不只是断言最终 failed：只断言 failed 的话，把判据拆掉
+ * 恢复成照常重试，用例依然全绿。
+ */
+describe("按错误类别决策：不可重试的类别当场停，不耗尽 maxAttempts", () => {
+  const CASES: { name: string; fail: () => never; hint: string }[] = [
+    {
+      name: "auth（401）：改 key 才有用",
+      fail: () => providerError("Unauthorized", { statusCode: 401 }),
+      hint: "Provider 中心",
+    },
+    {
+      name: "provider_billing（402）：充值才有用",
+      fail: () => providerError("Insufficient credits", { statusCode: 402 }),
+      hint: "充值",
+    },
+    {
+      name: "context_overflow：重试必然再溢出",
+      fail: () => providerError("prompt is too long: 213462 tokens > 200000 maximum"),
+      hint: "上下文窗口",
+    },
+  ];
+
+  for (const testCase of CASES) {
+    it(testCase.name, async () => {
+      const now = Date.now();
+      const t = store.createTask({ ...baseTask, failurePolicy: RETRY_3 }, now, null);
+      const sched = makeScheduler(new ManualClock(now), {
+        trigger: failingTrigger(testCase.fail),
+      });
+      const run = await sched.runNow(t);
+
+      expect(run?.status).toBe("failed");
+      // 核心断言：**没有**耗尽 maxAttempts（3 次），第一次就停了
+      expect(run?.attempt).toBe(1);
+      expect(run?.log.join(" ")).not.toContain("已达最大尝试次数");
+      expect(run?.log.join(" ")).not.toContain("将重试");
+      // 停下来的理由必须可操作
+      expect(run?.error).toContain(testCase.hint);
+    });
+  }
+
+  it("对照：分不出类别的失败沿用用户的 failurePolicy，照样重试到 maxAttempts", async () => {
+    const now = Date.now();
+    const t = store.createTask({ ...baseTask, failurePolicy: RETRY_3 }, now, null);
+    const sched = makeScheduler(new ManualClock(now), {
+      trigger: failingTrigger(() => providerError("触发实现自己炸了")),
+    });
+    const run = await sched.runNow(t);
+    expect(run?.status).toBe("failed");
+    expect(run?.attempt).toBe(3);
+    expect(run?.log.join(" ")).toContain("已达最大尝试次数");
+  });
+});
+
+describe("退避：指数 + 抖动取代固定 backoffMs，retry-after 优先", () => {
+  it("network 类：两次退避落在 1000~1250 / 2000~2500（指数 + 25% 抖动上界）", async () => {
+    const now = Date.now();
+    // backoffMs 故意设成一个显眼的固定值：它不该再出现在退避里
+    const t = store.createTask(
+      { ...baseTask, failurePolicy: { retry: true, maxAttempts: 3, backoffMs: 777 } },
+      now,
+      null
+    );
+    const waited: number[] = [];
+    const sched = makeScheduler(new ManualClock(now), {
+      trigger: failingTrigger(() => providerError("fetch failed")),
+      sleep: async (ms) => { waited.push(ms); },
+    });
+    const run = await sched.runNow(t);
+
+    expect(run?.attempt).toBe(3);
+    expect(waited.length).toBe(2);
+    expect(waited[0]).toBeGreaterThanOrEqual(1000);
+    expect(waited[0]).toBeLessThanOrEqual(1250);
+    expect(waited[1]).toBeGreaterThanOrEqual(2000);
+    expect(waited[1]).toBeLessThanOrEqual(2500);
+    expect(waited).not.toContain(777);
+  });
+
+  it("服务端给了 retry-after 就用它，不用本地曲线", async () => {
+    const now = Date.now();
+    const t = store.createTask({ ...baseTask, failurePolicy: RETRY_3 }, now, null);
+    const waited: number[] = [];
+    const sched = makeScheduler(new ManualClock(now), {
+      trigger: failingTrigger(() =>
+        providerError("Too Many Requests", {
+          statusCode: 429,
+          responseHeaders: { "retry-after": "7" },
+        })
+      ),
+      sleep: async (ms) => { waited.push(ms); },
+    });
+    await sched.runNow(t);
+    // 7 秒，逐点相等——本地曲线在这两步分别是 ~1000 / ~2000，混不进来
+    expect(waited).toEqual([7_000, 7_000]);
+  });
+});
+
+describe("四条合取前置条件里的另外两条", () => {
+  it("本次尝试已产生可见输出（assistant 说过话）→ 不重试", async () => {
+    const now = Date.now();
+    const t = store.createTask({ ...baseTask, failurePolicy: RETRY_3 }, now, null);
+    const spoke: AgentRunTrigger = {
+      async trigger() {
+        return {
+          status: "failed", sessionId: "sess-1", artifactIds: [], costUsd: null,
+          error: "助手回复以错误结束（stopReason=error）", note: "跑过了但以错误收场",
+          observableOutput: true,
+        };
+      },
+    };
+    const sched = makeScheduler(new ManualClock(now), { trigger: spoke });
+    const run = await sched.runNow(t);
+    expect(run?.status).toBe("failed");
+    expect(run?.attempt).toBe(1);
+    expect(run?.error).toContain("已经产出过可见结果");
+  });
+
+  it("同样的失败但一个字都没说出去 → 照常重试（可见输出这一条真的在起作用）", async () => {
+    const now = Date.now();
+    const t = store.createTask({ ...baseTask, failurePolicy: RETRY_3 }, now, null);
+    const silent: AgentRunTrigger = {
+      async trigger() {
+        return {
+          status: "failed", sessionId: "sess-1", artifactIds: [], costUsd: null,
+          error: "提示词投递失败：会话无活跃 runtime", note: "deliver 落空",
+          observableOutput: false,
+        };
+      },
+    };
+    const sched = makeScheduler(new ManualClock(now), { trigger: silent });
+    const run = await sched.runNow(t);
+    expect(run?.attempt).toBe(3);
+  });
+
+  it("预算已用尽 → 不再消耗剩余的重试次数", async () => {
+    const now = Date.now();
+    const t = store.createTask(
+      { ...baseTask, budgetUsd: 0.5, failurePolicy: RETRY_3 },
+      now,
+      null
+    );
+    const pricey: AgentRunTrigger = {
+      async trigger() {
+        return {
+          status: "failed", sessionId: null, artifactIds: [], costUsd: 0.8,
+          error: "跑完了但失败", note: "花了钱的失败",
+        };
+      },
+    };
+    const sched = makeScheduler(new ManualClock(now), { trigger: pricey });
+    const run = await sched.runNow(t);
+    expect(run?.attempt).toBe(1);
+    expect(run?.error).toContain("预算已用尽");
   });
 });
 

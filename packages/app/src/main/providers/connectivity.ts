@@ -15,10 +15,24 @@
  *   3. **日志同样脱敏** —— 只脱敏返回给渲染进程的字段是不够的：密钥仍会
  *      经日志落盘，而那是一条不报错的静默泄漏。本文件里凡是进 logger 的
  *      字段一律先过 redactSecrets。
+ *
+ * ## 分类判据不在这里（MDL-101 接线）
+ *
+ * 从前 classifyStatus / classifyError 各写一小段 if：401/403→auth、404→model、
+ * 5xx→network，**其余一律 unknown** —— 429、402、413 因此全落 unknown。而本文件
+ * 是全仓唯一手握**显式 statusCode 与响应正文**的调用点，正是 `model-errors/`
+ * 那批判据最该发挥的地方：它不必走「从消息里认前缀」那条窄路，可以直接把状态码
+ * 与正文交给分类器（正文里的 `context_length_exceeded` 一类结构化 code 是上下文
+ * 溢出唯一无条件的证据，代理把它包成 503 时也认得出来）。
  */
-import type { ProviderTestResult } from "@pibuddy/contract";
+import type { ModelErrorKind, ProviderTestResult } from "@pibuddy/contract";
 
 import { redactSecrets } from "../logger-redact.js";
+import {
+  classifyError as classifyProviderError,
+  modelFailureKind,
+  normalizeModelFailure,
+} from "../model-errors/index.js";
 import {
   OutboundBlockedError,
   OutboundDnsError,
@@ -38,27 +52,55 @@ function redactMessage(input: unknown): string {
   return String(redactSecrets(text));
 }
 
+type ProviderTestErrorCode = NonNullable<ProviderTestResult["errorCode"]>;
+
 /**
- * 错误分类。
+ * 归一化 kind → 测试结果的 errorCode。
  *
- * 401/403 → auth（去改 key）；404 → model（端点路径或模型名不对）；
- * ECONN* / ENOTFOUND / 超时 / 被出站守卫拦下 → network（去看网络或地址）。
- * 分不出来的一律 unknown，**不猜** —— 猜错的分类会把用户引到错误的设置页。
+ * 只有一处不是恒等：`abort` 在探测路径上不可能是真的「用户中止」（这条请求
+ * 没有取消入口），若真被分出来那说明证据被误读了，落 unknown 而不是编一个
+ * 更像样的类别。这个 return 同时是**编译期的词汇同源断言** —— 契约里的
+ * errorCode 少了任何一个 ModelErrorKind，这一行就红。
  */
-export function classifyStatus(status: number): ProviderTestResult["errorCode"] {
-  if (status === 401 || status === 403) return "auth";
-  if (status === 404) return "model";
-  if (status >= 500) return "network";
-  return "unknown";
+function errorCodeFromKind(kind: ModelErrorKind): ProviderTestErrorCode {
+  return kind === "abort" ? "unknown" : kind;
 }
 
-export function classifyError(err: unknown): ProviderTestResult["errorCode"] {
+/**
+ * 按状态码 + 响应正文分类。
+ *
+ * 404 必须在分类器**之前**拦下：`GET {base}/models` 不存在说的是端点路径或
+ * 模型名不对，这是探测路径特有的结论，通用的模型错误词汇里没有它。
+ *
+ * 其余交给 `model-errors` 的分类器。这里刻意造一个带 `statusCode` /
+ * `responseBody` 字段的 Error：那正是分类器为 AI SDK 的 `APICallError` 设计的
+ * 证据形状 —— statusCode 取**显式字段**（绝不从正文里认「413」这三个字符），
+ * 正文既进结构化 code 的解析，也进自由文本证据。
+ */
+export function classifyStatus(status: number, bodyText = ""): ProviderTestErrorCode {
+  if (status === 404) return "model";
+  const evidence = Object.assign(new Error(`HTTP ${status}`), {
+    statusCode: status,
+    responseBody: bodyText,
+  });
+  return errorCodeFromKind(modelFailureKind(classifyProviderError(evidence)));
+}
+
+/**
+ * 按抛出的错误分类。
+ *
+ * 出站原语自己的两类错误与已知 errno 保持原判（network）—— 它们是「本机到
+ * provider 这一跳不通」的确凿证据，比任何文本启发式都强，不该再交给分类器
+ * 复议。**变的是从前那句 `return "unknown"`**：走到这里说明不是出站层的问题，
+ * 那就把错误交给 model-errors 归一，而不是一律说「未知」。
+ */
+export function classifyError(err: unknown): ProviderTestErrorCode {
   if (err instanceof OutboundBlockedError || err instanceof OutboundDnsError) return "network";
   const message = err instanceof Error ? err.message : String(err);
   if (/OUTBOUND_TIMEOUT|OUTBOUND_FAILED|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT/i.test(message)) {
     return "network";
   }
-  return "unknown";
+  return errorCodeFromKind(normalizeModelFailure(err).kind);
 }
 
 /** 该 provider 的探测地址：自定义端点用它自己的 baseUrl，内置的查目录。 */
@@ -135,7 +177,9 @@ export async function testProvider(providerId: string): Promise<ProviderTestResu
       providerLogger().info("provider_test_ok", { providerId, latencyMs });
       return { ok: true, latencyMs };
     }
-    const errorCode = classifyStatus(resp.status);
+    // 正文进分类器（结构化 code 与 provider 措辞都在里面），但只在**函数内部**
+    // 被读；出去的仍然只有脱敏后的 detail。
+    const errorCode = classifyStatus(resp.status, resp.bodyText);
     // bodyText 里可能带着回显的请求头，必须脱敏后才允许出现在返回值与日志里
     const detail = redactMessage(resp.bodyText).slice(0, 240);
     providerLogger().warn("provider_test_failed", {
