@@ -64,11 +64,27 @@ jobs:
       - name: Check pure-JS dependency closure
         run: node packages/app/scripts/check-pure-js-deps.mjs
 
+      # 死代码基线（knip）。要求的是「各类不增长」而不是归零 —— 存量记在
+      # scripts/knip-baseline.json，理由见 scripts/check-dead-code.mjs 文件头。
+      - name: Check dead code against baseline
+        run: node scripts/check-dead-code.mjs --check
+
+      # 中文文案的可机械判定部分（营销压力词 / ASCII 省略号 / 界面文案的
+      # 中英文间距）。判不了的那三类（同意图同措辞、AI 腔、错误信息要含原因）
+      # 明写在脚本头里，留给人工评审。
+      - name: Check UI copy
+        run: node packages/app/scripts/check-copy.mjs --check
+
       - name: Test
         run: pnpm test
 
       - name: Build
         run: pnpm build
+
+      # 紧跟 Build：这一步要抓的是「build 那条命令没真正产出新东西，
+      # 后面却照常拿旧产物往下走」。build 刚跑完还判陈旧 = 构建静默失败了。
+      - name: Check stale build output
+        run: node packages/app/scripts/check-stale-dist.mjs --check
 
   # ---------------------------------------------------------------- 打包链路
   # `verify` job 跑的是 electron-vite build —— 它**碰不到**打包路径。
@@ -126,6 +142,12 @@ jobs:
           # 给个明确无效的占位值即可，绝不能让它去碰真实 feed 地址。
           PIBUDDY_UPDATE_FEED_URL: https://example.invalid/pibuddy-ci
         run: pnpm --filter @pibuddy/app exec electron-builder --dir --publish never
+
+      # 事故原型：build 那步没成，release/*-unpacked/resources/app.asar 还是
+      # 上一次的，打包与安装照常退出 0，真机跑的却是旧包。这一步把 asar 的
+      # mtime 和 out/ 比一遍 —— 当年是人肉比对时间戳发现的，现在归它管。
+      - name: Check stale build output (out/ + app.asar)
+        run: node packages/app/scripts/check-stale-dist.mjs --check
 
       - name: Verify packaged artifacts
         run: node packages/app/scripts/verify-packaged-app.mjs

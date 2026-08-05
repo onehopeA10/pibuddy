@@ -1,0 +1,33 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreExportsUsedInFile": true,
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.mjs", "vitest.config.ts"],
+      "project": ["scripts/*.mjs", "vitest.config.ts"]
+    },
+    "packages/contract": {
+      "entry": ["src/index.ts", "src/channels.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/pi-sdk": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/app": {
+      "entry": [
+        "src/main/index.ts",
+        "src/main/workspace/search-entry.ts",
+        "src/main/preview/convert-worker.ts",
+        "src/main/preview/preview-window.ts",
+        "src/preload/index.ts",
+        "src/renderer/src/main.ts",
+        "src/**/*.{test,spec}.ts",
+        "test/**/*.{test,spec}.ts",
+        "scripts/*.{mjs,cjs,js}"
+      ],
+      "project": ["src/**/*.{ts,vue}", "test/**/*.ts", "scripts/*.{mjs,cjs,js}"],
+      "ignoreDependencies": ["electron-builder"]
+    }
+  }
+}

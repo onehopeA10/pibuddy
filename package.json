@@ -11,12 +11,14 @@
     "build": "pnpm --filter @pibuddy/app build",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check-dead-code": "node scripts/check-dead-code.mjs"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.0",
     "@vue/test-utils": "^2.4.11",
     "happy-dom": "^15.11.7",
+    "knip": "^6.31.0",
     "naive-ui": "^2.44.1",
     "pinia": "^3.0.4",
     "vitest": "^3.2.0",
