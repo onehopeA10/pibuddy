@@ -36,6 +36,7 @@ import { z } from "zod";
 
 import { defineContractShard, voidRequestSchema } from "./channel-contract.js";
 import { CHANNELS } from "./channels.js";
+import { HOME_AUTOMATION_CAPABILITY_ID } from "./home-automation.js";
 
 export const HOME_ADVISOR_CAPABILITY_ID = "home.advisor";
 
@@ -49,6 +50,14 @@ export interface HomeAdvisorSkillDefinition {
   readonly summary: string;
   /** 面向家居用户的用法提示：对 agent 说什么就能用起来 */
   readonly usageHint: string;
+  /**
+   * 该技能在整包 `dependencies` **之外**额外需要的能力包（R4.5 单资源级门控）。
+   *
+   * 缺省 undefined = 无额外要求。写在这里而不是各自抄进 manifest：
+   * `piResourceGates` 由它派生（与 `piResources.skills` 同一手法），
+   * 面板将来要显示「这个技能需要启用 X」时读的也是它。
+   */
+  readonly requiredCapabilities?: readonly string[];
 }
 
 /**
@@ -66,6 +75,12 @@ export const HOME_ADVISOR_SKILLS: readonly HomeAdvisorSkillDefinition[] = [
       "盘点全屋设备 + 作息访谈，推理适合你家的场景与联动（离家/回家/睡前/观影等），" +
       "每条建议给出触发条件、动作序列与风险提示；经你确认后才落地成自动化规则。",
     usageHint: "对我说：「帮我看看家里的设备能配点什么自动化场景」",
+    // 本技能的操作规程第四步要调 home.automation.manage_rule 落地规则。
+    // automation 关着时它**根本不物化**（R4.5 单资源级门控），因此 pi 看不到
+    // 它、模型也没机会去调一个不存在的工具——原先靠 SKILL.md 正文里一句
+    // 「如实告知用户去启用」兜底，那是散文，只在模型真读到并照做时才生效，
+    // 而两行渐进披露的上下文成本已经付掉了。
+    requiredCapabilities: [HOME_AUTOMATION_CAPABILITY_ID],
   },
   {
     name: "home-energy-review",

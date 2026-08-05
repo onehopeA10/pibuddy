@@ -21,9 +21,28 @@
  * 两个技能的操作规程都以基座的三个工具（home_list_entities / home_get_state /
  * home_call_service）为前提。依赖交给装配期不动点拒绝（capability-registry
  * 的 resolve）：基座未注册/未启用时本包拒绝启用并给出可读原因，零运行期
- * 降级代码。落地自动化用的 home_automation_manage_rule 属 home.automation 包，
- * 刻意**不**声明为依赖——没有 automation 时建议照样能给（技能文本里写明
- * 「如实告知用户去启用」），硬依赖会把「只想要建议」的用户也拦在门外。
+ * 降级代码。
+ *
+ * ## 整包 dependencies 与单资源 piResourceGates 的分工
+ *
+ * 落地自动化用的 `home.automation.manage_rule` 属 home.automation 包，仍然
+ * **不是**整包依赖——没有 automation 时能耗回顾照样有用，硬依赖会把「只想要
+ * 建议」的用户一起拦在门外。但「不是整包依赖」不等于「没有依赖」：
+ * `home-scene-advisor` 这一个技能确实离不开它。因此两级各管一段：
+ *
+ *   - `dependencies: ["home.assistant"]` —— **整包**级。基座没有 ⇒ 本包整体
+ *     拒绝启用，一条通道都不注册、一个技能都不物化（capability-registry.resolve）。
+ *   - `piResourceGates` —— **单资源**级。automation 没开 ⇒ 只有
+ *     `skills/home-scene-advisor` 不物化（已物化的按 R4 归属账本收回），
+ *     `skills/home-energy-review` 照常在。
+ *
+ * 两级判据集合被 `validateCapabilityManifest` 强制互斥（写重了直接报错），
+ * 因此不存在「同一件事在两个地方各写一遍、改一处漏一处」的形态。
+ *
+ * 门控只写 `requiredCapabilities`、不再补一条 `requiredTools:
+ * [manage_rule]`：那个工具由 automation 包提供，包开着它就在、包关着它就没有，
+ * 两条是同一判据的两种说法，写两遍只是噪声。`requiredTools` 留给「工具来源
+ * 与能力包不是一对一」的场景。
  *
  * ## 为什么权限恰是一条 workspace.read
  *
@@ -85,4 +104,17 @@ export const homeAdvisorCapability = defineCapability({
     skills: HOME_ADVISOR_SKILLS.map((skill) => `skills/${skill.name}`),
     extensions: [],
   },
+  // 单资源级门控（R4.5），同样从契约的唯一定义点派生：技能声明了额外需要
+  // 哪些能力包，这里只做形状转换。手抄的那份漏一个技能时门就恒开着。
+  piResourceGates: HOME_ADVISOR_SKILLS.flatMap((skill) =>
+    skill.requiredCapabilities === undefined || skill.requiredCapabilities.length === 0
+      ? []
+      : [
+          {
+            kind: "skills" as const,
+            path: `skills/${skill.name}`,
+            requiredCapabilities: [...skill.requiredCapabilities],
+          },
+        ]
+  ),
 });

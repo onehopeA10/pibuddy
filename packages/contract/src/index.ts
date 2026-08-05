@@ -8,6 +8,7 @@ export * from "./channels.js";
 export * from "./channel-contract.js";
 export * from "./capability.js";
 export * from "./record-shape.js";
+export * from "./skill-policy.js";
 export * from "./permission.js";
 export * from "./permission-review.js";
 export * from "./agent-pool.js";
