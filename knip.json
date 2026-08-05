@@ -1,19 +1,37 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignoreExportsUsedInFile": true,
-  "ignore": [".claude/**", "source/**"],
+  "ignore": [
+    ".claude/**",
+    "source/**"
+  ],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.mjs", "vitest.config.ts"],
-      "project": ["scripts/*.mjs", "vitest.config.ts"]
+      "entry": [
+        "scripts/*.mjs",
+        "vitest.config.ts"
+      ],
+      "project": [
+        "scripts/*.mjs",
+        "vitest.config.ts"
+      ]
     },
     "packages/contract": {
-      "entry": ["src/index.ts", "src/channels.ts"],
-      "project": ["src/**/*.ts"]
+      "entry": [
+        "src/index.ts",
+        "src/channels.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
     },
     "packages/pi-sdk": {
-      "entry": ["src/index.ts"],
-      "project": ["src/**/*.ts"]
+      "entry": [
+        "src/index.ts"
+      ],
+      "project": [
+        "src/**/*.ts"
+      ]
     },
     "packages/app": {
       "entry": [
@@ -27,8 +45,18 @@
         "test/**/*.{test,spec}.ts",
         "scripts/*.{mjs,cjs,js}"
       ],
-      "project": ["src/**/*.{ts,vue}", "test/**/*.ts", "scripts/*.{mjs,cjs,js}"],
-      "ignoreDependencies": ["electron-builder"]
+      "project": [
+        "src/**/*.{ts,vue}",
+        "test/**/*.ts",
+        "scripts/*.{mjs,cjs,js}"
+      ],
+      "ignoreDependencies": [
+        "electron-builder"
+      ]
     }
-  }
+  },
+  "ignoreWorkspaces": [
+    "source/**",
+    ".claude/**"
+  ]
 }

@@ -4,7 +4,7 @@
   "max": {
     "binaries": 1,
     "dependencies": 2,
-    "devDependencies": 1,
+    "devDependencies": 2,
     "duplicates": 1,
     "exports": 67,
     "files": 4,
@@ -12,5 +12,5 @@
     "unlisted": 1
   },
   "$staged": "分阶段落地欠下的账（还清后跑 --update 收紧）：① tool-recovery/ —— 已还清：W3-8 接线后 RuntimeCommitBoundaryError 有了消费者，exports 68→67。② model-errors/ —— 未还：11 条导出 + 3 个类型仍无生产调用点。retry-policy 的判据要等 tasks 的任务级重试改成按错误类别决策（现在是固定 backoffMs，不看类别也不看是否已有可见输出）；providers/connectivity.ts 是唯一手握 statusCode + 响应头的真实调用点，拓宽它的 errorCode 词汇是下一个接入口。届时降不下来，说明那批判据没人用。",
-  "$fragile": "devDependencies 这一类依赖 source/ 存在：source/hermes-studio/package.json 声明了 naive-ui，knip 据此认为根 devDeps 的 naive-ui 有消费者。git worktree 里没有 source/，会多报一条。所以**收紧基线只能在主 checkout 上做**；worktree 里跑 --update 会把只在那儿成立的数字钉进来。"
+  "$stable": "计数与 source/ 是否存在无关：knip.json 的 ignoreWorkspaces 把 source/** 与 .claude/** 排除在 workspace 自动发现之外。此前不排除时，source/hermes-studio/package.json 声明的 naive-ui 会让 knip 认为根 devDeps 的 naive-ui 有消费者，于是主 checkout 报 1、git worktree（没有 source/）报 2——基线在两处对不上，且删掉 source/ 就会破。现在两处都报 2，--update 在哪跑都一样。"
 }

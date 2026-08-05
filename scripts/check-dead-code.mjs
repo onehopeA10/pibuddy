@@ -24,6 +24,13 @@
  * maka-agent / codex 等）的只读副本，压根不是本仓的评估对象。
  * 排除它们不是放宽判据，是把扫描面收回到「本仓自己的代码」。
  *
+ * **两个键都要写**：`ignore` 只挡文件分析，挡不住 workspace 自动发现——
+ * knip 仍会读 source 下各子项目的 package.json 并把它们当 workspace。实测后果是
+ * `source/hermes-studio/package.json` 声明的 naive-ui 让 knip 认为根 devDeps
+ * 的 naive-ui 有消费者，于是主 checkout 报 1、worktree 报 2，基线两处对不上，
+ * 而且删掉 `source/` 就会破。加上 `ignoreWorkspaces` 之后两处都报 2，
+ * `--update` 在哪跑都一样。
+ *
  * ── 基线里几条已知的 knip 误判（存量数字包含它们，刻意不加豁免）────────
  *   - 根 devDependencies 的 naive-ui / pinia：组件测试从仓库根跑（CT-21 的
  *     单一 vitest 配置），import 语句却写在 packages/app 的 spec 里。knip 按
