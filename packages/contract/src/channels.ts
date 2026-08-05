@@ -661,11 +661,26 @@ export const CHANNELS = {
   autoRuleSetEnabled: "automation:rule-set-enabled",
 } as const;
 
-/** 主进程单向推送通道（9 个）。 */
+/** 主进程单向推送通道。 */
 export const PUSH_CHANNELS = {
   piEvent: "pi:event",
   piUiRequest: "pi:ui-request",
   piExit: "pi:exit",
+  /**
+   * 一次模型 / provider 失败的**归一化**结论（MDL-101）。
+   *
+   * 与 `pi:event` 是两条通道而不是一个字段：pi 的事件形状归 pi-sdk 所有，
+   * 往 AgentEvent 里塞一个我们自己算出来的 kind，等于让契约包的 payload
+   * 类型对上游协议撒谎。归一化结论有自己的生命周期（同一条错误会先以
+   * `retry` 出现、再以 `retry-final` 收场），它本来就该是独立的一条流。
+   *
+   * 载荷是 `PiEnvelope<PiModelErrorPayload>`，与其它推送同一套信封，渲染侧
+   * 复用现成的 sequence（按本通道单调判）+ generation（全局判）丢弃规则。
+   * 注意本通道**立即发出**而 `pi:event` 走 33ms 合批，因此同一条错误的归一
+   * 结论通常比事件本身先到 —— 消费方按「会话级横幅」而不是「挂在某条消息
+   * 上」来用它，两条流的先后就不构成竞态。
+   */
+  piModelError: "pi:model-error",
   /**
    * 某一条扩展弹窗已失效（上游带 timeout 的 dialog 已自行 auto-resolve）。
    *

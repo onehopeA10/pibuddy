@@ -19,12 +19,15 @@ import type {
   AppSettings,
   AttachmentRef,
   DraftRecord,
+  ModelErrorKind,
   PiEnvelope,
   PiExitPayload,
+  PiModelErrorPayload,
   PiUiExpireAllPayload,
   PiUiExpirePayload,
 } from "@contract";
 import { parseEnvelope, UI_EXPIRED_HINT } from "@contract";
+import { retryStatusText, shouldSurfaceModelError } from "../model-error-advice";
 import { useSessionsStore } from "./sessions";
 // 静态引：workspace store 不反向依赖本文件，动态 import 只会让打包器
 // 把同一个模块同时算进两种图里并报一条警告，收益为零。
@@ -676,6 +679,9 @@ export const useAppStore = defineStore("app", () => {
     switch (e.type) {
       case "agent_start":
         streaming.value = true;
+        // 新一轮开始 = 上一轮那条「该怎么办」的横幅已经过时。留着它的话，
+        // 用户会以为刚发出去的这句话也失败了。
+        clearModelError();
         break;
       case "agent_settled":
         streaming.value = false;
@@ -789,12 +795,18 @@ export const useAppStore = defineStore("app", () => {
         break;
       case "auto_retry_start": {
         const ev = e as Extract<AgentEvent, { type: "auto_retry_start" }>;
-        extUi.setLocalStatus("retry", `网络繁忙，正在重试 (${ev.attempt}/${ev.maxAttempts})…`);
+        // 文案按归一化后的类别措辞。收敛前这里恒为「网络繁忙」，而实际触发
+        // 重试的绝大多数是服务商限流 —— 那句话会把用户引去查自己的网络。
+        extUi.setLocalStatus(
+          "retry",
+          retryStatusText(retryKind.value, ev.attempt, ev.maxAttempts)
+        );
         break;
       }
       case "auto_retry_end": {
         const ev = e as Extract<AgentEvent, { type: "auto_retry_end" }>;
         extUi.setLocalStatus("retry", "");
+        retryKind.value = "unknown";
         if (!ev.success && ev.finalError) {
           // 用量页的失败率来自这里与 assistant.stopReason==='error' 两处
           noteFailure();
@@ -908,6 +920,24 @@ export const useAppStore = defineStore("app", () => {
   /** 被闸门丢掉的消息计数，UI 不展示，只用于诊断与单测。 */
   const droppedEnvelopes = ref(0);
 
+  /**
+   * 最近一条**需要用户处理**的模型错误（MDL-101）。
+   *
+   * 会话级而不是挂在某条消息上：归一化结论走 `pi:model-error`（立即发出），
+   * 消息本身走 `pi:event`（33ms 合批），两者到达顺序不固定。挂消息就得先解
+   * 决一个本不存在的对齐问题，而用户真正要的只是「现在该做什么」。
+   *
+   * 自动重试中的报告（source==='retry'）不进这里，只更新状态条 —— 系统正在
+   * 自愈时弹一个带按钮的横幅，等于催用户在不必动手的时候动手。
+   */
+  const modelError = ref<PiModelErrorPayload | null>(null);
+  /** 本轮自动重试的类别，供状态条措辞用；重试收场即清。 */
+  const retryKind = ref<ModelErrorKind>("unknown");
+
+  function clearModelError(): void {
+    modelError.value = null;
+  }
+
   function acceptEnvelope(raw: unknown, channel: string): PiEnvelope<unknown> | null {
     const parsed = parseEnvelope(raw);
     if (!parsed.ok) {
@@ -943,6 +973,27 @@ export const useAppStore = defineStore("app", () => {
     const env = acceptEnvelope(raw, "pi:ui-request");
     if (!env) return;
     handleUiRequest(env.payload as ExtensionUiRequest);
+  }
+
+  /**
+   * `pi:model-error` 的入口：主进程归一化后的模型失败结论。
+   *
+   * 这条通道**只加解释，不改原文**：消息卡上那段 provider 原话一个字节都没
+   * 变，这里额外给出的是一个 kind，界面据此给出可操作的下一步。
+   */
+  function handleModelErrorEnvelope(raw: unknown): void {
+    const env = acceptEnvelope(raw, "pi:model-error");
+    if (!env) return;
+    const payload = env.payload as PiModelErrorPayload;
+    if (!payload?.kind) return;
+    if (payload.source === "retry") {
+      // 重试中：只记类别，横幅留给终态。状态条文案由 auto_retry_start 落地
+      // ——它比本通道晚到（合批 33ms），届时 retryKind 已经是准确值。
+      retryKind.value = payload.kind;
+      return;
+    }
+    if (!shouldSurfaceModelError(payload.source, payload.kind)) return;
+    modelError.value = payload;
   }
 
   /**
@@ -1071,6 +1122,9 @@ export const useAppStore = defineStore("app", () => {
     unsubscribes.push(window.piBuddy.pi.events.onEvent((e) => handleEventEnvelope(e)));
     unsubscribes.push(window.piBuddy.pi.events.onUiRequest((r) => handleUiRequestEnvelope(r)));
     unsubscribes.push(window.piBuddy.pi.events.onExit((e) => handleExitEnvelope(e)));
+    unsubscribes.push(
+      window.piBuddy.pi.events.onModelError((e) => handleModelErrorEnvelope(e))
+    );
     unsubscribes.push(window.piBuddy.pi.events.onUiExpire((e) => handleUiExpireEnvelope(e)));
     unsubscribes.push(
       window.piBuddy.pi.events.onUiExpireAll((e) => handleUiExpireAllEnvelope(e))
@@ -1402,6 +1456,31 @@ export const useAppStore = defineStore("app", () => {
     currentSessionBytes.value = 0;
     await refreshState();
     void refreshSessions();
+  }
+
+  /**
+   * 手动整理一次对话记忆（MDL-101 的 context_overflow 出口）。
+   *
+   * 上下文溢出是**唯一**一类「用户点一下就能修」的模型错误，此前界面上没有
+   * 任何入口 —— 只有 pi 自己在检测到溢出时的自动压缩，而它失败之后用户就
+   * 无路可走了。成功即清掉横幅：修好了还挂着提示，等于让用户怀疑没修好。
+   */
+  async function compactSession(): Promise<void> {
+    if (streaming.value) {
+      notify("warning", "请先等这一轮结束，再整理对话记忆");
+      return;
+    }
+    try {
+      const resp = await window.piBuddy.pi.compact();
+      if (!resp?.success) {
+        notify("error", resp?.error ?? "整理对话记忆失败");
+        return;
+      }
+      clearModelError();
+      notify("info", "已整理对话记忆，可以继续了");
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "整理对话记忆失败");
+    }
   }
 
   /**
@@ -1808,6 +1887,10 @@ export const useAppStore = defineStore("app", () => {
     handleUiExpireEnvelope,
     handleUiExpireAllEnvelope,
     handleExitEnvelope,
+    handleModelErrorEnvelope,
+    modelError,
+    retryKind,
+    clearModelError,
     dispose,
     init,
     start,
@@ -1815,6 +1898,7 @@ export const useAppStore = defineStore("app", () => {
     send,
     abortRun,
     newTask,
+    compactSession,
     openSession,
     reloadMessages,
     setModel,

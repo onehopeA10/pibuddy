@@ -13,6 +13,7 @@ export * from "./child-agent.js";
 export * from "./git.js";
 export * from "./memory.js";
 export * from "./envelope.js";
+export * from "./model-error.js";
 export * from "./settings.js";
 export * from "./session.js";
 export * from "./session-tree.js";
