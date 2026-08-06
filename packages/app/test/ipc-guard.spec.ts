@@ -26,6 +26,7 @@ const {
   CHANNEL_MAX_BYTES,
   IpcGuard,
   MAX_IPC_PAYLOAD_BYTES,
+  MAX_IPC_PAYLOAD_DEPTH,
   MAX_TEXT_PAYLOAD_BYTES,
   RateLimiter,
   assertMainFrame,
@@ -105,10 +106,59 @@ describe("闸 2：schema 校验", () => {
 });
 
 describe("闸 3：尺寸", () => {
-  it("estimateBytes 认得 ArrayBuffer —— JSON.stringify 会把它算成 2 字节", () => {
+  it("estimateBytes 认得 structured-clone 内建类型，并对深度溢出失败关闭", () => {
     const buf = new ArrayBuffer(1024);
     expect(estimateBytes({ audio: buf })).toBeGreaterThanOrEqual(1024);
+    expect(estimateBytes(new Map([["audio", buf]]))).toBeGreaterThanOrEqual(1024);
+    expect(estimateBytes(new Set([buf]))).toBeGreaterThanOrEqual(1024);
+    expect(estimateBytes(new Date())).toBeGreaterThan(8);
+    expect(estimateBytes(new Error("boom"))).toBeGreaterThan(Buffer.byteLength("boom"));
     expect(estimateBytes("héllo")).toBe(6);
+
+    let deep: unknown = "leaf";
+    for (let i = 0; i < MAX_IPC_PAYLOAD_DEPTH + 2; i++) deep = { next: deep };
+    expect(estimateBytes(deep)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("容器与成员本身计费，巨量 null / 空对象数组不能估成接近零", () => {
+    expect(estimateBytes(new Array(1_100_000).fill(null))).toBeGreaterThan(
+      MAX_IPC_PAYLOAD_BYTES
+    );
+    expect(estimateBytes(Array.from({ length: 400_000 }, () => ({})))).toBeGreaterThan(
+      MAX_IPC_PAYLOAD_BYTES
+    );
+  });
+
+  it("循环与共享图只计安全引用，不递归爆栈或重复放大", () => {
+    const shared = { text: "shared" };
+    const root: { self?: unknown; left: unknown; right: unknown } = {
+      left: shared,
+      right: shared,
+    };
+    root.self = root;
+    const bytes = estimateBytes(root);
+    expect(Number.isFinite(bytes)).toBe(true);
+    expect(bytes).toBeGreaterThan(Buffer.byteLength("shared"));
+    expect(bytes).toBeLessThan(1024);
+  });
+
+  it("大 RegExp 显式按 source 计费，未知原型失败关闭", () => {
+    const source = "a".repeat(300_000);
+    expect(estimateBytes(new RegExp(source))).toBeGreaterThanOrEqual(source.length);
+    expect(estimateBytes(Object.create({ inherited: true }))).toBe(
+      Number.POSITIVE_INFINITY
+    );
+  });
+
+  it("schema.parse 前拒绝过深的原始 payload，未知字段不能靠 zod strip 逃过", async () => {
+    registerHandler("pi:prompt", piPromptRequestSchema, () => "ok");
+    const fn = registered.get("pi:prompt")!;
+    let deep: unknown = "leaf";
+    for (let i = 0; i < MAX_IPC_PAYLOAD_DEPTH + 2; i++) deep = { next: deep };
+
+    await expect(fn(mainFrameEvent(), { message: "x", hidden: deep })).rejects.toThrow(
+      /IPC_PAYLOAD_TOO_DEEP/
+    );
   });
 
   it("超过 MAX_TEXT_PAYLOAD_BYTES 的 prompt 被拒", async () => {
@@ -123,6 +173,15 @@ describe("闸 3：尺寸", () => {
     await expect(
       fn(mainFrameEvent(), { message: "a".repeat(MAX_TEXT_PAYLOAD_BYTES) })
     ).resolves.toBe("ok");
+  });
+
+  it("有效 Unicode 在共享 UTF-8 字节上限处通过 schema 与 guard", async () => {
+    registerHandler("pi:prompt", piPromptRequestSchema, () => "ok");
+    const fn = registered.get("pi:prompt")!;
+    const exact = "你".repeat(Math.floor(MAX_TEXT_PAYLOAD_BYTES / 3)) + "x";
+
+    expect(Buffer.byteLength(exact, "utf8")).toBe(MAX_TEXT_PAYLOAD_BYTES);
+    await expect(fn(mainFrameEvent(), { message: exact })).resolves.toBe("ok");
   });
 
   it("图片的 base64 挂在 images[].data 上，不受文本上限误伤", async () => {
@@ -182,7 +241,19 @@ describe("闸 3：尺寸", () => {
   });
 });
 
-describe("闸 4：限流", () => {
+describe("闸 2：解析前限流", () => {
+  it("无效 schema 载荷同样消耗配额，第 11 次在 parse 前被限流", async () => {
+    registerHandler("pi:prompt", piPromptRequestSchema, () => "ok");
+    const fn = registered.get("pi:prompt")!;
+
+    for (let i = 0; i < 10; i++) {
+      await expect(fn(mainFrameEvent(), { message: 42 })).rejects.not.toThrow(
+        /IPC_RATE_LIMITED/
+      );
+    }
+    await expect(fn(mainFrameEvent(), { message: 42 })).rejects.toThrow(/IPC_RATE_LIMITED/);
+  });
+
   it("10 秒内第 11 次 prompt 被限流拒绝", async () => {
     registerHandler("pi:prompt", piPromptRequestSchema, () => "ok");
     const fn = registered.get("pi:prompt")!;
@@ -195,11 +266,13 @@ describe("闸 4：限流", () => {
     );
   });
 
-  it("限流按 (channel, sender) 计数：换个通道不受影响", () => {
+  it("prompt / steer / follow-up 共用模型动作桶，其他通道仍独立", () => {
     const limiter = new RateLimiter();
-    for (let i = 0; i < 10; i++) limiter.check("pi:prompt", 1);
+    for (let i = 0; i < 4; i++) limiter.check("pi:prompt", 1);
+    for (let i = 0; i < 3; i++) limiter.check("pi:steer", 1);
+    for (let i = 0; i < 3; i++) limiter.check("pi:follow-up", 1);
     expect(() => limiter.check("pi:prompt", 1)).toThrow(/IPC_RATE_LIMITED/);
-    // 另一条通道、另一个 sender 各自独立
+    expect(() => limiter.check("pi:steer", 1)).toThrow(/IPC_RATE_LIMITED/);
     expect(() => limiter.check("pi:get-state", 1)).not.toThrow();
     expect(() => limiter.check("pi:prompt", 2)).not.toThrow();
   });

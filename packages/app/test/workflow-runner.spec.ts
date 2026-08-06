@@ -235,6 +235,35 @@ describe("WorkflowRunner：失败传播 / 停止 / 重跑", () => {
     expect(finalRun!.nodes.find((n) => n.nodeId === "B")!.state).toBe("skipped");
   });
 
+  it("host 永不返回时 stop 仍立即结算", async () => {
+    const host: WorkflowAgentHost = {
+      runAgent: () => new Promise<WorkflowAgentResult>(() => undefined),
+    };
+    let finalRun: WorkflowRun | null = null;
+    const runner = new WorkflowRunner({ host, onSettled: (run) => (finalRun = run) });
+    const started = runner.start(def([agent("A")], []), "ws");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    runner.stop(started.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(finalRun?.state).toBe("stopped");
+  });
+
+  it("host 永不返回时由 runner 超时结算为 failed", async () => {
+    const host: WorkflowAgentHost = {
+      runAgent: () => new Promise<WorkflowAgentResult>(() => undefined),
+    };
+    let finalRun: WorkflowRun | null = null;
+    const runner = new WorkflowRunner({
+      host,
+      agentTimeoutMs: 5,
+      onSettled: (run) => (finalRun = run),
+    });
+    runner.start(def([agent("A")], []), "ws");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(finalRun?.state).toBe("failed");
+    expect(finalRun?.nodes[0].error).toContain("超时");
+  });
+
   it("重跑同一定义产生两次独立运行", async () => {
     const { host } = recordingHost();
     const runner = new WorkflowRunner({ host });

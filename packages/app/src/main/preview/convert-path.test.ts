@@ -97,6 +97,13 @@ describe("十类 PreviewKind 正向路径", () => {
 });
 
 describe("三个负向 fixture", () => {
+  it("文件在 host 检查后增长时，worker 不会越过已确认的输入上限", async () => {
+    const p = put("grown.md", Buffer.from("1234567890"));
+    const limited = { ...request(p), sizeBytes: 4 };
+    const result = await convertFile(limited);
+    expect(result.code).toBe("too-large");
+  });
+
   it("PPTX 里的 SmartArt：正文仍抽出，但如实降级成 unsupported", async () => {
     const p = put("smart.pptx", await makePptx(true));
     const result = await convertFile(request(p));

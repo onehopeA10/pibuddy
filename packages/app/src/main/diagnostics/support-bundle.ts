@@ -36,6 +36,8 @@ import { redactSecrets, redactText } from "../logger-redact.js";
 export const MAX_LOG_TAIL_BYTES = 1024 * 1024;
 /** 最多收几个日志文件（当前 + 归档）。 */
 export const MAX_LOG_FILES_IN_BUNDLE = 4;
+/** settings.json 单文件上限，防止损坏或恶意文件被整份读入主进程。 */
+export const MAX_SETTINGS_BYTES = 1024 * 1024;
 
 /**
  * 整个诊断包的总量上限。
@@ -139,7 +141,7 @@ function plan(sources: BundleSources): PlannedEntry[] {
   if (sources.settingsFile && safeStat(sources.settingsFile) !== null) {
     entries.push({
       path: "settings.json",
-      sizeBytes: safeStat(sources.settingsFile) ?? 0,
+      sizeBytes: Math.min(safeStat(sources.settingsFile) ?? 0, MAX_SETTINGS_BYTES),
       redacted: true,
       description: "应用设置副本（不含任何密钥，密钥不在设置文件里）",
       source: sources.settingsFile,
@@ -294,7 +296,9 @@ export function exportBundle(targetPath: string, sources: BundleSources): Bundle
         // 有上限：日志取尾部 1MB，settings.json 是配置文件。
         const raw = entry.path.startsWith("logs/")
           ? readTail(entry.source, MAX_LOG_TAIL_BYTES)
-          : readFileOr(entry.source);
+          : entry.path === "settings.json"
+            ? readTail(entry.source, MAX_SETTINGS_BYTES)
+            : readFileOr(entry.source);
         zip.addBuffer(entry.path, Buffer.from(redactText(raw), "utf8"));
       } else {
         // 二进制条目**流式**复制：这里正是原来 readFileSync 把几百兆转储

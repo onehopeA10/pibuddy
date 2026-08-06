@@ -108,6 +108,21 @@ describe("下载取消", () => {
     spy.mockRestore();
   });
 
+  it("取消后的迟到 error 不把 idle 覆盖成错误", async () => {
+    const { svc, updater } = build();
+    let release: () => void = () => {};
+    updater.onDownload = () => new Promise<void>((r) => (release = r));
+
+    const pending = svc.downloadUpdate();
+    svc.cancelDownload();
+    updater.emit("error", new Error("download cancelled"));
+
+    expect(svc.getState().status).toBe("idle");
+    expect(svc.getState().errorCode).toBeNull();
+    release();
+    await pending;
+  });
+
   it("cancelSupported=false 时 cancelDownload 是空操作（界面上也不会有那个按钮）", async () => {
     const { svc, updater } = build({
       cancelSupported: false,

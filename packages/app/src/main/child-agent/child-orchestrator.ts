@@ -3,8 +3,8 @@
  *
  * 把纯内核 `ChildAgentCore` 接到三样有副作用的东西上：
  *   - **进程派生**：走后台池的 `requestSession(origin:"child")` + 真实后台
- *     runtime（`pool-runtime-host`）。子 Agent 因此照样受池的并发/内存/成本闸
- *     与崩溃预算管辖——child 子进程独立 runtime 有资源上界，正是靠复用池。
+ *     runtime（`pool-runtime-host`）。子 Agent 复用池的并发/内存/成本闸；崩溃
+ *     重试安全由 `ChildAgentCore` 独占，池不会抢先重放。
  *   - **结构化消息汇聚**：从子会话的事件流里**只认一个约定的结构化上报点**
  *     （子运行时对 `pibuddy_child_report` 工具的调用，其**类型化 args** 即为
  *     `ChildMessage`），绝不解析子进程的自然语言输出。
@@ -88,7 +88,7 @@ const host: ChildHost = {
   launch(req) {
     // 记下目标，待 runtime 就绪再下发（子可能因资源闸先排队）。
     pendingGoals.set(req.nodeId, goalPrompt(req));
-    // 走池派生：origin:"child" 让池按并发/内存/成本闸与崩溃预算管辖它。
+    // 走池派生：origin:"child" 复用资源闸，并把崩溃重试所有权留给 child 核心。
     agentPool().requestSession({
       sessionId: req.nodeId,
       workspaceId: req.workspaceId,
@@ -102,7 +102,7 @@ const host: ChildHost = {
     agentPool().stopSession(nodeId);
   },
   deliver(nodeId, text) {
-    poolRuntimeHost().deliver(nodeId, text);
+    return poolRuntimeHost().deliverConfirmed(nodeId, text);
   },
 };
 
@@ -139,12 +139,18 @@ export function startChildOrchestration(): void {
     if (raw !== null) core.ingestMessage(sessionId, raw, Date.now());
   });
   // 子 runtime 就绪 → 下发暂存的目标提示词（排队的子也在此刻拿到目标）。
-  poolRuntimeHost().setChildReadySink((sessionId) => {
+  poolRuntimeHost().setChildReadySink(async (sessionId) => {
     const goal = pendingGoals.get(sessionId);
-    if (goal === undefined) return;
+    if (goal === undefined) return false;
+    const accepted = await poolRuntimeHost().deliverConfirmed(sessionId, goal);
+    if (!accepted) return false;
     pendingGoals.delete(sessionId);
     core.onRuntimeReady(sessionId, Date.now());
-    poolRuntimeHost().deliver(sessionId, goal);
+    return true;
+  });
+  poolRuntimeHost().setChildExitSink((sessionId, reason) => {
+    pendingGoals.delete(sessionId);
+    core.onRuntimeExit(sessionId, reason, Date.now());
   });
   if (!tickTimer) {
     tickTimer = setInterval(() => {
@@ -165,16 +171,18 @@ export function createChild(parentId: string | null, spec: ChildSpec, now = Date
 /**
  * 拆卸运行期资源（能力被禁用时调用）。
  *
- * 停维护节拍、摘掉池的子事件汇聚与就绪回调——D4 规则 4：拆 listener，但
- * **不动核心里的编排数据**（那是运行时状态，随进程走，不落盘）。
+ * 先让已有核心取消并停止全部非终态子节点，再停节拍、摘掉池回调。没有核心时
+ * 不为 dispose 单独实例化一个核心。
  */
 export function disposeChildOrchestration(): void {
+  instance?.dispose(Date.now());
   if (tickTimer) {
     clearInterval(tickTimer);
     tickTimer = null;
   }
   poolRuntimeHost().setChildEventSink(null);
   poolRuntimeHost().setChildReadySink(null);
+  poolRuntimeHost().setChildExitSink(null);
   pendingGoals.clear();
 }
 

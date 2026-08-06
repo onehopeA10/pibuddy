@@ -288,4 +288,17 @@ describe("关服务 → 不再监听（端口释放）", () => {
     expect(s2.isListening()).toBe(false);
     reg2.close();
   });
+
+  it("stop 完成后可以立即重新监听同一端口", async () => {
+    const reg2 = new RemoteRegistry(path.join(userData, "remote-restart.db"));
+    const s2 = new RemoteServer(reg2, fakeBackend, noopLogger);
+    await s2.start("loopback");
+    const firstPort = s2.port();
+    await s2.stop();
+    await s2.start("loopback");
+    expect(s2.isListening()).toBe(true);
+    expect(s2.port()).toBe(firstPort);
+    await s2.stop();
+    reg2.close();
+  });
 });

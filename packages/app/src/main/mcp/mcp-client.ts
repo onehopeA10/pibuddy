@@ -14,9 +14,9 @@
  *  - `spawn(..., { shell: false })`：command 直接作为 argv[0]，**不经 shell 解析**，
  *    因此 args 里的 `;` `|` `$()` 都只是普通字符串，不会被当成 shell 语法。
  *    这挡住的是 shell 注入；「运行用户配置里的某个可执行文件」是 MCP stdio
- *    的固有语义（与 pi-resources 的 npm/git 执行同类），残余风险记在
- *    FEAT-mcp.md：彻底收口要靠 PermissionEngine 的 process.shell 门（ADR D3，
- *    本轮未做）。
+ *    的固有语义（与 pi-resources 的 npm/git 执行同类）。调用方的 start / test
+ *    已接入 PermissionEngine 的 process.shell 第五道闸，授权绑定工作区、服务器
+ *    与完整执行配置指纹；配置或工作区变化后旧授权不再覆盖新的 spawn。
  *  - 进程一定被回收：无论握手成败，非 keepAlive 路径在 finally 里 kill。
  */
 import { spawn, type ChildProcess } from "node:child_process";
@@ -30,6 +30,18 @@ export const MCP_PROTOCOL_VERSION = "2024-11-05";
 
 /** 握手默认超时（ms）。够一个本地进程启动 + 报出 initialize 结果。 */
 export const HANDSHAKE_TIMEOUT_MS = 10_000;
+const terminatedChildren = new WeakSet<ChildProcess>();
+
+/** service 与 client 共用的幂等终止原语，避免 teardown/exit 路径重复 kill。 */
+export function terminateStdioChild(child: ChildProcess): void {
+  if (terminatedChildren.has(child)) return;
+  terminatedChildren.add(child);
+  try {
+    child.kill();
+  } catch {
+    /* 已退出 */
+  }
+}
 
 export interface StdioProbe {
   ok: boolean;
@@ -169,7 +181,11 @@ export function planSpawn(command: string, args: readonly string[]): SpawnPlan {
  */
 export function connectStdio(
   config: McpServerInput,
-  opts: { timeoutMs?: number; keepAlive?: boolean } = {}
+  opts: {
+    timeoutMs?: number;
+    keepAlive?: boolean;
+    onSpawn?: (child: ChildProcess) => void;
+  } = {}
 ): Promise<StdioConnection> {
   const timeoutMs = opts.timeoutMs ?? HANDSHAKE_TIMEOUT_MS;
   const keepAlive = opts.keepAlive ?? false;
@@ -195,6 +211,9 @@ export function connectStdio(
         windowsHide: true,
         windowsVerbatimArguments: plan.windowsVerbatimArguments,
       });
+      // 生命周期拥有者必须在握手前就拿到句柄：退出 / stop 可能发生在
+      // initialize 尚未返回时，等握手完成再登记会留下无法及时回收的进程。
+      opts.onSpawn?.(child);
     } catch (err) {
       resolve({ child: null, probe: fail([`无法启动进程：${describe(err)}`]) });
       return;
@@ -227,18 +246,15 @@ export function connectStdio(
       };
 
       if (ok && keepAlive) {
-        // 保留活进程：解绑握手期的监听，但不 kill。stderr 继续吞进 void，
+        // 保留活进程：解绑握手期的监听，但不 kill。输出继续吞进 void，
         // 避免管道写满把子进程卡死。
+        child.stdout?.on("data", () => undefined);
         child.stderr?.on("data", () => undefined);
         child.on("error", () => undefined);
         resolve({ child, probe });
         return;
       }
-      try {
-        child.kill();
-      } catch {
-        /* 已经退出就算了 */
-      }
+      terminateStdioChild(child);
       resolve({ child: null, probe });
     };
 

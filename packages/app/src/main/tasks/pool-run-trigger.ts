@@ -22,6 +22,7 @@
  */
 import type { UsageRecordRequest } from "@pibuddy/contract";
 import { agentPool, poolRuntimeHost } from "../agent-pool/pool.js";
+import type { PoolSessionOrigin } from "../agent-pool/pool-core.js";
 import type { RuntimeTap } from "../agent-pool/pool-runtime-host.js";
 import { usageStore } from "../usage/usage-store.js";
 import type { AgentRunTrigger, TriggerContext, TriggerOutcome } from "./task-trigger.js";
@@ -31,7 +32,7 @@ export interface PoolTriggerPort {
   requestSession(input: {
     sessionId: string;
     workspaceId: string | null;
-    origin: "user" | "child";
+    origin: PoolSessionOrigin;
     focus: boolean;
   }): void;
   stopSession(sessionId: string): void;
@@ -100,6 +101,24 @@ export function createPoolRunTrigger(
 
       const ready = deferred();
       const settledTurn = deferred();
+      const abortGate = deferred();
+      const ABORTED = Symbol("aborted");
+      let aborted = ctx.signal.aborted;
+      let stopped = false;
+      const stopSessionOnce = (): void => {
+        if (stopped) return;
+        stopped = true;
+        port.stopSession(poolKey);
+      };
+      const onAbort = (): void => {
+        aborted = true;
+        stopSessionOnce();
+        abortGate.resolve();
+        ready.resolve();
+        settledTurn.resolve();
+      };
+      ctx.signal.addEventListener("abort", onAbort, { once: true });
+      if (aborted) onAbort();
 
       const unobserve = port.observe(poolKey, {
         onReady: (sid) => {
@@ -149,6 +168,11 @@ export function createPoolRunTrigger(
         if (timer) clearTimeout(timer);
       };
 
+      const raceAbort = <T>(promise: Promise<T>): Promise<T | typeof ABORTED> => {
+        const abortedResult = abortGate.promise.then((): typeof ABORTED => ABORTED);
+        return Promise.race([promise, abortedResult]);
+      };
+
       const fail = (error: string, note: string): TriggerOutcome => ({
         status: "failed",
         sessionId: realSessionId,
@@ -160,14 +184,16 @@ export function createPoolRunTrigger(
       });
 
       try {
+        if (aborted) return fail("任务执行已取消", "取消发生在后台会话申请前");
         port.requestSession({
           sessionId: poolKey,
           workspaceId: ctx.workspaceId,
-          origin: "user",
+          origin: "task",
           focus: false,
         });
 
         await withDeadline(ready.promise);
+        if (aborted) return fail("任务执行已取消", "等待后台会话就绪时被取消");
         if (timedOut) {
           return fail(
             "等待后台会话就绪超时",
@@ -180,11 +206,15 @@ export function createPoolRunTrigger(
         // 默默用别的模型跑完，比失败更糟。
         if (ctx.input.provider && ctx.input.model) {
           try {
-            const resp = (await port.send(poolKey, {
-              type: "set_model",
-              provider: ctx.input.provider,
-              modelId: ctx.input.model,
-            })) as { success?: boolean; error?: string } | null;
+            const sent = await raceAbort(
+              port.send(poolKey, {
+                type: "set_model",
+                provider: ctx.input.provider,
+                modelId: ctx.input.model,
+              })
+            );
+            if (sent === ABORTED) return fail("任务执行已取消", "设置冻结 model 时被取消");
+            const resp = sent as { success?: boolean; error?: string } | null;
             if (resp && resp.success === false) {
               return fail(`设置模型失败：${resp.error ?? "未知原因"}`, "冻结的 model 未被接受");
             }
@@ -193,11 +223,13 @@ export function createPoolRunTrigger(
           }
         }
 
+        if (aborted) return fail("任务执行已取消", "提示词投递前被取消");
         if (!port.deliver(poolKey, ctx.input.prompt)) {
           return fail("提示词投递失败：会话无活跃 runtime", "deliver 落空");
         }
 
         await withDeadline(settledTurn.promise);
+        if (aborted) return fail("任务执行已取消", "等待后台会话完成时被取消");
         if (timedOut) {
           return fail("执行超时", `超过任务超时上限 ${ctx.timeoutMs}ms，已停止后台会话`);
         }
@@ -213,7 +245,9 @@ export function createPoolRunTrigger(
         // 上报，这里是它唯一的入账点。拉不到统计就不入账 —— 不造数。
         let costUsd: number | null = null;
         try {
-          const stats = (await port.send(poolKey, { type: "get_session_stats" })) as {
+          const sent = await raceAbort(port.send(poolKey, { type: "get_session_stats" }));
+          if (sent === ABORTED) return fail("任务执行已取消", "结算后台会话统计时被取消");
+          const stats = sent as {
             success?: boolean;
             data?: { cost?: number; tokens?: { input?: number; output?: number } };
           } | null;
@@ -263,10 +297,11 @@ export function createPoolRunTrigger(
             : "后台会话完成",
         };
       } finally {
+        ctx.signal.removeEventListener("abort", onAbort);
         unobserve();
-        // 无论成败，停掉本次 run 的后台会话，释放池的并发位；进程收尾由
-        // host.stop 的四级停止阶梯保证，不留僵尸。
-        port.stopSession(poolKey);
+        // 无论成败，停掉本次 run 的后台会话，释放池的并发位；取消路径会更早调用，
+        // stopSessionOnce 保证精确的 task:{runId} 只停一次。
+        stopSessionOnce();
       }
     },
   };

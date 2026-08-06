@@ -49,6 +49,8 @@ import EduPanel from "./EduPanel.vue";
 const HomeDashboardPanel = defineAsyncComponent(() => import("./HomeDashboardPanel.vue"));
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
+import { useMcpStore } from "../stores/mcp";
+import { usePermissionStore } from "../stores/permission";
 import { useProvidersStore } from "../stores/providers";
 import { useArtifactsStore } from "../stores/artifacts";
 import { useMemoryStore } from "../stores/memory";
@@ -65,6 +67,8 @@ import {
 const store = useAppStore();
 const updateStore = useUpdateStore();
 const piRes = usePiResourcesStore();
+const mcp = useMcpStore();
+const permission = usePermissionStore();
 const providers = useProvidersStore();
 const artifacts = useArtifactsStore();
 const memory = useMemoryStore();
@@ -107,7 +111,10 @@ function askDirty(tabs: EditorTab[]): Promise<DirtyDecision> {
 }
 
 setDirtyPrompt(askDirty);
-onBeforeUnmount(() => setDirtyPrompt(null));
+onBeforeUnmount(() => {
+  setDirtyPrompt(null);
+  store.dispose();
+});
 
 /**
  * 向导是否还没走完。
@@ -286,6 +293,9 @@ onMounted(() => {
 watch(
   () => store.workspaceId,
   (id) => {
+    mcp.setWorkspace(id);
+    piRes.setWorkspace(id);
+    void permission.refresh(id || null);
     if (id) void piRes.describeTrust(id);
   },
   { immediate: true }

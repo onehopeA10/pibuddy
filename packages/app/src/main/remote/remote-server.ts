@@ -173,8 +173,6 @@ export class RemoteServer {
     if (!state) return;
     await new Promise<void>((resolve) => {
       state.server.close(() => resolve());
-      // close() 只停接受新连接；已建立的 socket 上面 dropAll 已断，这里兜底
-      setImmediate(() => resolve());
     });
     this.registry.audit("server_stopped", "", Date.now());
     this.logger.info("remote_server_stopped", {});

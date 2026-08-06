@@ -2,9 +2,8 @@
  * 后台会话池的**主进程接线层**（AGT-101）。
  *
  * 把纯内核 `AgentPoolCore` 接到三样有副作用的东西上：
- *   - **进程启停**：`PoolRuntimeHost`。本批后台派生尚未落地（child 编排本批
- *     不做），launch 走一条记账占位——真实的后台进程派生在此 host 里补齐即可，
- *     池的准入/回收/崩溃预算无需再改。
+ *   - **进程启停**：`PoolRuntimeHost` 派生真实后台 runtime。池统一处理准入、
+ *     回收与资源上界；崩溃重试按 session origin 留给对应生命周期所有者。
  *   - **观测**：`agentPoolObserver()` 返回一个 `PoolObserver`，由 **pi 域**
  *     （pi-ipc.ts）挂到 supervisor 上，把当前会话的握手 / 事件流 / 退出喂进
  *     内核。**本文件不 import pi 域**——依赖方向必须是 pi → kernel，反过来
@@ -42,12 +41,12 @@ function broadcastSnapshot(_snapshot: PoolSnapshot): void {
  *
  * `bind` 把池内核的三个回调接上——放在这里而不是构造函数里，是为了打破
  * host ↔ pool 的构造期循环：回调体在**事件到达时**才调 `agentPool()`，那时
- * 单例早已就绪。后台会话事件因此直接喂进池内核的列表态 / 成本 / 崩溃预算，
+ * 单例早已就绪。后台会话事件因此直接喂进池内核的列表态 / 成本 / 生命周期判定，
  * 与前台 supervisor 那条路各喂各的、互不串台。
  */
 const runtimeHost = new PoolRuntimeHostImpl();
 runtimeHost.bind({
-  onReady: (sessionId, info) => agentPool().onRuntimeReady(sessionId, info),
+  onReady: (sessionId, info) => agentPool().onRuntimeReady(sessionId, info, Date.now()),
   onEvent: (envelope) => agentPool().observeEnvelope(envelope),
   onExit: (sessionId, reason) => agentPool().handleExit(sessionId, reason, Date.now()),
 });

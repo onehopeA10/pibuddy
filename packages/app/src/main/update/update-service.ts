@@ -116,6 +116,7 @@ export class UpdateService {
   // ---- single-flight：三个动作各一把锁，进入时判空，finally 复位 ----
   private checkInFlight = false;
   private downloadInFlight = false;
+  private downloadCancellationPending = false;
   private installInFlight = false;
   private lastManualCheckAt = 0;
 
@@ -334,7 +335,14 @@ export class UpdateService {
       retryable: false,
       lastCheckedAt: this.now(),
     });
-    if (version) this.announced.add(version);
+    if (version) {
+      this.announced.add(version);
+      while (this.announced.size > 100) {
+        const oldest = this.announced.values().next().value as string | undefined;
+        if (oldest === undefined) break;
+        this.announced.delete(oldest);
+      }
+    }
     if (this.prefs.autoDownload) void this.downloadUpdate();
   }
 
@@ -384,6 +392,10 @@ export class UpdateService {
     // 旧通道请求的失败不该染红新通道的界面：用户刚切到 stable，看到的却是
     // 一条来自 beta 源的网络错误，而重试按钮点下去一切正常。
     if (this.dropStale("error")) return;
+    if (this.downloadCancellationPending && this.state.status === "idle") {
+      this.deps.logger.info("update_cancel_error_dropped");
+      return;
+    }
     const info = mapUpdaterError(err);
     this.deps.logger.warn("update_error", { code: info.code, detail: info.detail });
     if (info.code === "network") this.failureStreak++;
@@ -441,6 +453,7 @@ export class UpdateService {
     const gen = this.channelGeneration;
     this.opGeneration = gen;
     this.downloadInFlight = true;
+    this.downloadCancellationPending = false;
     this.cancelToken = this.deps.createCancellationToken?.() ?? null;
     this.commit({
       status: "downloading",
@@ -458,6 +471,7 @@ export class UpdateService {
       // 会把切换之后新开的那次下载一起解锁。
       if (gen === this.channelGeneration) {
         this.downloadInFlight = false;
+        this.downloadCancellationPending = false;
         this.cancelToken = null;
       }
     }
@@ -476,6 +490,7 @@ export class UpdateService {
     if (!this.downloadInFlight || !this.cancelToken) return this.state;
     this.cancelToken.cancel();
     this.cancelToken = null;
+    this.downloadCancellationPending = true;
     return this.commit({
       status: "idle",
       percent: 0,

@@ -10,6 +10,7 @@ vi.mock("electron", () => ({
 }));
 
 const { createPoolRunTrigger } = await import("../src/main/tasks/pool-run-trigger.js");
+const { AgentPoolCore } = await import("../src/main/agent-pool/pool-core.js");
 import type { PoolTriggerPort } from "../src/main/tasks/pool-run-trigger.js";
 import type { RuntimeTap } from "../src/main/agent-pool/pool-runtime-host.js";
 import type { TriggerContext } from "../src/main/tasks/task-trigger.js";
@@ -69,6 +70,7 @@ function ctxOf(overrides: Partial<TriggerContext> = {}): TriggerContext {
     runId: "run-1",
     taskId: "t1",
     workspaceId: "ws1",
+    signal: new AbortController().signal,
     input: { provider: "openai", model: "gpt-x", prompt: "巡检一次" },
     timeoutMs: null,
     budgetUsd: null,
@@ -84,9 +86,9 @@ describe("池化 Agent run 触发（ISS-002）", () => {
     const p = createPoolRunTrigger(port, noRecord).trigger(ctxOf());
     await flush();
 
-    // 真的向池申请了一个 origin:user 的后台会话，键为 task:{runId}。
+    // task origin 把崩溃重试所有权留给 scheduler，键为 task:{runId}。
     expect(port.requested).toEqual([
-      { sessionId: "task:run-1", workspaceId: "ws1", origin: "user", focus: false },
+      { sessionId: "task:run-1", workspaceId: "ws1", origin: "task", focus: false },
     ]);
 
     port.tap!.onReady!("pi-sess-42");
@@ -165,6 +167,83 @@ describe("池化 Agent run 触发（ISS-002）", () => {
     expect(outcome.status).toBe("failed");
     expect(outcome.error).toContain("错误结束");
     expect(outcome.costUsd).toBe(0.12);
+  });
+
+  it("等待 ready 时取消：立即停止精确 task session，等待本身同步收口", async () => {
+    const port = new FakePort();
+    const controller = new AbortController();
+    const p = createPoolRunTrigger(port, noRecord).trigger(
+      ctxOf({ signal: controller.signal })
+    );
+    await flush();
+
+    controller.abort();
+    const outcome = await p;
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.error).toContain("取消");
+    expect(port.stopped).toEqual(["task:run-1"]);
+  });
+
+  it("等待 agent_settled 时取消：停止当前 run 的会话且不等待 runtime 再发事件", async () => {
+    const port = new FakePort();
+    const controller = new AbortController();
+    const p = createPoolRunTrigger(port, noRecord).trigger(
+      ctxOf({ signal: controller.signal })
+    );
+    await flush();
+    port.tap!.onReady!("pi-sess-1");
+    await flush();
+    expect(port.delivered).toHaveLength(1);
+
+    controller.abort();
+    const outcome = await p;
+
+    expect(outcome.status).toBe("failed");
+    expect(outcome.error).toContain("取消");
+    expect(port.stopped).toEqual(["task:run-1"]);
+  });
+
+  it("task runtime 崩溃由 scheduler 持有重试权，真实 PoolCore 不自动重启", async () => {
+    let tap: RuntimeTap | null = null;
+    const launches: Array<{ sessionId: string; workspaceId: string | null; origin: string }> = [];
+    let core!: InstanceType<typeof AgentPoolCore>;
+    core = new AgentPoolCore({
+      host: {
+        launch(req) {
+          launches.push(req);
+          queueMicrotask(() => tap?.onReady?.("pi-task-session"));
+        },
+        stop() {},
+      },
+    });
+    const port: PoolTriggerPort = {
+      requestSession: (input) => core.requestSession(input),
+      stopSession: (sessionId) => core.stopSession(sessionId),
+      observe: (_sessionId, nextTap) => {
+        tap = nextTap;
+        return () => {
+          if (tap === nextTap) tap = null;
+        };
+      },
+      deliver: () => true,
+      send: async (_sessionId, message) =>
+        (message as { type?: string }).type === "get_session_stats"
+          ? { success: true, data: { cost: 0 } }
+          : { success: true },
+    };
+
+    const p = createPoolRunTrigger(port, noRecord).trigger(ctxOf());
+    await flush();
+    core.handleExit("task:run-1", "crash", Date.now());
+    expect(core.snapshot().sessions[0]?.runState).toBe("crashed");
+    tap!.onExit?.("crash");
+    const outcome = await p;
+
+    expect(outcome.status).toBe("failed");
+    expect(launches).toEqual([
+      { sessionId: "task:run-1", workspaceId: "ws1", origin: "task" },
+    ]);
   });
 });
 

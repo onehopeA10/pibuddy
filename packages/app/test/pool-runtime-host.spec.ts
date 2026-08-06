@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentEvent, PiExitMeta } from "@pibuddy/pi-sdk";
-import type { PiEnvelope } from "@pibuddy/contract";
+import { childSpecSchema, type PiEnvelope } from "@pibuddy/contract";
+import { AgentPoolCore } from "../src/main/agent-pool/pool-core.js";
 import {
   PoolRuntimeHostImpl,
   type PoolRuntimeClient,
 } from "../src/main/agent-pool/pool-runtime-host.js";
+import { ChildAgentCore } from "../src/main/child-agent/child-core.js";
 
 import os from "node:os";
 vi.mock("electron", () => ({
@@ -21,11 +23,12 @@ vi.mock("electron", () => ({
  */
 
 class FakeClient implements PoolRuntimeClient {
-  readonly runtimeId = "rt-fake";
   started = false;
   stopped = false;
   sent: unknown[] = [];
   private handlers = new Map<string, (...args: unknown[]) => void>();
+
+  constructor(readonly runtimeId = "rt-fake") {}
 
   start(): void {
     this.started = true;
@@ -48,6 +51,28 @@ class FakeClient implements PoolRuntimeClient {
   }
   emitExit(meta: PiExitMeta): void {
     this.handlers.get("exit")?.(null, meta);
+  }
+}
+
+class RejectHandshakeClient extends FakeClient {
+  override async getState(): Promise<{ sessionId?: string }> {
+    throw new Error("handshake rejected");
+  }
+}
+
+class DeferredStopClient extends FakeClient {
+  private settleStop: (() => void) | null = null;
+  private readonly stopPromise = new Promise<void>((resolve) => {
+    this.settleStop = resolve;
+  });
+
+  override stop(): Promise<void> {
+    this.stopped = true;
+    return this.stopPromise;
+  }
+
+  resolveStop(): void {
+    this.settleStop?.();
   }
 }
 
@@ -110,6 +135,87 @@ describe("后台真实派生 host", () => {
     host.launch({ sessionId: "s1", workspaceId: "ws", origin: "child" });
     clients[0].emitExit({ runtimeId: "rt-fake", generation: 1, reason: "crash" } as PiExitMeta);
     expect(onExit).toHaveBeenCalledWith("s1", "crash");
+    expect(host.has("s1")).toBe(false);
+  });
+
+  it("握手拒绝会摘 runtime、停 client，并向 pool/tap/child 各通知一次 crash", async () => {
+    const client = new RejectHandshakeClient();
+    const onExit = vi.fn();
+    const tapExit = vi.fn();
+    const childExit = vi.fn();
+    const host = new PoolRuntimeHostImpl({
+      clientFactory: () => client,
+      resolveWorkspace: () => ({ cwd: "/ws", sessionDir: "/ws/.sessions" }),
+    });
+    host.bind({ onReady: vi.fn(), onEvent: vi.fn(), onExit });
+    host.observeRuntime("s1", { onExit: tapExit });
+    host.setChildExitSink(childExit);
+
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "child" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(host.has("s1")).toBe(false);
+    expect(client.stopped).toBe(true);
+    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(onExit).toHaveBeenCalledWith("s1", "crash");
+    expect(tapExit).toHaveBeenCalledTimes(1);
+    expect(tapExit).toHaveBeenCalledWith("crash");
+    expect(childExit).toHaveBeenCalledTimes(1);
+    expect(childExit).toHaveBeenCalledWith("s1", "crash");
+
+    client.emitExit({ runtimeId: client.runtimeId, generation: 1, reason: "crash" } as PiExitMeta);
+    expect(onExit).toHaveBeenCalledTimes(1);
+    expect(tapExit).toHaveBeenCalledTimes(1);
+    expect(childExit).toHaveBeenCalledTimes(1);
+  });
+
+  it("同会话替换等待旧 stop settlement，且只有最新 intent 能 spawn", async () => {
+    const clients: FakeClient[] = [];
+    const first = new DeferredStopClient("rt-old");
+    const host = new PoolRuntimeHostImpl({
+      clientFactory: () => {
+        const client = clients.length === 0 ? first : new FakeClient(`rt-${clients.length}`);
+        clients.push(client);
+        return client;
+      },
+      resolveWorkspace: () => ({ cwd: "/ws", sessionDir: "/ws/.sessions" }),
+    });
+    host.bind({ onReady: vi.fn(), onEvent: vi.fn(), onExit: vi.fn() });
+
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    expect(first.stopped).toBe(true);
+    expect(clients).toHaveLength(1);
+
+    first.resolveStop();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(clients).toHaveLength(2);
+    expect(clients[1].started).toBe(true);
+    expect(host.has("s1")).toBe(true);
+  });
+
+  it("替换等待期间 stop 会使 intent 失效，旧 stop 完成后不会复活", async () => {
+    const clients: FakeClient[] = [];
+    const first = new DeferredStopClient("rt-old");
+    const host = new PoolRuntimeHostImpl({
+      clientFactory: () => {
+        const client = clients.length === 0 ? first : new FakeClient("rt-new");
+        clients.push(client);
+        return client;
+      },
+      resolveWorkspace: () => ({ cwd: "/ws", sessionDir: "/ws/.sessions" }),
+    });
+    host.bind({ onReady: vi.fn(), onEvent: vi.fn(), onExit: vi.fn() });
+
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    host.stop("s1");
+    first.resolveStop();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(clients).toHaveLength(1);
     expect(host.has("s1")).toBe(false);
   });
 
@@ -235,6 +341,7 @@ describe("observeRuntime tap", () => {
     expect(exits).toEqual(["expected-stop"]);
     unobserve();
     host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
+    await new Promise((r) => setTimeout(r, 0));
     clients[1].emitEvent(AGENT_START);
     expect(events).toHaveLength(1); // 解除之后的事件不再进来
   });
@@ -251,5 +358,83 @@ describe("observeRuntime tap", () => {
     host.observeRuntime("s1", { onExit: (r) => exits.push(r) });
     host.launch({ sessionId: "s1", workspaceId: "ws", origin: "user" });
     expect(exits).toEqual(["crash"]);
+  });
+
+  it("stop 没有命中池或前台 runtime 时不伪造 expected-stop", () => {
+    const { host } = makeHost();
+    const exits: string[] = [];
+    host.observeRuntime("missing", { onExit: (reason) => exits.push(reason) });
+    host.stop("missing");
+    expect(exits).toEqual([]);
+  });
+});
+
+describe("child 生产崩溃接线", () => {
+  function makeIntegratedChild(idempotent: boolean) {
+    const clients: FakeClient[] = [];
+    const runtimeHost = new PoolRuntimeHostImpl({
+      clientFactory: () => {
+        const client = new FakeClient(`rt-${clients.length + 1}`);
+        clients.push(client);
+        return client;
+      },
+      resolveWorkspace: () => ({ cwd: "/ws", sessionDir: "/ws/.sessions" }),
+    });
+    const pool = new AgentPoolCore({ host: runtimeHost });
+    const child = new ChildAgentCore({
+      idFactory: () => "child-1",
+      host: {
+        launch: (req) =>
+          pool.requestSession({
+            sessionId: req.nodeId,
+            workspaceId: req.workspaceId,
+            origin: "child",
+          }),
+        stop: (nodeId) => pool.stopSession(nodeId),
+        deliver: async (nodeId, text) => runtimeHost.deliverConfirmed(nodeId, text),
+      },
+    });
+    runtimeHost.bind({
+      onReady: (sessionId, info) => pool.onRuntimeReady(sessionId, info, Date.now()),
+      onEvent: (envelope) => pool.observeEnvelope(envelope),
+      onExit: (sessionId, reason) => pool.handleExit(sessionId, reason, Date.now()),
+    });
+    runtimeHost.setChildExitSink((sessionId, reason) =>
+      child.onRuntimeExit(sessionId, reason, Date.now())
+    );
+    runtimeHost.setChildReadySink(async (sessionId) => {
+      const accepted = await runtimeHost.deliverConfirmed(sessionId, "goal");
+      if (accepted) child.onRuntimeReady(sessionId, Date.now());
+      return accepted;
+    });
+    const nodeId = child.createChild(
+      null,
+      childSpecSchema.parse({
+        goal: idempotent ? "safe-retry" : "side-effect",
+        workspaceId: "ws",
+        idempotent,
+        retryBudget: 1,
+      }),
+      0
+    ).nodeId;
+    return { child, clients, nodeId };
+  }
+
+  it("幂等 child 崩溃由 ChildAgentCore 预算内重启", async () => {
+    const { child, clients, nodeId } = makeIntegratedChild(true);
+    await vi.waitFor(() => expect(child.snapshot().nodes[0]?.status).toBe("running"));
+    clients[0].emitExit({ runtimeId: clients[0].runtimeId, generation: 1, reason: "crash" } as PiExitMeta);
+    expect(clients).toHaveLength(2);
+    await vi.waitFor(() => expect(child.snapshot().nodes[0]?.status).toBe("running"));
+    expect(child.snapshot().nodes.find((node) => node.nodeId === nodeId)?.status).toBe("running");
+    expect(child.snapshot().nodes.find((node) => node.nodeId === nodeId)?.retryCount).toBe(1);
+  });
+
+  it("非幂等 child 崩溃被阻断，池不会独立自动重启", async () => {
+    const { child, clients, nodeId } = makeIntegratedChild(false);
+    await vi.waitFor(() => expect(child.snapshot().nodes[0]?.status).toBe("running"));
+    clients[0].emitExit({ runtimeId: clients[0].runtimeId, generation: 1, reason: "crash" } as PiExitMeta);
+    expect(clients).toHaveLength(1);
+    expect(child.snapshot().nodes.find((node) => node.nodeId === nodeId)?.status).toBe("blocked");
   });
 });

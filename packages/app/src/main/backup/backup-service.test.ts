@@ -30,6 +30,7 @@ import {
   applyPendingRestore,
   createBackup,
   hasPendingRestore,
+  quarantinePendingRestore,
   stagePendingRestore,
   validateBackupAt,
 } from "./backup-service.js";
@@ -381,6 +382,16 @@ describe("损坏注入：每一层都要真的挡得住，且说得出原因", (
     expect(outcome.applied).toBe(false);
     expect(outcome.reason).toMatch(/已丢弃/);
     expect(fs.existsSync(pending)).toBe(false);
+  });
+
+  it("套用异常后的暂存区可隔离，后续启动不再永久重试", async () => {
+    const root = await backupOnce();
+    await stagePendingRestore(root, userDataDir);
+    const quarantined = await quarantinePendingRestore(userDataDir);
+    expect(quarantined).not.toBeNull();
+    expect(fs.existsSync(quarantined!)).toBe(true);
+    expect(await hasPendingRestore(userDataDir)).toBe(false);
+    expect((await applyPendingRestore(userDataDir)).applied).toBe(false);
   });
 });
 

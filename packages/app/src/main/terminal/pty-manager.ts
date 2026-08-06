@@ -30,7 +30,6 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 
-import type { IPty } from "node-pty";
 import type { TerminalEventPayload, TerminalProfile, TerminalTabMeta } from "@pibuddy/contract";
 
 import { TerminalRingBuffer } from "./ring-buffer.js";
@@ -40,9 +39,16 @@ import { planSpawn, wslShellProfile } from "./wsl.js";
 // 而不经 vite 的静态打包（原生 .node 不能被 bundle）。
 const requireNative = createRequire(import.meta.url);
 
-/** node-pty 的最小结构类型（只用到 spawn）。 */
-interface PtyLib {
-  spawn(file: string, args: string[] | string, options: PtySpawnOptions): IPty;
+/** node-pty 的最小结构类型；导出后单测可注入确定性的 fake PTY。 */
+export interface PtyProcess {
+  onData(listener: (data: string) => void): { dispose(): void };
+  onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void };
+  write(data: string | Buffer): void;
+  resize(cols: number, rows: number): void;
+  kill(): void;
+}
+export interface PtyLib {
+  spawn(file: string, args: string[] | string, options: PtySpawnOptions): PtyProcess;
 }
 interface PtySpawnOptions {
   name: string;
@@ -89,7 +95,7 @@ interface Session {
   shellId: string;
   title: string;
   generation: number;
-  pty: IPty | null;
+  pty: PtyProcess | null;
   ring: TerminalRingBuffer;
   running: boolean;
   exitCode: number | null;
@@ -113,6 +119,8 @@ export class PtyManager {
   private readonly sessions = new Map<string, Session>();
   private emitter: TerminalEmitter | null = null;
   private counter = 0;
+
+  constructor(private readonly injectedPtyLib: PtyLib | null = null) {}
 
   /** 注入下发通道（terminal-ipc 装配时给）。传 null 摘除（拆卸 / 单测）。 */
   setEmitter(emitter: TerminalEmitter | null): void {
@@ -202,7 +210,7 @@ export class PtyManager {
     // PTY 的 Windows cwd 换成主目录（ConPTY 对 UNC cwd 的兼容性不赌）；其余
     // shell 原样透传（R5.1）。
     const plan = planSpawn(shell, s.cwd);
-    const child = loadPty().spawn(plan.file, plan.args, {
+    const child = (this.injectedPtyLib ?? loadPty()).spawn(plan.file, plan.args, {
       name: "xterm-256color",
       cols: s.cols,
       rows: s.rows,
@@ -215,12 +223,14 @@ export class PtyManager {
     s.exitSignal = null;
 
     child.onData((chunk: string) => {
+      if (s.pty !== child) return;
       s.pending += chunk;
       if (s.pending.length >= FLUSH_THRESHOLD) this.flush(s);
       else this.schedule(s);
     });
 
     child.onExit(({ exitCode, signal }: { exitCode: number; signal?: number }) => {
+      if (s.pty !== child) return;
       this.flush(s); // 把退出前最后一段输出先送出去
       s.running = false;
       s.exitCode = exitCode ?? null;
@@ -258,22 +268,30 @@ export class PtyManager {
       pending: "",
       flushTimer: null,
     };
-    this.sessions.set(tabId, session);
-    this.spawnInto(session, shell);
-    return this.metaOf(session);
+    try {
+      this.spawnInto(session, shell);
+      this.sessions.set(tabId, session);
+      return this.metaOf(session);
+    } catch (error) {
+      this.killPty(session);
+      this.clearTimer(session);
+      session.pending = "";
+      this.sessions.delete(tabId);
+      throw error;
+    }
   }
 
   /** 写用户键入 / 粘贴的字节进 PTY 的 stdin。 */
-  input(tabId: string, data: string): boolean {
-    const s = this.sessions.get(tabId);
+  input(workspaceId: string, tabId: string, data: string): boolean {
+    const s = this.sessionFor(workspaceId, tabId);
     if (!s || !s.pty || !s.running) return false;
     s.pty.write(data);
     return true;
   }
 
   /** 调整 PTY 窗口尺寸。 */
-  resize(tabId: string, cols: number, rows: number): boolean {
-    const s = this.sessions.get(tabId);
+  resize(workspaceId: string, tabId: string, cols: number, rows: number): boolean {
+    const s = this.sessionFor(workspaceId, tabId);
     if (!s) return false;
     s.cols = cols;
     s.rows = rows;
@@ -288,16 +306,16 @@ export class PtyManager {
   }
 
   /** 清屏（清 ring buffer，序号不重置）。 */
-  clear(tabId: string): boolean {
-    const s = this.sessions.get(tabId);
+  clear(workspaceId: string, tabId: string): boolean {
+    const s = this.sessionFor(workspaceId, tabId);
     if (!s) return false;
     s.ring.clear();
     return true;
   }
 
   /** 重命名 tab。 */
-  rename(tabId: string, title: string): TerminalTabMeta | null {
-    const s = this.sessions.get(tabId);
+  rename(workspaceId: string, tabId: string, title: string): TerminalTabMeta | null {
+    const s = this.sessionFor(workspaceId, tabId);
     if (!s) return null;
     s.title = title;
     return this.metaOf(s);
@@ -309,8 +327,8 @@ export class PtyManager {
    * kill 会终止 PTY 及其下的整棵进程树（node-pty 关闭 ConPTY / 发信号给进程组），
    * 不留孤儿。
    */
-  kill(tabId: string): boolean {
-    const s = this.sessions.get(tabId);
+  kill(workspaceId: string, tabId: string): boolean {
+    const s = this.sessionFor(workspaceId, tabId);
     if (!s) return false;
     this.killPty(s);
     this.clearTimer(s);
@@ -318,21 +336,41 @@ export class PtyManager {
     return true;
   }
 
-  /** 重启：杀掉旧 PTY、代际 +1、换一份新 ring buffer、用同样的 shell 重新 spawn。 */
-  restart(tabId: string): TerminalTabMeta | null {
-    const s = this.sessions.get(tabId);
+  /** 重启：替换成功后才提交新代际；spawn 失败时保留原代际为 stopped tab。 */
+  restart(workspaceId: string, tabId: string): TerminalTabMeta | null {
+    const s = this.sessionFor(workspaceId, tabId);
     if (!s) return null;
+    const shell = this.resolveShell(s.shellId);
+    const replacement: Session = {
+      ...s,
+      generation: s.generation + 1,
+      pty: null,
+      ring: new TerminalRingBuffer(),
+      running: false,
+      exitCode: null,
+      exitSignal: null,
+      pending: "",
+      flushTimer: null,
+    };
+
     this.killPty(s);
     this.clearTimer(s);
     s.pending = "";
-    s.generation += 1;
-    s.ring = new TerminalRingBuffer();
-    this.spawnInto(s, this.resolveShell(s.shellId));
-    return this.metaOf(s);
+    try {
+      this.spawnInto(replacement, shell);
+    } catch (error) {
+      this.killPty(replacement);
+      this.clearTimer(replacement);
+      replacement.pending = "";
+      throw error;
+    }
+
+    this.sessions.set(tabId, replacement);
+    return this.metaOf(replacement);
   }
 
   /** 取一个 tab 的 ring buffer 快照，供 reload 后重连重建屏幕。 */
-  snapshot(tabId: string): {
+  snapshot(workspaceId: string, tabId: string): {
     found: boolean;
     generation: number;
     text: string;
@@ -341,7 +379,7 @@ export class PtyManager {
     exitCode: number | null;
     exitSignal: number | null;
   } {
-    const s = this.sessions.get(tabId);
+    const s = this.sessionFor(workspaceId, tabId);
     if (!s) {
       return { found: false, generation: 0, text: "", sequence: 0, running: false, exitCode: null, exitSignal: null };
     }
@@ -380,15 +418,23 @@ export class PtyManager {
 
   // ------------------------------------------------------------ 内部
 
+  /** 所有 tab-scoped 操作的唯一入口：tabId 命中后仍必须属于请求工作区。 */
+  private sessionFor(workspaceId: string, tabId: string): Session | null {
+    const s = this.sessions.get(tabId);
+    return s?.workspaceId === workspaceId ? s : null;
+  }
+
   private killPty(s: Session): void {
-    if (!s.pty) return;
+    const child = s.pty;
+    if (!child) return;
+    // 先摘身份再 kill，确保同步或延迟触发的旧 child 回调都被身份守卫挡下。
+    s.pty = null;
+    s.running = false;
     try {
-      s.pty.kill();
+      child.kill();
     } catch {
       /* 已退出 */
     }
-    s.pty = null;
-    s.running = false;
   }
 
   private clearTimer(s: Session): void {

@@ -338,7 +338,25 @@ export async function convertFile(request: ConvertRequest): Promise<PreviewResul
 
   let buf: Uint8Array;
   try {
-    buf = await fsp.readFile(request.inputPath);
+    const workerMaxInputBytes = 50 * 1024 * 1024;
+    if (!Number.isSafeInteger(request.sizeBytes) || request.sizeBytes < 0 || request.sizeBytes > workerMaxInputBytes) {
+      return emptyResult(kind, "too-large", request);
+    }
+    const handle = await fsp.open(request.inputPath, "r");
+    try {
+      const maxBytes = request.sizeBytes;
+      const bytes = Buffer.allocUnsafe(maxBytes + 1);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      if (offset > maxBytes) return emptyResult(kind, "too-large", request);
+      buf = bytes.subarray(0, offset);
+    } finally {
+      await handle.close();
+    }
   } catch {
     return emptyResult(kind, "corrupt", request);
   }

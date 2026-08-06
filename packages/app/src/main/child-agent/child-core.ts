@@ -54,15 +54,14 @@ export interface ChildLaunchRequest {
  *
  * 核心只决策「该起 / 该停 / 该重发哪个子」，具体怎么起（走后台池的
  * `requestSession(origin:"child")` + 真实进程派生、分配 worktree、发目标提示词）
- * 由实现方在 `child-orchestrator.ts` 里落地。方法**必须同步返回**：核心在调用
- * 之后立即更新自身状态，任何 await 都会在「已登记待起 / 尚未起」之间留一个查
- * 不到也清不掉的窗口（与池 host 同一约束）。
+ * 由实现方在 `child-orchestrator.ts` 里落地。launch/stop 必须同步返回；回答投递
+ * 则必须等待 runtime 的 RPC 确认，不能把「开始发送」当成「子已收到」。
  */
 export interface ChildHost {
   launch(req: ChildLaunchRequest): void;
   stop(nodeId: string): void;
-  /** 把一条父的回答 / 续发提示词转给子（结构化，不经自然语言拼接）。 */
-  deliver(nodeId: string, text: string): void;
+  /** 把父回答转给子；仅在同一代活跃 runtime 确认接受时返回 true。 */
+  deliver(nodeId: string, text: string): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------- 内部记录
@@ -187,10 +186,13 @@ export class ChildAgentCore {
 
   // -------------------------------------------------------------- 准入 / 限流
 
-  /** provider 当前在飞（running）子 Agent 数。 */
+  /** provider 当前在飞数；握手/首条目标确认中的 pending runtime 也占一个准入位。 */
   private inFlight(provider: string): number {
     let n = 0;
-    for (const r of this.nodes.values()) if (r.provider === provider && r.status === "running") n++;
+    for (const r of this.nodes.values()) {
+      if (r.provider !== provider) continue;
+      if (r.status === "running" || (r.status === "pending" && r.launched)) n++;
+    }
     return n;
   }
 
@@ -202,7 +204,7 @@ export class ChildAgentCore {
    */
   private admit(now: number): void {
     const pending = [...this.nodes.values()]
-      .filter((r) => r.status === "pending")
+      .filter((r) => r.status === "pending" && !r.launched)
       .sort((a, b) => a.createdAt - b.createdAt || a.nodeId.localeCompare(b.nodeId));
     for (const node of pending) {
       if (this.inFlight(node.provider) >= this.providerCap) continue;
@@ -211,7 +213,7 @@ export class ChildAgentCore {
   }
 
   private launchNode(node: NodeRecord, now: number): void {
-    node.status = "running";
+    // 首条目标提示词获 RPC acknowledgement 前保持 pending；launched 单独占住并发位。
     node.lastActivityAt = now;
     node.launched = true;
     this.host.launch({
@@ -305,15 +307,31 @@ export class ChildAgentCore {
 
   // -------------------------------------------------------------- 父回答
 
-  /** 父回答子的一条提问。清空提问、恢复运行、把回答经 host 转给子。 */
-  answer(nodeId: string, questionId: string, answer: string, now: number): void {
+  /** 父回答子的一条提问；只有 host 确认投递后才消费问题并恢复运行。 */
+  async answer(nodeId: string, questionId: string, answer: string, now: number): Promise<void> {
     const node = this.nodes.get(nodeId);
-    if (!node || node.status !== "waiting_answer") return;
+    if (!node || (node.status !== "waiting_answer" && node.status !== "blocked")) return;
     if (!node.question || node.question.id !== questionId) return;
+
+    let delivered = false;
+    try {
+      delivered = await this.host.deliver(nodeId, answer);
+    } catch {
+      delivered = false;
+    }
+    node.lastActivityAt = now;
+    if (!delivered) {
+      node.status = "blocked";
+      node.launched = false;
+      node.blockedReason = "回答投递失败：子运行时已断开或不可用，待处理问题已保留";
+      this.emit();
+      return;
+    }
+
     node.question = null;
     node.status = "running";
-    node.lastActivityAt = now;
-    this.host.deliver(nodeId, answer);
+    node.launched = true;
+    node.blockedReason = null;
     this.emit();
   }
 
@@ -332,10 +350,11 @@ export class ChildAgentCore {
 
   // -------------------------------------------------------------- 运行时回调
 
-  /** host 报告某子 runtime 就绪（拿到进程）。此处只记活动时间。 */
+  /** 首条目标提示词已被当前 runtime 确认接受，此时才从 pending 进入 running。 */
   onRuntimeReady(nodeId: string, now: number): void {
     const node = this.nodes.get(nodeId);
-    if (!node) return;
+    if (!node || node.status !== "pending" || !node.launched) return;
+    node.status = "running";
     node.lastActivityAt = now;
     this.emit();
   }
@@ -369,12 +388,21 @@ export class ChildAgentCore {
   onRuntimeExit(nodeId: string, reason: string, now: number): void {
     const node = this.nodes.get(nodeId);
     if (!node) return;
-    // 已收敛 / 已被取消 / 正等合并的节点，退出是预期内的，不触发重放。
+    // 已收敛 / 已被取消的节点，退出是预期内的，不触发重放。
     if (isTerminalChildStatus(node.status)) return;
-    if (node.status === "blocked" || node.status === "waiting_answer") return;
     if (reason === "expected-stop") return;
 
     node.lastActivityAt = now;
+    node.launched = false;
+    if (node.status === "waiting_answer") {
+      // 问题已经对父可见；断线后重放整段工作可能重复非幂等副作用。
+      node.status = "blocked";
+      node.blockedReason = "子运行时在等待回答时断开；问题已保留，未自动重放";
+      this.admit(now);
+      this.emit();
+      return;
+    }
+    if (node.status === "blocked") return;
     if (node.spec.idempotent && node.retryCount < node.spec.retryBudget) {
       // 幂等 + 预算内：自动重放（起一个新 runtime）。
       node.retryCount++;
@@ -436,6 +464,28 @@ export class ChildAgentCore {
     if (!node) return;
     for (const child of node.childIds) this.collectPostOrder(child, out);
     out.push(nodeId);
+  }
+
+  /** 能力卸载：停掉所有仍在运行的非终态节点，并阻止 pending 节点再被准入。 */
+  dispose(now: number): string[] {
+    const stopped: string[] = [];
+    let changed = false;
+    for (const node of this.nodes.values()) {
+      if (isTerminalChildStatus(node.status)) continue;
+      if (node.launched) {
+        this.host.stop(node.nodeId);
+        stopped.push(node.nodeId);
+        node.launched = false;
+      }
+      node.status = "cancelled";
+      node.lastActivityAt = now;
+      node.question = null;
+      node.pendingMerge = null;
+      node.blockedReason = null;
+      changed = true;
+    }
+    if (changed) this.emit();
+    return stopped;
   }
 
   // -------------------------------------------------------------- 周期性维护

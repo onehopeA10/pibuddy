@@ -6,26 +6,25 @@
  * 这个文件里没有一行 `utilityProcess.fork` / `BrowserWindow` / `dialog`。真正
  * 启停进程、弹原生框、推 IPC 的活儿都由注入的 `PoolRuntimeHost` 与 `onChange`
  * 回调承担（接线在 `pool.ts`）。理由与 `capability-registry.ts`、
- * `permission-engine.ts` 一致：并发不串台、崩溃预算、空闲回收、超时拒绝这四件
+ * `permission-engine.ts` 一致：并发不串台、重试所有权、空闲回收、超时拒绝这四件
  * 事**只有单测查得住**，而需要给 electron 打桩才能跑的判据最后都会变成没人跑
  * 的判据。把决策与副作用分开，多会话并发就能在一个纯函数环境里被真正制造出来。
  *
  * ## 它管什么、不管什么
  *
  * 管：每会话进程态（focused/background/warm/stopped/crashed）、列表任务态、
- * 资源上界与公平准入队列、空闲回收、崩溃预算与恢复、统一权限 inbox 的排队与
+ * 资源上界与公平准入队列、空闲回收、按 origin 分配崩溃重试所有权、权限 inbox 的排队与
  * 超时拒绝、按会话隔离的事件序号闸门（不串台的落点）、单调快照序号。
  *
  * 不管：怎么起 pi 进程（`PoolRuntimeHost.launch`）、权限最终怎么裁决
  * （既有 `decidePermission`，池只把待办排进 inbox、超时清掉，**绝不自动允许**）、
  * 快照怎么推到窗口（`onChange`）。
  *
- * ## child Agent 本批不做，但接口预留
+ * ## 生命周期所有权
  *
- * `requestSession` 带一个 `origin: "user" | "child"` 入参，`PoolRuntimeHost`
- * 是启停进程的唯一接缝——将来的 parent/child 编排只需以 `origin:"child"` 请求
- * 会话、并在 host 里落地子进程派生，池的准入/回收/崩溃预算对它们一视同仁。
- * 本批不实现任何 child 逻辑。
+ * `requestSession` 带显式 origin：用户会话由池拥有崩溃重试；child / task 会话
+ * 分别把重试安全交给 child 核心 / scheduler。`PoolRuntimeHost` 是启停进程的唯一
+ * 接缝，三类会话仍共享池的准入、回收与资源上界。
  */
 import type { AgentEvent } from "@pibuddy/pi-sdk";
 import {
@@ -74,12 +73,15 @@ export const DEFAULT_POOL_TIMING: PoolTiming = {
 
 // ---------------------------------------------------------------- host 接缝
 
+/** 会话的生命周期所有者；只有 user 会话由池通用崩溃预算自动重试。 */
+export type PoolSessionOrigin = "user" | "child" | "task";
+
 /** 一次会话准入的启动请求（host 据此真正派生 runtime）。 */
 export interface PoolLaunchRequest {
   sessionId: string;
   workspaceId: string | null;
-  /** 谁发起的：用户新建，还是 child 编排派生（本批只会是 "user"）。 */
-  origin: "user" | "child";
+  /** 谁拥有这次会话的重试决策。 */
+  origin: PoolSessionOrigin;
 }
 
 /**
@@ -131,7 +133,7 @@ interface SessionRecord {
   crashTimes: number[];
   lastActivityAt: number;
   queued: boolean;
-  origin: "user" | "child";
+  origin: PoolSessionOrigin;
   /** 本会话事件序号闸门的上一帧（不串台的落点，per (sessionId, generation)）。 */
   lastFrame: SequencedFrame | null;
   /** 入池顺序，用于公平（FIFO）准入。 */
@@ -188,9 +190,10 @@ export class AgentPoolCore {
   requestSession(input: {
     sessionId: string;
     workspaceId: string | null;
-    origin?: "user" | "child";
+    origin?: PoolSessionOrigin;
     focus?: boolean;
   }): void {
+    const origin = input.origin ?? "user";
     let record = this.sessions.get(input.sessionId);
     if (!record) {
       record = {
@@ -206,11 +209,21 @@ export class AgentPoolCore {
         crashTimes: [],
         lastActivityAt: 0,
         queued: true,
-        origin: input.origin ?? "user",
+        origin,
         lastFrame: null,
         seq: this.insertionSeq++,
       };
       this.sessions.set(input.sessionId, record);
+    } else {
+      if (record.workspaceId !== input.workspaceId || record.origin !== origin) {
+        throw new Error(
+          `POOL_SESSION_OWNERSHIP_MISMATCH: ${input.sessionId} belongs to workspace=${String(record.workspaceId)} origin=${record.origin}`
+        );
+      }
+      if (record.runState === "stopped" || record.runState === "crashed") {
+        record.runState = "background";
+        record.queued = true;
+      }
     }
     if (input.focus) {
       this.focusInternal(input.sessionId);
@@ -261,6 +274,11 @@ export class AgentPoolCore {
       };
       this.sessions.set(info.sessionId, record);
     } else {
+      if (record.workspaceId !== info.workspaceId || record.origin !== "user") {
+        throw new Error(
+          `POOL_SESSION_OWNERSHIP_MISMATCH: ${info.sessionId} belongs to workspace=${String(record.workspaceId)} origin=${record.origin}`
+        );
+      }
       record.runtimeId = info.runtimeId;
       record.generation = info.generation;
       record.queued = false;
@@ -277,8 +295,8 @@ export class AgentPoolCore {
   /**
    * host（supervisor 观测者）报告当前代际 runtime 退出。
    *
-   *   - `expected-stop` → 主动停止（用户停 / 换会话），置 stopped，不计崩溃预算；
-   *   - 其它 reason      → 走崩溃预算（`onCrash`）。
+   *   - `expected-stop` → 主动停止（用户停 / 换会话），置 stopped，不计崩溃；
+   *   - 其它 reason      → 由 `onCrash` 按 origin 分派重试所有权。
    */
   handleExit(sessionId: string, reason: string, now: number): void {
     const record = this.sessions.get(sessionId);
@@ -435,19 +453,24 @@ export class AgentPoolCore {
   // -------------------------------------------------------------- host 回调
 
   /** host 报告某会话的 runtime 已就绪（拿到 runtimeId 与代际）。 */
-  onRuntimeReady(sessionId: string, info: { runtimeId: string; generation: number }): void {
+  onRuntimeReady(
+    sessionId: string,
+    info: { runtimeId: string; generation: number },
+    now: number
+  ): void {
     const record = this.sessions.get(sessionId);
     if (!record) return;
     record.runtimeId = info.runtimeId;
     record.generation = info.generation;
+    record.lastActivityAt = now;
     // 新代际 = 会话事件闸门重置（上一代迟到事件不该被当成新事件）。
     record.lastFrame = null;
     this.emit();
   }
 
   /**
-   * host 报告某会话进程意外退出。崩溃预算：窗口内崩溃次数没超预算就自动恢复，
-   * 超了就放弃（置 crashed），等用户主动重启。
+   * host 报告某会话进程意外退出。user 会话按池预算恢复；child / task 只记
+   * crashed 并释放资源位，由各自所有者决定是否重试。
    */
   onCrash(sessionId: string, now: number): void {
     const record = this.sessions.get(sessionId);
@@ -458,10 +481,20 @@ export class AgentPoolCore {
     record.memoryMb = 0;
     record.lastFrame = null;
     this.inbox = this.inbox.filter((i) => i.sessionId !== sessionId);
+    if (record.origin !== "user") {
+      // ChildAgentCore / scheduler own retry safety for their sessions. The pool
+      // records the freed slot only; an approved retry returns via requestSession().
+      record.runState = "crashed";
+      record.queued = false;
+      this.admitQueued();
+      this.emit();
+      return;
+    }
     if (record.crashTimes.length > this.timing.crashBudget) {
       // 预算耗尽：不再自动重起。
       record.runState = "crashed";
       record.queued = false;
+      this.admitQueued();
     } else {
       // 预算内：自动恢复（起一个新代际的 runtime）。
       this.launch(record);

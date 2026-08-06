@@ -21,14 +21,17 @@ interface HostLog {
   delivered: Array<{ nodeId: string; text: string }>;
 }
 
-function makeCore(opts?: { cap?: number }) {
+function makeCore(opts?: { cap?: number; deliverResult?: boolean }) {
   const log: HostLog = { launched: [], stopped: [], delivered: [] };
   const core = new ChildAgentCore({
     providerConcurrencyCap: opts?.cap ?? 3,
     host: {
       launch: (req: ChildLaunchRequest) => log.launched.push(req.nodeId),
       stop: (nodeId: string) => log.stopped.push(nodeId),
-      deliver: (nodeId: string, text: string) => log.delivered.push({ nodeId, text }),
+      deliver: async (nodeId: string, text: string) => {
+        log.delivered.push({ nodeId, text });
+        return opts?.deliverResult ?? true;
+      },
     },
   });
   return { core, log };
@@ -43,12 +46,15 @@ function statusOf(core: ChildAgentCore, nodeId: string): string {
 }
 
 describe("child 编排：创建与拓扑", () => {
-  it("父子孙三层拓扑：parentId 串成一棵树，创建即 running（有位）", () => {
+  it("父子孙三层拓扑：parentId 串成一棵树，runtime 确认后进入 running", () => {
     const { core, log } = makeCore();
     const now = 1000;
     const p = core.createChild(null, spec({ goal: "parent" }), now).nodeId;
     const c = core.createChild(p, spec({ goal: "child" }), now).nodeId;
     const g = core.createChild(c, spec({ goal: "grand" }), now).nodeId;
+    core.onRuntimeReady(p, now);
+    core.onRuntimeReady(c, now);
+    core.onRuntimeReady(g, now);
 
     const snap = core.snapshot();
     expect(snap.nodes.map((n) => n.nodeId)).toEqual([p, c, g]);
@@ -109,6 +115,9 @@ describe("child 编排：cancel 向整棵子树传播（真父子时序）", () 
     const p = core.createChild(null, spec({ goal: "p" }), 0).nodeId;
     const c1 = core.createChild(p, spec({ goal: "c1" }), 0).nodeId;
     const c2 = core.createChild(p, spec({ goal: "c2" }), 0).nodeId;
+    core.onRuntimeReady(p, 0);
+    core.onRuntimeReady(c1, 0);
+    core.onRuntimeReady(c2, 0);
     core.cancel(c1, 1);
     expect(statusOf(core, c1)).toBe("cancelled");
     expect(statusOf(core, c2)).toBe("running");
@@ -120,6 +129,7 @@ describe("child 编排：非幂等工具不因断线自动重放（断线时序�
   it("非幂等子运行中断线 → blocked，不自动重放（launch 恰一次）", () => {
     const { core, log } = makeCore();
     const c = core.createChild(null, spec({ goal: "migrate-db", idempotent: false }), 0).nodeId;
+    core.onRuntimeReady(c, 0);
     expect(statusOf(core, c)).toBe("running");
     // 断线（崩溃）。
     core.onRuntimeExit(c, "crash", 100);
@@ -131,6 +141,31 @@ describe("child 编排：非幂等工具不因断线自动重放（断线时序�
     expect(core.snapshot().nodes[0].blockedReason).toContain("非幂等");
   });
 
+  it("等待回答时断线 → 保留问题并进入 disconnected blocked，不自动重放", () => {
+    const { core, log } = makeCore();
+    const c = core.createChild(
+      null,
+      spec({ goal: "confirm-side-effect", idempotent: false, retryBudget: 3 }),
+      0
+    ).nodeId;
+    core.ingestMessage(
+      c,
+      { type: "question", question: { id: "q1", prompt: "继续？", options: [], at: 1 } },
+      1
+    );
+
+    core.onRuntimeExit(c, "crash", 100);
+
+    const node = core.snapshot().nodes[0];
+    expect(node.status).toBe("blocked");
+    expect(node.question).toEqual({ id: "q1", prompt: "继续？", options: [], at: 1 });
+    expect(node.blockedReason).toContain("等待回答时断开");
+    expect(log.launched).toEqual([c]);
+
+    core.cancel(c, 101);
+    expect(log.stopped).toEqual([]);
+  });
+
   it("幂等子运行中断线 → 预算内自动重放（launch 两次），预算耗尽转 failed", () => {
     const { core, log } = makeCore();
     const c = core.createChild(
@@ -138,9 +173,12 @@ describe("child 编排：非幂等工具不因断线自动重放（断线时序�
       spec({ goal: "fetch-idempotent", idempotent: true, retryBudget: 1 }),
       0
     ).nodeId;
+    core.onRuntimeReady(c, 0);
     expect(log.launched).toEqual([c]);
     core.onRuntimeExit(c, "crash", 100);
-    // 预算内：重放，回到 running，launch 第二次。
+    // 预算内：重放并等待新 runtime 确认首条目标。
+    expect(statusOf(core, c)).toBe("pending");
+    core.onRuntimeReady(c, 101);
     expect(statusOf(core, c)).toBe("running");
     expect(log.launched).toEqual([c, c]);
     expect(core.snapshot().nodes[0].retryCount).toBe(1);
@@ -153,6 +191,7 @@ describe("child 编排：非幂等工具不因断线自动重放（断线时序�
   it("expected-stop（预期停止）永不触发重放，无论幂等与否", () => {
     const { core, log } = makeCore();
     const c = core.createChild(null, spec({ goal: "x", idempotent: true, retryBudget: 5 }), 0).nodeId;
+    core.onRuntimeReady(c, 0);
     core.onRuntimeExit(c, "expected-stop", 10);
     expect(statusOf(core, c)).toBe("running"); // 状态不变（预期停止由上层已处置）
     expect(log.launched).toEqual([c]);
@@ -160,7 +199,7 @@ describe("child 编排：非幂等工具不因断线自动重放（断线时序�
 });
 
 describe("child 编排：结构化消息（不解析自然语言）", () => {
-  it("progress / question / evidence / result 各自落到结构化字段", () => {
+  it("progress / question / evidence / result 各自落到结构化字段", async () => {
     const { core, log } = makeCore();
     const c = core.createChild(null, spec({ goal: "g" }), 0).nodeId;
 
@@ -175,7 +214,7 @@ describe("child 编排：结构化消息（不解析自然语言）", () => {
     core.ingestMessage(c, { type: "question", question: { id: "q1", prompt: "继续？", options: [], at: 3 } }, 3);
     expect(statusOf(core, c)).toBe("waiting_answer");
 
-    core.answer(c, "q1", "继续", 4);
+    await core.answer(c, "q1", "继续", 4);
     expect(statusOf(core, c)).toBe("running");
     expect(log.delivered).toEqual([{ nodeId: c, text: "继续" }]);
 
@@ -183,9 +222,31 @@ describe("child 编排：结构化消息（不解析自然语言）", () => {
     expect(statusOf(core, c)).toBe("succeeded");
   });
 
+  it("回答投递失败 → 保留问题并阻塞，不虚报 running", async () => {
+    const { core, log } = makeCore({ deliverResult: false });
+    const c = core.createChild(null, spec({ goal: "g" }), 0).nodeId;
+    core.ingestMessage(
+      c,
+      { type: "question", question: { id: "q1", prompt: "继续？", options: [], at: 1 } },
+      1
+    );
+
+    await core.answer(c, "q1", "继续", 2);
+
+    const node = core.snapshot().nodes[0];
+    expect(node.status).toBe("blocked");
+    expect(node.question?.id).toBe("q1");
+    expect(node.blockedReason).toContain("回答投递失败");
+    expect(log.delivered).toEqual([{ nodeId: c, text: "继续" }]);
+
+    core.cancel(c, 3);
+    expect(log.stopped).toEqual([]);
+  });
+
   it("非结构化 / 不合 schema 的上报被丢弃，不猜、不容错", () => {
     const { core } = makeCore();
     const c = core.createChild(null, spec({ goal: "g" }), 0).nodeId;
+    core.onRuntimeReady(c, 0);
     // 一段像日志的自然语言，不是结构化消息 → 丢弃，状态不动。
     expect(core.ingestMessage(c, "任务已完成，结果良好", 1)).toBe(false);
     expect(core.ingestMessage(c, { type: "done" }, 1)).toBe(false);
@@ -200,6 +261,8 @@ describe("child 编排：Provider 限流协调", () => {
     const a = core.createChild(null, { ...p, goal: "a" }, 0).nodeId;
     const b = core.createChild(null, { ...p, goal: "b" }, 0).nodeId;
     const d = core.createChild(null, { ...p, goal: "d" }, 0).nodeId;
+    core.onRuntimeReady(a, 0);
+    core.onRuntimeReady(b, 0);
     // cap=2：a、b running，d 因在飞满而 pending。对拍：去掉 inFlight>=cap 半句，
     // 三个会同时 running。
     expect([statusOf(core, a), statusOf(core, b), statusOf(core, d)]).toEqual([
@@ -212,6 +275,8 @@ describe("child 编排：Provider 限流协调", () => {
 
     // a 提问 → 让出在飞位 → d 被准入。
     core.ingestMessage(a, { type: "question", question: { id: "q", prompt: "?", options: [], at: 1 } }, 1);
+    expect(statusOf(core, d)).toBe("pending");
+    core.onRuntimeReady(d, 1);
     expect(statusOf(core, d)).toBe("running");
     expect(log.launched).toEqual([a, b, d]);
   });

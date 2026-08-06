@@ -156,6 +156,8 @@ export interface WorkflowRunnerOptions {
   now?: () => number;
   /** 内存里保留的运行数上界（活跃 + 历史）。 */
   maxRuns?: number;
+  /** Agent 节点硬超时；host 自身失灵时内核仍必须结算。 */
+  agentTimeoutMs?: number;
 }
 
 /** 运行进入终态即不再有后续转移。 */
@@ -169,6 +171,8 @@ export class WorkflowRunner {
   private readonly onSettled: ((run: WorkflowRun) => void) | null;
   private readonly now: () => number;
   private readonly maxRuns: number;
+  private readonly agentTimeoutMs: number;
+  private readonly stopWaiters = new Map<string, Set<() => void>>();
 
   /** 全部运行，按插入顺序（活跃 + 近期历史）。 */
   private runs: InternalRun[] = [];
@@ -181,6 +185,7 @@ export class WorkflowRunner {
     this.onSettled = options.onSettled ?? null;
     this.now = options.now ?? (() => Date.now());
     this.maxRuns = options.maxRuns ?? 50;
+    this.agentTimeoutMs = options.agentTimeoutMs ?? 5 * 60_000;
   }
 
   /**
@@ -250,6 +255,7 @@ export class WorkflowRunner {
     if (isTerminalRunState(internal.run.state)) return;
     internal.stopped = true;
     this.host.cancelRun?.(runId);
+    for (const resolve of this.stopWaiters.get(runId) ?? []) resolve();
   }
 
   activeRuns(): WorkflowRun[] {
@@ -364,13 +370,14 @@ export class WorkflowRunner {
         }
         case "agent": {
           try {
-            const result = await this.host.runAgent({
+            const request = {
               runId: run.id,
               nodeId,
               workspaceId: run.workspaceId,
               prompt: renderAgentPrompt(node.prompt, input),
               input,
-            });
+            };
+            const result = await this.runAgentBounded(request);
             output = result.output;
             failed = !result.ok;
             error = result.error ?? (result.ok ? null : "Agent 节点执行失败");
@@ -422,6 +429,32 @@ export class WorkflowRunner {
   }
 
   // -------------------------------------------------------------- 快照 / 落盘
+
+  private async runAgentBounded(request: WorkflowAgentRequest): Promise<WorkflowAgentResult> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopResolver: (() => void) | null = null;
+    const stopped = new Promise<WorkflowAgentResult>((resolve) => {
+      stopResolver = () => resolve({ ok: false, output: "", error: "Agent 节点已停止" });
+      const waiters = this.stopWaiters.get(request.runId) ?? new Set<() => void>();
+      waiters.add(stopResolver);
+      this.stopWaiters.set(request.runId, waiters);
+    });
+    const timedOut = new Promise<WorkflowAgentResult>((resolve) => {
+      timer = setTimeout(() => {
+        this.host.cancelRun?.(request.runId);
+        resolve({ ok: false, output: "", error: "Agent 节点执行超时" });
+      }, this.agentTimeoutMs);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([this.host.runAgent(request), stopped, timedOut]);
+    } finally {
+      if (timer) clearTimeout(timer);
+      const waiters = this.stopWaiters.get(request.runId);
+      if (stopResolver) waiters?.delete(stopResolver);
+      if (waiters?.size === 0) this.stopWaiters.delete(request.runId);
+    }
+  }
 
   private viewOf(internal: InternalRun): WorkflowRun {
     return {

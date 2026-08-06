@@ -10,8 +10,8 @@
  * 前台活跃会话仍走既有 `pi:start` → `PiSupervisor.launch(webContents,…)` 那条零
  * 回归的老路（推流到窗口、33ms 合批、扩展 UI 挂起表）。本 host 只管**后台**会话：
  * 它们没有对应窗口，事件不推给任何 webContents，而是直接喂进池内核（列表态 /
- * 未读 / 成本 / 崩溃预算）与——对 origin:"child" 的会话——child 编排的结构化消息
- * 汇聚点。两条路各起各的进程、各喂各的观测者，互不串台。
+ * 未读 / 成本 / 生命周期所有权）与——对 origin:"child" 的会话——child 编排的
+ * 结构化消息汇聚点。两条路各起各的进程、各喂各的观测者，互不串台。
  *
  * ## 为什么 client 工厂可注入
  *
@@ -39,7 +39,11 @@ import { buildPiSpawn, verifyRuntimeHandshake } from "../pi-launcher.js";
 import { resolveSessionDir } from "../sessions/session-dir.js";
 import { loadSettings } from "../settings.js";
 import { requireWorkspaceRoot } from "../workspace-registry.js";
-import type { PoolLaunchRequest, PoolRuntimeHost } from "./pool-core.js";
+import type {
+  PoolLaunchRequest,
+  PoolRuntimeHost,
+  PoolSessionOrigin,
+} from "./pool-core.js";
 
 /**
  * 一个真实后台 runtime 需要的最小 client 面（`PiRpcClient` 的子集）。
@@ -97,7 +101,13 @@ interface RuntimeRecord {
   client: PoolRuntimeClient;
   ctx: EnvelopeContext;
   sequence: number;
-  origin: "user" | "child";
+  origin: PoolSessionOrigin;
+  launchToken: number;
+}
+
+interface LaunchIntent {
+  token: number;
+  req: PoolLaunchRequest;
 }
 
 /** 池内核侧的回调（由 pool.ts 装配时接上，避免 host ↔ pool 的构造期循环）。 */
@@ -113,8 +123,11 @@ export interface PoolHostSink {
 /** 子 Agent 结构化事件汇聚（仅 origin:"child" 的会话；由 child 编排注册）。 */
 export type ChildEventSink = (sessionId: string, event: AgentEvent) => void;
 
-/** 子 runtime 就绪通知（仅 origin:"child"；child 编排据此下发目标提示词）。 */
-export type ChildReadySink = (sessionId: string) => void;
+/** 子 runtime 握手完成通知；返回 true 才表示首条目标提示词已被当前 runtime 接受。 */
+export type ChildReadySink = (sessionId: string) => Promise<boolean>;
+
+/** 子 runtime 退出通知（仅 origin:"child"；重试安全由 ChildAgentCore 决策）。 */
+export type ChildExitSink = (sessionId: string, reason: string) => void;
 
 /**
  * 前台 supervisor 的回退网关（由 **pi 域**在装配期注入，本文件不 import pi 域）。
@@ -167,10 +180,14 @@ export interface PoolRuntimeHostOptions {
  */
 export class PoolRuntimeHostImpl implements PoolRuntimeHost {
   private runtimes = new Map<string, RuntimeRecord>();
+  private launchIntents = new Map<string, LaunchIntent>();
+  private stopBarriers = new Map<string, Promise<void>>();
   private generationCounter = 0;
+  private launchTokenCounter = 0;
   private sink: PoolHostSink | null = null;
   private childEventSink: ChildEventSink | null = null;
   private childReadySink: ChildReadySink | null = null;
+  private childExitSink: ChildExitSink | null = null;
   private foreground: ForegroundGateway | null = null;
   private taps = new Map<string, RuntimeTap>();
   private readonly clientFactory: PoolRuntimeClientFactory;
@@ -196,6 +213,11 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
     this.childReadySink = sink;
   }
 
+  /** child 编排注册子 runtime 退出通知（重试安全只由 child 核心决定）。 */
+  setChildExitSink(sink: ChildExitSink | null): void {
+    this.childExitSink = sink;
+  }
+
   /** pi 域装配期注入前台回退网关（不装时行为与从前一字不差）。 */
   setForegroundGateway(gateway: ForegroundGateway | null): void {
     this.foreground = gateway;
@@ -215,29 +237,53 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
   }
 
   /**
-   * 派生一个后台 runtime。**同步返回**（与 host 契约一致）：spawn 之后的握手
-   * 走一个不阻塞的异步尾巴，握手拿到状态才回填 onReady。
+   * 派生一个后台 runtime。方法保持同步返回；同会话替换时，真正 spawn 会排在
+   * 旧 client.stop() settlement 之后。每次调用覆盖前一次 intent，避免陈旧替换
+   * 在 stop 完成后复活。
    */
   launch(req: PoolLaunchRequest): void {
-    // 已有则先停掉旧的（避免同 sessionId 双 runtime）。**只停池内 runtime**：
-    // 这里绝不能走带前台回退的 stop()——重新派生一个恰与前台同名的会话时，
-    // 回退会把用户正在看的 supervisor runtime 误杀掉。
-    this.stopPoolRuntime(req.sessionId);
+    const intent: LaunchIntent = { token: ++this.launchTokenCounter, req };
+    this.launchIntents.set(req.sessionId, intent);
+
+    let barrier = this.stopBarriers.get(req.sessionId);
+    const old = this.runtimes.get(req.sessionId);
+    if (old) {
+      this.runtimes.delete(req.sessionId);
+      barrier = this.stopClient(req.sessionId, old);
+      this.stopBarriers.set(req.sessionId, barrier);
+      log().info("agent_pool_runtime_replacing", {
+        sessionId: req.sessionId,
+        runtimeId: old.ctx.runtimeId,
+      });
+    }
+
+    if (barrier) {
+      void barrier.finally(() => {
+        if (this.stopBarriers.get(req.sessionId) === barrier) {
+          this.stopBarriers.delete(req.sessionId);
+        }
+        if (this.launchIntents.get(req.sessionId)?.token === intent.token) {
+          this.spawnIntent(intent);
+        }
+      });
+      return;
+    }
+
+    this.spawnIntent(intent);
+  }
+
+  private spawnIntent(intent: LaunchIntent): void {
+    const { req, token } = intent;
+    if (this.launchIntents.get(req.sessionId)?.token !== token) return;
 
     let cwd: string;
     let sessionDir: string;
     try {
       ({ cwd, sessionDir } = this.resolveWorkspace(req.workspaceId));
     } catch (err) {
-      log().warn("agent_pool_launch_resolve_failed", {
-        sessionId: req.sessionId,
+      this.failLaunch(intent, "agent_pool_launch_resolve_failed", err, {
         workspaceId: req.workspaceId,
-        detail: err instanceof Error ? err.message : String(err),
       });
-      // 起不来当成一次崩溃反馈给池：池的崩溃预算据此处置，不留一个卡在
-      // background 却没有进程的幽灵会话。
-      this.sink?.onExit(req.sessionId, "crash");
-      this.taps.get(req.sessionId)?.onExit?.("crash");
       return;
     }
 
@@ -252,12 +298,24 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
         generation,
       });
     } catch (err) {
-      log().warn("agent_pool_launch_spawn_failed", {
-        sessionId: req.sessionId,
-        detail: err instanceof Error ? err.message : String(err),
-      });
-      this.sink?.onExit(req.sessionId, "crash");
-      this.taps.get(req.sessionId)?.onExit?.("crash");
+      this.failLaunch(intent, "agent_pool_launch_spawn_failed", err);
+      return;
+    }
+
+    if (this.launchIntents.get(req.sessionId)?.token !== token) {
+      const stale: RuntimeRecord = {
+        client,
+        ctx: {
+          workspaceId: req.workspaceId ?? cwd,
+          sessionId: req.sessionId,
+          runtimeId: client.runtimeId,
+          generation,
+        },
+        sequence: 0,
+        origin: req.origin,
+        launchToken: token,
+      };
+      void this.stopClient(req.sessionId, stale);
       return;
     }
 
@@ -267,11 +325,17 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
       runtimeId: client.runtimeId,
       generation,
     };
-    const record: RuntimeRecord = { client, ctx, sequence: 0, origin: req.origin };
+    const record: RuntimeRecord = {
+      client,
+      ctx,
+      sequence: 0,
+      origin: req.origin,
+      launchToken: token,
+    };
     this.runtimes.set(req.sessionId, record);
 
     client.on("event", (e: AgentEvent) => {
-      if (this.runtimes.get(req.sessionId) !== record) return; // 陈旧代际
+      if (this.runtimes.get(req.sessionId) !== record) return;
       const env = wrapEnvelope(record.ctx, record.sequence++, e);
       this.sink?.onEvent(env);
       if (record.origin === "child") this.childEventSink?.(req.sessionId, e);
@@ -285,13 +349,19 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
       });
     });
     client.on("exit", (_code: number | null, meta: PiExitMeta) => {
-      if (this.runtimes.get(req.sessionId) !== record) return;
-      this.runtimes.delete(req.sessionId);
-      this.sink?.onExit(req.sessionId, meta.reason);
-      this.taps.get(req.sessionId)?.onExit?.(meta.reason);
+      this.finalizeRuntime(req.sessionId, record, meta.reason, false);
     });
 
-    client.start();
+    try {
+      client.start();
+    } catch (err) {
+      log().warn("agent_pool_launch_start_failed", {
+        sessionId: req.sessionId,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      this.finalizeRuntime(req.sessionId, record, "crash", true);
+      return;
+    }
     log().info("agent_pool_runtime_launched", {
       sessionId: req.sessionId,
       runtimeId: client.runtimeId,
@@ -299,31 +369,122 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
       origin: req.origin,
     });
 
-    // 握手：拿到真实 sessionId 只用于回填 runtime 索引与就绪回调；池的键仍是
-    // 不透明的 pool sessionId（req.sessionId），事件信封也一律用它，保证与
-    // requestSession 时登记的键一致。
     void (async () => {
       try {
         const state = await client.getState();
         if (this.runtimes.get(req.sessionId) !== record) return;
+        if (record.origin === "child" && this.childReadySink) {
+          let goalAccepted = false;
+          try {
+            goalAccepted = await this.childReadySink(req.sessionId);
+          } catch (err) {
+            log().warn("agent_pool_child_goal_delivery_failed", {
+              sessionId: req.sessionId,
+              detail: err instanceof Error ? err.message : String(err),
+            });
+          }
+          if (this.runtimes.get(req.sessionId) !== record) return;
+          if (!goalAccepted) {
+            log().warn("agent_pool_child_goal_not_acknowledged", {
+              sessionId: req.sessionId,
+              runtimeId: client.runtimeId,
+            });
+            this.finalizeRuntime(req.sessionId, record, "initial-goal-delivery-failed", true);
+            return;
+          }
+        }
+        if (this.runtimes.get(req.sessionId) !== record) return;
         this.sink?.onReady(req.sessionId, { runtimeId: client.runtimeId, generation });
-        if (record.origin === "child") this.childReadySink?.(req.sessionId);
         this.taps.get(req.sessionId)?.onReady?.(state.sessionId ?? null);
       } catch (err) {
+        if (this.runtimes.get(req.sessionId) !== record) return;
         log().warn("agent_pool_runtime_handshake_failed", {
           sessionId: req.sessionId,
           detail: err instanceof Error ? err.message : String(err),
         });
+        this.finalizeRuntime(req.sessionId, record, "crash", true);
       }
     })();
   }
 
+  private failLaunch(
+    intent: LaunchIntent,
+    event: string,
+    err: unknown,
+    extra: Record<string, unknown> = {}
+  ): void {
+    if (this.launchIntents.get(intent.req.sessionId)?.token !== intent.token) return;
+    this.launchIntents.delete(intent.req.sessionId);
+    log().warn(event, {
+      sessionId: intent.req.sessionId,
+      ...extra,
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    this.notifyExit(intent.req.sessionId, intent.req.origin, "crash");
+  }
+
+  private finalizeRuntime(
+    sessionId: string,
+    record: RuntimeRecord,
+    reason: string,
+    stopClient: boolean
+  ): boolean {
+    if (this.runtimes.get(sessionId) !== record) return false;
+    this.runtimes.delete(sessionId);
+    if (this.launchIntents.get(sessionId)?.token === record.launchToken) {
+      this.launchIntents.delete(sessionId);
+    }
+    if (stopClient) {
+      const barrier = this.stopClient(sessionId, record);
+      this.stopBarriers.set(sessionId, barrier);
+      void barrier.finally(() => {
+        if (this.stopBarriers.get(sessionId) === barrier) this.stopBarriers.delete(sessionId);
+      });
+    }
+    this.notifyExit(sessionId, record.origin, reason);
+    return true;
+  }
+
+  private notifyExit(sessionId: string, origin: PoolSessionOrigin, reason: string): void {
+    const tap = this.taps.get(sessionId);
+    const childSink = origin === "child" ? this.childExitSink : null;
+    this.sink?.onExit(sessionId, reason);
+    tap?.onExit?.(reason);
+    childSink?.(sessionId, reason);
+  }
+
+  private stopClient(sessionId: string, record: RuntimeRecord): Promise<void> {
+    let result: Promise<void> | void;
+    try {
+      result = record.client.stop();
+    } catch (err) {
+      log().warn("agent_pool_runtime_stop_failed", {
+        sessionId,
+        runtimeId: record.ctx.runtimeId,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      return Promise.resolve();
+    }
+    return Promise.resolve(result).catch((err) => {
+      log().warn("agent_pool_runtime_stop_failed", {
+        sessionId,
+        runtimeId: record.ctx.runtimeId,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
   /** 停掉某会话的**池内** runtime（有则停并返回 true；没有不碰任何回退）。 */
   private stopPoolRuntime(sessionId: string): boolean {
+    this.launchIntents.delete(sessionId);
     const record = this.runtimes.get(sessionId);
     if (!record) return false;
     this.runtimes.delete(sessionId);
-    void Promise.resolve(record.client.stop()).catch(() => undefined);
+    const barrier = this.stopClient(sessionId, record);
+    this.stopBarriers.set(sessionId, barrier);
+    void barrier.finally(() => {
+      if (this.stopBarriers.get(sessionId) === barrier) this.stopBarriers.delete(sessionId);
+    });
     log().info("agent_pool_runtime_stopped", { sessionId, runtimeId: record.ctx.runtimeId });
     return true;
   }
@@ -336,15 +497,17 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
    * 都不中 → 无事可做（会话本就没有进程），记一条日志便于诊断。
    */
   stop(sessionId: string): void {
-    if (!this.stopPoolRuntime(sessionId)) {
+    let stopped = this.stopPoolRuntime(sessionId);
+    if (!stopped) {
       if (this.foreground?.activeSessionId() === sessionId) {
         this.foreground.stop();
+        stopped = true;
         log().info("agent_pool_stop_foreground_fallback", { sessionId });
       } else {
         log().info("agent_pool_stop_no_runtime", { sessionId });
       }
     }
-    this.taps.get(sessionId)?.onExit?.("expected-stop");
+    if (stopped) this.taps.get(sessionId)?.onExit?.("expected-stop");
   }
 
   /**
@@ -374,6 +537,36 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
   }
 
   /**
+   * 向当前池 runtime 投递提示词并等待 RPC 确认。响应回来时 runtime 已被替换也算失败，
+   * 避免旧代际的迟到 success 把新代际状态误标为 running。
+   */
+  async deliverConfirmed(sessionId: string, text: string): Promise<boolean> {
+    const record = this.runtimes.get(sessionId);
+    if (!record) {
+      log().warn("agent_pool_confirmed_deliver_no_runtime", { sessionId });
+      return false;
+    }
+    try {
+      const response = await Promise.resolve(
+        record.client.send({ type: "prompt", message: text })
+      );
+      if (this.runtimes.get(sessionId) !== record) return false;
+      return (
+        typeof response === "object" &&
+        response !== null &&
+        (response as { success?: boolean }).success === true
+      );
+    } catch (err) {
+      log().warn("agent_pool_confirmed_deliver_failed", {
+        sessionId,
+        runtimeId: record.ctx.runtimeId,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  }
+
+  /**
    * 向某个**池派生**的后台会话发一条任意 RPC 命令并等响应（tasks 触发用它
    * 下发冻结的 set_model / 收尾拉 get_session_stats）。无活跃 runtime 时 reject。
    */
@@ -388,8 +581,10 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
     return this.runtimes.has(sessionId);
   }
 
-  /** 停掉全部后台 runtime（应用退出）。 */
+  /** 停掉全部后台 runtime，并取消尚在等待旧 stop 的替换 intent（应用退出）。 */
   stopAll(): void {
-    for (const id of [...this.runtimes.keys()]) this.stop(id);
+    const runtimeIds = [...this.runtimes.keys()];
+    this.launchIntents.clear();
+    for (const id of runtimeIds) this.stop(id);
   }
 }

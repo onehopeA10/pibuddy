@@ -33,9 +33,9 @@ export const HEALTH_CHECK_NAMES: HealthCheckName[] = [
 
 /** 三个探针。任一抛错或超时即该项失败。 */
 export interface HealthProbes {
-  dbMigration(): Promise<unknown>;
-  rendererReady(): Promise<unknown>;
-  piHandshake(): Promise<unknown>;
+  dbMigration(signal?: AbortSignal): Promise<unknown>;
+  rendererReady(signal?: AbortSignal): Promise<unknown>;
+  piHandshake(signal?: AbortSignal): Promise<unknown>;
 }
 
 export interface HealthCheckOptions {
@@ -52,15 +52,17 @@ export interface HealthCheckOptions {
  * 而主进程会被它拖着退不掉。
  */
 function withTimeout(
-  factory: () => Promise<unknown>,
+  factory: (signal: AbortSignal) => Promise<unknown>,
   timeoutMs: number
 ): Promise<{ ok: boolean; ms: number }> {
   const started = Date.now();
   return new Promise((resolve) => {
     let settled = false;
+    const controller = new AbortController();
     const timer = globalThis.setTimeout(() => {
       if (settled) return;
       settled = true;
+      controller.abort();
       resolve({ ok: false, ms: timeoutMs });
     }, timeoutMs);
 
@@ -73,7 +75,7 @@ function withTimeout(
 
     let started$: Promise<unknown>;
     try {
-      started$ = factory();
+      started$ = factory(controller.signal);
     } catch {
       // 同步抛错也算失败：探针里一个手滑的 undefined 解引用不该让
       // 整个健康检查以 unhandled rejection 的形式消失。
@@ -100,10 +102,10 @@ export async function runStartupHealthCheck(
   const timeoutMs = options.timeoutMs ?? HEALTH_CHECK_TIMEOUT_MS;
   const now = options.now ?? (() => Date.now());
 
-  const factories: Record<HealthCheckName, () => Promise<unknown>> = {
-    "db-migration": () => probes.dbMigration(),
-    "renderer-ready": () => probes.rendererReady(),
-    "pi-handshake": () => probes.piHandshake(),
+  const factories: Record<HealthCheckName, (signal: AbortSignal) => Promise<unknown>> = {
+    "db-migration": (signal) => probes.dbMigration(signal),
+    "renderer-ready": (signal) => probes.rendererReady(signal),
+    "pi-handshake": (signal) => probes.piHandshake(signal),
   };
 
   const settled = await Promise.all(

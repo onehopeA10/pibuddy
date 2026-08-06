@@ -60,6 +60,33 @@ describe("保存与读取", () => {
     raw.close();
     expect(row.user_version).toBe(MEMORY_DATA_SCHEMA_VERSION);
   });
+
+  it("FTS 写入失败时回滚主表写入", () => {
+    store.close();
+    const { DatabaseSync } = require("node:sqlite");
+    const raw = new DatabaseSync(dbFile);
+    raw.exec(`
+      DROP TABLE memories_fts;
+      CREATE TABLE memories_fts (
+        id TEXT NOT NULL,
+        content TEXT NOT NULL CHECK (length(content) < 0)
+      );
+    `);
+    raw.close();
+    store = new MemoryStore(dbFile);
+
+    expect(() =>
+      store.save({ workspaceId: WS_A, content: "事务回滚验证", type: "fact", scope: "workspace" })
+    ).toThrow();
+
+    store.close();
+    const check = new DatabaseSync(dbFile);
+    const memoryCount = check.prepare("SELECT count(*) c FROM memories").get() as { c: number };
+    const ftsCount = check.prepare("SELECT count(*) c FROM memories_fts").get() as { c: number };
+    check.close();
+    store = new MemoryStore(dbFile);
+    expect([memoryCount.c, ftsCount.c]).toEqual([0, 0]);
+  });
 });
 
 describe("FTS 检索", () => {

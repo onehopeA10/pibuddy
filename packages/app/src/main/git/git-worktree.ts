@@ -145,6 +145,7 @@ export async function worktreeCreate(
 
   const baseDir = path.join(app.getPath("userData"), "git-worktrees", workspaceId);
   const target = path.join(baseDir, name);
+  const targetExisted = fs.existsSync(target);
   fs.mkdirSync(baseDir, { recursive: true });
 
   const argv = ["worktree", "add"];
@@ -152,6 +153,14 @@ export async function worktreeCreate(
   else argv.push(target, branch);
 
   const res = await runGit(repoRoot, argv);
+  if (res.code !== 0 && !targetExisted) {
+    fs.rmSync(target, { recursive: true, force: true });
+    try {
+      fs.rmdirSync(baseDir);
+    } catch {
+      // 目录非空或已被并发使用时保留。
+    }
+  }
   return res.code === 0
     ? { ok: true, message: null }
     : { ok: false, message: firstLine(res.stderr) };

@@ -26,7 +26,18 @@ import type {
   PiUiExpireAllPayload,
   PiUiExpirePayload,
 } from "@contract";
-import { parseEnvelope, UI_EXPIRED_HINT } from "@contract";
+import {
+  MAX_PROMPT_ATTACHMENT_BYTES,
+  MAX_PROMPT_ATTACHMENT_TOKENS,
+  MAX_PROMPT_IMAGES,
+  MAX_PROMPT_IMAGE_BYTES,
+  MAX_PROMPT_TOTAL_ATTACHMENT_BYTES,
+  MAX_PROMPT_TOTAL_IMAGE_BYTES,
+  SUPPORTED_PROMPT_IMAGE_MIME_TYPES,
+  decodedBase64ByteLength,
+  parseEnvelope,
+  UI_EXPIRED_HINT,
+} from "@contract";
 import { retryStatusText, shouldSurfaceModelError } from "../model-error-advice";
 import { useSessionsStore } from "./sessions";
 // 静态引：workspace store 不反向依赖本文件，动态 import 只会让打包器
@@ -40,6 +51,7 @@ import {
 } from "./model-capability";
 import { registerSessionScopedReset, resetSessionScopedState } from "./session-scope";
 import { recordUnknownEvent, useExtensionUiStore } from "./extensionUi";
+import { clearMarkdownCache } from "../markdown";
 
 export interface ChatItem {
   key: number;
@@ -242,6 +254,10 @@ export interface SendOptions {
   mode?: SendMode;
 }
 
+interface PendingUserEcho {
+  echoed: boolean;
+}
+
 /**
  * 发送用户输入。**返回值是「RPC 是否已接受」，调用方据此决定是否清空输入区。**
  *
@@ -251,6 +267,42 @@ export interface SendOptions {
  *
  * 签名被 TASK-006/007/010/014/015 共同依赖，改写前先看那几条收敛条件。
  */
+const supportedPromptImageMimes = new Set<string>(SUPPORTED_PROMPT_IMAGE_MIME_TYPES);
+
+function promptResourceError(images: ImageContent[], attachments: AttachmentRef[]): string | null {
+  if (images.length > MAX_PROMPT_IMAGES) return `图片最多添加 ${MAX_PROMPT_IMAGES} 张`;
+
+  let totalImageBytes = 0;
+  for (const image of images) {
+    if (!supportedPromptImageMimes.has(image.mimeType)) return `不支持的图片格式：${image.mimeType}`;
+    const bytes = decodedBase64ByteLength(image.data);
+    if (!Number.isFinite(bytes)) return "图片数据格式无效";
+    if (bytes > MAX_PROMPT_IMAGE_BYTES) {
+      return `单张图片不能超过 ${MAX_PROMPT_IMAGE_BYTES / 1024 / 1024} MB`;
+    }
+    totalImageBytes += bytes;
+    if (totalImageBytes > MAX_PROMPT_TOTAL_IMAGE_BYTES) {
+      return `图片总大小不能超过 ${MAX_PROMPT_TOTAL_IMAGE_BYTES / 1024 / 1024} MB`;
+    }
+  }
+
+  const nonImages = attachments.filter((attachment) => attachment.kind !== "image");
+  if (nonImages.length > MAX_PROMPT_ATTACHMENT_TOKENS) {
+    return `文件最多添加 ${MAX_PROMPT_ATTACHMENT_TOKENS} 个`;
+  }
+  let totalAttachmentBytes = 0;
+  for (const attachment of nonImages) {
+    if (attachment.size > MAX_PROMPT_ATTACHMENT_BYTES) {
+      return `单个文件不能超过 ${MAX_PROMPT_ATTACHMENT_BYTES / 1024 / 1024} MB`;
+    }
+    totalAttachmentBytes += attachment.size;
+    if (totalAttachmentBytes > MAX_PROMPT_TOTAL_ATTACHMENT_BYTES) {
+      return `文件总大小不能超过 ${MAX_PROMPT_TOTAL_ATTACHMENT_BYTES / 1024 / 1024} MB`;
+    }
+  }
+  return null;
+}
+
 export async function send(opts: SendOptions = {}): Promise<boolean> {
   const store = useAppStore();
   const images = opts.images ?? [];
@@ -261,6 +313,12 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
     .filter((a) => a.kind !== "image")
     .map((a) => a.token);
   if (!message && images.length === 0 && attachmentTokens.length === 0) return false;
+
+  const resourceError = promptResourceError(images, attachments);
+  if (resourceError) {
+    store.notify("warning", resourceError);
+    return false;
+  }
 
   // 图片能力守卫（PROV-101）。位置必须在**任何 RPC 之前**：事后补救意味着
   // 图片已经发出去了 —— 上游报一次错、用户被计一次费，而界面上只能显示
@@ -284,6 +342,7 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
   if (wasStreaming && !opts.mode) {
     throw new Error("助手正在输出，请选择「立即插话」或「下一轮处理」");
   }
+  const echo = store.stageUserEcho();
   let resp: { success: boolean; error?: string };
   try {
     resp = await window.piBuddy.pi.prompt({
@@ -294,10 +353,12 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
       ...(wasStreaming ? STREAMING_BEHAVIOR[opts.mode!] : {}),
     });
   } catch (err) {
+    store.discardUserEcho(echo);
     store.notify("error", err instanceof Error ? err.message : "发送失败");
     return false;
   }
   if (!resp.success) {
+    store.discardUserEcho(echo);
     store.notify("error", resp.error ?? "发送失败");
     return false;
   }
@@ -310,17 +371,19 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
     );
   }
 
-  const content: (TextContent | ImageContent)[] = [];
-  if (message) content.push({ type: "text", text: message });
-  content.push(...images);
-  store.items.push({
-    key: ++keySeq,
-    message: {
-      role: "user",
-      content: content.length === 1 && content[0].type === "text" ? message : content,
-      timestamp: Date.now(),
-    } as UserMessage,
-  });
+  if (!echo.echoed) {
+    const content: (TextContent | ImageContent)[] = [];
+    if (message) content.push({ type: "text", text: message });
+    content.push(...images);
+    store.items.push({
+      key: ++keySeq,
+      message: {
+        role: "user",
+        content: content.length === 1 && content[0].type === "text" ? message : content,
+        timestamp: Date.now(),
+      } as UserMessage,
+    });
+  }
   store.activityTick++;
   return true;
 }
@@ -328,6 +391,31 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
 export const useAppStore = defineStore("app", () => {
   // ---------- 基础状态 ----------
   const booting = ref(true);
+  const pendingUserEchoes: PendingUserEcho[] = [];
+
+  function stageUserEcho(): PendingUserEcho {
+    const echo = { echoed: false };
+    pendingUserEchoes.push(echo);
+    if (pendingUserEchoes.length > 100) pendingUserEchoes.shift();
+    return echo;
+  }
+
+  function discardUserEcho(echo: PendingUserEcho): void {
+    const index = pendingUserEchoes.indexOf(echo);
+    if (index >= 0) pendingUserEchoes.splice(index, 1);
+  }
+
+  function consumeUserEcho(): boolean {
+    const echo = pendingUserEchoes.shift();
+    if (!echo) return false;
+    echo.echoed = true;
+    return true;
+  }
+
+  registerSessionScopedReset(() => {
+    pendingUserEchoes.length = 0;
+    clearMarkdownCache();
+  });
   // init() 之前的占位：形状与 schema 默认值一致（piRuntimeMode 有默认值，不能是裸 {}）
   // 首帧的占位值：真正的设置由 boot() 里的 settings.get() 覆盖。
   // 密钥的两个展示位从「未配置」开始，绝不臆造一个 configured:true。
@@ -420,6 +508,8 @@ export const useAppStore = defineStore("app", () => {
   const composers = reactive<Record<string, ComposerState>>({
     [PENDING_SCOPE_KEY]: emptyComposer(),
   });
+  /** 有效会话/工作区切换会递增，使尚未完成的附件操作即使 sessionId 尚未更新也失效。 */
+  const composerAttachmentEpoch = ref(0);
 
   function composer(sessionId: string = currentSessionId.value): ComposerState {
     let c = composers[sessionId];
@@ -428,6 +518,12 @@ export const useAppStore = defineStore("app", () => {
       composers[sessionId] = c;
     }
     return c;
+  }
+
+  /** main 在有效会话切换后全量撤销 token，因此所有 composer 的非图片附件都作废。 */
+  function clearEphemeralComposerAttachments(): void {
+    for (const state of Object.values(composers)) state.attachments = [];
+    composerAttachmentEpoch.value++;
   }
 
   /**
@@ -583,6 +679,7 @@ export const useAppStore = defineStore("app", () => {
     if (nextId !== workspaceId.value) {
       for (const key of Object.keys(composers)) delete composers[key];
       composers[PENDING_SCOPE_KEY] = emptyComposer();
+      composerAttachmentEpoch.value++;
     }
     workspaceId.value = nextId;
     displayPath.value = ref_?.displayPath ?? "";
@@ -736,19 +833,7 @@ export const useAppStore = defineStore("app", () => {
         } else if (msg.role === "user") {
           // steering / follow-up 被投递时会出现 user message_end；
           // 本地乐观插入过的不重复显示
-          const last = [...items.value]
-            .reverse()
-            .find((i) => i.message.role === "user");
-          const text =
-            typeof (msg as UserMessage).content === "string"
-              ? ((msg as UserMessage).content as string)
-              : textOf((msg as UserMessage).content as { type: string }[]);
-          const lastText = last
-            ? typeof (last.message as UserMessage).content === "string"
-              ? ((last.message as UserMessage).content as string)
-              : textOf((last.message as UserMessage).content as { type: string }[])
-            : "";
-          if (text !== lastText) pushMessage(msg);
+          if (!consumeUserEcho()) pushMessage(msg);
         }
         break;
       }
@@ -1134,6 +1219,10 @@ export const useAppStore = defineStore("app", () => {
   /** 解除全部推送订阅（窗口销毁 / 测试收尾）。 */
   function dispose(): void {
     while (unsubscribes.length) unsubscribes.pop()!();
+    if (refreshSessionsTimer) {
+      clearTimeout(refreshSessionsTimer);
+      refreshSessionsTimer = null;
+    }
     subscribed = false;
   }
 
@@ -1449,6 +1538,7 @@ export const useAppStore = defineStore("app", () => {
       notify("warning", "扩展取消了「开始新任务」，当前会话保持不变");
       return;
     }
+    clearEphemeralComposerAttachments();
     sessionLoadError.value = "";
     resetSessionScopedState();
     stats.value = null;
@@ -1483,6 +1573,33 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
+  let sessionPreviewEpoch = 0;
+  let sessionPreviewPromise: Promise<void> | null = null;
+
+  interface SessionPreviewRollback {
+    currentSessionBytes: number;
+    items: ChatItem[];
+    toolRuns: Record<string, ToolRun>;
+    keySeq: number;
+  }
+
+  function captureSessionPreviewRollback(): SessionPreviewRollback {
+    return {
+      currentSessionBytes: currentSessionBytes.value,
+      items: [...items.value],
+      toolRuns: { ...toolRuns },
+      keySeq,
+    };
+  }
+
+  function restoreSessionPreviewRollback(snapshot: SessionPreviewRollback): void {
+    currentSessionBytes.value = snapshot.currentSessionBytes;
+    items.value = snapshot.items;
+    for (const key of Object.keys(toolRuns)) delete toolRuns[key];
+    Object.assign(toolRuns, snapshot.toolRuns);
+    keySeq = snapshot.keySeq;
+  }
+
   /**
    * 打开一个历史会话。
    *
@@ -1504,37 +1621,56 @@ export const useAppStore = defineStore("app", () => {
     // 各自 5 秒的切换，最后落在哪个会话上取决于返回顺序。
     if (switchingSessionId.value !== null) return;
 
+    const rollback = captureSessionPreviewRollback();
+    const previewEpoch = ++sessionPreviewEpoch;
     switchingSessionId.value = target.sessionId;
     // 先于 currentSessionId 变化写入：ChatView 在 currentSessionId 一变就
     // 用它 reset 翻页游标，晚一步写就等于用 0 去 reset（= 直接判定已到文件头）。
     currentSessionBytes.value = target.sizeBytes ?? 0;
+    // 先用本地 JSONL 把内容铺出来（10ms 级），不等 pi。promise 被显式保留：
+    // switch 有结论后先作废 epoch、再等 preview 收尾，最后才 rollback / 权威重载。
+    const previewPromise = previewSessionLocally(
+      target.sessionId,
+      target.sizeBytes,
+      previewEpoch
+    );
+    sessionPreviewPromise = previewPromise;
     try {
-      // 先用本地 JSONL 把内容铺出来（10ms 级），不等 pi。
-      //
-      // pi 的 switch_session 要重建整个上下文，实测 1.7MB 会话 4679ms，且耗
-      // 时由文件大小决定而非消息数。那段等待消不掉，但没有理由让用户连"这
-      // 个会话里有什么"都看不到 —— 消息内容就在磁盘上，我们自己的索引按字节
-      // offset 读它只要几毫秒。pi 那边跑完之前只是不能发新消息而已。
-      void previewSessionLocally(target.sessionId, target.sizeBytes);
+      let resp: Awaited<ReturnType<typeof window.piBuddy.pi.switchSession>>;
+      try {
+        resp = await window.piBuddy.pi.switchSession(target.sessionId);
+      } catch (err) {
+        sessionPreviewEpoch++;
+        await previewPromise;
+        restoreSessionPreviewRollback(rollback);
+        throw err;
+      }
 
-      const resp = await window.piBuddy.pi.switchSession(target.sessionId);
+      // preview 可能已经落地，也可能还卡在 IPC。先失效再等待，确保它不可能在
+      // rollback 或 reloadMessages 之后以 detached promise 的身份反向覆盖界面。
+      sessionPreviewEpoch++;
+      await previewPromise;
       if (!resp.success) {
+        restoreSessionPreviewRollback(rollback);
         notify("error", resp.error ?? "打开会话失败");
         return;
       }
       // 同 new_session：扩展否决时保持原样，不能拿一个空会话冒充切换成功。
       if (resp.data?.cancelled === true) {
+        restoreSessionPreviewRollback(rollback);
         notify("warning", "扩展取消了会话切换，当前会话保持不变");
         return;
       }
-      // 切换已经生效：旧会话的消息、工具卡片、扩展弹窗全部作废。哪怕下面
-      // 拉消息失败，也绝不能把旧消息留在界面上冒充新会话的内容。
+      // 切换已经生效：主进程已撤销全部非图片附件 token；文本、内联图片与
+      // 本地队列仍按会话保留。旧会话的消息、工具卡片、扩展弹窗全部作废。
+      clearEphemeralComposerAttachments();
       resetSessionScopedState();
       await reloadMessages();
       await refreshState();
       void restoreDraft();
       void refreshStats();
     } finally {
+      if (sessionPreviewPromise === previewPromise) sessionPreviewPromise = null;
       switchingSessionId.value = null;
     }
   }
@@ -1549,7 +1685,11 @@ export const useAppStore = defineStore("app", () => {
    *
    * 失败一律吞掉：这是锦上添花的路径，出问题不该盖住真正的切换流程。
    */
-  async function previewSessionLocally(sessionId: string, sizeBytes?: number): Promise<void> {
+  async function previewSessionLocally(
+    sessionId: string,
+    sizeBytes: number | undefined,
+    epoch: number
+  ): Promise<void> {
     // sizeBytes 由调用方从已加载的会话行里带过来：列表本来就有这个字段，
     // 为它单开一条 IPC 通道既多一次往返，也多一处要校验的接口面。
     if (typeof sizeBytes !== "number" || sizeBytes <= 0) return;
@@ -1560,8 +1700,8 @@ export const useAppStore = defineStore("app", () => {
         beforeOffset: sizeBytes,
         limit: 60,
       });
-      // 期间用户可能又切走了：过期结果绝不能盖到新会话头上
-      if (switchingSessionId.value !== sessionId) return;
+      // switch 已有结论或期间目标失效：过期结果绝不能盖到 rollback / 权威数据上。
+      if (sessionPreviewEpoch !== epoch || switchingSessionId.value !== sessionId) return;
       const msgs = entriesToMessages(page.entries);
       if (msgs.length > 0) loadMessages(msgs);
     } catch {
@@ -1697,7 +1837,8 @@ export const useAppStore = defineStore("app", () => {
     if (!c) return;
     const draft: DraftRecord = {
       text: c.text,
-      attachments: c.attachments,
+      // 非图片附件是短期 capability token，不能跨重启伪装成可恢复的 durable draft。
+      attachments: [],
       queue: {
         steering: c.queue.filter((i) => i.mode === "steer").map((i) => i.text),
         followUp: c.queue.filter((i) => i.mode === "followUp").map((i) => i.text),
@@ -1735,9 +1876,8 @@ export const useAppStore = defineStore("app", () => {
     // getDraft 是一次 IPC 往返，期间用户完全可能又切走了。
     const c = composer(sessionId);
     c.text = draft.text ?? "";
-    // attachments 在契约里是 unknown[]（DraftRecord 不解释凭证的形状），
-    // 到这一层才收窄回 AttachmentRef[] —— 它就是 InputBar 存进去的那批。
-    c.attachments = (draft.attachments ?? []) as AttachmentRef[];
+    // 历史草稿可能仍含旧 token；main 重启或会话切换后它们已经失效，统一忽略。
+    c.attachments = [];
     c.queue = [
       ...(draft.queue?.steering ?? []).map((text) => ({
         id: ++localQueueSeq,
@@ -1849,6 +1989,7 @@ export const useAppStore = defineStore("app", () => {
     currentSessionId,
     runtimeScope,
     composers,
+    composerAttachmentEpoch,
     currentRuntimeId,
     currentGeneration,
     lastSequence,
@@ -1892,6 +2033,8 @@ export const useAppStore = defineStore("app", () => {
     retryKind,
     clearModelError,
     dispose,
+    stageUserEcho,
+    discardUserEcho,
     init,
     start,
     chooseWorkspace,

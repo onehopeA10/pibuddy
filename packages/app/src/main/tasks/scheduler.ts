@@ -23,7 +23,7 @@
  *     的孤儿 run 被 `recover()` 判死（crash recovery）。
  *   - **misfire policy**：错过的运行按用户选的 skip / run-once / catch-up 处理
  *     （`planMisfire`）。
- *   - **并发策略**：allow / forbid / queue，据 `hasActiveRun` 判断。
+ *   - **并发策略**：forbid 查 active run；queue 由稳定 pending FIFO 逐条准入。
  */
 import type {
   CapabilityGrant,
@@ -57,6 +57,9 @@ import { uncertainOutcomeFromError } from "../tool-recovery/tool-guards.js";
 
 /** run 的 lease 有效期：一次 run 正常远小于此；超过即视为孤儿（进程崩了没人收尾）。 */
 export const LEASE_TTL_MS = 5 * 60_000;
+
+/** 应用退出时仍在活动的 run 的唯一终结原因。 */
+export const APP_SHUTDOWN_RUN_REASON = "应用关闭：任务执行已中止，未安排重试";
 
 /**
  * 三类「重试必然再失败」的错误类别 —— 它们要的是**改配置**，不是再来一次。
@@ -191,7 +194,17 @@ function stopReasonFor(
 export class Scheduler {
   /** 本次进程运行的 lease 归属标识；重启即换一个，因此旧进程的 lease 天然过期。 */
   private readonly owner = `sched-${randomUUID().slice(0, 8)}`;
+  /** 每个 queue 任务只有一条 drain 链；所有入口都加入并等待同一条 FIFO。 */
+  private readonly queueDrains = new Map<string, Promise<void>>();
+  /** 活跃执行的取消所有权，按精确 runId 绑定。 */
+  private readonly activeRunControllers = new Map<string, AbortController>();
+  /** cancelRun 据此等待当前执行真正收口，再允许 FIFO 接续。 */
+  private readonly activeRunExecutions = new Map<string, Promise<void>>();
+  /** tick / runNow / retry 等调度入口的总屏障，关库前必须全部退出。 */
+  private readonly activeOperations = new Set<Promise<unknown>>();
   private timer: ReturnType<typeof setInterval> | null = null;
+  private shuttingDown = false;
+  private shutdownPromise: Promise<void> | null = null;
 
   constructor(private readonly deps: SchedulerDeps) {}
 
@@ -207,6 +220,53 @@ export class Scheduler {
     return this.deps.trigger ? this.deps.trigger() : agentRunTrigger();
   }
 
+  private trackOperation<T>(operation: Promise<T>): Promise<T> {
+    this.activeOperations.add(operation);
+    const release = (): void => {
+      this.activeOperations.delete(operation);
+    };
+    void operation.then(release, release);
+    return operation;
+  }
+
+  /** 给一条 run 建立唯一的 controller/execution 记录，供 cancelRun 精确中止并等待。 */
+  private async runExecution(task: TaskRecord, run: RunRecord, now: number): Promise<void> {
+    const existing = this.activeRunExecutions.get(run.id);
+    if (existing) return existing;
+    if (this.shuttingDown) return;
+
+    const controller = new AbortController();
+    this.activeRunControllers.set(run.id, controller);
+    let execution!: Promise<void>;
+    execution = this.executeRun(task, run, now, controller.signal).finally(() => {
+      if (this.activeRunControllers.get(run.id) === controller) {
+        this.activeRunControllers.delete(run.id);
+      }
+      if (this.activeRunExecutions.get(run.id) === execution) {
+        this.activeRunExecutions.delete(run.id);
+      }
+    });
+    this.activeRunExecutions.set(run.id, execution);
+    return execution;
+  }
+
+  /** 注入的 sleep 不必懂 AbortSignal；调度器仍保证取消不会卡在退避等待上。 */
+  private async sleepBeforeRetry(ms: number, signal: AbortSignal): Promise<void> {
+    const sleeper = this.deps.sleep?.(ms);
+    if (!sleeper || signal.aborted) return;
+
+    let releaseAbort!: () => void;
+    const aborted = new Promise<void>((resolve) => {
+      releaseAbort = resolve;
+    });
+    signal.addEventListener("abort", releaseAbort, { once: true });
+    try {
+      await Promise.race([sleeper, aborted]);
+    } finally {
+      signal.removeEventListener("abort", releaseAbort);
+    }
+  }
+
   // ------------------------------------------------------------ 生命周期
 
   /**
@@ -216,7 +276,7 @@ export class Scheduler {
    * 之内的精度）。单测不调 start，直接调 tick。
    */
   start(intervalMs = 30_000): void {
-    if (this.timer) return;
+    if (this.timer || this.shuttingDown) return;
     this.recover(this.now());
     void this.tick(this.now());
     this.timer = setInterval(() => {
@@ -232,6 +292,42 @@ export class Scheduler {
       clearInterval(this.timer);
       this.timer = null;
     }
+  }
+
+  /**
+   * 应用关闭屏障：同步封住所有准入，取消在飞执行，等调度入口全部退出后再终结 DB run。
+   */
+  shutdown(reason = APP_SHUTDOWN_RUN_REASON): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.shuttingDown = true;
+    this.stop();
+    for (const controller of this.activeRunControllers.values()) controller.abort(reason);
+
+    this.shutdownPromise = (async () => {
+      while (
+        this.activeRunExecutions.size > 0 ||
+        this.queueDrains.size > 0 ||
+        this.activeOperations.size > 0
+      ) {
+        await Promise.allSettled([
+          ...this.activeRunExecutions.values(),
+          ...this.queueDrains.values(),
+          ...this.activeOperations,
+        ]);
+      }
+      const finishedAt = this.now();
+      for (const run of this.deps.store.activeRuns()) {
+        this.deps.store.updateRun(run.id, {
+          status: "failed",
+          finishedAt,
+          error: reason,
+          appendLog: reason,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+        });
+      }
+    })();
+    return this.shutdownPromise;
   }
 
   // ------------------------------------------------------------ 崩溃恢复
@@ -252,12 +348,21 @@ export class Scheduler {
    *     维持判死，并把 resolver 给出的**确切理由**写进 run 的 error 文案 ——
    *     用户据它知道为什么这一条没被自动重试，而不是只看到一句「判定为失败」。
    *
-   * 没接账本时（`deps.recovery` 未注入）行为与从前一字不差：全部判死。
+   * 没接账本时，已经进入 running 的孤儿仍保守判死；从未派发的 queue pending
+   * 则保留原 run，并在恢复阶段重新校验权限后按 FIFO 准入。
    */
   recover(now: number): number {
+    if (this.shuttingDown) return 0;
     const stale = this.deps.store.staleRuns(now);
     const resumable: RunRecord[] = [];
+    const queuedTaskIds = new Set<string>();
     for (const run of stale) {
+      const task = this.deps.store.getTask(run.taskId);
+      // queue 的 pending run 尚未占 lease、也尚未派发；保留原 run，恢复后按 FIFO 准入。
+      if (run.status === "pending" && task?.concurrencyPolicy === "queue") {
+        queuedTaskIds.add(task.id);
+        continue;
+      }
       const verdict = this.dispatchVerdict(run);
       if (verdict?.retrySafe) {
         this.deps.store.updateRun(run.id, {
@@ -269,7 +374,8 @@ export class Scheduler {
           leaseOwner: null,
           leaseExpiresAt: null,
         });
-        resumable.push(run);
+        if (task?.concurrencyPolicy === "queue") queuedTaskIds.add(task.id);
+        else resumable.push(run);
         continue;
       }
       // 判死时给出确切理由。没有判据（未接账本 / 读账本失败）时也如实说明，
@@ -283,22 +389,65 @@ export class Scheduler {
         leaseOwner: null,
         leaseExpiresAt: null,
       });
+      if (task?.concurrencyPolicy === "queue") queuedTaskIds.add(task.id);
     }
     if (stale.length > 0) {
       this.log("tasks_recover", {
         count: stale.length,
-        resumed: resumable.length,
+        resumed: resumable.length + queuedTaskIds.size,
         owner: this.owner,
       });
     }
     // 可安全重跑的立刻重跑。不 await：recover 是 start() 的同步前置，而一次
     // 重跑要跑多久由触发实现决定，不该把启动挡在这里。
     for (const run of resumable) {
+      if (this.shuttingDown) break;
       const task = this.deps.store.getTask(run.taskId);
       const latest = this.deps.store.getRun(run.id);
-      if (task && latest) void this.executeRun(task, latest, now);
+      if (task && latest) void this.executeRecoveredRun(task, latest, now);
+    }
+    for (const taskId of queuedTaskIds) {
+      if (this.shuttingDown) break;
+      const task = this.deps.store.getTask(taskId);
+      if (task) {
+        void this.drainQueue(task, now, true).catch((err) => {
+          this.log("tasks_recover_queue_rejected", {
+            taskId,
+            error: this.errorMessage(err),
+          });
+        });
+      }
     }
     return stale.length;
+  }
+
+  /** recover 保持同步入口，但它派出的异步执行必须自行收口，不能形成 unhandled rejection。 */
+  private async executeRecoveredRun(task: TaskRecord, run: RunRecord, now: number): Promise<void> {
+    try {
+      await this.runExecution(task, run, now);
+    } catch (err) {
+      const latest = this.deps.store.getRun(run.id);
+      const error = `崩溃恢复自动重跑异常：${this.errorMessage(err)}`;
+      if (latest && (latest.status === "pending" || latest.status === "running")) {
+        this.deps.store.updateRun(run.id, {
+          status: "failed",
+          finishedAt: this.now(),
+          error,
+          appendLog: error,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+        });
+      }
+      this.log("tasks_recover_execute_rejected", {
+        runId: run.id,
+        taskId: task.id,
+        error: this.errorMessage(err),
+      });
+    }
+  }
+
+  private errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
   }
 
   /**
@@ -321,17 +470,34 @@ export class Scheduler {
 
   // ------------------------------------------------------------ 主循环
 
-  /** 推进到 now：处理所有 active 任务的到期 / 错过槽位。 */
+  /** 推进到 now：先接续 queue，再处理 active 任务的到期 / 错过槽位。 */
   async tick(now: number): Promise<void> {
+    if (this.shuttingDown) return;
+    return this.trackOperation(this.tickImpl(now));
+  }
+
+  private async tickImpl(now: number): Promise<void> {
+    await this.drainPendingQueues(now);
+    if (this.shuttingDown) return;
     for (const task of this.deps.store.activeDueTasks()) {
+      if (this.shuttingDown) return;
       if (task.nextRunAt === null) continue;
       if (task.nextRunAt > now) continue; // 还没到点
       await this.processTask(task, now);
+    }
+    if (!this.shuttingDown) await this.drainPendingQueues(now);
+  }
+
+  private async drainPendingQueues(now: number): Promise<void> {
+    for (const task of this.deps.store.queueTasksWithPendingRuns()) {
+      if (this.shuttingDown) return;
+      await this.drainQueue(task, now);
     }
   }
 
   /** 处理单个到期任务：按 misfire 策略展开槽位，逐个尝试。 */
   private async processTask(task: TaskRecord, now: number): Promise<void> {
+    if (this.shuttingDown) return;
     const anchor = task.nextRunAt;
     if (anchor === null) return;
 
@@ -349,9 +515,11 @@ export class Scheduler {
     }
 
     for (const slot of plan.dueSlots) {
+      if (this.shuttingDown) return;
       await this.fireSlot(task, slot, now);
     }
 
+    if (this.shuttingDown) return;
     // 无论跑没跑，都把 next 推进到 now 之后，绝不停在一个已经过去的槽位上。
     this.deps.store.updateTask(
       task.id,
@@ -365,6 +533,7 @@ export class Scheduler {
 
   /** 触发一个具体槽位的 run（scheduled）。 */
   private async fireSlot(task: TaskRecord, slot: number, now: number): Promise<void> {
+    if (this.shuttingDown) return;
     const key = `${task.id}#${slot}`;
 
     // 并发策略：forbid 时上一次没结束就跳过这一槽（记一条 skipped，标记该槽已处理）。
@@ -397,13 +566,66 @@ export class Scheduler {
       return;
     }
 
-    // queue 策略下若已有在跑的，就把这条留作 pending，等下一 tick 再执行。
-    if (task.concurrencyPolicy === "queue" && this.deps.store.hasActiveRun(task.id)) {
-      this.deps.store.updateRun(run.id, { appendLog: "并发策略 queue：排队等待上一次结束" });
+    if (task.concurrencyPolicy === "queue") {
+      const first = this.deps.store.nextPendingRun(task.id);
+      if (this.deps.store.hasRunningRun(task.id) || first?.id !== run.id) {
+        this.deps.store.updateRun(run.id, { appendLog: "并发策略 queue：按 FIFO 排队等待" });
+      }
+      await this.drainQueue(task, now);
       return;
     }
 
-    await this.executeRun(task, run, now);
+    await this.runExecution(task, run, now);
+  }
+
+  /** queue 每次只准入最早的 pending；所有调用者加入同一条 drain Promise。 */
+  private drainQueue(task: TaskRecord, now: number, recovered = false): Promise<void> {
+    if (task.concurrencyPolicy !== "queue" || this.shuttingDown) return Promise.resolve();
+    const active = this.queueDrains.get(task.id);
+    if (active) return active;
+
+    let draining!: Promise<void>;
+    draining = this.drainQueueLoop(task, now, recovered).finally(() => {
+      if (this.queueDrains.get(task.id) === draining) this.queueDrains.delete(task.id);
+    });
+    this.queueDrains.set(task.id, draining);
+    return draining;
+  }
+
+  private async drainQueueLoop(task: TaskRecord, now: number, recovered: boolean): Promise<void> {
+    while (true) {
+      if (this.shuttingDown) return;
+      const pending = this.deps.store.nextPendingRun(task.id);
+      if (!pending) return;
+
+      // 排队期间授权可能被撤销；真正准入时重查，不能用创建 run 时的旧判定绕过权限。
+      const grants = this.deps.workspaceGrants(task.workspaceId);
+      const perm = evaluateScheduledPermissions(task.requiredPermissions, task.workspaceId, grants);
+      if (!perm.allowed) {
+        const reason = `等待 owner 授权：当前工作区尚未预授权 ${perm.missing.join("、")}`;
+        this.deps.store.updateRun(pending.id, {
+          status: "failed",
+          finishedAt: this.now(),
+          error: reason,
+          appendLog: `${reason}（queue 准入时重新校验）`,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+        });
+        this.log("tasks_run_blocked", {
+          runId: pending.id,
+          taskId: task.id,
+          missing: perm.missing,
+        });
+        continue;
+      }
+
+      // 数据库条件更新同时检查 FIFO 首项与 running，不依赖单进程内存锁保证唯一准入。
+      const claimed = this.deps.store.claimNextPendingRun(task.id);
+      if (!claimed) return;
+      if (this.shuttingDown) return;
+      if (recovered) await this.executeRecoveredRun(task, claimed, now);
+      else await this.runExecution(task, claimed, now);
+    }
   }
 
   /**
@@ -428,7 +650,12 @@ export class Scheduler {
    *     已经产出过 assistant 消息 / 产物）—— 已经吐过字之后再重试，用户看到的是
    *     同一段话被说了两遍。
    */
-  private async executeRun(task: TaskRecord, run0: RunRecord, now: number): Promise<void> {
+  private async executeRun(
+    task: TaskRecord,
+    run0: RunRecord,
+    now: number,
+    signal: AbortSignal
+  ): Promise<void> {
     let run = run0;
     // 本次执行允许的尝试次数（自动重试）。run 的 attempt 从它自己的初始值起算——
     // 手动 retryRun 建的 run 初始 attempt 已是 prev+1，不能被内部循环重置回 1。
@@ -440,6 +667,14 @@ export class Scheduler {
     let retryDelayMs = task.failurePolicy.backoffMs;
 
     for (let tries = 1; tries <= maxTries; tries++) {
+      if (signal.aborted || this.shuttingDown) return;
+      const latestBeforeAttempt = this.deps.store.getRun(run.id);
+      if (!latestBeforeAttempt) return;
+      if (latestBeforeAttempt.status === "cancelled") {
+        this.log("tasks_run_cancelled_before_retry", { runId: run.id, attempt });
+        return;
+      }
+      run = latestBeforeAttempt;
       const startedAt = this.now();
       this.deps.store.updateRun(run.id, {
         status: "running",
@@ -465,6 +700,7 @@ export class Scheduler {
             runId: run.id,
             taskId: task.id,
             workspaceId: task.workspaceId,
+            signal,
             input: run.input,
             timeoutMs: task.timeoutMs,
             budgetUsd: task.budgetUsd,
@@ -483,6 +719,9 @@ export class Scheduler {
           note: uncertain ? "结算事实未落地：这次执行的结果不确定，不自动重试" : "触发实现抛错",
         };
       }
+
+      // shutdown/cancel 的 abort 是终结信号，不得被折成一次普通失败或重试。
+      if (signal.aborted || this.shuttingDown) return;
 
       // 执行期间被取消？（cancelRun 会把状态改成 cancelled）——尊重它，不覆盖。
       const latest = this.deps.store.getRun(run.id);
@@ -551,7 +790,7 @@ export class Scheduler {
       }
       attempt++;
       run = this.deps.store.requireRun(run.id);
-      await this.deps.sleep?.(retryDelayMs);
+      await this.sleepBeforeRetry(retryDelayMs, signal);
     }
   }
 
@@ -661,6 +900,12 @@ export class Scheduler {
    * 权限判定照样走：无预授权的危险任务，run-now 也只会被登记为等待授权。
    */
   async runNow(task: TaskRecord): Promise<RunRecord | null> {
+    if (this.shuttingDown) return null;
+    return this.trackOperation(this.runNowImpl(task));
+  }
+
+  private async runNowImpl(task: TaskRecord): Promise<RunRecord | null> {
+    if (this.shuttingDown) return null;
     const now = this.now();
     const key = `${task.id}#run-now#${now}#${randomUUID().slice(0, 6)}`;
 
@@ -682,16 +927,23 @@ export class Scheduler {
       now,
     });
     if (!run) return null;
-    await this.executeRun(task, run, now);
+    if (this.shuttingDown) return this.deps.store.getRun(run.id);
+    if (task.concurrencyPolicy === "queue") await this.drainQueue(task, now);
+    else await this.runExecution(task, run, now);
     return this.deps.store.getRun(run.id);
   }
 
   /** 取消一条 run（pending / running）。已终结的不动。 */
-  cancelRun(runId: string): RunRecord | null {
+  async cancelRun(runId: string): Promise<RunRecord | null> {
+    if (this.shuttingDown) return this.deps.store.getRun(runId);
+    return this.trackOperation(this.cancelRunImpl(runId));
+  }
+
+  private async cancelRunImpl(runId: string): Promise<RunRecord | null> {
     const run = this.deps.store.getRun(runId);
     if (!run) return null;
     if (run.status !== "pending" && run.status !== "running") return run;
-    return this.deps.store.updateRun(runId, {
+    const cancelled = this.deps.store.updateRun(runId, {
       status: "cancelled",
       finishedAt: this.now(),
       error: "已取消",
@@ -699,13 +951,44 @@ export class Scheduler {
       leaseOwner: null,
       leaseExpiresAt: null,
     });
+    const controller = this.activeRunControllers.get(runId);
+    const execution = this.activeRunExecutions.get(runId);
+    controller?.abort("task run cancelled");
+    if (execution) {
+      try {
+        await execution;
+      } catch (err) {
+        this.log("tasks_cancel_execution_rejected", {
+          runId,
+          error: this.errorMessage(err),
+        });
+      }
+    }
+
+    const task = this.deps.store.getTask(run.taskId);
+    if (task && !this.shuttingDown) {
+      void this.drainQueue(task, this.now()).catch((err) => {
+        this.log("tasks_cancel_queue_rejected", {
+          runId,
+          taskId: task.id,
+          error: this.errorMessage(err),
+        });
+      });
+    }
+    return cancelled;
   }
 
   /**
-   * 重试一条已终结的 run：建一条**新** run（新 idempotency key、attempt+1），
-   * 立即执行。这是一次显式的、用户知情的重来，因此不受原槽位去重约束。
+   * 重试一条已终结的 run：建一条**新** run（新 idempotency key、attempt+1）。
+   * queue 任务加入同一 FIFO；其余策略立即执行。这是用户知情的重来，不受原槽位去重。
    */
   async retryRun(runId: string): Promise<RunRecord | null> {
+    if (this.shuttingDown) return null;
+    return this.trackOperation(this.retryRunImpl(runId));
+  }
+
+  private async retryRunImpl(runId: string): Promise<RunRecord | null> {
+    if (this.shuttingDown) return null;
     const prev = this.deps.store.getRun(runId);
     if (!prev) return null;
     const task = this.deps.store.getTask(prev.taskId);
@@ -732,7 +1015,9 @@ export class Scheduler {
       now,
     });
     if (!run) return null;
-    await this.executeRun(task, run, now);
+    if (this.shuttingDown) return this.deps.store.getRun(run.id);
+    if (task.concurrencyPolicy === "queue") await this.drainQueue(task, now);
+    else await this.runExecution(task, run, now);
     return this.deps.store.getRun(run.id);
   }
 }

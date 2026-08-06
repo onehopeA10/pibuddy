@@ -84,7 +84,8 @@ md.renderer.rules.image = (tokens, idx, options, env, self) => {
   const token = tokens[idx];
   const src = token.attrGet("src") ?? "";
   const scheme = schemeOf(src);
-  if (scheme === null || !IMAGE_SRC_ALLOWLIST.includes(scheme)) {
+  const safeDataImage = /^data:image\/(?:png|jpeg|gif|webp);base64,/i.test(src);
+  if (scheme === null || !IMAGE_SRC_ALLOWLIST.includes(scheme) || (scheme === "data:" && !safeDataImage)) {
     const i = token.attrIndex("src");
     if (i >= 0) token.attrs?.splice(i, 1);
   }
@@ -109,6 +110,17 @@ export function truncateToolOutput(text: string): string {
 // 其余块与历史消息全部命中缓存，避免每次组件重渲染都重新解析 markdown
 const cache = new Map<string, string>();
 const MAX_CACHE = 300;
+const MAX_CACHE_BYTES = 4 * 1024 * 1024;
+let cacheBytes = 0;
+
+function entryBytes(key: string, html: string): number {
+  return new TextEncoder().encode(key).byteLength + new TextEncoder().encode(html).byteLength;
+}
+
+export function clearMarkdownCache(): void {
+  cache.clear();
+  cacheBytes = 0;
+}
 
 export function renderMarkdown(text: string): string {
   const key = text ?? "";
@@ -116,8 +128,13 @@ export function renderMarkdown(text: string): string {
   if (hit !== undefined) return hit;
   const html = md.render(key);
   cache.set(key, html);
-  if (cache.size > MAX_CACHE) {
-    cache.delete(cache.keys().next().value as string);
+  cacheBytes += entryBytes(key, html);
+  while (cache.size > MAX_CACHE || cacheBytes > MAX_CACHE_BYTES) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    const oldHtml = cache.get(oldest) ?? "";
+    cache.delete(oldest);
+    cacheBytes -= entryBytes(oldest, oldHtml);
   }
   return html;
 }

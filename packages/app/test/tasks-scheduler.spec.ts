@@ -54,6 +54,7 @@ function makeScheduler(clock: InstanceType<typeof ManualClock>, opts: {
   trigger?: AgentRunTrigger;
   grants?: CapabilityGrant[];
   sleep?: (ms: number) => Promise<void>;
+  log?: (event: string, fields: Record<string, unknown>) => void;
 } = {}) {
   return new Scheduler({
     store,
@@ -61,6 +62,7 @@ function makeScheduler(clock: InstanceType<typeof ManualClock>, opts: {
     trigger: () => opts.trigger ?? okTrigger,
     workspaceGrants: () => opts.grants ?? [],
     ...(opts.sleep ? { sleep: opts.sleep } : {}),
+    ...(opts.log ? { log: opts.log } : {}),
   });
 }
 
@@ -135,6 +137,140 @@ describe("并发策略", () => {
     expect(run?.status).toBe("skipped");
     expect(run?.error).toContain("并发被禁止");
   });
+
+  it("queue：第一条不自阻塞，第二条等待后按 FIFO 自动接续", async () => {
+    const slot = Date.UTC(2026, 5, 1, 1, 0, 0);
+    const now = slot + 5000;
+    const clock = new ManualClock(now);
+    const t = store.createTask({ ...baseTask, concurrencyPolicy: "queue" }, now, slot);
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const order: string[] = [];
+    const trigger: AgentRunTrigger = {
+      async trigger(ctx) {
+        order.push(ctx.runId);
+        if (order.length === 1) await firstGate;
+        return {
+          status: "succeeded", sessionId: null, artifactIds: [], costUsd: null,
+          error: null, note: "queue ok",
+        };
+      },
+    };
+    const sched = makeScheduler(clock, { trigger });
+    const ticking = sched.tick(now);
+
+    await vi.waitFor(() => expect(order).toHaveLength(1));
+    const first = store.listRuns(t.id).find((r) => r.scheduledFor === slot)!;
+    expect(store.getRun(first.id)?.status).toBe("running");
+
+    // 在第一条仍占用 queue 时制造下一槽；走真实 fireSlot，断言它只排队不抢跑。
+    const internal = sched as unknown as {
+      fireSlot(task: typeof t, scheduledFor: number, firedAt: number): Promise<void>;
+    };
+    const secondSlot = slot + 60_000;
+    const firingSecond = internal.fireSlot(t, secondSlot, now);
+    await vi.waitFor(() => {
+      expect(store.listRuns(t.id).some((r) => r.scheduledFor === secondSlot)).toBe(true);
+    });
+    const second = store.listRuns(t.id).find((r) => r.scheduledFor === secondSlot)!;
+    expect(store.getRun(second.id)?.status).toBe("pending");
+    expect(store.getRun(second.id)?.log.join(" ")).toContain("FIFO");
+    expect(order).toEqual([first.id]);
+
+    releaseFirst();
+    await Promise.all([ticking, firingSecond]);
+
+    expect(order).toEqual([first.id, second.id]);
+    expect(store.getRun(first.id)?.status).toBe("succeeded");
+    expect(store.getRun(second.id)?.status).toBe("succeeded");
+  });
+
+  it("queue：取消活跃 run 会 abort，执行收口后下一条 FIFO 才开始", async () => {
+    const now = Date.now();
+    const clock = new ManualClock(now);
+    const t = store.createTask({ ...baseTask, concurrencyPolicy: "queue" }, now, null);
+    const order: string[] = [];
+    const aborted: string[] = [];
+    const trigger: AgentRunTrigger = {
+      async trigger(ctx) {
+        order.push(ctx.runId);
+        if (order.length === 1) {
+          await new Promise<void>((resolve) => {
+            ctx.signal.addEventListener(
+              "abort",
+              () => {
+                aborted.push(ctx.runId);
+                resolve();
+              },
+              { once: true }
+            );
+          });
+        }
+        return {
+          status: "succeeded", sessionId: null, artifactIds: [], costUsd: null,
+          error: null, note: "queue cancellation probe",
+        };
+      },
+    };
+    const sched = makeScheduler(clock, { trigger });
+
+    const firstCall = sched.runNow(t);
+    await vi.waitFor(() => expect(order).toHaveLength(1));
+    const first = store.listRuns(t.id)[0]!;
+    const secondCall = sched.runNow(t);
+    await vi.waitFor(() => expect(store.listRuns(t.id)).toHaveLength(2));
+    const second = store.listRuns(t.id).find((r) => r.id !== first.id)!;
+    expect(second.status).toBe("pending");
+
+    const cancelled = await sched.cancelRun(first.id);
+    expect(cancelled?.status).toBe("cancelled");
+    await vi.waitFor(() => expect(order).toEqual([first.id, second.id]));
+    await Promise.all([firstCall, secondCall]);
+
+    expect(aborted).toEqual([first.id]);
+    expect(store.getRun(first.id)?.status).toBe("cancelled");
+    expect(store.getRun(second.id)?.status).toBe("succeeded");
+  });
+
+  it("queue：runNow 与 retryRun 都入同一 FIFO，retry 不能越过先到的 runNow", async () => {
+    const now = Date.now();
+    const t = store.createTask({ ...baseTask, concurrencyPolicy: "queue" }, now, null);
+    const previous = store.createRun({
+      taskId: t.id, workspaceId: "ws1", scheduledFor: now - 1, idempotencyKey: "previous-failed",
+      attempt: 1, input: t.agent, status: "failed", now: now - 1,
+    })!;
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const order: string[] = [];
+    const trigger: AgentRunTrigger = {
+      async trigger(ctx) {
+        order.push(ctx.runId);
+        if (order.length === 1) await gate;
+        return {
+          status: "succeeded", sessionId: null, artifactIds: [], costUsd: null,
+          error: null, note: "manual FIFO probe",
+        };
+      },
+    };
+    const sched = makeScheduler(new ManualClock(now), { trigger });
+
+    const runningNow = sched.runNow(t);
+    await vi.waitFor(() => expect(order).toHaveLength(1));
+    const runNowRun = store.listRuns(t.id).find((r) => r.id !== previous.id)!;
+    const retrying = sched.retryRun(previous.id);
+    await vi.waitFor(() => expect(store.listRuns(t.id)).toHaveLength(3));
+    const retryRun = store.listRuns(t.id).find(
+      (r) => r.id !== previous.id && r.id !== runNowRun.id
+    )!;
+
+    expect(retryRun.status).toBe("pending");
+    expect(order).toEqual([runNowRun.id]);
+    releaseFirst();
+    await Promise.all([runningNow, retrying]);
+
+    expect(order).toEqual([runNowRun.id, retryRun.id]);
+    expect(store.getRun(retryRun.id)?.status).toBe("succeeded");
+  });
 });
 
 describe("崩溃恢复：孤儿 run（lease 过期）被判死，不盲目重跑", () => {
@@ -170,6 +306,75 @@ describe("崩溃恢复：孤儿 run（lease 过期）被判死，不盲目重跑
     expect(sched.recover(now)).toBe(0);
     expect(store.getRun(run.id)?.status).toBe("running");
   });
+
+  it("recovery：未派发的 queue pending 保留原 run，并按插入顺序 FIFO 排空", async () => {
+    const now = 1_000_000;
+    const t = store.createTask({ ...baseTask, concurrencyPolicy: "queue" }, now, null);
+    const first = store.createRun({
+      taskId: t.id, workspaceId: "ws1", scheduledFor: 20, idempotencyKey: "queued-first",
+      attempt: 1, input: baseTask.agent, status: "pending", now,
+    })!;
+    const second = store.createRun({
+      taskId: t.id, workspaceId: "ws1", scheduledFor: 10, idempotencyKey: "queued-second",
+      attempt: 1, input: baseTask.agent, status: "pending", now,
+    })!;
+    const order: string[] = [];
+    const trigger: AgentRunTrigger = {
+      async trigger(ctx) {
+        order.push(ctx.runId);
+        return {
+          status: "succeeded", sessionId: null, artifactIds: [], costUsd: null,
+          error: null, note: "recovered queue ok",
+        };
+      },
+    };
+    const sched = makeScheduler(new ManualClock(now), { trigger });
+
+    expect(sched.recover(now)).toBe(2);
+    await vi.waitFor(() => {
+      expect(store.getRun(first.id)?.status).toBe("succeeded");
+      expect(store.getRun(second.id)?.status).toBe("succeeded");
+    });
+    expect(order).toEqual([first.id, second.id]);
+  });
+
+  it("恢复执行意外 reject 被收口、记录日志并把 run 终结为 failed", async () => {
+    const now = 1_000_000;
+    const t = store.createTask(
+      { ...baseTask, failurePolicy: { retry: true, maxAttempts: 2, backoffMs: 0 } },
+      now,
+      null
+    );
+    const run = store.createRun({
+      taskId: t.id, workspaceId: "ws1", scheduledFor: 1, idempotencyKey: "recover-reject",
+      attempt: 1, input: baseTask.agent, status: "running", now,
+    })!;
+    store.updateRun(run.id, { leaseOwner: "dead", leaseExpiresAt: now - 1 });
+    const events: string[] = [];
+    const failed: AgentRunTrigger = {
+      async trigger() {
+        return {
+          status: "failed", sessionId: null, artifactIds: [], costUsd: null,
+          error: "retry me", note: "recover first attempt failed",
+        };
+      },
+    };
+    const sched = makeScheduler(new ManualClock(now), {
+      trigger: failed,
+      sleep: async () => { throw new Error("sleep containment probe"); },
+      log: (event) => { events.push(event); },
+    });
+    const internal = sched as unknown as {
+      dispatchVerdict: () => { retrySafe: boolean; explain: string };
+    };
+    internal.dispatchVerdict = () => ({ retrySafe: true, explain: "测试判定可恢复" });
+
+    expect(sched.recover(now)).toBe(1);
+    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe("failed"));
+
+    expect(store.getRun(run.id)?.error).toContain("sleep containment probe");
+    expect(events).toContain("tasks_recover_execute_rejected");
+  });
 });
 
 describe("pause / run-now / cancel / retry", () => {
@@ -184,7 +389,7 @@ describe("pause / run-now / cancel / retry", () => {
     expect(run?.log.join(" ")).toContain("开始执行");
   });
 
-  it("cancelRun 把 pending 的 run 置为 cancelled", () => {
+  it("cancelRun 把 pending 的 run 置为 cancelled", async () => {
     const now = Date.now();
     const t = store.createTask(baseTask, now, null);
     const run = store.createRun({
@@ -192,7 +397,7 @@ describe("pause / run-now / cancel / retry", () => {
       attempt: 1, input: baseTask.agent, status: "pending", now,
     })!;
     const sched = makeScheduler(new ManualClock(now));
-    const after = sched.cancelRun(run.id);
+    const after = await sched.cancelRun(run.id);
     expect(after?.status).toBe("cancelled");
   });
 
@@ -323,6 +528,45 @@ describe("按错误类别决策：不可重试的类别当场停，不耗尽 max
 });
 
 describe("退避：指数 + 抖动取代固定 backoffMs，retry-after 优先", () => {
+  it("退避期间取消：下一次 retry 开始前重读状态，保持 cancelled 且不再触发", async () => {
+    const now = Date.now();
+    const t = store.createTask({ ...baseTask, failurePolicy: RETRY_3 }, now, null);
+    let enterBackoff!: () => void;
+    let releaseBackoff!: () => void;
+    const entered = new Promise<void>((resolve) => { enterBackoff = resolve; });
+    const gate = new Promise<void>((resolve) => { releaseBackoff = resolve; });
+    let calls = 0;
+    const trigger: AgentRunTrigger = {
+      async trigger() {
+        calls += 1;
+        return {
+          status: "failed", sessionId: null, artifactIds: [], costUsd: null,
+          error: "retry me", note: "first attempt failed",
+        };
+      },
+    };
+    const sched = makeScheduler(new ManualClock(now), {
+      trigger,
+      sleep: async () => {
+        enterBackoff();
+        await gate;
+      },
+    });
+
+    const running = sched.runNow(t);
+    await entered;
+    const run = store.listRuns(t.id)[0]!;
+    expect(run.status).toBe("running");
+    await sched.cancelRun(run.id);
+    releaseBackoff();
+    const after = await running;
+
+    expect(after?.status).toBe("cancelled");
+    expect(after?.attempt).toBe(1);
+    expect(calls).toBe(1);
+    expect(after?.log.join(" ")).not.toContain("第 2 次尝试");
+  });
+
   it("network 类：两次退避落在 1000~1250 / 2000~2500（指数 + 25% 抖动上界）", async () => {
     const now = Date.now();
     // backoffMs 故意设成一个显眼的固定值：它不该再出现在退避里

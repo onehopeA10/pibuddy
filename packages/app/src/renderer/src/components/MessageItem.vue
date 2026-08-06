@@ -51,7 +51,10 @@ const userText = computed(() => {
 const userImages = computed(() => {
   const m = props.message as UserMessage;
   if (typeof m.content === "string") return [];
-  return (m.content ?? []).filter((b): b is ImageContent => b.type === "image");
+  return (m.content ?? []).filter(
+    (b): b is ImageContent =>
+      b.type === "image" && ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(b.mimeType)
+  );
 });
 
 // --- 助手消息 ---

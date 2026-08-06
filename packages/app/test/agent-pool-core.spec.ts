@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentEvent } from "@pibuddy/pi-sdk";
+import { PROTOCOL_VERSION, type PiEnvelope } from "@pibuddy/contract";
 import {
-  PROTOCOL_VERSION,
-  type PiEnvelope,
+  AgentPoolCore,
   type PoolLaunchRequest,
-} from "@pibuddy/contract";
-import { AgentPoolCore, type PoolRuntimeHost } from "../src/main/agent-pool/pool-core.js";
+  type PoolRuntimeHost,
+} from "../src/main/agent-pool/pool-core.js";
 
 /**
  * AgentPoolCore 的**可证伪**判据（AGT-101 第一批）。
@@ -70,8 +70,8 @@ describe("N 个并发会话不串消息/成本/权限（真交错，串台就红
     const pool = new AgentPoolCore({ host });
     pool.requestSession({ sessionId: "A", workspaceId: "ws" });
     pool.requestSession({ sessionId: "B", workspaceId: "ws" });
-    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 });
-    pool.onRuntimeReady("B", { runtimeId: "rt-B-1", generation: 1 });
+    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 }, 10);
+    pool.onRuntimeReady("B", { runtimeId: "rt-B-1", generation: 1 }, 10);
     pool.setFocused("A"); // A 前台，B 后台
 
     // A 先跑一整轮，把它的序号推到 5。
@@ -110,7 +110,7 @@ describe("N 个并发会话不串消息/成本/权限（真交错，串台就红
     const { host } = makeHost();
     const pool = new AgentPoolCore({ host });
     pool.requestSession({ sessionId: "A", workspaceId: "ws" });
-    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 });
+    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 }, 10);
 
     pool.observeEnvelope(envelope("A", 1, 3, agentStart));
     expect(pool.droppedEnvelopes).toBe(0);
@@ -118,7 +118,7 @@ describe("N 个并发会话不串消息/成本/权限（真交错，串台就红
     pool.observeEnvelope(envelope("A", 1, 2, message));
     expect(pool.droppedEnvelopes).toBe(1);
     // 新代际 → 序号从 0 重新计数，被接受（不因数值更小而丢）。
-    pool.onRuntimeReady("A", { runtimeId: "rt-A-2", generation: 2 });
+    pool.onRuntimeReady("A", { runtimeId: "rt-A-2", generation: 2 }, 20);
     pool.observeEnvelope(envelope("A", 2, 0, agentStart));
     expect(pool.droppedEnvelopes).toBe(1);
   });
@@ -178,11 +178,68 @@ describe("资源上界与公平准入（防止开 100 个会话打爆机器）",
     pool.requestSession({ sessionId: "B", workspaceId: "ws" });
     expect(pool.snapshot().sessions.find((s) => s.sessionId === "B")!.queued).toBe(true);
   });
+
+  it("永久崩溃释放并发位后立即准入队首会话", () => {
+    const { host, calls } = makeHost();
+    const pool = new AgentPoolCore({
+      host,
+      caps: { maxConcurrent: 1, maxPerWorkspace: 2, memoryCeilingMb: 9999, costCeilingUsd: 9999 },
+      timing: { crashBudget: 0 },
+    });
+    pool.requestSession({ sessionId: "A", workspaceId: "ws" });
+    pool.requestSession({ sessionId: "B", workspaceId: "ws" });
+    expect(pool.snapshot().sessions.find((s) => s.sessionId === "B")!.queued).toBe(true);
+
+    pool.onCrash("A", 100);
+
+    expect(pool.snapshot().sessions.find((s) => s.sessionId === "A")!.runState).toBe("crashed");
+    expect(pool.snapshot().sessions.find((s) => s.sessionId === "B")!.queued).toBe(false);
+    expect(calls.filter((c) => c.op === "launch").map((c) => c.sessionId)).toEqual(["A", "B"]);
+  });
 });
 
 // ---------------------------------------------------------------- 崩溃预算
 
 describe("崩溃预算：窗口内超预算才放弃自动恢复", () => {
+  it("task 崩溃不走池通用重试；scheduler 保留唯一重试所有权", () => {
+    const { host, calls } = makeHost();
+    const pool = new AgentPoolCore({ host, timing: { crashBudget: 9 } });
+    pool.requestSession({ sessionId: "task:run-1", workspaceId: "ws", origin: "task" });
+
+    pool.handleExit("task:run-1", "crash", 100);
+
+    expect(pool.snapshot().sessions[0].runState).toBe("crashed");
+    expect(calls.filter((c) => c.op === "launch")).toEqual([
+      { op: "launch", sessionId: "task:run-1", origin: "task" },
+    ]);
+  });
+
+  it("child 崩溃不走池通用重试；同 ownership 的再次请求可重启终态记录", () => {
+    const { host, calls } = makeHost();
+    const pool = new AgentPoolCore({ host, timing: { crashBudget: 9 } });
+    pool.requestSession({ sessionId: "C", workspaceId: "ws", origin: "child" });
+
+    pool.handleExit("C", "crash", 100);
+    expect(pool.snapshot().sessions[0].runState).toBe("crashed");
+    expect(calls.filter((c) => c.op === "launch").map((c) => c.sessionId)).toEqual(["C"]);
+
+    pool.requestSession({ sessionId: "C", workspaceId: "ws", origin: "child" });
+    expect(pool.snapshot().sessions[0].runState).toBe("background");
+    expect(calls.filter((c) => c.op === "launch").map((c) => c.sessionId)).toEqual(["C", "C"]);
+  });
+
+  it("同 sessionId 不能换 workspace 或 origin 复用", () => {
+    const { host } = makeHost();
+    const pool = new AgentPoolCore({ host });
+    pool.requestSession({ sessionId: "A", workspaceId: "ws-1", origin: "user" });
+    expect(() =>
+      pool.requestSession({ sessionId: "A", workspaceId: "ws-2", origin: "user" })
+    ).toThrow(/POOL_SESSION_OWNERSHIP_MISMATCH/);
+    expect(() =>
+      pool.requestSession({ sessionId: "A", workspaceId: "ws-1", origin: "child" })
+    ).toThrow(/POOL_SESSION_OWNERSHIP_MISMATCH/);
+  });
+
   it("预算内崩溃 → 自动恢复（重新 launch）", () => {
     const { host, calls } = makeHost();
     const pool = new AgentPoolCore({ host, timing: { crashBudget: 2, crashWindowMs: 60_000 } });
@@ -221,6 +278,16 @@ describe("崩溃预算：窗口内超预算才放弃自动恢复", () => {
 // ---------------------------------------------------------------- 空闲回收
 
 describe("空闲回收：background → warm → stopped（running 永不回收）", () => {
+  it("runtime ready 初始化并更新 lastActivityAt", () => {
+    const { host } = makeHost();
+    const pool = new AgentPoolCore({ host });
+    pool.requestSession({ sessionId: "A", workspaceId: "ws" });
+    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 }, 1234);
+    expect(pool.snapshot().sessions[0].lastActivityAt).toBe(1234);
+    pool.onRuntimeReady("A", { runtimeId: "rt-A-2", generation: 2 }, 5678);
+    expect(pool.snapshot().sessions[0].lastActivityAt).toBe(5678);
+  });
+
   it("按空闲时长逐级回收", () => {
     const { host, calls } = makeHost();
     const pool = new AgentPoolCore({
@@ -228,7 +295,7 @@ describe("空闲回收：background → warm → stopped（running 永不回收�
       timing: { idleToWarmMs: 1000, warmToStoppedMs: 2000 },
     });
     pool.requestSession({ sessionId: "A", workspaceId: "ws" });
-    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 });
+    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 }, 10);
     pool.observeEnvelope(envelope("A", 1, 0, agentSettled)); // lastActivity = 某刻，done
     const activityAt = pool.snapshot().sessions[0].lastActivityAt;
 
@@ -243,7 +310,7 @@ describe("空闲回收：background → warm → stopped（running 永不回收�
     const { host } = makeHost();
     const pool = new AgentPoolCore({ host, timing: { idleToWarmMs: 1 } });
     pool.requestSession({ sessionId: "A", workspaceId: "ws" });
-    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 });
+    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 }, 10);
     pool.observeEnvelope(envelope("A", 1, 0, agentStart)); // running
     pool.tick(1_000_000);
     expect(pool.snapshot().sessions[0].runState).toBe("background");
@@ -257,7 +324,7 @@ describe("统一权限 inbox：超时拒绝，绝不自动允许", () => {
     const { host } = makeHost();
     const pool = new AgentPoolCore({ host, timing: { permissionTimeoutMs: 1000 } });
     pool.requestSession({ sessionId: "A", workspaceId: "ws" });
-    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 });
+    pool.onRuntimeReady("A", { runtimeId: "rt-A-1", generation: 1 }, 10);
     pool.observeEnvelope(envelope("A", 1, 0, agentStart)); // running
 
     pool.enqueuePermission({
@@ -324,6 +391,20 @@ describe("adoptRunning：纳入已在跑的会话，不重复派生进程", () =
     pool.adoptRunning({ sessionId: "A", workspaceId: "ws", runtimeId: "rt-A-1", generation: 1 });
     expect(calls.filter((c) => c.op === "launch").length).toBe(0);
     expect(pool.snapshot().sessions[0].runState).toBe("focused");
+  });
+
+  it("不能把 child ownership 的同名记录改由前台 adopt", () => {
+    const { host } = makeHost();
+    const pool = new AgentPoolCore({ host });
+    pool.requestSession({ sessionId: "A", workspaceId: "ws", origin: "child" });
+    expect(() =>
+      pool.adoptRunning({
+        sessionId: "A",
+        workspaceId: "ws",
+        runtimeId: "rt-foreground",
+        generation: 1,
+      })
+    ).toThrow(/POOL_SESSION_OWNERSHIP_MISMATCH/);
   });
 
   it("空闲计时从纳入时刻起：刚纳入的会话不会被第一次 tick 立即回收（真机边界）", () => {

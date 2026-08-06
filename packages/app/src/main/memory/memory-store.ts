@@ -204,6 +204,7 @@ export function extractTerms(text: string): string[] {
 
 export class MemoryStore {
   private readonly db: DatabaseSync;
+  private transactionDepth = 0;
 
   constructor(file: string = dbPath()) {
     this.db = new DatabaseSync(file);
@@ -240,6 +241,26 @@ export class MemoryStore {
     this.db.close();
   }
 
+  private transaction<T>(operation: () => T): T {
+    if (this.transactionDepth > 0) return operation();
+    this.db.exec("BEGIN IMMEDIATE");
+    this.transactionDepth++;
+    try {
+      const result = operation();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        // 保留触发回滚的原始错误。
+      }
+      throw error;
+    } finally {
+      this.transactionDepth--;
+    }
+  }
+
   // ------------------------------------------------------------ 写入
 
   /**
@@ -269,13 +290,14 @@ export class MemoryStore {
       updated: now,
       expiry: input.expiry ?? null,
     };
-    this.db
-      .prepare(
+    this.transaction(() => {
+      this.db
+        .prepare(
         `INSERT INTO memories (id, workspace_id, content, type, scope, origin, confidence,
            sensitivity, excluded, source_session_id, source_turn_id, created, updated, expiry, schema_version)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-      )
-      .run(
+        )
+        .run(
         id,
         input.workspaceId,
         record.content,
@@ -291,10 +313,11 @@ export class MemoryStore {
         now,
         record.expiry,
         MEMORY_DATA_SCHEMA_VERSION
-      );
-    this.db
-      .prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)")
-      .run(id, record.content);
+        );
+      this.db
+        .prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)")
+        .run(id, record.content);
+    });
     return {
       ok: true,
       record,
@@ -333,12 +356,13 @@ export class MemoryStore {
       excluded: patch.excluded ?? existing.record.excluded,
       updated: Date.now(),
     };
-    this.db
-      .prepare(
+    this.transaction(() => {
+      this.db
+        .prepare(
         `UPDATE memories SET content=?, type=?, scope=?, confidence=?, expiry=?, sensitivity=?, excluded=?, updated=?
          WHERE id=?`
-      )
-      .run(
+        )
+        .run(
         next.content,
         next.type,
         next.scope,
@@ -348,10 +372,11 @@ export class MemoryStore {
         next.excluded ? 1 : 0,
         next.updated,
         id
-      );
-    // FTS 影子表跟着正文走：正文变了不同步，检索命中的是旧字。
-    this.db.prepare("DELETE FROM memories_fts WHERE id = ?").run(id);
-    this.db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, next.content);
+        );
+      // FTS 影子表跟着正文走：正文变了不同步，检索命中的是旧字。
+      this.db.prepare("DELETE FROM memories_fts WHERE id = ?").run(id);
+      this.db.prepare("INSERT INTO memories_fts (id, content) VALUES (?, ?)").run(id, next.content);
+    });
     return { ok: true, record: next, workspaceId: existing.workspaceId };
   }
 
@@ -370,15 +395,17 @@ export class MemoryStore {
     const first = ids.map((id) => this.rowById(id)).find((r) => r !== null);
     const type: MemoryType = first?.record.type ?? "fact";
     const scope: MemoryScope = first?.record.scope ?? "workspace";
-    for (const id of ids) this.deleteInternal(id);
-    return this.save({ workspaceId, content, type, scope });
+    return this.transaction(() => {
+      for (const id of ids) this.deleteInternal(id);
+      return this.save({ workspaceId, content, type, scope });
+    });
   }
 
   /** 删除一条：主表 + FTS 一起清。返回删掉的归属工作区（供 IPC 清命中 cache）。 */
   delete(id: string): { ok: boolean; workspaceId: string | null } {
     const existing = this.rowById(id);
     if (!existing) return { ok: false, workspaceId: null };
-    this.deleteInternal(id);
+    this.transaction(() => this.deleteInternal(id));
     return { ok: true, workspaceId: existing.workspaceId };
   }
 
@@ -664,23 +691,25 @@ export class MemoryStore {
       created: now,
       updated: now,
     };
-    this.db
-      .prepare(
+    this.transaction(() => {
+      this.db
+        .prepare(
         `INSERT INTO knowledge (id, workspace_id, title, content, source_kind, source_ref, source_turn_id, created, updated)
          VALUES (?,?,?,?,?,?,?,?,?)`
       )
-      .run(
-        id,
-        input.workspaceId,
-        record.title,
-        record.content,
-        record.sourceKind,
-        record.sourceRef,
-        record.sourceTurnId,
-        now,
-        now
-      );
-    this.db.prepare("INSERT INTO knowledge_fts (id, content) VALUES (?, ?)").run(id, record.content);
+        .run(
+          id,
+          input.workspaceId,
+          record.title,
+          record.content,
+          record.sourceKind,
+          record.sourceRef,
+          record.sourceTurnId,
+          now,
+          now
+        );
+      this.db.prepare("INSERT INTO knowledge_fts (id, content) VALUES (?, ?)").run(id, record.content);
+    });
     return { ok: true, record };
   }
 
@@ -710,9 +739,11 @@ export class MemoryStore {
   deleteKnowledge(id: string): { ok: boolean } {
     const exists = this.db.prepare("SELECT 1 FROM knowledge WHERE id = ?").get(id);
     if (!exists) return { ok: false };
-    this.db.prepare("DELETE FROM knowledge WHERE id = ?").run(id);
-    this.db.prepare("DELETE FROM knowledge_fts WHERE id = ?").run(id);
-    this.db.prepare("DELETE FROM embeddings WHERE kind = 'knowledge' AND ref_id = ?").run(id);
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM knowledge WHERE id = ?").run(id);
+      this.db.prepare("DELETE FROM knowledge_fts WHERE id = ?").run(id);
+      this.db.prepare("DELETE FROM embeddings WHERE kind = 'knowledge' AND ref_id = ?").run(id);
+    });
     return { ok: true };
   }
 

@@ -19,14 +19,14 @@
  *   1. assertMainFrame —— 发送者必须是主窗口的主 frame。子 frame / iframe /
  *      webview 即便同源也一律拒绝：渲染进程被注入后第一步就是找一个能发 IPC
  *      的执行上下文。
- *   2. schema.parse    —— 结构必须匹配该 channel 的契约。跨进程收到的是
- *      structured-clone 之后的任意 JS 值，编译期类型在这里已经不存在。
- *   3. 尺寸            —— 按 CHANNEL_MAX_BYTES 查表封顶。
- *   4. 限流            —— 渲染进程被攻陷后可以无限刷 IPC，频率是最后一道闸。
+ *   2. 限流            —— 在任何解析工作之前先计费，畸形载荷同样消耗配额。
+ *   3. 原始尺寸/深度   —— schema.parse 前先挡住过大或过深的 structured clone。
+ *   4. schema.parse    —— 结构必须匹配该 channel 的契约；解析后再复核尺寸。
  */
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import {
   CHANNEL_CONTRACTS,
+  MAX_PROMPT_MESSAGE_BYTES,
   isKnownChannel,
   type InvokeChannel,
   type PermissionDecision,
@@ -46,7 +46,9 @@ export const MAX_IPC_PAYLOAD_BYTES = 8 * 1024 * 1024;
  * customInstructions / value）才是「用户敲进来的文本」，256KB 约等于
  * 十几万汉字，正常使用碰不到。
  */
-export const MAX_TEXT_PAYLOAD_BYTES = 262144;
+export const MAX_TEXT_PAYLOAD_BYTES = MAX_PROMPT_MESSAGE_BYTES;
+/** structured-clone 载荷允许递归估算的最大深度；超出即失败关闭。 */
+export const MAX_IPC_PAYLOAD_DEPTH = 12;
 
 /**
  * 按 channel 覆盖的尺寸上限。
@@ -72,9 +74,14 @@ export const RATE_LIMIT_DEFAULT = 30;
 
 /** 走 prompt 配额的通道（真正会驱动模型跑起来的那几个）。 */
 const PROMPT_CHANNELS = new Set<string>(["pi:prompt", "pi:steer", "pi:follow-up"]);
+const MODEL_ACTION_BUCKET = "model-action";
 
 export function limitFor(channel: string): number {
   return PROMPT_CHANNELS.has(channel) ? RATE_LIMIT_PROMPT : RATE_LIMIT_DEFAULT;
+}
+
+export function rateBucketFor(channel: string): string {
+  return PROMPT_CHANNELS.has(channel) ? MODEL_ACTION_BUCKET : channel;
 }
 
 /** 某 channel 的完整准入规则（CT-20 的运行时投影）。 */
@@ -110,38 +117,145 @@ export function assertMainFrame(event: IpcMainInvokeEvent): void {
  * 一段 20MB 的音频会被算成 2 字节。
  */
 export function estimateBytes(value: unknown, depth = 0): number {
-  if (value === null || value === undefined) return 0;
-  if (depth > 12) return 0;
-  switch (typeof value) {
-    case "string":
-      return Buffer.byteLength(value, "utf8");
-    case "number":
-    case "boolean":
-      return 8;
-    case "bigint":
-      return 16;
-    case "object":
-      break;
-    default:
-      return 0;
+  const CONTAINER_OVERHEAD = 16;
+  const MEMBER_OVERHEAD = 8;
+  const seen = new WeakSet<object>();
+  const pending: Array<{ value: unknown; depth: number }> = [{ value, depth }];
+  let total = 0;
+
+  const add = (bytes: number): boolean => {
+    total += bytes;
+    return Number.isSafeInteger(total);
+  };
+  const queueEntries = (entries: [string, unknown][], entryDepth: number): boolean => {
+    for (const [key, item] of entries) {
+      if (!add(MEMBER_OVERHEAD + Buffer.byteLength(key, "utf8"))) return false;
+      pending.push({ value: item, depth: entryDepth });
+    }
+    return true;
+  };
+
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    const item = current.value;
+    if (item === null || item === undefined) continue;
+
+    switch (typeof item) {
+      case "string":
+        if (!add(Buffer.byteLength(item, "utf8"))) return Number.POSITIVE_INFINITY;
+        continue;
+      case "number":
+      case "boolean":
+        if (!add(8)) return Number.POSITIVE_INFINITY;
+        continue;
+      case "bigint":
+        if (!add(16)) return Number.POSITIVE_INFINITY;
+        continue;
+      case "object":
+        break;
+      default:
+        return Number.POSITIVE_INFINITY;
+    }
+
+    if (seen.has(item)) continue;
+    seen.add(item);
+    if (current.depth > MAX_IPC_PAYLOAD_DEPTH) return Number.POSITIVE_INFINITY;
+
+    if (item instanceof ArrayBuffer) {
+      if (!add(CONTAINER_OVERHEAD + item.byteLength)) return Number.POSITIVE_INFINITY;
+      continue;
+    }
+    if (typeof SharedArrayBuffer !== "undefined" && item instanceof SharedArrayBuffer) {
+      if (!add(CONTAINER_OVERHEAD + item.byteLength)) return Number.POSITIVE_INFINITY;
+      continue;
+    }
+    if (ArrayBuffer.isView(item)) {
+      if (!add(CONTAINER_OVERHEAD + item.byteLength)) return Number.POSITIVE_INFINITY;
+      continue;
+    }
+    if (typeof Blob !== "undefined" && item instanceof Blob) {
+      if (!add(CONTAINER_OVERHEAD + item.size)) return Number.POSITIVE_INFINITY;
+      continue;
+    }
+    if (item instanceof Date) {
+      if (!add(CONTAINER_OVERHEAD + 8)) return Number.POSITIVE_INFINITY;
+      continue;
+    }
+    if (item instanceof RegExp) {
+      if (
+        !add(
+          CONTAINER_OVERHEAD +
+            Buffer.byteLength(item.source, "utf8") +
+            Buffer.byteLength(item.flags, "utf8")
+        )
+      ) {
+        return Number.POSITIVE_INFINITY;
+      }
+      continue;
+    }
+    if (item instanceof Error) {
+      if (!add(CONTAINER_OVERHEAD)) return Number.POSITIVE_INFINITY;
+      const standard: [string, unknown][] = [
+        ["name", item.name],
+        ["message", item.message],
+        ["stack", item.stack],
+      ];
+      if ("cause" in item) standard.push(["cause", item.cause]);
+      if (!queueEntries(standard, current.depth + 1)) return Number.POSITIVE_INFINITY;
+      if (!queueEntries(Object.entries(item), current.depth + 1)) {
+        return Number.POSITIVE_INFINITY;
+      }
+      continue;
+    }
+    if (item instanceof Map) {
+      if (!add(CONTAINER_OVERHEAD + item.size * MEMBER_OVERHEAD * 2)) {
+        return Number.POSITIVE_INFINITY;
+      }
+      for (const [key, mapValue] of item) {
+        pending.push({ value: key, depth: current.depth + 1 });
+        pending.push({ value: mapValue, depth: current.depth + 1 });
+      }
+      continue;
+    }
+    if (item instanceof Set) {
+      if (!add(CONTAINER_OVERHEAD + item.size * MEMBER_OVERHEAD)) {
+        return Number.POSITIVE_INFINITY;
+      }
+      for (const setValue of item) {
+        pending.push({ value: setValue, depth: current.depth + 1 });
+      }
+      continue;
+    }
+    if (Array.isArray(item)) {
+      if (!add(CONTAINER_OVERHEAD + item.length * MEMBER_OVERHEAD)) {
+        return Number.POSITIVE_INFINITY;
+      }
+      for (const arrayValue of item) {
+        pending.push({ value: arrayValue, depth: current.depth + 1 });
+      }
+      continue;
+    }
+
+    const prototype = Object.getPrototypeOf(item);
+    if (prototype !== Object.prototype && prototype !== null) {
+      return Number.POSITIVE_INFINITY;
+    }
+    if (Object.getOwnPropertySymbols(item).length > 0) return Number.POSITIVE_INFINITY;
+    if (!add(CONTAINER_OVERHEAD)) return Number.POSITIVE_INFINITY;
+    if (!queueEntries(Object.entries(item), current.depth + 1)) {
+      return Number.POSITIVE_INFINITY;
+    }
   }
-  if (value instanceof ArrayBuffer) return value.byteLength;
-  if (ArrayBuffer.isView(value)) return value.byteLength;
-  if (Array.isArray(value)) {
-    let sum = 0;
-    for (const item of value) sum += estimateBytes(item, depth + 1);
-    return sum;
-  }
-  let sum = 0;
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    sum += Buffer.byteLength(key, "utf8") + estimateBytes(item, depth + 1);
-  }
-  return sum;
+
+  return total;
 }
 
 /** 尺寸校验：整体载荷按 channel 查表封顶，顶层字符串字段单独按文本上限封顶。 */
 export function assertSizeWithin(channel: string, payload: unknown, limit: number): void {
   const total = estimateBytes(payload);
+  if (!Number.isFinite(total)) {
+    throw new Error(`IPC_PAYLOAD_TOO_DEEP_OR_UNSUPPORTED: ${channel}`);
+  }
   if (total > limit) {
     throw new Error(`IPC_PAYLOAD_TOO_LARGE: ${channel} ${total} > ${limit}`);
   }
@@ -160,12 +274,13 @@ export function assertSizeWithin(channel: string, payload: unknown, limit: numbe
   }
 }
 
-// ---------------------------------------------------------------- 闸 4：限流
+// ---------------------------------------------------------------- 闸 2：限流
 
 /**
- * 按 (channel, senderId) 计数的滑动窗口限流器。
+ * 按 (bucket, senderId) 计数的滑动窗口限流器。
  *
- * 按通道而不是全局计数：一次正常的会话切换会在同一瞬间打出 switch_session /
+ * 三条模型动作共用一个 bucket；其余通道仍各自计数。一次正常的会话切换会
+ * 在同一瞬间打出 switch_session /
  * get_messages / get_state / get_session_stats 四条不同通道的调用，全局计数会
  * 把正常操作误伤成攻击。
  */
@@ -181,7 +296,7 @@ export class RateLimiter {
   }
 
   evaluate(channel: string, senderId: number, now: number = Date.now()): PermissionDecision {
-    const key = `${channel}#${senderId}`;
+    const key = `${rateBucketFor(channel)}#${senderId}`;
     const limit = limitFor(channel);
     const cutoff = now - this.windowMs;
     const recent = (this.hits.get(key) ?? []).filter((t) => t > cutoff);
@@ -307,7 +422,7 @@ export function __resetRegisteredChannels(): void {
  *
  * ## 注册期契约核对（ISS-001）
  *
- * 闸 2 用的 schema 由调用点传入，但**必须就是** CHANNEL_CONTRACTS 里那一个
+ * 闸 4 用的 schema 由调用点传入，但**必须就是** CHANNEL_CONTRACTS 里那一个
  * 对象（同一性，不是结构等价）：结构相同的两份 schema 今天等价，明天有人
  * 只改其中一份，gate2 实际校验的就悄悄偏离了契约表 —— 而契约表才是
  * preload / 渲染层 / 策略面板共同引用的唯一真相源。同一性在注册期（也就是
@@ -333,10 +448,12 @@ export function registerHandler<Req, Res>(
   ipcMain.handle(channel, async (event, raw: unknown) => {
     try {
       assertMainFrame(event);
-      const payload = schema.parse(raw);
-      const limit = CHANNEL_MAX_BYTES[channel] ?? MAX_IPC_PAYLOAD_BYTES;
-      assertSizeWithin(channel, payload, limit);
       rateLimiter.check(channel, event.sender.id);
+      const limit = CHANNEL_MAX_BYTES[channel] ?? MAX_IPC_PAYLOAD_BYTES;
+      assertSizeWithin(channel, raw, limit);
+      const payload = schema.parse(raw);
+      // zod 会剥掉未知字段并做变换；保留解析后的尺寸复核，避免契约变换扩大载荷。
+      assertSizeWithin(channel, payload, limit);
       permissionGate?.(channel, payload); // 闸 5：能力权限（无适用规则则放行）
       return await handler(payload, event);
     } catch (err) {

@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { shouldAcceptEnvelope } from "@pibuddy/contract";
 import { TerminalRingBuffer } from "../src/main/terminal/ring-buffer.js";
-import { PtyManager, type TerminalEmit } from "../src/main/terminal/pty-manager.js";
+import {
+  PtyManager,
+  type PtyLib,
+  type PtyProcess,
+  type TerminalEmit,
+} from "../src/main/terminal/pty-manager.js";
 
 /**
  * 终端能力包（coding.terminal / PTY-101）的判据。**大量用真 PTY 子进程**——方案 B
@@ -30,6 +35,63 @@ async function waitFor(predicate: () => boolean, timeoutMs = 8000): Promise<bool
     await new Promise((r) => setTimeout(r, 25));
   }
   return predicate();
+}
+
+class FakePty implements PtyProcess {
+  readonly writes: string[] = [];
+  readonly resizes: Array<[number, number]> = [];
+  killed = false;
+  private readonly dataListeners: Array<(data: string) => void> = [];
+  private readonly exitListeners: Array<(event: { exitCode: number; signal?: number }) => void> = [];
+
+  onData(listener: (data: string) => void): { dispose(): void } {
+    this.dataListeners.push(listener);
+    return { dispose: () => undefined };
+  }
+
+  onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void } {
+    this.exitListeners.push(listener);
+    return { dispose: () => undefined };
+  }
+
+  write(data: string | Buffer): void {
+    this.writes.push(data.toString());
+  }
+
+  resize(cols: number, rows: number): void {
+    this.resizes.push([cols, rows]);
+  }
+
+  kill(): void {
+    this.killed = true;
+  }
+
+  fireData(data: string): void {
+    for (const listener of this.dataListeners) listener(data);
+  }
+
+  fireExit(exitCode: number, signal?: number): void {
+    for (const listener of this.exitListeners) listener({ exitCode, signal });
+  }
+}
+
+class FakePtyLib implements PtyLib {
+  readonly children: FakePty[] = [];
+  spawnCount = 0;
+  private readonly failures = new Map<number, Error>();
+
+  failSpawn(call: number, error: Error): void {
+    this.failures.set(call, error);
+  }
+
+  spawn(): FakePty {
+    this.spawnCount += 1;
+    const failure = this.failures.get(this.spawnCount);
+    if (failure) throw failure;
+    const child = new FakePty();
+    this.children.push(child);
+    return child;
+  }
 }
 
 describe("TerminalRingBuffer：有界 + 单调序号（纯逻辑对拍）", () => {
@@ -80,6 +142,176 @@ describe("TerminalRingBuffer：有界 + 单调序号（纯逻辑对拍）", () =
   });
 });
 
+describe("PtyManager：确定性 PTY 竞态与 workspace 所有权", () => {
+  it("open spawn 同步失败会回滚会话并原样抛错", () => {
+    const lib = new FakePtyLib();
+    const manager = new PtyManager(lib);
+    const failure = new Error("fake open spawn failure");
+    lib.failSpawn(1, failure);
+
+    expect(() =>
+      manager.open({
+        workspaceId: "wsA",
+        cwd: os.tmpdir(),
+        profileId: null,
+        cols: 80,
+        rows: 24,
+      })
+    ).toThrow(failure);
+    expect(lib.spawnCount).toBe(1);
+    expect(lib.children).toEqual([]);
+    expect(manager.list("wsA")).toEqual([]);
+    expect(manager.list("wsB")).toEqual([]);
+
+    const opened = manager.open({
+      workspaceId: "wsA",
+      cwd: os.tmpdir(),
+      profileId: null,
+      cols: 80,
+      rows: 24,
+    });
+    expect(manager.list("wsA").map((tab) => tab.tabId)).toEqual([opened.tabId]);
+    manager.disposeAll();
+  });
+
+  it("restart spawn 同步失败保留 stopped 原代际，清掉旧 child，且可再次重启", () => {
+    const lib = new FakePtyLib();
+    const manager = new PtyManager(lib);
+    const emits: TerminalEmit[] = [];
+    manager.setEmitter((event) => emits.push(event));
+    const opened = manager.open({
+      workspaceId: "wsA",
+      cwd: os.tmpdir(),
+      profileId: null,
+      cols: 80,
+      rows: 24,
+    });
+    const oldChild = lib.children[0];
+    oldChild.fireData("preserved-output".padEnd(64 * 1024, "x"));
+    const emittedBeforeFailure = emits.length;
+    const failure = new Error("fake restart spawn failure");
+    lib.failSpawn(2, failure);
+
+    expect(() => manager.restart("wsA", opened.tabId)).toThrow(failure);
+    expect(lib.spawnCount).toBe(2);
+    expect(lib.children).toEqual([oldChild]);
+    expect(oldChild.killed).toBe(true);
+    expect(manager.input("wsA", opened.tabId, "blocked-after-failure")).toBe(false);
+    expect(manager.snapshot("wsA", opened.tabId)).toMatchObject({
+      found: true,
+      generation: 0,
+      text: expect.stringContaining("preserved-output"),
+      running: false,
+      exitCode: null,
+      exitSignal: null,
+    });
+    expect(manager.list("wsA")).toHaveLength(1);
+    expect(manager.list("wsA")[0]).toMatchObject({
+      tabId: opened.tabId,
+      generation: 0,
+      running: false,
+    });
+
+    oldChild.fireData("late-old-data");
+    oldChild.fireExit(17, 9);
+    expect(emits).toHaveLength(emittedBeforeFailure);
+
+    const restarted = manager.restart("wsA", opened.tabId);
+    expect(restarted).toMatchObject({ generation: 1, running: true });
+    expect(lib.children).toHaveLength(2);
+    expect(manager.snapshot("wsA", opened.tabId)).toMatchObject({
+      generation: 1,
+      text: "",
+      sequence: 0,
+      running: true,
+    });
+    manager.disposeAll();
+  });
+
+  it("restart 后旧 child 的延迟 data/exit 不得污染或结束新代际", () => {
+    const lib = new FakePtyLib();
+    const manager = new PtyManager(lib);
+    const emits: TerminalEmit[] = [];
+    manager.setEmitter((event) => emits.push(event));
+
+    const opened = manager.open({
+      workspaceId: "wsA",
+      cwd: os.tmpdir(),
+      profileId: null,
+      cols: 80,
+      rows: 24,
+    });
+    const oldChild = lib.children[0];
+    const restarted = manager.restart("wsA", opened.tabId);
+    const newChild = lib.children[1];
+
+    expect(restarted?.generation).toBe(1);
+    expect(oldChild.killed).toBe(true);
+
+    oldChild.fireData("old-generation-data");
+    oldChild.fireExit(17, 9);
+
+    expect(emits).toEqual([]);
+    expect(manager.snapshot("wsA", opened.tabId)).toMatchObject({
+      found: true,
+      generation: 1,
+      text: "",
+      sequence: 0,
+      running: true,
+      exitCode: null,
+      exitSignal: null,
+    });
+
+    newChild.fireData("new-generation-data");
+    newChild.fireExit(0);
+
+    expect(emits.map((event) => event.generation)).toEqual([1, 1]);
+    expect(emits.map((event) => event.payload.kind)).toEqual(["data", "exit"]);
+    expect(manager.snapshot("wsA", opened.tabId)).toMatchObject({
+      generation: 1,
+      text: "new-generation-data",
+      running: false,
+      exitCode: 0,
+    });
+    manager.disposeAll();
+  });
+
+  it("七种 tab 操作都拒绝 workspace B，且 workspace A 仍可操作", () => {
+    const lib = new FakePtyLib();
+    const manager = new PtyManager(lib);
+    const opened = manager.open({
+      workspaceId: "wsA",
+      cwd: os.tmpdir(),
+      profileId: null,
+      cols: 80,
+      rows: 24,
+    });
+    const child = lib.children[0];
+
+    expect(manager.input("wsB", opened.tabId, "blocked")).toBe(false);
+    expect(manager.resize("wsB", opened.tabId, 100, 30)).toBe(false);
+    expect(manager.snapshot("wsB", opened.tabId).found).toBe(false);
+    expect(manager.clear("wsB", opened.tabId)).toBe(false);
+    expect(manager.kill("wsB", opened.tabId)).toBe(false);
+    expect(manager.restart("wsB", opened.tabId)).toBeNull();
+    expect(manager.rename("wsB", opened.tabId, "blocked")).toBeNull();
+    expect(child.writes).toEqual([]);
+    expect(child.resizes).toEqual([]);
+    expect(child.killed).toBe(false);
+
+    expect(manager.input("wsA", opened.tabId, "allowed")).toBe(true);
+    expect(manager.resize("wsA", opened.tabId, 120, 40)).toBe(true);
+    expect(manager.snapshot("wsA", opened.tabId).found).toBe(true);
+    expect(manager.clear("wsA", opened.tabId)).toBe(true);
+    expect(manager.rename("wsA", opened.tabId, "allowed")?.title).toBe("allowed");
+    expect(manager.restart("wsA", opened.tabId)?.generation).toBe(1);
+    expect(manager.kill("wsA", opened.tabId)).toBe(true);
+    expect(child.writes).toEqual(["allowed"]);
+    expect(child.resizes).toEqual([[120, 40]]);
+    expect(child.killed).toBe(true);
+  });
+});
+
 describe("PtyManager：真 PTY 子进程（node-pty，方案 B）", () => {
   const managers: PtyManager[] = [];
   function make(): PtyManager {
@@ -109,7 +341,7 @@ describe("PtyManager：真 PTY 子进程（node-pty，方案 B）", () => {
     expect(meta.tabId).toBeTruthy();
 
     const marker = "pty-marker-open-777";
-    m.input(meta.tabId, echoCmd(marker));
+    m.input("ws1", meta.tabId, echoCmd(marker));
 
     const seen = await waitFor(() =>
       emits.some((e) => e.payload.kind === "data" && e.payload.data.includes(marker))
@@ -130,11 +362,11 @@ describe("PtyManager：真 PTY 子进程（node-pty，方案 B）", () => {
     const meta = m.open({ workspaceId: "ws1", cwd: os.tmpdir(), profileId: null, cols: 80, rows: 24 });
 
     const marker1 = "reconnect-marker-1";
-    m.input(meta.tabId, echoCmd(marker1));
-    await waitFor(() => m.snapshot(meta.tabId).text.includes(marker1));
+    m.input("ws1", meta.tabId, echoCmd(marker1));
+    await waitFor(() => m.snapshot("ws1", meta.tabId).text.includes(marker1));
 
     // 模拟 reload：渲染进程只有 snapshot 这一份初始状态。
-    const snap = m.snapshot(meta.tabId);
+    const snap = m.snapshot("ws1", meta.tabId);
     expect(snap.found).toBe(true);
     expect(snap.text).toContain(marker1);
     const prevFrame = { generation: snap.generation, sequence: snap.sequence };
@@ -145,7 +377,7 @@ describe("PtyManager：真 PTY 子进程（node-pty，方案 B）", () => {
     // 续接：再 echo 一段，等到一个序号更大的块。
     const marker2 = "reconnect-marker-2";
     const before = emits.length;
-    m.input(meta.tabId, echoCmd(marker2));
+    m.input("ws1", meta.tabId, echoCmd(marker2));
     await waitFor(() =>
       emits
         .slice(before)
@@ -165,7 +397,7 @@ describe("PtyManager：真 PTY 子进程（node-pty，方案 B）", () => {
     m.setEmitter((e) => emits.push(e));
     const meta = m.open({ workspaceId: "ws1", cwd: os.tmpdir(), profileId: null, cols: 80, rows: 24 });
 
-    m.input(meta.tabId, "exit\r");
+    m.input("ws1", meta.tabId, "exit\r");
     const exited = await waitFor(() => emits.some((e) => e.payload.kind === "exit"));
     expect(exited).toBe(true);
 
@@ -173,7 +405,7 @@ describe("PtyManager：真 PTY 子进程（node-pty，方案 B）", () => {
     expect(exitEmit).toBeTruthy();
     expect(typeof (exitEmit!.payload as { exitCode: number | null }).exitCode).not.toBe("undefined");
 
-    const snap = m.snapshot(meta.tabId);
+    const snap = m.snapshot("ws1", meta.tabId);
     expect(snap.running).toBe(false);
     // 退出事件的序号严格大于最后一段数据的序号（渲染进程先回放数据再处理退出）。
     const lastData = Math.max(0, ...emits.filter((e) => e.payload.kind === "data").map((e) => e.sequence));
@@ -184,14 +416,14 @@ describe("PtyManager：真 PTY 子进程（node-pty，方案 B）", () => {
     const m = make();
     m.setEmitter(() => undefined);
     const meta = m.open({ workspaceId: "ws1", cwd: os.tmpdir(), profileId: null, cols: 80, rows: 24 });
-    m.input(meta.tabId, echoCmd("before-restart"));
-    await waitFor(() => m.snapshot(meta.tabId).text.includes("before-restart"));
+    m.input("ws1", meta.tabId, echoCmd("before-restart"));
+    await waitFor(() => m.snapshot("ws1", meta.tabId).text.includes("before-restart"));
 
-    const restarted = m.restart(meta.tabId);
+    const restarted = m.restart("ws1", meta.tabId);
     expect(restarted).toBeTruthy();
     expect(restarted!.generation).toBe(meta.generation + 1);
     // 新代际的 ring buffer 是空的（旧输出不再在册）。
-    const snap = m.snapshot(meta.tabId);
+    const snap = m.snapshot("ws1", meta.tabId);
     expect(snap.generation).toBe(meta.generation + 1);
     expect(snap.text).not.toContain("before-restart");
     // 上一代的迟到块（generation 更小）被丢弃规则挡下。
@@ -210,8 +442,8 @@ describe("PtyManager：真 PTY 子进程（node-pty，方案 B）", () => {
     const b = m.open({ workspaceId: "ws1", cwd: os.tmpdir(), profileId: null, cols: 80, rows: 24 });
     expect(m.list("ws1").length).toBe(2);
 
-    expect(m.kill(a.tabId)).toBe(true);
-    expect(m.snapshot(a.tabId).found).toBe(false);
+    expect(m.kill("ws1", a.tabId)).toBe(true);
+    expect(m.snapshot("ws1", a.tabId).found).toBe(false);
     expect(m.list("ws1").map((t) => t.tabId)).toEqual([b.tabId]);
 
     m.disposeAll();
@@ -225,7 +457,7 @@ describe("PtyManager：真 PTY 子进程（node-pty，方案 B）", () => {
     m.open({ workspaceId: "wsB", cwd: os.tmpdir(), profileId: null, cols: 80, rows: 24 });
     expect(m.list("wsA").map((t) => t.tabId)).toEqual([a.tabId]);
 
-    const renamed = m.rename(a.tabId, "构建");
+    const renamed = m.rename("wsA", a.tabId, "构建");
     expect(renamed?.title).toBe("构建");
     expect(m.list("wsA")[0].title).toBe("构建");
   });

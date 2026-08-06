@@ -29,6 +29,7 @@ import {
   backupStoreIds,
   createBackup,
   hasPendingRestore,
+  quarantinePendingRestore,
   readBackupState,
   stagePendingRestore,
   validateBackupAt,
@@ -111,7 +112,13 @@ export async function applyPendingRestoreOnStartup(): Promise<void> {
     }
   } catch (err) {
     // 恢复失败不许拦启动：拦了的话用户连「换一份备份再试」的界面都进不去。
-    log().warn("backup_restore_failed", { error: String(err) });
+    let quarantinedPath: string | null = null;
+    try {
+      quarantinedPath = await quarantinePendingRestore(dataDir());
+    } catch (quarantineError) {
+      log().warn("backup_restore_quarantine_failed", { error: String(quarantineError) });
+    }
+    log().warn("backup_restore_failed", { error: String(err), quarantinedPath });
   }
 }
 

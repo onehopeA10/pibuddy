@@ -178,6 +178,7 @@ describe("extension veto（data.cancelled）", () => {
     const warn = vi.fn();
     store.setNotifier({ info: vi.fn(), success: vi.fn(), warning: warn, error: vi.fn() });
     fillSessionScopedState(store);
+    store.draftAttachments = [{ token: "keep", name: "keep.txt", size: 1, kind: "other" }];
     commandHandler = (cmd) =>
       cmd.type === "new_session"
         ? { success: true, data: { cancelled: true } }
@@ -186,6 +187,7 @@ describe("extension veto（data.cancelled）", () => {
     await store.newTask();
 
     expect(store.items.length).toBe(1);
+    expect(store.draftAttachments).toHaveLength(1);
     expect(warn).toHaveBeenCalledTimes(1);
     // 否决后不该继续拉状态
     expect(commandLog).toEqual(["new_session"]);
@@ -217,12 +219,32 @@ describe("extension veto（data.cancelled）", () => {
       error: vi.fn(),
     });
     fillSessionScopedState(store);
+    store.currentSessionId = "old";
+    store.editorText = "旧会话正文";
+    store.draftImages = [
+      { type: "image", data: "AAAA", mimeType: "image/png", name: "old.png" },
+    ];
+    store.draftAttachments = [{ token: "old-token", name: "old.txt", size: 1, kind: "other" }];
+    store.enqueueLocal("旧会话队列", "followUp");
+    store.composers.a = {
+      text: "目标会话正文",
+      images: [{ type: "image", data: "AAAA", mimeType: "image/png", name: "target.png" }],
+      attachments: [{ token: "target-token", name: "target.txt", size: 1, kind: "other" }],
+      queue: [],
+    };
 
     await store.openSession({ sessionId: "a" });
 
     expect(store.items.length).toBe(0);
     expect(Object.keys(store.toolRuns).length).toBe(0);
     expect(store.uiRequests.length).toBe(0);
+    expect(store.composers.old.text).toBe("旧会话正文");
+    expect(store.composers.old.images).toHaveLength(1);
+    expect(store.composers.old.queue.map((item) => item.text)).toEqual(["旧会话队列"]);
+    expect(store.composers.a.text).toBe("目标会话正文");
+    expect(store.composers.a.images).toHaveLength(1);
+    expect(store.composers.old.attachments).toEqual([]);
+    expect(store.composers.a.attachments).toEqual([]);
   });
 });
 
@@ -292,6 +314,32 @@ describe("send() 返回值即「草稿能否清空」", () => {
     const ok = await store.send({ text: "你好" });
     expect(ok).toBe(true);
     expect(store.items.length).toBe(1);
+  });
+
+  it("本地乐观消息只消费对应的 runtime echo，不重复展示", async () => {
+    const store = useAppStore();
+    expect(await store.send({ text: "相同内容" })).toBe(true);
+    store.handleEventEnvelope(
+      envelope({ type: "message_end", message: { role: "user", content: "相同内容" } }, 1)
+    );
+    expect(store.items).toHaveLength(1);
+  });
+
+  it("没有待消费 echo 时，相同文本和纯图片消息都不会被误判为重复", () => {
+    const store = useAppStore();
+    const textEvent = { type: "message_end", message: { role: "user", content: "再说一次" } };
+    store.handleEventEnvelope(envelope(textEvent, 1));
+    store.handleEventEnvelope(envelope(textEvent, 2));
+    const imageEvent = {
+      type: "message_end",
+      message: {
+        role: "user",
+        content: [{ type: "image", mimeType: "image/png", data: "AA==" }],
+      },
+    };
+    store.handleEventEnvelope(envelope(imageEvent, 3));
+    store.handleEventEnvelope(envelope(imageEvent, 4));
+    expect(store.items).toHaveLength(4);
   });
 
   it("没有内容时返回 false（不清空、也不发送）", async () => {

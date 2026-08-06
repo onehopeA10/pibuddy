@@ -791,6 +791,15 @@ export async function hasPendingRestore(dataDir: string): Promise<boolean> {
   return pathExists(path.join(path.resolve(dataDir), PENDING_RESTORE_DIR));
 }
 
+/** 将无法套用的 staging 移出启动扫描路径，保留现场供诊断或人工恢复。 */
+export async function quarantinePendingRestore(dataDir: string): Promise<string | null> {
+  const pending = path.join(path.resolve(dataDir), PENDING_RESTORE_DIR);
+  if (!(await pathExists(pending))) return null;
+  const quarantined = `${pending}.failed-${Date.now()}`;
+  await rename(pending, quarantined);
+  return quarantined;
+}
+
 // ---------------------------------------------------------------- 状态落盘
 
 export interface BackupStateFile {

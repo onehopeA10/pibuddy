@@ -72,7 +72,7 @@ export function electronProbes(win: BrowserWindow | null): HealthProbes {
      * 永远不 resolve，实测表现是 renderer-ready 每次都恰好卡满 5000ms 超时
      * 然后报失败。轮询补上这条竞态。
      */
-    rendererReady: async () => {
+    rendererReady: async (signal?: AbortSignal) => {
       if (!win || win.isDestroyed()) throw new Error("no window");
       if (win.webContents.isCrashed()) throw new Error("renderer crashed");
       if (!win.webContents.isLoading()) return;
@@ -84,6 +84,7 @@ export function electronProbes(win: BrowserWindow | null): HealthProbes {
           timer = null;
           win.webContents.off("did-finish-load", ok);
           win.webContents.off("did-fail-load", bad);
+          signal?.removeEventListener("abort", aborted);
         };
         const ok = (): void => {
           cleanup();
@@ -93,8 +94,13 @@ export function electronProbes(win: BrowserWindow | null): HealthProbes {
           cleanup();
           reject(new Error("did-fail-load"));
         };
+        const aborted = (): void => {
+          cleanup();
+          reject(new Error("renderer readiness probe aborted"));
+        };
         win.webContents.once("did-finish-load", ok);
         win.webContents.once("did-fail-load", bad);
+        signal?.addEventListener("abort", aborted, { once: true });
         timer = globalThis.setInterval(() => {
           if (win.isDestroyed()) return bad();
           if (!win.webContents.isLoading()) ok();
