@@ -47,7 +47,7 @@ function installWindow(): void {
         ),
         abort: vi.fn(() => dispatch({ type: "abort" })),
         newSession: vi.fn(() => dispatch({ type: "new_session" })),
-        switchSession: vi.fn((sessionId: string) =>
+        switchSession: vi.fn((_workspaceId: string, sessionId: string) =>
           dispatch({ type: "switch_session", sessionId })
         ),
         setModel: vi.fn((provider: string, modelId: string) =>
@@ -146,7 +146,7 @@ function envelope(payload: unknown, sequence: number): Record<string, unknown> {
 
 /** 往 store 里塞满会话级状态，用于验证清空覆盖面。 */
 function fillSessionScopedState(store: ReturnType<typeof useAppStore>): void {
-  store.items.push({ key: 1, message: { role: "user", content: "hi" } as never });
+  store.items = [{ key: 1, message: { role: "user", content: "hi" } as never }];
   store.toolRuns["t1"] = {
     toolCallId: "t1",
     toolName: "bash",

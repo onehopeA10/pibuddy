@@ -1,9 +1,9 @@
 /**
- * 会话中心的 IPC handler（SES-101）——**恰 9 条通道，一条不多**。
+ * 会话中心的 IPC handler（SES-101）——**恰 11 条通道，一条不多**。
  *
- * 跨进程边界上只有不透明的 `sessionId`：JSONL 的绝对路径（sourcePath）与
- * 工作目录的真实路径（workspaceRoot）都只活在主进程里，由索引表在这里
- * 反查（CT-15）。渲染进程拿到一个 sessionId 也推断不出磁盘布局。
+ * 跨进程边界上只有不透明的 `sessionId` / `externalId`：JSONL 的绝对路径
+ * （sourcePath）与工作目录的真实路径（workspaceRoot）都只活在主进程里，
+ * 由索引表在这里反查（CT-15）。渲染进程拿到一个 sessionId 也推断不出磁盘布局。
  *
  * 本文件不出现 ipcMain.handle：注册一律经 ipc-guard 的 registerHandler。
  */
@@ -13,6 +13,8 @@ import {
   CHANNELS,
   readHistoryRequestSchema,
   sessionIdRequestSchema,
+  sessionImportRunRequestSchema,
+  sessionImportScanRequestSchema,
   sessionQuerySchema,
   sessionRenameRequestSchema,
   sessionSaveDraftRequestSchema,
@@ -20,6 +22,8 @@ import {
   sessionSetStatusRequestSchema,
   type InvokeChannel,
   type SessionHistoryPage,
+  type SessionImportScanResult,
+  type SessionImportRunResult,
   type SessionRow,
 } from "@pibuddy/contract";
 
@@ -28,13 +32,15 @@ import { tryClientFor } from "../pi/pi-ipc.js";
 import { loadSettings } from "../settings.js";
 import { requireWorkspaceRoot } from "../workspace-registry.js";
 import { readEntriesBefore } from "./session-history.js";
+import { importPiSessions, scanPiSessions } from "./import-pi.js";
+import { resolveSessionDir } from "./session-dir.js";
 import { sessionIndex, toSessionRow, type IndexedSession } from "./session-index.js";
 import { renameSession } from "./session-rename.js";
 
 /**
  * 本域注册的全部通道。
  *
- * 导出成常量而不是散在下面的调用里：单测据它断言「恰 9 条」，多挂一条
+ * 导出成常量而不是散在下面的调用里：单测据它断言「恰 11 条」，多挂一条
  * 或漏挂一条都会立刻失败，而不是等到用户点到那个按钮才发现。
  */
 export const SESSIONS_CHANNELS: InvokeChannel[] = [
@@ -47,6 +53,8 @@ export const SESSIONS_CHANNELS: InvokeChannel[] = [
   CHANNELS.sessionsSaveDraft,
   CHANNELS.sessionsExportHtml,
   CHANNELS.sessionsReadHistory,
+  CHANNELS.sessionsImportScan,
+  CHANNELS.sessionsImportRun,
 ];
 
 /**
@@ -202,12 +210,45 @@ export function registerSessionsIpc(): void {
       // 无限重试会把主进程钉在这里）。
       await index.syncWorkspace(row.workspaceRoot, loadSettings());
       row = await requireRow(payload.workspaceId, payload.sessionId);
-      return readEntriesBefore({
+      const second = await readEntriesBefore({
         sourcePath: row.sourcePath,
-        beforeOffset: payload.beforeOffset,
+        beforeOffset: Math.max(payload.beforeOffset, row.sizeBytes),
         limit: payload.limit,
         expect: { mtimeMs: row.mtimeMs, sizeBytes: row.sizeBytes },
       });
+      if (!second.stale) return second;
+      // 文件还在被追加：切会话预览不能因此空窗，按当前磁盘尽力读。
+      return readEntriesBefore({
+        sourcePath: row.sourcePath,
+        beforeOffset: Math.max(payload.beforeOffset, row.sizeBytes),
+        limit: payload.limit,
+      });
+    }
+  );
+
+  registerHandler(
+    CHANNELS.sessionsImportScan,
+    sessionImportScanRequestSchema,
+    async (payload): Promise<SessionImportScanResult> => {
+      const root = requireWorkspaceRoot(payload.workspaceId);
+      const destDir = resolveSessionDir(root, loadSettings());
+      const scanned = await scanPiSessions(destDir);
+      return {
+        items: scanned.map(({ sourceFile: _sourceFile, ...item }) => item),
+      };
+    }
+  );
+
+  registerHandler(
+    CHANNELS.sessionsImportRun,
+    sessionImportRunRequestSchema,
+    async (payload): Promise<SessionImportRunResult> => {
+      const root = requireWorkspaceRoot(payload.workspaceId);
+      const settings = loadSettings();
+      const destDir = resolveSessionDir(root, settings);
+      const result = await importPiSessions(destDir, payload.externalIds);
+      await sessionIndex().syncWorkspace(root, settings);
+      return result;
     }
   );
 }

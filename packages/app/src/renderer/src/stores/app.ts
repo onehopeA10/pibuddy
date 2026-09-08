@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, reactive, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, reactive, ref, shallowRef, watch } from "vue";
 import type {
   AgentEvent,
   AgentMessage,
@@ -50,6 +50,8 @@ import {
   type ImageCapabilityVerdict,
 } from "./model-capability";
 import { registerSessionScopedReset, resetSessionScopedState } from "./session-scope";
+import type { WorkMode } from "../../../lib/work-mode";
+import { useChatArtifactsStore } from "./chat-artifacts";
 import { recordUnknownEvent, useExtensionUiStore } from "./extensionUi";
 import { clearMarkdownCache } from "../markdown";
 
@@ -118,10 +120,11 @@ export interface ComposerState {
   images: ComposerImage[];
   attachments: AttachmentRef[];
   queue: LocalQueueItem[];
+  workMode: WorkMode;
 }
 
 function emptyComposer(): ComposerState {
-  return { text: "", images: [], attachments: [], queue: [] };
+  return { text: "", images: [], attachments: [], queue: [], workMode: "act" };
 }
 
 export type Notifier = {
@@ -343,49 +346,92 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
     throw new Error("助手正在输出，请选择「立即插话」或「下一轮处理」");
   }
   const echo = store.stageUserEcho();
-  let resp: { success: boolean; error?: string };
-  try {
-    resp = await window.piBuddy.pi.prompt({
-      message,
-      ...(images.length ? { images } : {}),
-      ...(attachmentTokens.length ? { attachmentTokens } : {}),
-      // 传输命令恒为 prompt，产品语义由 streamingBehavior 取值区分
-      ...(wasStreaming ? STREAMING_BEHAVIOR[opts.mode!] : {}),
-    });
-  } catch (err) {
-    store.discardUserEcho(echo);
-    store.notify("error", err instanceof Error ? err.message : "发送失败");
-    return false;
-  }
-  if (!resp.success) {
-    store.discardUserEcho(echo);
-    store.notify("error", resp.error ?? "发送失败");
-    return false;
-  }
-  if (wasStreaming) {
-    store.notify(
-      "info",
-      opts.mode === "followUp"
-        ? "已排队，助手做完这一轮就处理你的新指令"
-        : "已插话，助手会尽快处理你的新指令"
-    );
-  }
+  const localKey = echo.echoed
+    ? null
+    : appendLocalUserMessage(store, message, images);
 
-  if (!echo.echoed) {
-    const content: (TextContent | ImageContent)[] = [];
-    if (message) content.push({ type: "text", text: message });
-    content.push(...images);
-    store.items.push({
-      key: ++keySeq,
+  const deliver = async (): Promise<boolean> => {
+    const targetSession = store.currentSessionId;
+    await store.whenPiReady();
+    if (
+      store.currentSessionId !== targetSession ||
+      store.currentSessionId !== store.piLoadedSessionId
+    ) {
+      store.discardUserEcho(echo);
+      removeLocalUserMessage(store, localKey);
+      return false;
+    }
+    let resp: { success: boolean; error?: string };
+    try {
+      resp = await window.piBuddy.pi.prompt({
+        message,
+        ...(images.length ? { images } : {}),
+        ...(attachmentTokens.length ? { attachmentTokens } : {}),
+        ...(wasStreaming ? STREAMING_BEHAVIOR[opts.mode!] : {}),
+        ...(store.workMode === "plan" ? { workMode: "plan" as const } : {}),
+      });
+    } catch (err) {
+      store.discardUserEcho(echo);
+      removeLocalUserMessage(store, localKey);
+      store.notify("error", err instanceof Error ? err.message : "发送失败");
+      return false;
+    }
+    if (!resp.success) {
+      store.discardUserEcho(echo);
+      removeLocalUserMessage(store, localKey);
+      store.notify("error", resp.error ?? "发送失败");
+      return false;
+    }
+    if (wasStreaming) {
+      store.notify(
+        "info",
+        opts.mode === "followUp"
+          ? "已排队，助手做完这一轮就处理你的新指令"
+          : "已插话，助手会尽快处理你的新指令"
+      );
+    }
+    store.activityTick++;
+    return true;
+  };
+
+  const piReady =
+    Boolean(store.currentSessionId) &&
+    store.currentSessionId === store.piLoadedSessionId &&
+    store.piSwitchingSessionId === null;
+  if (!piReady && store.currentSessionId) {
+    // Pi 还在切会话：先让出输入框，接通后再发。失败会撤掉刚才那条本地消息。
+    void deliver();
+    return true;
+  }
+  return deliver();
+}
+
+function appendLocalUserMessage(
+  store: { items: ChatItem[] },
+  message: string,
+  images: ImageContent[]
+): number {
+  const content: (TextContent | ImageContent)[] = [];
+  if (message) content.push({ type: "text", text: message });
+  content.push(...images);
+  const key = ++keySeq;
+  store.items = [
+    ...store.items,
+    {
+      key,
       message: {
         role: "user",
         content: content.length === 1 && content[0].type === "text" ? message : content,
         timestamp: Date.now(),
       } as UserMessage,
-    });
-  }
-  store.activityTick++;
-  return true;
+    },
+  ];
+  return key;
+}
+
+function removeLocalUserMessage(store: { items: ChatItem[] }, key: number | null): void {
+  if (key === null) return;
+  store.items = store.items.filter((item) => item.key !== key);
 }
 
 export const useAppStore = defineStore("app", () => {
@@ -435,6 +481,8 @@ export const useAppStore = defineStore("app", () => {
     voiceEnabled: false,
   });
   const startError = ref("");
+  /** getAvailableModels 失败时的原因；启动本身仍成功，空态展示给用户。 */
+  const modelsError = ref("");
   /** 会话切换成功但消息拉取失败时的提示；非空时 ChatView 显示错误条与「重试」。 */
   const sessionLoadError = ref("");
 
@@ -447,6 +495,83 @@ export const useAppStore = defineStore("app", () => {
    * 毫无反应，用户会以为没点上而反复点，每一下都再排队 5 秒。
    */
   const switchingSessionId = ref<string | null>(null);
+  /**
+   * Pi 还在读 JSONL。列表转圈用 switchingSessionId，预览落地即清掉；
+   * 输入框用这个锁，避免发到还没切完的旧会话。
+   */
+  const piSwitchingSessionId = ref<string | null>(null);
+  /** Pi 进程当前装载的会话。和界面上的 currentSessionId 可以暂时不一致。 */
+  const piLoadedSessionId = ref("");
+  let ensurePiInflight: Promise<void> | null = null;
+  let piSwitchWaiters: Array<() => void> = [];
+  /**
+   * switch_session 回来后 Pi 可能紧跟着丢一条 agent_settled。
+   * 若立刻 get_state / get_session_stats，发送会被再挡一轮重建。
+   */
+  let skipSettledRefreshAfterSwitch = false;
+
+  function settlePiSwitchWaiters(): void {
+    const pending = piSwitchWaiters;
+    piSwitchWaiters = [];
+    for (const done of pending) done();
+  }
+
+  /**
+   * 浏览会话只读本地 JSONL；点开会话时后台预热 switch_session，
+   * 发送 / 换模型 / 压缩时只 join 这次 in-flight，不再从零等一整遍。
+   */
+  async function ensurePiOnCurrentSession(forcedId?: string): Promise<void> {
+    for (;;) {
+      const target = forcedId ?? currentSessionId.value;
+      if (!target || target === piLoadedSessionId.value) return;
+      if (ensurePiInflight) {
+        await ensurePiInflight;
+        continue;
+      }
+      const attempted = target;
+      const run = (async () => {
+        piSwitchingSessionId.value = attempted;
+        try {
+          const resp = await window.piBuddy.pi.switchSession(workspaceId.value, attempted);
+          if (!resp.success) {
+            notify("error", resp.error ?? "打开会话失败");
+            return;
+          }
+          if (resp.data?.cancelled === true) {
+            notify("warning", "扩展取消了会话切换，当前会话保持不变");
+            return;
+          }
+          piLoadedSessionId.value = attempted;
+          skipSettledRefreshAfterSwitch = true;
+          // 切完立刻停。get_state / get_session_stats 会占住 Pi 的 RPC 队列，
+          // 发送被排在后面，体感就是「又等了一次整份重建」。
+        } catch (err) {
+          notify("error", err instanceof Error ? err.message : "打开会话失败");
+        } finally {
+          piSwitchingSessionId.value = null;
+          settlePiSwitchWaiters();
+        }
+      })();
+      ensurePiInflight = run;
+      try {
+        await run;
+      } finally {
+        if (ensurePiInflight === run) ensurePiInflight = null;
+      }
+      if (piLoadedSessionId.value !== attempted) return;
+    }
+  }
+
+  /** 输入框不锁；真发送时再等 Pi 切到当前会话。 */
+  function whenPiReady(): Promise<void> {
+    if (currentSessionId.value && currentSessionId.value !== piLoadedSessionId.value) {
+      return ensurePiOnCurrentSession();
+    }
+    if (piSwitchingSessionId.value === null) return Promise.resolve();
+    return new Promise((resolve) => {
+      piSwitchWaiters.push(resolve);
+    }).then(() => whenPiReady());
+  }
 
   /**
    * 当前会话 .jsonl 的字节数 —— **向前翻页的初始游标**。
@@ -586,7 +711,7 @@ export const useAppStore = defineStore("app", () => {
   const thinkingLevels = shallowRef<ThinkingLevel[]>(["off"]);
   const stats = shallowRef<SessionStats | null>(null);
 
-  const items = ref<ChatItem[]>([]);
+  const items = shallowRef<ChatItem[]>([]);
   const liveAssistant = shallowRef<AssistantMessage | null>(null);
   const toolRuns = reactive<Record<string, ToolRun>>({});
   const queue = ref<{ steering: string[]; followUp: string[] }>({ steering: [], followUp: [] });
@@ -616,6 +741,7 @@ export const useAppStore = defineStore("app", () => {
    * 迁移不该顺手改掉一堆读点，那样一次改动会同时验证两件事。
    */
   const extUi = useExtensionUiStore();
+  const chatArtifacts = useChatArtifactsStore();
   const uiRequests = computed(() => extUi.uiRequests);
   const statusTexts = extUi.statusTexts;
   /** 输入区正文。同名代理，落在当前会话的 composer 格子上。 */
@@ -623,6 +749,12 @@ export const useAppStore = defineStore("app", () => {
     get: () => composer().text,
     set: (v) => {
       composer().text = v;
+    },
+  });
+  const workMode = computed<WorkMode>({
+    get: () => composer().workMode ?? "act",
+    set: (v) => {
+      composer().workMode = v;
     },
   });
   const settingsOpen = ref(false);
@@ -643,6 +775,7 @@ export const useAppStore = defineStore("app", () => {
     // statusTexts / uiRequests 的清空由 extensionUi store 自己注册的那一条
     // 回调负责（CT-25）：状态归谁所有，清空就归谁写。
     liveAssistant.value = null;
+    chatArtifacts.reset();
     // 流式缓冲与挂起的 rAF 也是会话级状态：不清就会把上一会话的尾字符
     // 渗进新会话的首条消息（三大门禁全绿，只有肉眼能发现）。
     resetStream();
@@ -693,7 +826,7 @@ export const useAppStore = defineStore("app", () => {
   // ---------- 事件处理 ----------
 
   function pushMessage(message: AgentMessage): void {
-    items.value.push({ key: ++keySeq, message });
+    items.value = [...items.value, { key: ++keySeq, message }];
   }
 
   // ---------- 流式缓冲的落地 / 清空 ----------
@@ -763,13 +896,17 @@ export const useAppStore = defineStore("app", () => {
   }
 
   function handleEvent(e: AgentEvent): void {
+    const deltaType =
+      e.type === "message_update"
+        ? (e as { assistantMessageEvent?: { type?: string } }).assistantMessageEvent?.type
+        : undefined;
     if (
       e.type === "message_start" ||
-      e.type === "message_update" ||
       e.type === "message_end" ||
       e.type === "tool_execution_start" ||
       e.type === "tool_execution_update" ||
-      e.type === "tool_execution_end"
+      e.type === "tool_execution_end" ||
+      (e.type === "message_update" && deltaType !== "text_delta" && deltaType !== "thinking_delta")
     ) {
       activityTick.value++;
     }
@@ -783,8 +920,12 @@ export const useAppStore = defineStore("app", () => {
       case "agent_settled":
         streaming.value = false;
         liveAssistant.value = null;
-        void refreshStats();
         scheduleRefreshSessions();
+        if (skipSettledRefreshAfterSwitch) {
+          skipSettledRefreshAfterSwitch = false;
+          break;
+        }
+        void refreshStats();
         void refreshState();
         break;
       case "message_start": {
@@ -865,6 +1006,19 @@ export const useAppStore = defineStore("app", () => {
           output: textOf(ev.result?.content),
           images: imagesOf(ev.result?.content),
         };
+        if (!ev.isError && workspaceId.value && currentSessionId.value) {
+          void chatArtifacts
+            .projectToolEnd({
+              workspaceId: workspaceId.value,
+              sessionId: currentSessionId.value,
+              toolCallId: ev.toolCallId,
+              items: items.value,
+              streaming: streaming.value,
+            })
+            .then((n) => {
+              if (n > 0) activityTick.value += 1;
+            });
+        }
         break;
       }
       case "queue_update": {
@@ -1238,16 +1392,44 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
-  function loadMessages(messages: AgentMessage[]): void {
-    items.value = [];
-    for (const key of Object.keys(toolRuns)) delete toolRuns[key];
+  function loadMessages(messages: AgentMessage[], opts?: { hydrate?: boolean }): void {
+    // 先在本地拼好再一次性写回。先 `items = []` 再逐条 push 的话，
+    // 长会话会先闪欢迎页再卡在上百次重渲染上，体感就是「聊天区空白」。
+    const nextItems: ChatItem[] = [];
+    const nextRuns: Record<string, ToolRun> = {};
     for (const msg of messages) {
       if (msg.role === "user" || msg.role === "assistant") {
-        pushMessage(msg);
+        nextItems.push({ key: ++keySeq, message: msg });
       } else if (msg.role === "toolResult") {
-        recordToolResult(msg as ToolResultMessage);
+        const existing = nextRuns[msg.toolCallId] ?? toolRuns[msg.toolCallId];
+        nextRuns[msg.toolCallId] = {
+          toolCallId: msg.toolCallId,
+          toolName: msg.toolName,
+          args: existing?.args ?? {},
+          status: msg.isError ? "error" : "done",
+          output: textOf(msg.content),
+          images: imagesOf(msg.content),
+        };
       }
     }
+    for (const key of Object.keys(toolRuns)) delete toolRuns[key];
+    Object.assign(toolRuns, nextRuns);
+    items.value = nextItems;
+    // 本地预览必须保持 10ms 级：产物回填会打 IPC，不能挡在抢先渲染上。
+    if (opts?.hydrate !== false) void hydrateChatArtifacts();
+  }
+
+  async function hydrateChatArtifacts(): Promise<void> {
+    // switch 成功后 currentSessionId 要等 refreshState 才改；热路径上用目标 id。
+    const sessionId =
+      switchingSessionId.value || piSwitchingSessionId.value || currentSessionId.value;
+    if (!workspaceId.value || !sessionId) return;
+    const n = await chatArtifacts.backfillSession({
+      workspaceId: workspaceId.value,
+      sessionId,
+      items: items.value,
+    });
+    if (n > 0) activityTick.value += 1;
   }
 
   /**
@@ -1316,6 +1498,7 @@ export const useAppStore = defineStore("app", () => {
 
   async function start(sessionId?: string): Promise<void> {
     startError.value = "";
+    modelsError.value = "";
     sessionLoadError.value = "";
     started.value = false;
     streaming.value = false;
@@ -1329,6 +1512,7 @@ export const useAppStore = defineStore("app", () => {
       });
       agentState.value = result.state;
       models.value = result.models;
+      modelsError.value = result.modelsError ?? "";
       loadMessages(result.messages);
 
       // 新的一代 runtime：generation 单调递增，供 M1 丢弃上一代迟到事件
@@ -1336,6 +1520,7 @@ export const useAppStore = defineStore("app", () => {
       sc.generation += 1;
       sc.runtimeId = `rt-${Date.now().toString(36)}-${sc.generation}`;
       adoptSession(result.state.sessionId);
+      piLoadedSessionId.value = result.state.sessionId ?? "";
       started.value = true;
 
       // 只有**新会话**才套用全局设置里的模型与思考力度。
@@ -1545,6 +1730,7 @@ export const useAppStore = defineStore("app", () => {
     // 新会话磁盘上还没有文件，更谈不上「更早的消息」。
     currentSessionBytes.value = 0;
     await refreshState();
+    piLoadedSessionId.value = currentSessionId.value;
     void refreshSessions();
   }
 
@@ -1560,6 +1746,7 @@ export const useAppStore = defineStore("app", () => {
       notify("warning", "请先等这一轮结束，再整理对话记忆");
       return;
     }
+    await whenPiReady();
     try {
       const resp = await window.piBuddy.pi.compact();
       if (!resp?.success) {
@@ -1574,9 +1761,11 @@ export const useAppStore = defineStore("app", () => {
   }
 
   let sessionPreviewEpoch = 0;
-  let sessionPreviewPromise: Promise<void> | null = null;
+  let sessionSwitchGeneration = 0;
+  let sessionPreviewPromise: Promise<boolean> | null = null;
 
   interface SessionPreviewRollback {
+    currentSessionId: string;
     currentSessionBytes: number;
     items: ChatItem[];
     toolRuns: Record<string, ToolRun>;
@@ -1585,6 +1774,7 @@ export const useAppStore = defineStore("app", () => {
 
   function captureSessionPreviewRollback(): SessionPreviewRollback {
     return {
+      currentSessionId: currentSessionId.value,
       currentSessionBytes: currentSessionBytes.value,
       items: [...items.value],
       toolRuns: { ...toolRuns },
@@ -1593,6 +1783,7 @@ export const useAppStore = defineStore("app", () => {
   }
 
   function restoreSessionPreviewRollback(snapshot: SessionPreviewRollback): void {
+    currentSessionId.value = snapshot.currentSessionId;
     currentSessionBytes.value = snapshot.currentSessionBytes;
     items.value = snapshot.items;
     for (const key of Object.keys(toolRuns)) delete toolRuns[key];
@@ -1615,63 +1806,57 @@ export const useAppStore = defineStore("app", () => {
       notify("warning", "请先停止当前任务，再切换历史会话");
       return;
     }
-    // 已经在这个会话里：pi 那边照样要重读整个文件，白等好几秒换来同样的界面
-    if (target.sessionId === currentSessionId.value) return;
-    // 一次只切一个。少了这道闸，用户在 5 秒空窗里连点几下，就会排起几个
-    // 各自 5 秒的切换，最后落在哪个会话上取决于返回顺序。
-    if (switchingSessionId.value !== null) return;
+    if (target.sessionId === currentSessionId.value && switchingSessionId.value === null) {
+      return;
+    }
+    if (switchingSessionId.value === target.sessionId) return;
 
     const rollback = captureSessionPreviewRollback();
     const previewEpoch = ++sessionPreviewEpoch;
+    const switchGen = ++sessionSwitchGeneration;
     switchingSessionId.value = target.sessionId;
+    const sizeBytes =
+      target.sizeBytes ?? useSessionsStore().rowOf(target.sessionId)?.sizeBytes ?? 0;
     // 先于 currentSessionId 变化写入：ChatView 在 currentSessionId 一变就
     // 用它 reset 翻页游标，晚一步写就等于用 0 去 reset（= 直接判定已到文件头）。
-    currentSessionBytes.value = target.sizeBytes ?? 0;
-    // 先用本地 JSONL 把内容铺出来（10ms 级），不等 pi。promise 被显式保留：
-    // switch 有结论后先作废 epoch、再等 preview 收尾，最后才 rollback / 权威重载。
-    const previewPromise = previewSessionLocally(
-      target.sessionId,
-      target.sizeBytes,
-      previewEpoch
-    );
+    currentSessionBytes.value = sizeBytes;
+    const previewPromise = previewSessionLocally(target.sessionId, sizeBytes, previewEpoch);
     sessionPreviewPromise = previewPromise;
+    // 预览只是读本地 JSONL；Pi 重建可以同时开工，别等预览结束才开始付 5 秒。
+    void ensurePiOnCurrentSession(target.sessionId);
     try {
-      let resp: Awaited<ReturnType<typeof window.piBuddy.pi.switchSession>>;
-      try {
-        resp = await window.piBuddy.pi.switchSession(target.sessionId);
-      } catch (err) {
-        sessionPreviewEpoch++;
-        await previewPromise;
-        restoreSessionPreviewRollback(rollback);
-        throw err;
-      }
-
-      // preview 可能已经落地，也可能还卡在 IPC。先失效再等待，确保它不可能在
-      // rollback 或 reloadMessages 之后以 detached promise 的身份反向覆盖界面。
-      sessionPreviewEpoch++;
-      await previewPromise;
-      if (!resp.success) {
-        restoreSessionPreviewRollback(rollback);
-        notify("error", resp.error ?? "打开会话失败");
-        return;
-      }
-      // 同 new_session：扩展否决时保持原样，不能拿一个空会话冒充切换成功。
-      if (resp.data?.cancelled === true) {
-        restoreSessionPreviewRollback(rollback);
-        notify("warning", "扩展取消了会话切换，当前会话保持不变");
-        return;
-      }
-      // 切换已经生效：主进程已撤销全部非图片附件 token；文本、内联图片与
-      // 本地队列仍按会话保留。旧会话的消息、工具卡片、扩展弹窗全部作废。
+      const previewOk = await previewPromise;
+      if (switchGen !== sessionSwitchGeneration) return;
+      const keepPreview = {
+        items: [...items.value],
+        toolRuns: { ...toolRuns },
+      };
       clearEphemeralComposerAttachments();
       resetSessionScopedState();
-      await reloadMessages();
-      await refreshState();
+      if (previewOk && keepPreview.items.length > 0) {
+        items.value = keepPreview.items;
+        Object.assign(toolRuns, keepPreview.toolRuns);
+      }
+      adoptSession(target.sessionId);
+      await nextTick();
       void restoreDraft();
-      void refreshStats();
-    } finally {
-      if (sessionPreviewPromise === previewPromise) sessionPreviewPromise = null;
+      // 预览走完就松手。switch_session 可能要十几秒，不能继续占着输入框。
       switchingSessionId.value = null;
+      if (!previewOk) {
+        // 预热已经在飞或刚结束：只 join，失败时不要再打一次 switch_session。
+        if (ensurePiInflight) await ensurePiInflight;
+        if (switchGen !== sessionSwitchGeneration) return;
+        if (piLoadedSessionId.value !== target.sessionId) {
+          restoreSessionPreviewRollback(rollback);
+          return;
+        }
+        await reloadMessages();
+      }
+    } finally {
+      if (switchGen === sessionSwitchGeneration) {
+        if (sessionPreviewPromise === previewPromise) sessionPreviewPromise = null;
+        switchingSessionId.value = null;
+      }
     }
   }
 
@@ -1689,10 +1874,10 @@ export const useAppStore = defineStore("app", () => {
     sessionId: string,
     sizeBytes: number | undefined,
     epoch: number
-  ): Promise<void> {
+  ): Promise<boolean> {
     // sizeBytes 由调用方从已加载的会话行里带过来：列表本来就有这个字段，
     // 为它单开一条 IPC 通道既多一次往返，也多一处要校验的接口面。
-    if (typeof sizeBytes !== "number" || sizeBytes <= 0) return;
+    if (typeof sizeBytes !== "number" || sizeBytes <= 0) return false;
     try {
       const page = await window.piBuddy.sessions.readHistoryBefore({
         workspaceId: workspaceId.value,
@@ -1700,12 +1885,15 @@ export const useAppStore = defineStore("app", () => {
         beforeOffset: sizeBytes,
         limit: 60,
       });
-      // switch 已有结论或期间目标失效：过期结果绝不能盖到 rollback / 权威数据上。
-      if (sessionPreviewEpoch !== epoch || switchingSessionId.value !== sessionId) return;
+      // 失败 / 否决才会 ++epoch。成功路径要让还在飞的预览落地。
+      if (sessionPreviewEpoch !== epoch || switchingSessionId.value !== sessionId) return false;
       const msgs = entriesToMessages(page.entries);
-      if (msgs.length > 0) loadMessages(msgs);
+      if (msgs.length === 0) return false;
+      loadMessages(msgs, { hydrate: false });
+      return true;
     } catch {
       /* 抢先渲染失败就等 pi 的权威数据，不打扰用户 */
+      return false;
     }
   }
 
@@ -1714,6 +1902,7 @@ export const useAppStore = defineStore("app", () => {
    * 由 ChatView 的「重试」按钮再调一次，绝不静默留白。
    */
   async function reloadMessages(): Promise<void> {
+    await whenPiReady();
     sessionLoadError.value = "";
     let resp: { success: boolean; error?: string; data?: { messages: AgentMessage[] } };
     try {
@@ -1897,6 +2086,7 @@ export const useAppStore = defineStore("app", () => {
     modelId: string,
     persist = true
   ): Promise<void> {
+    await whenPiReady();
     const resp = await window.piBuddy.pi.setModel(provider, modelId);
     if (!resp.success) {
       notify("error", resp.error ?? "切换模型失败");
@@ -1927,6 +2117,7 @@ export const useAppStore = defineStore("app", () => {
   }
 
   async function setThinkingLevel(level: ThinkingLevel): Promise<void> {
+    await whenPiReady();
     const resp = await window.piBuddy.pi.setThinkingLevel(level);
     if (resp.success) {
       settings.value = await window.piBuddy.settings.set({ thinkingLevel: level });
@@ -1981,8 +2172,12 @@ export const useAppStore = defineStore("app", () => {
     settings,
     started,
     startError,
+    modelsError,
     sessionLoadError,
     switchingSessionId,
+    piSwitchingSessionId,
+    piLoadedSessionId,
+    whenPiReady,
     currentSessionBytes,
     entriesToMessages,
     prependMessages,
@@ -1999,6 +2194,7 @@ export const useAppStore = defineStore("app", () => {
     thinkingLevels,
     stats,
     items,
+    artifactsFor: (keys: ReadonlyArray<string | number>) => chatArtifacts.artifactsFor(keys),
     liveAssistant,
     toolRuns,
     streaming,
@@ -2010,6 +2206,7 @@ export const useAppStore = defineStore("app", () => {
     statusTexts,
     uiRequests,
     editorText,
+    workMode,
     settingsOpen,
     activityTick,
     workspace,

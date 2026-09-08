@@ -13,7 +13,7 @@ import { computed, onMounted, ref } from "vue";
 import { NButton, NDropdown, NInput, NSpin, useDialog, useMessage } from "naive-ui";
 import type { SessionRow, SessionStatus } from "@contract";
 import { useAppStore } from "../stores/app";
-import { useSessionsStore } from "../stores/sessions";
+import { sessionDisplayName, useSessionsStore } from "../stores/sessions";
 import { formatTime } from "../friendly";
 
 const app = useAppStore();
@@ -103,7 +103,7 @@ async function onMenu(key: string, row: SessionRow): Promise<void> {
 function confirmPurge(row: SessionRow): void {
   dialog.warning({
     title: "彻底删除这个任务？",
-    content: `「${row.name || row.preview || "未命名任务"}」共 ${row.messageCount} 条消息。会话文件会被移入系统回收站，之后还可以从那里找回。`,
+    content: `「${sessionDisplayName(row)}」共 ${row.messageCount} 条消息。会话文件会被移入系统回收站，之后还可以从那里找回。`,
     positiveText: "彻底删除",
     negativeText: "取消",
     onPositiveClick: async () => {
@@ -187,7 +187,7 @@ async function commitRename(row: SessionRow): Promise<void> {
               @blur="commitRename(s)"
               @click.stop
             />
-            <template v-else>{{ s.name || "（未命名任务）" }}</template>
+            <template v-else>{{ sessionDisplayName(s) }}</template>
             <span v-if="s.unread" class="dot" title="有新消息"></span>
             <span v-if="s.running" class="dot running" title="正在后台运行"></span>
           </div>

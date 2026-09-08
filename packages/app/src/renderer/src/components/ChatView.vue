@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { NButton } from "naive-ui";
 import { useAppStore } from "../stores/app";
 import { useChatWindow } from "../stores/chat-window";
+import { groupVisualMessages, type VisualMessageItem } from "../message-groups";
 import MessageItem from "./MessageItem.vue";
 import Welcome from "./Welcome.vue";
 
@@ -54,6 +55,15 @@ const hiddenCount = computed(() =>
 const visibleItems = computed(() =>
   hiddenCount.value > 0 ? store.items.slice(hiddenCount.value) : store.items
 );
+const visualItems = computed(() => groupVisualMessages(visibleItems.value, store.liveAssistant));
+
+function artifactsOf(item: VisualMessageItem) {
+  return store.artifactsFor([
+    item.key,
+    ...item.sourceKeys,
+    ...(item.streaming ? (["live-assistant"] as const) : []),
+  ]);
+}
 
 /**
  * 向前扩窗的重入闸。
@@ -156,8 +166,14 @@ function resend(text: string): void {
       </n-button>
     </div>
     <Welcome
-      v-if="store.items.length === 0 && !store.liveAssistant && !store.sessionLoadError"
+      v-if="store.items.length === 0 && !store.liveAssistant && !store.sessionLoadError && !store.switchingSessionId"
     />
+    <div
+      v-else-if="store.items.length === 0 && store.switchingSessionId && !store.sessionLoadError"
+      class="session-opening"
+    >
+      正在打开这个会话…
+    </div>
     <div v-else class="chat-inner">
       <div v-if="win.loadError.value" class="history-load-error">
         <span>😕 更早的消息没能加载出来：{{ win.loadError.value }}</span>
@@ -183,9 +199,13 @@ function resend(text: string): void {
         </n-button>
       </div>
 
-      <template v-for="item in visibleItems" :key="item.key">
+      <template
+        v-for="item in visualItems"
+        :key="item.key"
+        v-memo="[item.key, item.streaming, item.streaming ? item.message : item.key, win.unreadDivider.value]"
+      >
         <div
-          v-if="win.unreadDivider.value === item.key"
+          v-if="item.sourceKeys.includes(win.unreadDivider.value ?? -1)"
           data-unread-divider
           class="unread-divider"
         >
@@ -194,14 +214,11 @@ function resend(text: string): void {
         <MessageItem
           :message="item.message"
           :message-key="item.key"
+          :streaming="item.streaming"
+          :artifacts="artifactsOf(item)"
           @resend="resend"
         />
       </template>
-      <MessageItem
-        v-if="store.liveAssistant"
-        :message="store.liveAssistant"
-        streaming
-      />
     </div>
 
     <n-button
@@ -232,6 +249,14 @@ function resend(text: string): void {
   flex: 1;
   height: 1px;
   background: #fecaca;
+}
+.session-opening {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
+  color: #64748b;
+  font-size: 13px;
 }
 .history-load-error {
   display: flex;

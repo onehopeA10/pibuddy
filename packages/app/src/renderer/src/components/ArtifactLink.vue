@@ -14,6 +14,7 @@ import { NButton, NTag } from "naive-ui";
 import type { ArtifactRecord } from "@contract";
 import { useAppStore } from "../stores/app";
 import { useArtifactsStore } from "../stores/artifacts";
+import { useChatArtifactsStore } from "../stores/chat-artifacts";
 
 const props = defineProps<{
   artifactId: string;
@@ -24,8 +25,12 @@ const props = defineProps<{
 
 const app = useAppStore();
 const store = useArtifactsStore();
+const chatArtifacts = useChatArtifactsStore();
 
 const record = ref<ArtifactRecord | null>(null);
+const pendingChangeId = ref<string | null>(null);
+const reviewError = ref("");
+const reviewing = ref(false);
 const missing = ref(false);
 
 const trashed = computed(() => record.value?.status === "trashed");
@@ -47,26 +52,16 @@ async function resolve(): Promise<void> {
     return;
   }
   try {
-    // 用 artifactId 精确定位，再在版本链里挑出消息当时引用的那一版。
-    const page = await window.piBuddy.artifacts.query({ workspaceId, limit: 1000 });
-    const trash = await window.piBuddy.artifacts.query({
-      workspaceId,
-      trashed: true,
-      limit: 1000,
-    });
-    const all = [...page.items, ...trash.items];
-    const anchor = all.find((a) => a.id === props.artifactId);
-    if (!anchor) {
+    // 同一会话里的链接共用一轮查询。切会话时绝不能每条消息各扫一遍产物表。
+    const sessionId = app.switchingSessionId || app.currentSessionId || undefined;
+    await chatArtifacts.ensureResolved(workspaceId, sessionId);
+    const hit = chatArtifacts.resolveRecord(props.artifactId, props.version);
+    if (!hit) {
       missing.value = true;
       return;
     }
-    record.value =
-      all.find(
-        (a) =>
-          a.logicalKey === anchor.logicalKey &&
-          a.workspaceId === anchor.workspaceId &&
-          a.version === props.version
-      ) ?? anchor;
+    record.value = hit;
+    pendingChangeId.value = chatArtifacts.pendingChangeIdFor(hit);
   } catch {
     missing.value = true;
   }
@@ -86,7 +81,44 @@ function open(): void {
 async function restore(): Promise<void> {
   if (!record.value) return;
   await store.restore(record.value.workspaceId, record.value.id);
+  chatArtifacts.invalidateRecords();
   await resolve();
+}
+
+function reviewFailMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  if (/conflict|hash|mismatch/i.test(raw)) return "这份后来又被动过，没法替你退回。";
+  return raw || "这次没办成，按钮还在，可以再试。";
+}
+
+async function acceptChange(): Promise<void> {
+  const id = pendingChangeId.value;
+  if (!id || !window.piBuddy.workspace?.acceptChange || reviewing.value) return;
+  reviewing.value = true;
+  reviewError.value = "";
+  try {
+    await window.piBuddy.workspace.acceptChange(id);
+    pendingChangeId.value = null;
+  } catch (err) {
+    reviewError.value = reviewFailMessage(err);
+  } finally {
+    reviewing.value = false;
+  }
+}
+
+async function rejectChange(): Promise<void> {
+  const id = pendingChangeId.value;
+  if (!id || !window.piBuddy.workspace?.rejectChange || reviewing.value) return;
+  reviewing.value = true;
+  reviewError.value = "";
+  try {
+    await window.piBuddy.workspace.rejectChange(id);
+    pendingChangeId.value = null;
+  } catch (err) {
+    reviewError.value = reviewFailMessage(err);
+  } finally {
+    reviewing.value = false;
+  }
 }
 </script>
 
@@ -120,6 +152,28 @@ async function restore(): Promise<void> {
       <n-tag v-else-if="record?.status === 'conflicted'" size="small" type="warning">
         已被外部改动
       </n-tag>
+      <template v-if="pendingChangeId">
+        <n-button
+          size="tiny"
+          type="primary"
+          secondary
+          :loading="reviewing"
+          aria-label="留下这份改动"
+          @click="acceptChange"
+        >
+          留下这份
+        </n-button>
+        <n-button
+          size="tiny"
+          quaternary
+          :disabled="reviewing"
+          aria-label="退回这次改动"
+          @click="rejectChange"
+        >
+          退回这次
+        </n-button>
+      </template>
+      <n-tag v-if="reviewError" size="small" type="error">{{ reviewError }}</n-tag>
     </template>
   </span>
 </template>
