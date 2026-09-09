@@ -15,6 +15,15 @@ import type { SessionRow, SessionStatus } from "@contract";
 /** 搜索框停止输入多久之后才真正查一次。 */
 const SEARCH_DEBOUNCE_MS = 220;
 
+/** 会话没有显式名称时，使用首条用户消息的前 5 个字符。 */
+export function sessionDisplayName(row: Pick<SessionRow, "name" | "preview">): string {
+  const explicitName = row.name?.trim();
+  if (explicitName) return explicitName;
+
+  const preview = row.preview.trim().replace(/\s+/g, " ");
+  return Array.from(preview).slice(0, 5).join("") || "未命名任务";
+}
+
 export interface SessionFilters {
   search: string;
   status: SessionStatus;

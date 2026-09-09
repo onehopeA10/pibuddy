@@ -116,6 +116,15 @@ describe("verifyBeforeInstall", () => {
     expect(r.ok).toBe(true);
   });
 
+  it("文件在但清单缺 sha512 → ok:false, signature", () => {
+    const r = verifyBeforeInstall(
+      { version: "2.0.0", currentVersion: "1.0.0", filePath: "/tmp/PiBuddy-Setup-2.0.0.exe" },
+      { exists: () => true }
+    );
+    expect(r.ok).toBe(false);
+    expect(r.errorCode).toBe("signature");
+  });
+
   it("下载好的文件不见了 → ok:false, disk", () => {
     const r = verifyBeforeInstall(
       { version: "2.0.0", currentVersion: "1.0.0", filePath: "/tmp/gone.exe" },

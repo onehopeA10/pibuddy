@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { NButton, NInput, NSpin, useMessage } from "naive-ui";
+import {
+  MAX_PROMPT_ATTACHMENT_BYTES,
+  MAX_PROMPT_ATTACHMENT_TOKENS,
+  MAX_PROMPT_IMAGES,
+  MAX_PROMPT_IMAGE_BYTES,
+  MAX_PROMPT_TOTAL_ATTACHMENT_BYTES,
+  MAX_PROMPT_TOTAL_IMAGE_BYTES,
+  SUPPORTED_PROMPT_IMAGE_MIME_TYPES,
+  decodedBase64ByteLength,
+  type AttachmentRef,
+} from "@contract";
 import { useAppStore, type ComposerImage, type SendMode } from "../stores/app";
 import { imageCapableModels, supportsImage } from "../stores/model-capability";
 import { VoiceRecorder } from "../stt";
@@ -9,6 +20,7 @@ import ExtensionWidgetHost from "./ExtensionWidgetHost.vue";
 
 const store = useAppStore();
 const message = useMessage();
+const composerLocked = computed(() => !store.started || store.switchingSessionId !== null);
 
 /**
  * 图片与文件附件**归 store 的 composer 所有**，这里只是同名代理。
@@ -99,43 +111,228 @@ function onDraftChanged(): void {
  */
 watch([() => store.editorText, images, files], onDraftChanged, { deep: true });
 
-/**
- * 取走文件树推过来的附件。
- *
- * `immediate: true` 是必需的：用户完全可能在 InputBar 挂载之前就从文件树
- * 点了「加入输入框附件」（面板是可折叠的，挂载顺序不固定）。少了它，
- * 那一次点击会静默丢失 —— 三大门禁全绿，只有真机点一遍才看得出来。
- */
+// ---------- 附件 ----------
+
+const supportedImageMimes = new Set<string>(SUPPORTED_PROMPT_IMAGE_MIME_TYPES);
+
+type ReservationKind = "image" | "attachment";
+interface ComposerScope {
+  workspaceId: string;
+  sessionId: string;
+  attachmentEpoch: number;
+}
+interface Reservation {
+  scopeKey: string;
+  kind: ReservationKind;
+  bytes: number;
+  reader?: FileReader;
+}
+
+const reservations = new Map<symbol, Reservation>();
+let acceptingCompletions = true;
+
+function captureScope(): ComposerScope {
+  return {
+    workspaceId: store.workspaceId,
+    sessionId: store.currentSessionId,
+    attachmentEpoch: store.composerAttachmentEpoch,
+  };
+}
+
+function scopeKey(scope: ComposerScope): string {
+  return `${scope.workspaceId}\u0000${scope.sessionId}\u0000${scope.attachmentEpoch}`;
+}
+
+function isCurrentScope(scope: ComposerScope): boolean {
+  return (
+    acceptingCompletions &&
+    store.workspaceId === scope.workspaceId &&
+    store.currentSessionId === scope.sessionId &&
+    store.composerAttachmentEpoch === scope.attachmentEpoch
+  );
+}
+
+function pendingFor(scope: ComposerScope, kind: ReservationKind): { count: number; bytes: number } {
+  const key = scopeKey(scope);
+  let count = 0;
+  let bytes = 0;
+  for (const reservation of reservations.values()) {
+    if (reservation.scopeKey !== key || reservation.kind !== kind) continue;
+    count++;
+    bytes += reservation.bytes;
+  }
+  return { count, bytes };
+}
+
+function reserve(scope: ComposerScope, kind: ReservationKind, bytes: number): symbol {
+  const id = Symbol(kind);
+  reservations.set(id, { scopeKey: scopeKey(scope), kind, bytes });
+  return id;
+}
+
+function release(id: symbol): boolean {
+  return reservations.delete(id);
+}
+
+function imageBytesInComposer(): number {
+  let total = 0;
+  for (const image of images.value) {
+    const bytes = decodedBase64ByteLength(image.data);
+    if (!Number.isFinite(bytes)) return Number.POSITIVE_INFINITY;
+    total += bytes;
+  }
+  return total;
+}
+
+function imageLimitError(bytes: number, mimeType: string | undefined, scope: ComposerScope): string | null {
+  if (mimeType && !supportedImageMimes.has(mimeType)) return `不支持的图片格式：${mimeType}`;
+  if (bytes > MAX_PROMPT_IMAGE_BYTES) {
+    return `单张图片不能超过 ${MAX_PROMPT_IMAGE_BYTES / 1024 / 1024} MB`;
+  }
+  const pending = pendingFor(scope, "image");
+  if (images.value.length + pending.count >= MAX_PROMPT_IMAGES) {
+    return `图片最多添加 ${MAX_PROMPT_IMAGES} 张`;
+  }
+  if (imageBytesInComposer() + pending.bytes + bytes > MAX_PROMPT_TOTAL_IMAGE_BYTES) {
+    return `图片总大小不能超过 ${MAX_PROMPT_TOTAL_IMAGE_BYTES / 1024 / 1024} MB`;
+  }
+  return null;
+}
+
+function reserveImage(scope: ComposerScope, bytes: number, mimeType?: string): symbol | null {
+  if (!isCurrentScope(scope)) return null;
+  const error = imageLimitError(bytes, mimeType, scope);
+  if (error) {
+    message.warning(error);
+    return null;
+  }
+  return reserve(scope, "image", bytes);
+}
+
+function appendDecodedImage(
+  data: string,
+  mimeType: string,
+  name: string,
+  scope: ComposerScope
+): void {
+  if (!isCurrentScope(scope)) return;
+  const bytes = decodedBase64ByteLength(data);
+  if (!Number.isFinite(bytes)) {
+    message.warning(`无法读取图片：${name}`);
+    return;
+  }
+  const error = imageLimitError(bytes, mimeType, scope);
+  if (error) {
+    message.warning(error);
+    return;
+  }
+  images.value.push({ type: "image", data, mimeType, name });
+}
+
+function addImageFromFile(file: File, scope: ComposerScope): void {
+  const reservationId = reserveImage(scope, file.size, file.type);
+  if (!reservationId) return;
+
+  let reader: FileReader;
+  try {
+    reader = new FileReader();
+    reservations.get(reservationId)!.reader = reader;
+  } catch {
+    release(reservationId);
+    message.warning(`无法读取图片：${file.name || "剪贴板图片"}`);
+    return;
+  }
+  reader.onload = () => {
+    if (!release(reservationId)) return;
+    if (!isCurrentScope(scope)) return;
+    if (typeof reader.result !== "string") {
+      message.warning(`无法读取图片：${file.name || "剪贴板图片"}`);
+      return;
+    }
+    const separator = reader.result.indexOf(",");
+    const head = separator >= 0 ? reader.result.slice(0, separator) : "";
+    const data = separator >= 0 ? reader.result.slice(separator + 1) : "";
+    const mimeType = head.match(/^data:([^;]+);base64$/)?.[1] ?? file.type;
+    appendDecodedImage(data, mimeType, file.name || "剪贴板图片", scope);
+  };
+  reader.onerror = reader.onabort = () => {
+    if (release(reservationId) && isCurrentScope(scope)) {
+      message.warning(`无法读取图片：${file.name || "剪贴板图片"}`);
+    }
+  };
+  try {
+    reader.readAsDataURL(file);
+  } catch {
+    if (release(reservationId) && isCurrentScope(scope)) {
+      message.warning(`无法读取图片：${file.name || "剪贴板图片"}`);
+    }
+  }
+}
+
+function attachmentBytesInComposer(): number {
+  return files.value.reduce((total, attachment) => total + attachment.size, 0);
+}
+
+function attachmentLimitError(size: number, scope: ComposerScope): string | null {
+  if (size > MAX_PROMPT_ATTACHMENT_BYTES) {
+    return `单个文件不能超过 ${MAX_PROMPT_ATTACHMENT_BYTES / 1024 / 1024} MB`;
+  }
+  const pending = pendingFor(scope, "attachment");
+  if (files.value.length + pending.count >= MAX_PROMPT_ATTACHMENT_TOKENS) {
+    return `文件最多添加 ${MAX_PROMPT_ATTACHMENT_TOKENS} 个`;
+  }
+  if (
+    attachmentBytesInComposer() + pending.bytes + size >
+    MAX_PROMPT_TOTAL_ATTACHMENT_BYTES
+  ) {
+    return `文件总大小不能超过 ${MAX_PROMPT_TOTAL_ATTACHMENT_BYTES / 1024 / 1024} MB`;
+  }
+  return null;
+}
+
+function appendAttachment(
+  attachment: AttachmentRef,
+  scope: ComposerScope = captureScope()
+): boolean {
+  if (!isCurrentScope(scope)) return false;
+  const error = attachmentLimitError(attachment.size, scope);
+  if (error) {
+    message.warning(error);
+    return false;
+  }
+  files.value.push(attachment);
+  return true;
+}
+
+function reserveAttachment(scope: ComposerScope, size: number): symbol | null {
+  if (!isCurrentScope(scope)) return null;
+  const error = attachmentLimitError(size, scope);
+  if (error) {
+    message.warning(error);
+    return null;
+  }
+  return reserve(scope, "attachment", size);
+}
+
+/** 文件树的同步入队在 reservation 状态初始化后立即消费，避免 setup 初始化时序竞态。 */
 watch(
   () => store.inboundAttachments,
   (list) => {
     if (list.length === 0) return;
-    files.value = [...files.value, ...list];
+    for (const attachment of list) appendAttachment(attachment);
     store.inboundAttachments = [];
   },
   { immediate: true, deep: true }
 );
 
-// ---------- 附件 ----------
-
-function addImageFromFile(file: File): void {
-  const reader = new FileReader();
-  reader.onload = () => {
-    const url = reader.result as string;
-    const [head, data] = url.split(",");
-    const mimeType = head.match(/data:(.*?);/)?.[1] ?? "image/png";
-    images.value.push({ type: "image", data, mimeType, name: file.name || "剪贴板图片" });
-  };
-  reader.readAsDataURL(file);
-}
-
 function onPaste(e: ClipboardEvent): void {
+  const scope = captureScope();
   const items = e.clipboardData?.items ?? [];
   for (const item of items) {
     if (item.kind === "file" && item.type.startsWith("image/")) {
       const file = item.getAsFile();
       if (file) {
-        addImageFromFile(file);
+        addImageFromFile(file, scope);
         e.preventDefault();
       }
     }
@@ -146,35 +343,52 @@ async function onWindowDrop(e: DragEvent): Promise<void> {
   e.preventDefault();
   const dropped = e.dataTransfer?.files;
   if (!dropped) return;
+  const scope = captureScope();
   for (const file of Array.from(dropped)) {
     if (file.type.startsWith("image/")) {
-      addImageFromFile(file);
+      addImageFromFile(file, scope);
       continue;
     }
+    const reservationId = reserveAttachment(scope, file.size);
+    if (!reservationId) continue;
     try {
       // 绝对路径在 preload 内部就被换成短期能力凭证，渲染进程拿不到它
-      files.value.push(await window.piBuddy.file.fromDrop(file));
+      const attachment = await window.piBuddy.file.fromDrop(file);
+      release(reservationId);
+      appendAttachment(attachment, scope);
     } catch {
-      message.warning(`无法读取文件：${file.name}`);
+      release(reservationId);
+      if (isCurrentScope(scope)) message.warning(`无法读取文件：${file.name}`);
     }
   }
 }
 
 async function pickFiles(): Promise<void> {
+  const scope = captureScope();
   const picked = await window.piBuddy.dialog.chooseFiles();
+  if (!isCurrentScope(scope)) return;
   for (const f of picked) {
+    if (!isCurrentScope(scope)) return;
     if (f.kind === "image") {
+      const reservationId = reserveImage(scope, f.size);
+      if (!reservationId) continue;
       // 凭证换 base64：主进程重做收容、大小与 magic bytes 校验后才给数据
+      let img: Awaited<ReturnType<typeof window.piBuddy.file.readImage>>;
       try {
-        const img = await window.piBuddy.file.readImage(f.token);
-        images.value.push({ type: "image", ...img, name: f.name });
+        img = await window.piBuddy.file.readImage(f.token);
       } catch (err) {
-        message.warning(
-          err instanceof Error ? `${f.name}：${err.message}` : `无法读取图片：${f.name}`
-        );
+        release(reservationId);
+        if (isCurrentScope(scope)) {
+          message.warning(
+            err instanceof Error ? `${f.name}：${err.message}` : `无法读取图片：${f.name}`
+          );
+        }
+        continue;
       }
+      release(reservationId);
+      appendDecodedImage(img.data, img.mimeType, f.name, scope);
     } else {
-      files.value.push(f);
+      appendAttachment(f, scope);
     }
   }
 }
@@ -261,6 +475,16 @@ async function submit(mode?: SendMode): Promise<void> {
   }
 }
 
+async function approvePlan(): Promise<void> {
+  store.workMode = "act";
+  sending.value = true;
+  try {
+    await store.send({ text: "按这个做" });
+  } finally {
+    sending.value = false;
+  }
+}
+
 /** 把当前输入放进本地未发送队列（不发给 pi，因而随时可改可删）。 */
 function queueLocally(): void {
   const text = store.editorText.trim();
@@ -283,7 +507,12 @@ function handleWindowDrop(e: DragEvent): void {
 }
 
 onMounted(() => window.addEventListener("drop", handleWindowDrop));
-onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
+onBeforeUnmount(() => {
+  acceptingCompletions = false;
+  window.removeEventListener("drop", handleWindowDrop);
+  for (const reservation of [...reservations.values()]) reservation.reader?.abort();
+  reservations.clear();
+});
 </script>
 
 <template>
@@ -373,25 +602,59 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
         </ul>
       </div>
 
+      <div class="work-mode" role="group" aria-label="工作方式">
+        <button
+          type="button"
+          class="work-chip"
+          :class="{ on: store.workMode === 'act' }"
+          :disabled="composerLocked"
+          @click="store.workMode = 'act'"
+        >
+          直接干
+        </button>
+        <button
+          type="button"
+          class="work-chip"
+          :class="{ on: store.workMode === 'plan' }"
+          :disabled="composerLocked"
+          @click="store.workMode = 'plan'"
+        >
+          先看方案
+        </button>
+        <span class="work-hint">{{
+          store.workMode === "plan" ? "先说做法，你点头才动手" : "改动会先给你看，点留下才生效"
+        }}</span>
+      </div>
+      <div v-if="store.workMode === 'plan'" class="plan-bar">
+        <span>方案看起来对的话，让它按这个做。</span>
+        <n-button size="tiny" type="primary" :loading="sending" :disabled="composerLocked" @click="approvePlan">
+          按这个做
+        </n-button>
+      </div>
+
       <n-input
         v-model:value="store.editorText"
         type="textarea"
         :autosize="{ minRows: 1, maxRows: 8 }"
         :bordered="false"
-        placeholder="告诉我要做什么…（可粘贴/拖入图片和文件，Enter 发送，Shift+Enter 换行）"
-        :disabled="!store.started"
+        :placeholder="
+          store.workMode === 'plan'
+            ? '先说你想办成什么，我只出方案、先不动手…'
+            : '告诉我要做什么…（可粘贴/拖入图片和文件，Enter 发送，Shift+Enter 换行）'
+        "
+        :disabled="composerLocked"
         @keydown="onKeydown"
       />
 
       <div class="composer-actions">
-        <n-button quaternary size="small" :disabled="!store.started" @click="pickFiles">
+        <n-button quaternary size="small" :disabled="composerLocked" @click="pickFiles">
           📎 文件
         </n-button>
         <n-button
           quaternary
           size="small"
           :type="recording ? 'error' : 'default'"
-          :disabled="!store.started"
+          :disabled="composerLocked"
           @click="toggleVoice"
         >
           <template v-if="transcribing"><n-spin :size="14" style="margin-right: 4px" />识别中…</template>
@@ -422,7 +685,7 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
           <n-button
             size="small"
             quaternary
-            :disabled="!store.started || !store.editorText.trim()"
+            :disabled="composerLocked || !store.editorText.trim()"
             aria-label="先加入队列稍后再发"
             @click="queueLocally"
           >
@@ -432,7 +695,7 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
             size="small"
             type="primary"
             :loading="sending"
-            :disabled="!store.started"
+            :disabled="composerLocked"
             aria-label="立即插话"
             @click="submit('steer')"
           >
@@ -442,7 +705,7 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
             size="small"
             secondary
             :loading="sending"
-            :disabled="!store.started"
+            :disabled="composerLocked"
             aria-label="下一轮处理"
             @click="submit('followUp')"
           >
@@ -454,7 +717,7 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
           type="primary"
           size="small"
           :loading="sending"
-          :disabled="!store.started || imagesBlocked"
+          :disabled="composerLocked || imagesBlocked"
           data-testid="send-button"
           :title="
             imagesBlocked
@@ -473,6 +736,42 @@ onBeforeUnmount(() => window.removeEventListener("drop", handleWindowDrop));
 </template>
 
 <style scoped>
+.work-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  flex-wrap: wrap;
+}
+.work-chip {
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  background: transparent;
+  color: #4b5563;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.work-chip.on {
+  background: #6366f1;
+  color: #fff;
+  border-color: #6366f1;
+}
+.work-hint,
+.plan-bar {
+  font-size: 12px;
+  color: #8a8f98;
+}
+.plan-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
+}
 /* 受阻的图片附件：视觉上一眼可辨，同时 aria-disabled 让辅助技术也读得到 */
 .attach-chip.blocked {
   opacity: 0.55;

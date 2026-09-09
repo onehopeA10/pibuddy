@@ -13,11 +13,16 @@
  *
  * 单例、无 electron 之外的重依赖。IPC handler 在 `agent-pool-ipc.ts`。
  */
-import { BrowserWindow } from "electron";
 import { PUSH_CHANNELS, type PoolCaps, type PoolSnapshot } from "@pibuddy/contract";
+import { fanoutToSubscribed } from "../window-fanout.js";
 
 import { log } from "../log.js";
-import { decidePermission } from "../permission/permission-store.js";
+import {
+  decidePermission,
+  setPermissionInboxHooks,
+  setSessionGrantPolicyResolver,
+  type PermissionInboxNeed,
+} from "../permission/permission-store.js";
 import { AgentPoolCore, type PoolObserver } from "./pool-core.js";
 import { PoolRuntimeHostImpl } from "./pool-runtime-host.js";
 
@@ -30,10 +35,7 @@ const TICK_INTERVAL_MS = 15_000;
 function broadcastSnapshot(_snapshot: PoolSnapshot): void {
   // 从内核取一份带信封的快照（sequence 单调、generation 固定）。
   const envelope = agentPool().snapshotEnvelope();
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed()) continue;
-    win.webContents.send(PUSH_CHANNELS.agentPoolEvent, envelope);
-  }
+  fanoutToSubscribed(PUSH_CHANNELS.agentPoolEvent, envelope);
 }
 
 /**
@@ -59,8 +61,41 @@ export function poolRuntimeHost(): PoolRuntimeHostImpl {
 export function agentPool(): AgentPoolCore {
   if (!instance) {
     instance = new AgentPoolCore({ host: runtimeHost, onChange: broadcastSnapshot });
+    setSessionGrantPolicyResolver((sessionId) => instance!.sessionGrantPolicy(sessionId));
+    setPermissionInboxHooks({
+      onBlocked: (need) => reportPoolPermissionNeed(need),
+      onDecided: (need) =>
+        instance?.resolveMatchingInbox({
+          capabilityId: need.capabilityId,
+          permission: need.permission,
+          resource: need.resource,
+          workspaceId: need.workspaceId,
+        }),
+    });
   }
   return instance;
+}
+
+/**
+ * 后台 / 子 / task 会话缺权限时的唯一入队口（COR-009）。
+ *
+ * 前台 focused user 会话仍走渲染层弹窗，不进 inbox。
+ */
+export function reportPoolPermissionNeed(
+  need: PermissionInboxNeed & { now?: number; id?: string }
+): void {
+  const sessionId = need.sessionId;
+  if (!sessionId) return;
+  const pool = agentPool();
+  if (!pool.isInboxCandidate(sessionId)) return;
+  pool.enqueuePermission({
+    id: need.id ?? `perm:${sessionId}:${need.capabilityId}:${need.permission}:${need.resource ?? ""}`,
+    sessionId,
+    capabilityId: need.capabilityId,
+    permission: need.permission,
+    resource: need.resource,
+    now: need.now ?? Date.now(),
+  });
 }
 
 /**
@@ -128,4 +163,6 @@ export function __resetAgentPool(): void {
     tickTimer = null;
   }
   instance = null;
+  setSessionGrantPolicyResolver(null);
+  setPermissionInboxHooks(null);
 }

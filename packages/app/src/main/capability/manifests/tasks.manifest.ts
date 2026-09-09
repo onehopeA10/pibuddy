@@ -5,13 +5,12 @@
  * drift test 要能直接 import 它做对账，而对账的另一端是磁盘上的源码文本——
  * 一旦清单反过来依赖实现，「声明与实现是否一致」就退化成恒真。
  *
- * ## 为什么 permissions 为空
+ * ## 为什么只申请 tasks.manage
  *
- * tasks 能力**自己的代码**只做调度：读写自己的 sqlite（node:sqlite，不算
- * workspace.write）、读某工作区落盘的授权表、把「触发 Agent run」交给一个
- * 注入的接口。它不 readFile 用户文件、不 spawn、不出站、不开外部程序——因此
- * 一条能力权限都不申请，drift test 的双向权限对账（声明↔源码调用）两个方向
- * 都成立。
+ * tasks 能力**自己的代码**不 readFile 用户文件、不 spawn、不出站。
+ * `tasks.manage` 只挡住渲染层改调度表（创建 / 立即跑 / 删除）。
+ * 无人值守 run 需要的能力权限仍在每个任务的 `requiredPermissions` 里，
+ * 由 `task-permission` 按 workspace 预授权判定。
  *
  * **注意这与「任务需要哪些权限」是两个轴**：每个任务在 `requiredPermissions`
  * 里声明它触发的那次 run 可能需要的能力权限，那由主进程的 `task-permission`
@@ -41,7 +40,7 @@ export const tasksCapability = defineCapability({
   // appMin "0.0.0"：内置能力不可能比宿主更老。真正生效的是 contractMin/Max。
   compatibility: { appMin: "0.0.0", contractMin: 1, contractMax: 1 },
   dependencies: [],
-  permissions: [],
+  permissions: ["tasks.manage"],
   channels: [
     CHANNELS.tasksList,
     CHANNELS.tasksGet,

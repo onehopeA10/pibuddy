@@ -25,6 +25,39 @@ import { agentPool, poolRuntimeHost } from "./agent-pool/pool.js";
 // store 都可能被打开，而 Windows 上对已打开的 sqlite 文件 rename 覆盖会 EPERM，
 // 表现是「恢复成功了但数据没变」。
 import { applyPendingRestoreOnStartup } from "./backup/backup-ipc.js";
+import { disposeMcpResources } from "./mcp/mcp-ipc.js";
+import { disposePackageCommands } from "./pi-resources/package-install.js";
+import { shutdownTasksResources } from "./tasks/tasks-ipc.js";
+
+let applicationShutdown: Promise<void> | null = null;
+
+function shutdownApplication(): Promise<void> {
+  if (applicationShutdown) return applicationShutdown;
+  applicationShutdown = Promise.resolve().then(async () => {
+    try {
+      await shutdownTasksResources();
+    } catch (err) {
+      log().warn("tasks_shutdown_failed", { error: String(err) });
+    }
+
+    // 从这里开始才允许扫池：tasks 的 abort/finally 已经停完它拥有的 runtime，
+    // 因而 expected-stop 不可能在池清空之后再触发一次 retry 复活进程。
+    disposeUpdateService();
+    disposeAllWorkspaceResources();
+    agentPool().shutdownAll();
+    poolRuntimeHost().stopAll();
+    disposeMcpResources();
+    disposePackageCommands();
+    try {
+      await disposeRemoteResources();
+    } catch (err) {
+      log().warn("remote_shutdown_failed", { error: String(err) });
+    }
+    disposeHomeResources();
+    app.quit();
+  });
+  return applicationShutdown;
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -134,19 +167,6 @@ if (!gotLock) {
   });
 
   app.on("window-all-closed", () => {
-    // 更新检查的定时器已经 unref 过，这里再显式拆一次：崩溃现场里
-    // 「进程退不掉」的原因往往就是某个没人清的 timer。
-    disposeUpdateService();
-    disposeAllWorkspaceResources();
-    // 后台池的全部 pi 子进程在退出前收掉——后台 runtime 没有窗口跟着陪葬，
-    // 不显式停就是任务管理器里越攒越多的孤儿 pi 进程（ISS-002 生命周期收尾）。
-    agentPool().shutdownAll();
-    poolRuntimeHost().stopAll();
-    // 显式停远程监听 + 关 sqlite 句柄：崩溃现场里「进程退不掉 / 端口没释放」
-    // 的原因往往就是某个没人收的 listener。
-    void disposeRemoteResources();
-    // 家居基座的 named pipe 监听 / WS 会话 / sqlite 句柄同理显式收掉。
-    disposeHomeResources();
-    app.quit();
+    void shutdownApplication();
   });
 }

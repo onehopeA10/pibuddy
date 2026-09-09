@@ -35,7 +35,9 @@ import {
   NSwitch,
   NTag,
   NText,
+  useDialog,
 } from "naive-ui";
+import type { PiResource } from "@contract";
 import { useAppStore } from "../stores/app";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useCapabilitiesStore } from "../stores/capabilities";
@@ -44,6 +46,7 @@ import McpPanel from "./McpPanel.vue";
 const store = useAppStore();
 const piRes = usePiResourcesStore();
 const capabilities = useCapabilitiesStore();
+const dialog = useDialog();
 
 /**
  * MCP 面板的可见性门控（ADR-0002 feature gate 渲染侧）。双引号写法是
@@ -89,11 +92,38 @@ watch(
   }
 );
 
+watch(
+  () => store.workspaceId,
+  () => {
+    specInput.value = "";
+    scope.value = "user";
+  }
+);
+
 async function doInstall(): Promise<void> {
   const spec = specInput.value.trim();
   if (!spec) return;
   const result = await piRes.install(store.workspaceId, spec, scope.value);
   if (result.ok) specInput.value = "";
+}
+
+function confirmRemove(resource: PiResource): void {
+  if (!resource.spec) return;
+  const workspaceId = store.workspaceId;
+  const removeScope = resource.source === "project" ? "project" : "user";
+  dialog.warning({
+    title: "卸载这个 Pi 包？",
+    content: `将从${removeScope === "project" ? "当前项目" : "用户级环境"}卸载「${resource.spec}」。权限授权只允许启动包管理进程，不代表确认卸载；此处仍需单独确认。`,
+    positiveText: "卸载",
+    negativeText: "取消",
+    onPositiveClick: () => {
+      if (!workspaceId || store.workspaceId !== workspaceId) {
+        piRes.lastError = "工作目录已经切换，这次卸载没有执行。请在目标项目里重新确认。";
+        return;
+      }
+      return piRes.remove(workspaceId, resource.spec!, removeScope);
+    },
+  });
 }
 </script>
 
@@ -142,6 +172,20 @@ async function doInstall(): Promise<void> {
             🔄 刷新
           </n-button>
         </n-space>
+
+        <n-alert
+          v-if="piRes.permissionDenied"
+          type="warning"
+          title="需要授权才能运行 Pi 包管理器"
+          closable
+          @close="piRes.clearDenied()"
+        >
+          <pre class="err">{{ piRes.deniedNotice }}</pre>
+          <n-space size="small" style="margin-top: 8px">
+            <n-button size="tiny" type="primary" @click="piRes.authorize()">去授权</n-button>
+            <n-button size="tiny" @click="piRes.openPermissionCenter()">授权中心</n-button>
+          </n-space>
+        </n-alert>
 
         <n-alert v-if="piRes.lastError" type="error" closable @close="piRes.lastError = ''">
           <pre class="err">{{ piRes.lastError }}</pre>
@@ -200,7 +244,7 @@ async function doInstall(): Promise<void> {
                   quaternary
                   type="error"
                   :loading="piRes.busySpec === r.spec"
-                  @click="piRes.remove(store.workspaceId, r.spec, r.source === 'project' ? 'project' : 'user')"
+                  @click="confirmRemove(r)"
                 >
                   卸载
                 </n-button>

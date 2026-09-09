@@ -60,6 +60,9 @@ describe("ProjectTrustDialog", () => {
   it("提交给弹窗里显示的那个项目，而不是当前工作目录", async () => {
     const app = useAppStore();
     const piRes = usePiResourcesStore();
+    // store 的权威上下文与弹窗快照都属于 A；这个组件单测不挂 AppShell，
+    // 因此要显式建立上下文，不能只绕过 action 直接塞 trustState。
+    piRes.setWorkspace("ws-A");
     // 弹窗里显示的是 A（describe 的响应属于 A）……
     piRes.trustState = shownTrust("ws-A");
     piRes.trustOpen = true;

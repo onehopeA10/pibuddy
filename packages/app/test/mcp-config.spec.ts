@@ -51,10 +51,32 @@ afterEach(() => {
 });
 
 describe("mcpServerId", () => {
-  it("同 scope 同 name 稳定，跨 scope / name 不同", () => {
-    expect(mcpServerId("user", "fs")).toBe(mcpServerId("user", "fs"));
-    expect(mcpServerId("user", "fs")).not.toBe(mcpServerId("project", "fs"));
-    expect(mcpServerId("user", "fs")).not.toBe(mcpServerId("user", "web"));
+  const config = (name: string, command = "node"): McpServerInput => ({
+    name,
+    transport: "stdio",
+    command,
+    args: ["server.mjs"],
+    env: {},
+    headers: {},
+    oauth: false,
+  });
+
+  it("同工作区、scope 与完整配置稳定；跨工作区 / scope / name / command 均不同", () => {
+    expect(mcpServerId("ws-a", "user", config("fs"))).toBe(
+      mcpServerId("ws-a", "user", config("fs"))
+    );
+    expect(mcpServerId("ws-a", "user", config("fs"))).not.toBe(
+      mcpServerId("ws-b", "user", config("fs"))
+    );
+    expect(mcpServerId("ws-a", "user", config("fs"))).not.toBe(
+      mcpServerId("ws-a", "project", config("fs"))
+    );
+    expect(mcpServerId("ws-a", "user", config("fs"))).not.toBe(
+      mcpServerId("ws-a", "user", config("web"))
+    );
+    expect(mcpServerId("ws-a", "user", config("fs"))).not.toBe(
+      mcpServerId("ws-a", "user", config("fs", "deno"))
+    );
   });
 });
 
@@ -116,12 +138,14 @@ describe("toDescriptor 脱敏", () => {
         s: { command: "node", env: { TOKEN: "super-secret" }, args: [] },
       },
     });
-    const server = await findServer("ws", mcpServerId("user", "s"), HOME);
+    const listed = await resolveServers("ws", HOME);
+    const server = await findServer("ws", listed.servers[0]!.id, HOME);
     const d = toDescriptor(server!, false);
     expect(d.envKeys).toEqual(["TOKEN"]);
     // 序列化整份 descriptor，明文密钥一个字都不能出现
     expect(JSON.stringify(d)).not.toContain("super-secret");
     expect(d.running).toBe(false);
+    expect(d.runPermissionResource).toContain("mcp-run:");
   });
 });
 
@@ -178,5 +202,24 @@ describe("saveServer / removeServer 先读再合并", () => {
     await removeServer("ws", "user", "does-not-exist", HOME); // 不抛
     ({ servers } = await resolveServers("ws", HOME));
     expect(servers.map((s) => s.config.name)).toEqual(["b"]);
+  });
+
+  it("并发 save/save 按文件串行，不丢任一更新", async () => {
+    await Promise.all([
+      saveServer("ws", "user", stdio("a", "ca"), HOME),
+      saveServer("ws", "user", stdio("b", "cb"), HOME),
+    ]);
+    const { servers } = await resolveServers("ws", HOME);
+    expect(servers.map((server) => server.config.name).sort()).toEqual(["a", "b"]);
+  });
+
+  it("并发 save/remove 保持调用顺序，最终不会把已删条目写回来", async () => {
+    await saveServer("ws", "user", stdio("a", "v1"), HOME);
+    await Promise.all([
+      saveServer("ws", "user", stdio("b", "v1"), HOME),
+      removeServer("ws", "user", "a", HOME),
+    ]);
+    const { servers } = await resolveServers("ws", HOME);
+    expect(servers.map((server) => server.config.name)).toEqual(["b"]);
   });
 });

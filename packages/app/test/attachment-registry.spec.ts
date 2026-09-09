@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -18,7 +19,12 @@ const openPath = vi.fn(async () => "");
 const showItemInFolder = vi.fn();
 
 vi.mock("electron", () => ({
-  app: { getPath: () => userDataDir },
+  app: {
+    getPath: (name: string) => {
+      if (name === "home") return path.join(tmpRoot || os.tmpdir(), "home");
+      return userDataDir;
+    },
+  },
   shell: { openPath, showItemInFolder },
 }));
 
@@ -172,12 +178,28 @@ describe("magic bytes 嗅探", () => {
 });
 
 describe("大小与收容", () => {
-  it("超过 MAX_IMAGE_BYTES 的文件被拒", async () => {
+  it("超限附件在开始 hash stream 前就被拒", async () => {
     const { reg } = await freshModules();
     const big = path.join(workspaceDir, "big.png");
     writePng(big, reg.MAX_IMAGE_BYTES + 1);
-    const { token } = await reg.issue(big);
-    await expect(reg.readImage(token)).rejects.toThrow(/ATTACHMENT_TOO_LARGE/);
+    const streamSpy = vi.spyOn(fs, "createReadStream");
+
+    await expect(reg.issue(big)).rejects.toThrow(/ATTACHMENT_TOO_LARGE/);
+    expect(streamSpy).not.toHaveBeenCalled();
+    streamSpy.mockRestore();
+  });
+
+  it("签发后文件变大时不覆盖 issued size，兑付直接拒绝", async () => {
+    const { reg } = await freshModules();
+    const file = path.join(workspaceDir, "grows.txt");
+    fs.writeFileSync(file, "small", "utf8");
+
+    const record = await reg.issue(file);
+    fs.truncateSync(file, reg.MAX_IMAGE_BYTES + 1);
+    await expect(reg.resolveAttachment(record.token)).rejects.toThrow(
+      /ATTACHMENT_CONTENT_CHANGED/
+    );
+    expect(record.size).toBe(5);
   });
 
   it("绑定 workspace 的凭证：签发时就拒掉 workspace 之外的文件", async () => {
@@ -221,6 +243,93 @@ describe("大小与收容", () => {
     await expect(reg.openAttachment(token)).rejects.toThrow(
       /ATTACHMENT_CAPABILITY_DENIED/
     );
+  });
+});
+
+describe("单句柄稳定读取与 prompt snapshots", () => {
+  it("readImage 打开原 inode 后路径被替换，仍只读已授权字节", async () => {
+    const { reg } = await freshModules();
+    const file = path.join(workspaceDir, "swap.png");
+    const moved = path.join(workspaceDir, "issued.png");
+    writePng(file, 16);
+    const issuedBytes = fs.readFileSync(file);
+    const { token } = await reg.issue(file);
+    const originalOpen = fsp.open.bind(fsp);
+    const openSpy = vi.spyOn(fsp, "open").mockImplementationOnce(
+      (async (target: fsp.PathLike, flags: string | number, mode?: number) => {
+        const handle = await originalOpen(target, flags, mode);
+        fs.renameSync(file, moved);
+        fs.writeFileSync(file, Buffer.alloc(issuedBytes.byteLength, 0x4d));
+        return handle;
+      }) as typeof fsp.open
+    );
+
+    const image = await reg.readImage(token);
+    expect(Buffer.from(image.data, "base64")).toEqual(issuedBytes);
+    expect(fs.readFileSync(file)).not.toEqual(issuedBytes);
+    openSpy.mockRestore();
+  });
+
+  it("readImage 打开后增长到上限以上，只做 MAX+1 有界判定并拒绝", async () => {
+    const { reg } = await freshModules();
+    const file = path.join(workspaceDir, "grow.png");
+    writePng(file);
+    const { token } = await reg.issue(file);
+    const originalOpen = fsp.open.bind(fsp);
+    const openSpy = vi.spyOn(fsp, "open").mockImplementationOnce(
+      (async (target: fsp.PathLike, flags: string | number, mode?: number) => {
+        const handle = await originalOpen(target, flags, mode);
+        fs.appendFileSync(file, Buffer.alloc(reg.MAX_IMAGE_BYTES + 1));
+        return handle;
+      }) as typeof fsp.open
+    );
+
+    await expect(reg.readImage(token)).rejects.toThrow(/ATTACHMENT_TOO_LARGE/);
+    openSpy.mockRestore();
+  });
+
+  it("同大小替换在 snapshot redemption 时被 sha256 拒绝", async () => {
+    const { reg } = await freshModules();
+    const file = path.join(workspaceDir, "same-size.txt");
+    fs.writeFileSync(file, "issued-bytes", "utf8");
+    const { token } = await reg.issue(file);
+    fs.writeFileSync(file, "changed-byte", "utf8");
+
+    await expect(reg.snapshotPromptAttachment(token)).rejects.toThrow(
+      /ATTACHMENT_CONTENT_CHANGED/
+    );
+  });
+
+  it("prompt 使用缓存的 immutable snapshot，原文件后续变更不影响快照", async () => {
+    const { reg, ws } = await freshModules();
+    ws.__setWorkspaceDataDir(userDataDir);
+    const workspaceId = ws.registerWorkspace(workspaceDir).workspaceId;
+    const file = path.join(workspaceDir, "report.md");
+    fs.writeFileSync(file, "stable prompt bytes", "utf8");
+    const { token } = await reg.issue(file, { workspaceId });
+
+    const first = await reg.snapshotPromptAttachment(token);
+    expect(first.sourceLabel).toBe("report.md");
+    expect(first.snapshotPath).not.toBe(fs.realpathSync.native(file));
+    expect(fs.readFileSync(first.snapshotPath, "utf8")).toBe("stable prompt bytes");
+
+    fs.writeFileSync(file, "mutated after snapshot", "utf8");
+    const second = await reg.snapshotPromptAttachment(token);
+    expect(second.snapshotPath).toBe(first.snapshotPath);
+    expect(fs.readFileSync(second.snapshotPath, "utf8")).toBe("stable prompt bytes");
+  });
+
+  it("revoke 删除 token-owned snapshot directory", async () => {
+    const { reg } = await freshModules();
+    const file = path.join(workspaceDir, "revoke.txt");
+    fs.writeFileSync(file, "snapshot", "utf8");
+    const { token } = await reg.issue(file);
+    const snapshot = await reg.snapshotPromptAttachment(token);
+    expect(fs.existsSync(snapshot.snapshotPath)).toBe(true);
+
+    expect(reg.revokeAll()).toBe(1);
+    expect(fs.existsSync(snapshot.snapshotPath)).toBe(false);
+    expect(reg.snapshotPathForTest(token)).toBe(null);
   });
 });
 
@@ -289,5 +398,53 @@ describe("结构化附件引用（裁定2 · FS-101）", () => {
     const record = await reg.resolveAttachment(descriptor.token, { capability: "open" });
     expect(record.token).toBe(descriptor.token);
     expect(record.sha256).toBe(descriptor.sha256);
+  });
+});
+
+describe("拖拽路径收容（SEC-001）", () => {
+  it("相对路径与空字节被拒", async () => {
+    const { reg } = await freshModules();
+    expect(() => reg.assertSafeDroppedPath("secret.png")).toThrow(/ATTACHMENT_PATH_NOT_ABSOLUTE/);
+    expect(() => reg.assertSafeDroppedPath(`${workspaceDir}\0.png`)).toThrow(
+      /ATTACHMENT_PATH_INVALID/
+    );
+  });
+
+  it("userData 与 ~/.ssh 下的路径被拒，工作区文件放行", async () => {
+    const { reg } = await freshModules();
+    const home = path.join(tmpRoot, "home");
+    fs.mkdirSync(path.join(home, ".ssh"), { recursive: true });
+    const secret = path.join(home, ".ssh", "id_rsa");
+    fs.writeFileSync(secret, "x");
+    const inUserData = path.join(userDataDir, "auth.json");
+    fs.writeFileSync(inUserData, "{}");
+    const ok = path.join(workspaceDir, "note.md");
+    fs.writeFileSync(ok, "hi");
+
+    expect(() => reg.assertSafeDroppedPath(secret)).toThrow(/ATTACHMENT_PATH_FORBIDDEN/);
+    expect(() => reg.assertSafeDroppedPath(inUserData)).toThrow(/ATTACHMENT_PATH_FORBIDDEN/);
+    expect(() => reg.assertSafeDroppedPath(ok)).not.toThrow();
+  });
+
+  it("nonce 一次性、绑定 sender，裸路径不能直接兑付", async () => {
+    const { reg } = await freshModules();
+    const ok = path.join(workspaceDir, "note.md");
+    fs.writeFileSync(ok, "hi");
+    const nonce = reg.stageDroppedPath(ok, 7, 1_000);
+    expect(nonce.length).toBeGreaterThanOrEqual(16);
+    expect(() => reg.consumeDroppedNonce(nonce, 8, 1_001)).toThrow(/DROP_NONCE_SENDER_MISMATCH/);
+    expect(() => reg.consumeDroppedNonce(nonce, 7, 1_001)).toThrow(/DROP_NONCE_UNKNOWN/);
+    const again = reg.stageDroppedPath(ok, 7, 1_002);
+    expect(reg.consumeDroppedNonce(again, 7, 1_003)).toBe(ok);
+    expect(() => reg.consumeDroppedNonce(again, 7, 1_004)).toThrow(/DROP_NONCE_UNKNOWN/);
+  });
+
+  it("过期 nonce 一次性作废，不能换 sender 重试", async () => {
+    const { reg } = await freshModules();
+    const ok = path.join(workspaceDir, "note.md");
+    fs.writeFileSync(ok, "hi");
+    const nonce = reg.stageDroppedPath(ok, 7, 1_000);
+    expect(() => reg.consumeDroppedNonce(nonce, 7, 1_000 + 15_001)).toThrow(/DROP_NONCE_EXPIRED/);
+    expect(() => reg.consumeDroppedNonce(nonce, 8, 1_000 + 15_002)).toThrow(/DROP_NONCE_UNKNOWN/);
   });
 });

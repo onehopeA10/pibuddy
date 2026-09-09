@@ -28,6 +28,8 @@
  */
 import { defineCapability, CHANNELS, OFFICE_SKILLS, OFFICE_SKILLS_CAPABILITY_ID } from "@pibuddy/contract";
 
+export { OFFICE_SKILLS_CAPABILITY_ID };
+
 export const officeSkillsCapability = defineCapability({
   manifestVersion: 1,
   id: OFFICE_SKILLS_CAPABILITY_ID,

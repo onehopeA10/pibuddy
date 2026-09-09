@@ -40,11 +40,13 @@ beforeAll(() => {
   registerAllIpc();
 });
 
-describe("会话中心恰 9 条通道（裁定5）", () => {
-  it("SESSIONS_CHANNELS 的内容与顺序无关地等于那 9 个常量", () => {
+describe("会话中心恰 11 条通道（裁定5）", () => {
+  it("SESSIONS_CHANNELS 的内容与顺序无关地等于那 11 个常量", () => {
     const expected = [
       "sessions:export-html",
       "sessions:get-draft",
+      "sessions:import-run",
+      "sessions:import-scan",
       "sessions:purge",
       "sessions:query",
       "sessions:read-history",
@@ -53,7 +55,7 @@ describe("会话中心恰 9 条通道（裁定5）", () => {
       "sessions:set-pinned",
       "sessions:set-status",
     ];
-    expect(SESSIONS_CHANNELS.length).toBe(9);
+    expect(SESSIONS_CHANNELS.length).toBe(11);
     expect([...SESSIONS_CHANNELS].sort()).toEqual(expected);
   });
 
@@ -64,7 +66,7 @@ describe("会话中心恰 9 条通道（裁定5）", () => {
 });
 
 describe("registerAllIpc 之后的注册面（裁定1）", () => {
-  it("9 条会话通道逐一出现在 ipc-guard 的已注册表里", () => {
+  it("11 条会话通道逐一出现在 ipc-guard 的已注册表里", () => {
     const table = registeredChannels();
     for (const channel of SESSIONS_CHANNELS) {
       expect(table).toContain(channel);
@@ -137,6 +139,6 @@ describe("CT-15：跨进程只有不透明标识", () => {
 
   it("pi:switch-session 也只收 sessionId，不再收路径", async () => {
     const { piSwitchSessionRequestSchema } = await import("@pibuddy/contract");
-    expect(Object.keys(piSwitchSessionRequestSchema.shape)).toEqual(["sessionId"]);
+    expect(Object.keys(piSwitchSessionRequestSchema.shape)).toEqual(["workspaceId", "sessionId"]);
   });
 });

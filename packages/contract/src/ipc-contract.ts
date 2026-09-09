@@ -60,6 +60,7 @@ import {
 } from "./connector-channels.js";
 import { gitContractShard } from "./git.js";
 import { permissionContractShard } from "./permission.js";
+import { utf8ByteLength } from "./permission-review.js";
 import { memoryContractShard } from "./memory.js";
 import { mcpContractShard } from "./mcp.js";
 import { previewContractShard } from "./preview.js";
@@ -82,6 +83,10 @@ import {
   draftRecordSchema,
   readHistoryRequestSchema,
   sessionHistoryPageSchema,
+  sessionImportRunRequestSchema,
+  sessionImportRunResultSchema,
+  sessionImportScanRequestSchema,
+  sessionImportScanResultSchema,
   sessionQuerySchema,
   sessionRowSchema,
   sessionStatusSchema,
@@ -156,6 +161,8 @@ export interface StartResult<TState = unknown, TModel = unknown, TMessage = unkn
   state: TState;
   models: TModel[];
   messages: TMessage[];
+  /** getAvailableModels 失败时的原因；缺省表示枚举成功 */
+  modelsError?: string;
 }
 
 /**
@@ -200,11 +207,47 @@ export const readImageResultSchema = z.object({
 });
 export type ReadImageResult = z.infer<typeof readImageResultSchema>;
 
+/** Prompt 类 IPC 共用的资源上限。 */
+export const MAX_PROMPT_IMAGES = 8;
+export const MAX_PROMPT_ATTACHMENT_TOKENS = 8;
+export const MAX_PROMPT_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_PROMPT_TOTAL_IMAGE_BYTES = 16 * 1024 * 1024;
+export const MAX_PROMPT_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_PROMPT_TOTAL_ATTACHMENT_BYTES = 16 * 1024 * 1024;
+export const MAX_PROMPT_MESSAGE_BYTES = 262144;
+export const MAX_ATTACHMENT_TOKEN_CHARS = 512;
+export const MAX_PROMPT_IMAGE_BASE64_CHARS = 4 * Math.ceil(MAX_PROMPT_IMAGE_BYTES / 3);
+
+/** schema 与 main 共用字节上限；字节计数复用 contract 已有的浏览器/Node 双端 helper。 */
+const promptMessageSchema = z.string().refine(
+  (value) => utf8ByteLength(value) <= MAX_PROMPT_MESSAGE_BYTES,
+  { message: `message must be at most ${MAX_PROMPT_MESSAGE_BYTES} UTF-8 bytes` }
+);
+
+/** Pi 运行时当前支持的内联图片类型；main 侧还会用 magic bytes 复核。 */
+export const SUPPORTED_PROMPT_IMAGE_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/bmp",
+] as const;
+
+/**
+ * 严格估算规范 base64 的解码字节数。格式不合法时返回 Infinity，供各层失败关闭。
+ */
+export function decodedBase64ByteLength(value: string): number {
+  if (value.length === 0 || value.length % 4 !== 0) return Number.POSITIVE_INFINITY;
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value)) return Number.POSITIVE_INFINITY;
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return (value.length / 4) * 3 - padding;
+}
+
 /** 内联图片附件（粘贴 / 拖拽的图片直接走 base64，不落 token）。 */
 export const imageContentSchema = z.object({
   type: z.literal("image"),
-  data: z.string(),
-  mimeType: z.string(),
+  data: z.string().min(4).max(MAX_PROMPT_IMAGE_BASE64_CHARS),
+  mimeType: z.enum(SUPPORTED_PROMPT_IMAGE_MIME_TYPES),
 });
 
 /**
@@ -270,16 +313,21 @@ export type SecretDescriptor = z.infer<typeof secretDescriptorSchema>;
  * 本机的绝对路径。
  */
 export const piPromptRequestSchema = z.object({
-  message: z.string(),
-  images: z.array(imageContentSchema).optional(),
-  attachmentTokens: z.array(z.string()).optional(),
+  message: promptMessageSchema,
+  images: z.array(imageContentSchema).max(MAX_PROMPT_IMAGES).optional(),
+  attachmentTokens: z
+    .array(z.string().min(1).max(MAX_ATTACHMENT_TOKEN_CHARS))
+    .max(MAX_PROMPT_ATTACHMENT_TOKENS)
+    .optional(),
   streamingBehavior: z.enum(["steer", "followUp"]).optional(),
+  /** 先看方案：主进程加约束，不改 Pi runtime。 */
+  workMode: z.enum(["act", "plan"]).optional(),
 });
 
 /** pi:steer / pi:follow-up 的入参（保留 pi 原生命令的直接映射）。 */
 export const piMessageRequestSchema = z.object({
-  message: z.string(),
-  images: z.array(imageContentSchema).optional(),
+  message: promptMessageSchema,
+  images: z.array(imageContentSchema).max(MAX_PROMPT_IMAGES).optional(),
 });
 
 /**
@@ -290,6 +338,7 @@ export const piMessageRequestSchema = z.object({
  * 一次会话目录收容校验。
  */
 export const piSwitchSessionRequestSchema = z.object({
+  workspaceId: z.string().min(1),
   sessionId: z.string().min(1),
 });
 
@@ -382,10 +431,24 @@ export const workspaceIdRequestSchema = z.object({
   workspaceId: z.string().min(1),
 });
 
-/** file:attach-dropped：拖拽进来的文件，preload 内部用 webUtils 取路径后立刻换 token。 */
-export const attachDroppedRequestSchema = z.object({
-  droppedPath: z.string().min(1),
-});
+/** file:stage-dropped：preload 用 webUtils 取到路径后，主进程签发一次性 nonce。 */
+export const attachDroppedStageRequestSchema = z
+  .object({
+    droppedPath: z.string().min(1),
+  })
+  .strict();
+export const attachDroppedStageResultSchema = z
+  .object({
+    nonce: z.string().min(16),
+  })
+  .strict();
+
+/** file:attach-dropped：只接受主进程签发的 nonce，不再接受裸路径。 */
+export const attachDroppedRequestSchema = z
+  .object({
+    nonce: z.string().min(16),
+  })
+  .strict();
 
 /**
  * 渲染进程可写的设置子集。
@@ -494,6 +557,7 @@ export const piRuntimeContractShard = defineContractShard("pi-runtime", {
       state: z.unknown(),
       models: z.array(z.unknown()),
       messages: z.array(z.unknown()),
+      modelsError: z.string().optional(),
     }),
   },
   [CHANNELS.piStop]: { request: voidRequestSchema, response: z.void() },
@@ -549,7 +613,7 @@ export const piRuntimeContractShard = defineContractShard("pi-runtime", {
 });
 
 export const sessionsContractShard = defineContractShard("sessions", {
-  // ---- 会话中心（9 条） ----
+  // ---- 会话中心（11 条） ----
   [CHANNELS.sessionsQuery]: {
     request: sessionQuerySchema,
     response: z.array(sessionRowSchema),
@@ -582,6 +646,14 @@ export const sessionsContractShard = defineContractShard("sessions", {
   [CHANNELS.sessionsReadHistory]: {
     request: readHistoryRequestSchema,
     response: sessionHistoryPageSchema,
+  },
+  [CHANNELS.sessionsImportScan]: {
+    request: sessionImportScanRequestSchema,
+    response: sessionImportScanResultSchema,
+  },
+  [CHANNELS.sessionsImportRun]: {
+    request: sessionImportRunRequestSchema,
+    response: sessionImportRunResultSchema,
   },
 });
 
@@ -619,6 +691,10 @@ export const attachmentsContractShard = defineContractShard("attachments", {
   [CHANNELS.dialogChooseFiles]: {
     request: voidRequestSchema,
     response: z.array(attachmentRefSchema),
+  },
+  [CHANNELS.fileStageDropped]: {
+    request: attachDroppedStageRequestSchema,
+    response: attachDroppedStageResultSchema,
   },
   [CHANNELS.fileAttachDropped]: {
     request: attachDroppedRequestSchema,

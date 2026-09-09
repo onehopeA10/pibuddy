@@ -50,7 +50,7 @@ export interface RemoteBackend {
   stopSession(sessionId: string): RemoteActionResult;
   /** 当前工作区的授权表 + 审计（权限只读视图）。 */
   permissionState(workspaceId: string | null): PermissionState;
-  /** 裁决一条 permission inbox 待办（allow-session / deny）。需 permission.approve scope。 */
+  /** 裁决一条 permission inbox 待办（allow-once / deny）。需 permission.approve scope。 */
   decideInbox(inboxId: string, allow: boolean): Promise<RemoteActionResult>;
 }
 
@@ -100,7 +100,7 @@ export function productionBackend(): RemoteBackend {
         capabilityId: item.capabilityId,
         permission: item.permission,
         resource: item.resource,
-        disposition: allow ? "allow-session" : "deny",
+        disposition: allow ? "allow-once" : "deny",
         workspaceId: item.workspaceId,
       });
       return { ok: true, reason: "ok" };

@@ -32,6 +32,8 @@ import path from "node:path";
 
 import {
   MCP_HTTP_TEST_NOT_IMPLEMENTED_NOTE,
+  mcpExecutionFingerprintMaterial,
+  mcpRunResource,
   type McpScope,
   type McpServerDescriptor,
   type McpServerInput,
@@ -47,12 +49,75 @@ export interface ResolvedMcpServer {
   scope: McpScope;
   source: string;
   config: McpServerInput;
+  executionFingerprint: string | null;
+  runPermissionResource: string | null;
   diagnostics: string[];
 }
 
-/** `${scope}:${name}` 的 sha256 前 16 位。 */
-export function mcpServerId(scope: McpScope, name: string): string {
-  return createHash("sha256").update(`${scope}:${name}`).digest("hex").slice(0, 16);
+export interface McpPermissionTarget {
+  workspaceId: string;
+  scope: McpScope;
+  name: string;
+  resource: string | null;
+}
+
+const permissionTargetSnapshots = new Map<string, ReadonlyMap<string, McpPermissionTarget>>();
+const resolutionGeneration = new Map<string, number>();
+
+export function lookupMcpPermissionTarget(
+  workspaceId: string,
+  id: string
+): McpPermissionTarget | undefined {
+  return permissionTargetSnapshots.get(workspaceId)?.get(id);
+}
+
+export function lookupMcpPermissionTargetByRef(
+  workspaceId: string,
+  scope: McpScope,
+  name: string
+): McpPermissionTarget | undefined {
+  const snap = permissionTargetSnapshots.get(workspaceId);
+  if (!snap) return undefined;
+  for (const target of snap.values()) {
+    if (target.scope === scope && target.name === name) return target;
+  }
+  return undefined;
+}
+
+export function __resetMcpPermissionTargets(): void {
+  permissionTargetSnapshots.clear();
+  resolutionGeneration.clear();
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+/** 指纹覆盖真正交给 spawn 的 command / args / env，env 明文永不离开 main。 */
+export function mcpExecutionFingerprint(config: McpServerInput): string {
+  return sha256(mcpExecutionFingerprintMaterial(config));
+}
+
+function descriptorFingerprintMaterial(config: McpServerInput): string {
+  if (config.transport === "stdio") return mcpExecutionFingerprintMaterial(config);
+  return JSON.stringify({
+    url: config.url ?? "",
+    headers: Object.fromEntries(
+      Object.entries(config.headers).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    ),
+    oauth: config.oauth,
+  });
+}
+
+/** 配置一变 id 就变；旧列表里的 id 因此无法命中新配置并触发 spawn。 */
+export function mcpServerId(
+  workspaceId: string,
+  scope: McpScope,
+  config: McpServerInput
+): string {
+  return sha256(
+    `${workspaceId}\u0000${scope}\u0000${config.name}\u0000${descriptorFingerprintMaterial(config)}`
+  ).slice(0, 16);
 }
 
 function configFile(scope: McpScope, workspaceRoot: string, homeDir: string): string {
@@ -120,6 +185,7 @@ function normalizeEntry(name: string, raw: unknown): { config: McpServerInput; d
 
 /** 读一个作用域的配置文件。文件不存在返回空表；解析失败记一条 error。 */
 async function readScope(
+  workspaceId: string,
   scope: McpScope,
   file: string,
   errors: string[]
@@ -152,7 +218,22 @@ async function readScope(
   const out: ResolvedMcpServer[] = [];
   for (const [name, raw] of Object.entries(servers as Record<string, unknown>)) {
     const { config, diagnostics } = normalizeEntry(name, raw);
-    out.push({ id: mcpServerId(scope, name), scope, source: file, config, diagnostics });
+    const id = mcpServerId(workspaceId, scope, config);
+    const executionFingerprint =
+      config.transport === "stdio" ? mcpExecutionFingerprint(config) : null;
+    const runPermissionResource =
+      executionFingerprint === null
+        ? null
+        : mcpRunResource(workspaceId, scope, name, executionFingerprint);
+    out.push({
+      id,
+      scope,
+      source: file,
+      config,
+      executionFingerprint,
+      runPermissionResource,
+      diagnostics,
+    });
   }
   return out;
 }
@@ -164,9 +245,29 @@ export async function resolveServers(
 ): Promise<{ servers: ResolvedMcpServer[]; errors: string[] }> {
   const root = requireWorkspaceRoot(workspaceId);
   const errors: string[] = [];
-  const user = await readScope("user", configFile("user", root, homeDir), errors);
-  const project = await readScope("project", configFile("project", root, homeDir), errors);
-  return { servers: [...user, ...project], errors };
+  const generation = (resolutionGeneration.get(workspaceId) ?? 0) + 1;
+  resolutionGeneration.set(workspaceId, generation);
+  const user = await readScope(workspaceId, "user", configFile("user", root, homeDir), errors);
+  const project = await readScope(
+    workspaceId,
+    "project",
+    configFile("project", root, homeDir),
+    errors
+  );
+  const servers = [...user, ...project];
+  if (resolutionGeneration.get(workspaceId) === generation) {
+    const next = new Map<string, McpPermissionTarget>();
+    for (const server of servers) {
+      next.set(server.id, {
+        workspaceId,
+        scope: server.scope,
+        name: server.config.name,
+        resource: server.runPermissionResource,
+      });
+    }
+    permissionTargetSnapshots.set(workspaceId, next);
+  }
+  return { servers, errors };
 }
 
 /** 按 id 找一台服务器（含明文配置，供 main 侧 spawn 用）。 */
@@ -195,8 +296,29 @@ export function toDescriptor(server: ResolvedMcpServer, running: boolean): McpSe
     headerKeys: Object.keys(config.headers),
     oauthRequired: config.oauth,
     running,
+    runPermissionResource: server.runPermissionResource,
     diagnostics: server.diagnostics,
   };
+}
+
+const configMutationTails = new Map<string, Promise<void>>();
+
+/** 同一配置文件的 read-modify-write 串行化，避免并发 save/remove 丢更新。 */
+async function withConfigMutation<T>(file: string, work: () => Promise<T>): Promise<T> {
+  const previous = configMutationTails.get(file) ?? Promise.resolve();
+  let release!: () => void;
+  const marker = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.catch(() => undefined).then(() => marker);
+  configMutationTails.set(file, tail);
+  await previous.catch(() => undefined);
+  try {
+    return await work();
+  } finally {
+    release();
+    if (configMutationTails.get(file) === tail) configMutationTails.delete(file);
+  }
 }
 
 /**
@@ -213,35 +335,37 @@ export async function saveServer(
   const root = requireWorkspaceRoot(workspaceId);
   const file = configFile(scope, root, homeDir);
 
-  let doc: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      doc = parsed as Record<string, unknown>;
+  await withConfigMutation(file, async () => {
+    let doc: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        doc = parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* 文件不存在 / 坏了：从空文档起，下面 writeJsonAtomic 会建目录并写出 */
     }
-  } catch {
-    /* 文件不存在 / 坏了：从空文档起，下面 writeJsonAtomic 会建目录并写出 */
-  }
 
-  const servers =
-    doc.mcpServers && typeof doc.mcpServers === "object" && !Array.isArray(doc.mcpServers)
-      ? { ...(doc.mcpServers as Record<string, unknown>) }
-      : {};
+    const servers =
+      doc.mcpServers && typeof doc.mcpServers === "object" && !Array.isArray(doc.mcpServers)
+        ? { ...(doc.mcpServers as Record<string, unknown>) }
+        : {};
 
-  const entry: Record<string, unknown> = { type: config.transport };
-  if (config.transport === "stdio") {
-    entry.command = config.command ?? "";
-    if (config.args.length > 0) entry.args = config.args;
-    if (Object.keys(config.env).length > 0) entry.env = pruneEmpty(config.env);
-  } else {
-    entry.url = config.url ?? "";
-    if (Object.keys(config.headers).length > 0) entry.headers = pruneEmpty(config.headers);
-  }
-  if (config.oauth) entry.oauth = true;
-  servers[config.name] = entry;
+    const entry: Record<string, unknown> = { type: config.transport };
+    if (config.transport === "stdio") {
+      entry.command = config.command ?? "";
+      if (config.args.length > 0) entry.args = config.args;
+      if (Object.keys(config.env).length > 0) entry.env = pruneEmpty(config.env);
+    } else {
+      entry.url = config.url ?? "";
+      if (Object.keys(config.headers).length > 0) entry.headers = pruneEmpty(config.headers);
+    }
+    if (config.oauth) entry.oauth = true;
+    servers[config.name] = entry;
 
-  await ensureDir(path.dirname(file));
-  writeJsonAtomic(file, { ...doc, mcpServers: servers });
+    await ensureDir(path.dirname(file));
+    writeJsonAtomic(file, { ...doc, mcpServers: servers });
+  });
 }
 
 /** 删除一台服务器。写前先读再合并；服务器不存在时静默成功（幂等）。 */
@@ -254,20 +378,24 @@ export async function removeServer(
   const root = requireWorkspaceRoot(workspaceId);
   const file = configFile(scope, root, homeDir);
 
-  let doc: Record<string, unknown>;
-  try {
-    const parsed = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
-    doc = parsed as Record<string, unknown>;
-  } catch {
-    return; // 文件不存在：没什么可删的
-  }
-  if (!doc.mcpServers || typeof doc.mcpServers !== "object" || Array.isArray(doc.mcpServers)) return;
+  await withConfigMutation(file, async () => {
+    let doc: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+      doc = parsed as Record<string, unknown>;
+    } catch {
+      return; // 文件不存在：没什么可删的
+    }
+    if (!doc.mcpServers || typeof doc.mcpServers !== "object" || Array.isArray(doc.mcpServers)) {
+      return;
+    }
 
-  const servers = { ...(doc.mcpServers as Record<string, unknown>) };
-  if (!(name in servers)) return;
-  delete servers[name];
-  writeJsonAtomic(file, { ...doc, mcpServers: servers });
+    const servers = { ...(doc.mcpServers as Record<string, unknown>) };
+    if (!(name in servers)) return;
+    delete servers[name];
+    writeJsonAtomic(file, { ...doc, mcpServers: servers });
+  });
 }
 
 function pruneEmpty(record: Record<string, string>): Record<string, string> {

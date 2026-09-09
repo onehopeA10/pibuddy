@@ -64,12 +64,19 @@ function load(): Map<string, WorkspaceRecord> {
     if (raw && typeof raw === "object") {
       for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
         const rec = value as Partial<WorkspaceRecord>;
-        if (typeof rec?.root === "string" && rec.root) {
+        if (typeof rec?.root !== "string" || !rec.root) continue;
+        try {
+          const root = fs.realpathSync.native(normalizeWslUnc(rec.root));
+          if (!fs.statSync(root).isDirectory()) continue;
+          // workspaceId 是 root 的派生身份，不是可由落盘 JSON 任意重新绑定的别名。
+          if (workspaceIdFor(root) !== id) continue;
           map.set(id, {
             workspaceId: id,
-            root: rec.root,
+            root,
             registeredAt: typeof rec.registeredAt === "number" ? rec.registeredAt : 0,
           });
+        } catch {
+          // root 已不存在、不可访问或不是合法工作区：忽略该条，绝不保留旧绑定。
         }
       }
     }

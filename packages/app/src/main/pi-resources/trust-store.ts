@@ -245,9 +245,13 @@ export async function lookupTrust(
   }
 }
 
-/** 需要 trust 才会被 pi 加载的项目资源标记（security.md:9-16 逐条对齐）。 */
+/**
+ * 需要 trust 才会被加载的项目资源标记。前七项对齐 pi security.md；mcp.json
+ * 由 PiBuddy 自己加载并可启动进程，因此沿用同一份 project-trust 决策。
+ */
 const PROJECT_MARKERS: { segments: string[]; label: string; kind: "file" | "dir" }[] = [
   { segments: [".pi", "settings.json"], label: "项目设置 .pi/settings.json", kind: "file" },
+  { segments: [".pi", "mcp.json"], label: "项目 MCP 配置 .pi/mcp.json", kind: "file" },
   { segments: [".pi", "extensions"], label: "项目扩展 .pi/extensions", kind: "dir" },
   { segments: [".pi", "skills"], label: "项目技能 .pi/skills", kind: "dir" },
   { segments: [".pi", "prompts"], label: "项目提示词 .pi/prompts", kind: "dir" },

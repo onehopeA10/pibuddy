@@ -19,6 +19,7 @@ import UpdateSettingsPanel from "./UpdateSettingsPanel.vue";
 import DiagnosticsPanel from "./DiagnosticsPanel.vue";
 import BackupPanel from "./BackupPanel.vue";
 import HomeAssistantSettings from "./HomeAssistantSettings.vue";
+import SessionImportPanel from "./SessionImportPanel.vue";
 
 const store = useAppStore();
 const providers = useProvidersStore();
@@ -236,6 +237,8 @@ async function backToBundled(): Promise<void> {
       <n-button @click="openProviders">🔑 账号与模型</n-button>
       <n-button @click="openUsage">📊 用量与花费（仅本地统计）</n-button>
     </n-space>
+
+    <session-import-panel />
 
     <!-- 智能家居（home.assistant 能力包的 settings.section 贡献；能力关闭时不渲染） -->
     <home-assistant-settings v-if="homeAssistantEnabled" />

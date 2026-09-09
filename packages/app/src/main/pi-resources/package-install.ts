@@ -16,9 +16,9 @@
  * 未受信时写 `.pi/settings.json` 等于替用户接受了一个他还没同意加载的项目
  * 配置 —— 而且下次启动 pi 会照着它去装包。
  */
-import { execFile } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 
-import type { PiPackageCommandResult } from "@pibuddy/contract";
+import { piPackageSpecIssue, type PiPackageCommandResult } from "@pibuddy/contract";
 
 /** 允许经 IPC 触发的 pi 子命令。加成员前先想清楚它会不会写磁盘。 */
 export const ALLOWED_SUBCOMMANDS = ["install", "remove"] as const;
@@ -29,55 +29,29 @@ export type AllowedSubcommand = (typeof ALLOWED_SUBCOMMANDS)[number];
 const OUTPUT_LIMIT = 8000;
 
 const DEFAULT_TIMEOUT_MS = 120_000;
+const activePackageCommands = new Set<ChildProcess>();
 
-/** shell 元字符。命中任意一个直接拒绝，不做转义 —— 转义是给自己挖坑。 */
-const INJECTION_PATTERNS: { pattern: RegExp; label: string }[] = [
-  { pattern: /;/, label: "分号" },
-  { pattern: /&&/, label: "逻辑与" },
-  { pattern: /\|/, label: "管道符" },
-  { pattern: /`/, label: "反引号" },
-  { pattern: /\$\(/, label: "命令替换" },
-  { pattern: /[\r\n]/, label: "换行" },
-  { pattern: /&/, label: "与号" },
-];
-
-/** packages.md 认可的规格前缀。 */
-const ALLOWED_PREFIXES = ["npm:", "git:", "https://", "ssh://"];
-
-function looksLikeAbsolutePath(spec: string): boolean {
-  // POSIX 的 /a/b 与 Windows 的 C:\a\b 都要认；后者不能用 path.isAbsolute
-  // 判断，因为主进程可能跑在 POSIX 上处理一份来自 Windows 的旧设置。
-  return spec.startsWith("/") || /^[A-Za-z]:[\\/]/.test(spec);
+/** 应用退出时回收仍在运行的 pi/npm/git 包管理进程。 */
+export function disposePackageCommands(): void {
+  for (const child of activePackageCommands) {
+    try {
+      child.kill();
+    } catch {
+      /* 已退出 */
+    }
+  }
+  activePackageCommands.clear();
 }
 
 /**
  * 校验包规格。不合格直接抛 `PKG_SPEC_REJECTED: ...`。
  *
- * 抛而不是返回 false：调用方漏判返回值时，抛异常会在测试里立刻炸出来，
- * 而漏判的布尔值会一路静默地把脏值送进 execFile。
+ * 规则定义在 contract：IPC schema、权限资源解析与 execFile 前最后一道校验
+ * 必须是同一口径，不能出现「批准的是 A 语法，执行的是 B 语法」。
  */
 export function assertSafeSpec(spec: string): void {
-  if (typeof spec !== "string" || spec.trim().length === 0) {
-    throw new Error("PKG_SPEC_REJECTED: 包规格为空");
-  }
-
-  for (const { pattern, label } of INJECTION_PATTERNS) {
-    if (pattern.test(spec)) {
-      throw new Error(`PKG_SPEC_REJECTED: 包规格含有${label}，可能是命令注入`);
-    }
-  }
-
-  const accepted =
-    ALLOWED_PREFIXES.some((prefix) => spec.startsWith(prefix)) ||
-    looksLikeAbsolutePath(spec) ||
-    spec.startsWith("./") ||
-    spec.startsWith(".\\");
-
-  if (!accepted) {
-    throw new Error(
-      "PKG_SPEC_REJECTED: 包规格前缀不被接受，只支持 npm:、git:、https://、ssh:// 或本地路径"
-    );
-  }
+  const issue = piPackageSpecIssue(spec);
+  if (issue !== null) throw new Error(`PKG_SPEC_REJECTED: ${issue}`);
 }
 
 function truncate(text: string): string {
@@ -135,7 +109,8 @@ export async function runPackageCommand(args: {
   }
 
   return await new Promise<PiPackageCommandResult>((resolve) => {
-    execFile(
+    let child: ChildProcess | undefined;
+    child = execFile(
       args.piCommand.command,
       argv,
       {
@@ -149,6 +124,7 @@ export async function runPackageCommand(args: {
         windowsHide: true,
       },
       (err, stdout, stderr) => {
+        if (child) activePackageCommands.delete(child);
         const output = truncate(`${stdout ?? ""}${stderr ?? ""}`);
         if (err) {
           const detail = output.length > 0 ? output : describeError(err);
@@ -158,5 +134,7 @@ export async function runPackageCommand(args: {
         resolve({ ok: true, output });
       }
     );
+    // 单测中的同步 callback mock 会在赋值前完成；真实 execFile 总会返回 child。
+    if (child) activePackageCommands.add(child);
   });
 }

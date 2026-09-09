@@ -30,9 +30,8 @@ import {
   type InvokeChannel,
   type TerminalTabMeta,
 } from "@pibuddy/contract";
-import { BrowserWindow } from "electron";
-
 import { registerHandler } from "../ipc-guard.js";
+import { fanoutToSubscribed } from "../window-fanout.js";
 import { requireWorkspaceRoot } from "../workspace-registry.js";
 import { ptyManager, type TerminalEmit } from "./pty-manager.js";
 import { listWslDistros, wslTerminalProfiles } from "./wsl.js";
@@ -66,10 +65,7 @@ function broadcast(msg: TerminalEmit): void {
     msg.sequence,
     msg.payload
   );
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed()) continue;
-    win.webContents.send(PUSH_CHANNELS.terminalEvent, envelope);
-  }
+  fanoutToSubscribed(PUSH_CHANNELS.terminalEvent, envelope);
 }
 
 export function registerTerminalIpc(): void {
@@ -107,38 +103,38 @@ export function registerTerminalIpc(): void {
   });
 
   registerHandler(CHANNELS.terminalInput, terminalInputRequestSchema, (payload) => {
-    const ok = ptyManager.input(payload.tabId, payload.data);
+    const ok = ptyManager.input(payload.workspaceId, payload.tabId, payload.data);
     return { ok, message: ok ? null : "终端不存在或已退出" };
   });
 
   registerHandler(CHANNELS.terminalResize, terminalResizeRequestSchema, (payload) => {
-    const ok = ptyManager.resize(payload.tabId, payload.cols, payload.rows);
+    const ok = ptyManager.resize(payload.workspaceId, payload.tabId, payload.cols, payload.rows);
     return { ok, message: ok ? null : "终端不存在" };
   });
 
   registerHandler(CHANNELS.terminalSnapshot, terminalTabRequestSchema, (payload) => {
-    const snap = ptyManager.snapshot(payload.tabId);
+    const snap = ptyManager.snapshot(payload.workspaceId, payload.tabId);
     return { tabId: payload.tabId, ...snap };
   });
 
   registerHandler(CHANNELS.terminalClear, terminalTabRequestSchema, (payload) => {
-    const ok = ptyManager.clear(payload.tabId);
+    const ok = ptyManager.clear(payload.workspaceId, payload.tabId);
     return { ok, message: ok ? null : "终端不存在" };
   });
 
   registerHandler(CHANNELS.terminalKill, terminalTabRequestSchema, (payload) => {
-    const ok = ptyManager.kill(payload.tabId);
+    const ok = ptyManager.kill(payload.workspaceId, payload.tabId);
     return { ok, message: ok ? null : "终端不存在" };
   });
 
   registerHandler(CHANNELS.terminalRestart, terminalTabRequestSchema, (payload): TerminalTabMeta => {
-    const meta = ptyManager.restart(payload.tabId);
+    const meta = ptyManager.restart(payload.workspaceId, payload.tabId);
     if (!meta) throw new Error(`TERMINAL_TAB_UNKNOWN: ${payload.tabId}`);
     return meta;
   });
 
   registerHandler(CHANNELS.terminalRename, terminalRenameRequestSchema, (payload): TerminalTabMeta => {
-    const meta = ptyManager.rename(payload.tabId, payload.title);
+    const meta = ptyManager.rename(payload.workspaceId, payload.tabId, payload.title);
     if (!meta) throw new Error(`TERMINAL_TAB_UNKNOWN: ${payload.tabId}`);
     return meta;
   });

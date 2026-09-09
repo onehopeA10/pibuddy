@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * 第五道闸的**真流水线**判据（ADR-0002 D3）。
@@ -22,7 +22,11 @@ const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), "pibuddy-perm-ws-"));
 vi.mock("electron", () => ({
   app: { getPath: () => userData, isPackaged: false, getVersion: () => "0.0.0" },
   shell: { trashItem: vi.fn(async () => undefined), openPath: vi.fn(), showItemInFolder: vi.fn() },
-  dialog: { showOpenDialog: vi.fn(), showSaveDialog: vi.fn(), showMessageBox: vi.fn() },
+  dialog: {
+    showOpenDialog: vi.fn(),
+    showSaveDialog: vi.fn(),
+    showMessageBox: vi.fn(async () => ({ response: 1 })),
+  },
   BrowserWindow: { fromWebContents: vi.fn() },
   ipcMain: {
     handle: (channel: string, fn: (event: unknown, raw: unknown) => unknown) => {
@@ -61,6 +65,10 @@ beforeAll(async () => {
   const { registerAllIpc } = await import("../src/main/ipc-registry.js");
   registerAllIpc();
   workspaceId = workspaceStore().open(wsDir).id;
+});
+
+beforeEach(() => {
+  permStore.setPermissionPrompter({ confirmDangerousGrant: async () => true });
 });
 
 describe("拒绝路径：未授权，第五道闸把探针挡在 handler 之外", () => {
@@ -118,10 +126,43 @@ describe("上界：越过 manifest 声明的授权不被记录", () => {
   });
 });
 
-describe("危险权限的持久化授权必须过主进程原生确认框", () => {
-  it("原生确认被取消 → 不落盘", async () => {
+describe("危险权限的所有授权档位必须过主进程原生确认框", () => {
+  it.each(["allow-once", "allow-session"] as const)(
+    "%s 原生确认被取消 → 不产生瞬时授权",
+    async (disposition) => {
+      permStore.__resetPermissionStore();
+      permStore.setPermissionPrompter({ confirmDangerousGrant: async () => false });
+      const state = await permStore.decidePermission({
+        capabilityId: PERMISSION_PROBE_CAPABILITY_ID,
+        permission: PERMISSION_PROBE_PERMISSION,
+        resource: null,
+        disposition,
+        workspaceId: null,
+      });
+      expect(state.sessionGrants).toEqual([]);
+      expect(() => permStore.gateForChannel(CHANNELS.permissionProbe, {})).toThrow(
+        /IPC_PERMISSION_DENIED/
+      );
+    }
+  );
+
+  it("renderer 直接调用 permission:decide 也不能绕过原生确认", async () => {
     permStore.__resetPermissionStore();
-    permStore.setPermissionPrompter({ confirmPersistentGrant: async () => false });
+    permStore.setPermissionPrompter({ confirmDangerousGrant: async () => false });
+    const state = (await call(CHANNELS.permissionDecide, {
+      capabilityId: PERMISSION_PROBE_CAPABILITY_ID,
+      permission: PERMISSION_PROBE_PERMISSION,
+      resource: null,
+      disposition: "allow-session",
+      workspaceId: null,
+    })) as { sessionGrants: unknown[] };
+    expect(state.sessionGrants).toEqual([]);
+    await expect(call(CHANNELS.permissionProbe, {})).rejects.toThrow(/IPC_PERMISSION_DENIED/);
+  });
+
+  it("allow-workspace 原生确认被取消 → 不落盘", async () => {
+    permStore.__resetPermissionStore();
+    permStore.setPermissionPrompter({ confirmDangerousGrant: async () => false });
     await permStore.decidePermission({
       capabilityId: PERMISSION_PROBE_CAPABILITY_ID,
       permission: PERMISSION_PROBE_PERMISSION,
@@ -134,7 +175,7 @@ describe("危险权限的持久化授权必须过主进程原生确认框", () =
 
   it("原生确认通过 → 落盘到 workspace，且带该 workspace 的探针放行", async () => {
     permStore.__resetPermissionStore();
-    permStore.setPermissionPrompter({ confirmPersistentGrant: async () => true });
+    permStore.setPermissionPrompter({ confirmDangerousGrant: async () => true });
     await permStore.decidePermission({
       capabilityId: PERMISSION_PROBE_CAPABILITY_ID,
       permission: PERMISSION_PROBE_PERMISSION,
@@ -150,6 +191,50 @@ describe("危险权限的持久化授权必须过主进程原生确认框", () =
     await expect(call(CHANNELS.permissionProbe, { workspaceId })).resolves.toEqual({ ok: true });
     // 换一个没有该授权的上下文（无 workspace）仍被拒。
     await expect(call(CHANNELS.permissionProbe, {})).rejects.toThrow(/IPC_PERMISSION_DENIED/);
+  });
+});
+
+describe("COR-009：拒绝入 inbox hook，裁决后摘待办", () => {
+  it("gateForChannel 拒绝时把 payload.sessionId 交给 onBlocked", () => {
+    permStore.__resetPermissionStore();
+    const blocked: Array<{ sessionId: string | null; permission: string }> = [];
+    permStore.setPermissionInboxHooks({
+      onBlocked: (need) => blocked.push({ sessionId: need.sessionId, permission: need.permission }),
+    });
+    expect(() =>
+      permStore.gateForChannel(CHANNELS.permissionProbe, { sessionId: "child-1" })
+    ).toThrow(/IPC_PERMISSION_DENIED/);
+    expect(blocked).toEqual([
+      { sessionId: "child-1", permission: PERMISSION_PROBE_PERMISSION },
+    ]);
+  });
+
+  it("decidePermission 拒绝 / 允许一次都触发 onDecided", async () => {
+    permStore.__resetPermissionStore();
+    permStore.setPermissionPrompter({ confirmDangerousGrant: async () => true });
+    const decided: string[] = [];
+    permStore.setPermissionInboxHooks({
+      onDecided: (need) => decided.push(`${need.permission}:${need.workspaceId ?? ""}`),
+    });
+    await permStore.decidePermission({
+      capabilityId: PERMISSION_PROBE_CAPABILITY_ID,
+      permission: PERMISSION_PROBE_PERMISSION,
+      resource: null,
+      disposition: "deny",
+      workspaceId: null,
+    });
+    await permStore.decidePermission({
+      capabilityId: PERMISSION_PROBE_CAPABILITY_ID,
+      permission: PERMISSION_PROBE_PERMISSION,
+      resource: null,
+      disposition: "allow-once",
+      workspaceId: null,
+    });
+    expect(decided).toEqual([
+      `${PERMISSION_PROBE_PERMISSION}:`,
+      `${PERMISSION_PROBE_PERMISSION}:`,
+    ]);
+    permStore.__resetPermissionStore();
   });
 });
 

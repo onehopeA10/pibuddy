@@ -48,3 +48,10 @@ export function formatCost(cost: number): string {
   if (!cost) return "$0";
   return cost < 0.01 ? "<$0.01" : `$${cost.toFixed(2)}`;
 }
+
+export function formatTokenCount(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "0 tokens";
+  if (tokens < 1000) return `${Math.floor(tokens)} tokens`;
+  if (tokens < 1_000_000) return `${(tokens / 1000).toFixed(tokens < 10_000 ? 1 : 0)}k tokens`;
+  return `${(tokens / 1_000_000).toFixed(1)}m tokens`;
+}

@@ -75,6 +75,50 @@ export interface SpawnPlan {
 /** cmd.exe 的元字符集合——这些字符在命令行里会被 cmd 解释，需逐个加 `^` 保字面量。 */
 const CMD_META = /[()%!^"<>&|]/g;
 
+/**
+ * MCP 子进程可继承的宿主环境键。
+ *
+ * 只放「npx / node 不给就起不来」的路径与临时目录，绝不展开 process.env。
+ * 用户在 mcp.json 里显式写的 config.env 随后覆盖同名键。
+ */
+export const MCP_ENV_ALLOWLIST = [
+  "PATH",
+  "Path",
+  "PATHEXT",
+  "HOME",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "SystemRoot",
+  "windir",
+  "ComSpec",
+  "LANG",
+  "LC_ALL",
+] as const;
+
+const MCP_ENV_DENY = /^(NODE_OPTIONS|NODE_INSPECT|LD_PRELOAD|DYLD_|ELECTRON_|PIBUDDY_)/i;
+
+/** 构造 MCP stdio 子进程环境：白名单继承 + 用户显式 env。 */
+export function buildMcpChildEnv(
+  base: NodeJS.ProcessEnv = process.env,
+  overlay: Record<string, string> = {}
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of MCP_ENV_ALLOWLIST) {
+    const value = base[key];
+    if (typeof value === "string" && value !== "") env[key] = value;
+  }
+  for (const [key, value] of Object.entries(overlay)) {
+    if (!key || MCP_ENV_DENY.test(key)) continue;
+    env[key] = value;
+  }
+  env.NODE_OPTIONS = "";
+  return env;
+}
+
 function isFile(p: string): boolean {
   try {
     return fs.statSync(p).isFile();
@@ -203,9 +247,9 @@ export function connectStdio(
       // 但不放宽 shell:false（planSpawn 用逐字转义 + verbatim 挡住注入）。
       const plan = planSpawn(config.command, config.args);
       child = spawn(plan.file, plan.args, {
-        // config.env 叠加在 process.env 之上：npx / node 需要 PATH 等继承变量，
-        // 用户的 env 覆盖同名键。shell:false 是安全边界，不能动。
-        env: { ...process.env, ...config.env },
+        // 白名单继承 PATH 等启动必需变量，再叠用户显式 config.env。
+        // 绝不 `{ ...process.env }`：那会把 API Key / NODE_OPTIONS 交给第三方 MCP。
+        env: buildMcpChildEnv(process.env, config.env),
         stdio: ["pipe", "pipe", "pipe"],
         shell: false,
         windowsHide: true,
@@ -277,6 +321,11 @@ export function connectStdio(
     });
 
     // ---- 行缓冲：stdio 传输是换行分隔的 JSON-RPC 消息 ----
+    //
+    // 缓冲必须有上界：恶意/异常服务器可以在握手超时窗口内持续输出不带换行
+    // 的字节，无上限累积等于把主进程内存交给对端。正常握手只有 initialize
+    // 结果 + tools/list 两条消息，远小于此数；超限按握手失败收场并回收进程。
+    const HANDSHAKE_BUFFER_LIMIT = 4 * 1024 * 1024;
     let buffer = "";
     const onLine = (line: string): void => {
       const trimmed = line.trim();
@@ -332,6 +381,11 @@ export function connectStdio(
         onLine(buffer.slice(0, nl));
         buffer = buffer.slice(nl + 1);
         nl = buffer.indexOf("\n");
+      }
+      // 在整行消耗之后再判：正常的大消息只要带换行就不受影响，
+      // 只有「迟迟凑不出一行」的输出才会触顶。
+      if (buffer.length > HANDSHAKE_BUFFER_LIMIT) {
+        finish(false, [`握手输出累积超过 ${HANDSHAKE_BUFFER_LIMIT} 字节仍无完整消息，已中止`]);
       }
     });
 

@@ -115,6 +115,17 @@ export interface SchedulerDeps {
   trigger?: () => AgentRunTrigger;
   /** 读某工作区落盘的能力授权表（决策数据源，只读 workspace grants） */
   workspaceGrants: (workspaceId: string) => readonly CapabilityGrant[];
+  /**
+   * 定时 run 因缺预授权被挡住时通知统一权限 inbox（COR-009）。
+   * 不注入则只落库「等待授权」，与从前一致。
+   */
+  onAwaitingAuth?: (info: {
+    taskId: string;
+    workspaceId: string;
+    runId: string | null;
+    missing: string[];
+    now: number;
+  }) => void;
   /** 审计日志（可选，不 import electron 才能被单测直跑） */
   log?: (event: string, fields: Record<string, unknown>) => void;
   /** 崩溃恢复账本（可选，见 {@link SchedulerRecovery}） */
@@ -888,6 +899,13 @@ export class Scheduler {
       });
       this.log("tasks_run_blocked", { runId: run.id, taskId: task.id, missing });
     }
+    this.deps.onAwaitingAuth?.({
+      taskId: task.id,
+      workspaceId: task.workspaceId,
+      runId: run?.id ?? null,
+      missing,
+      now,
+    });
   }
 
   // ------------------------------------------------------------ 手动操作

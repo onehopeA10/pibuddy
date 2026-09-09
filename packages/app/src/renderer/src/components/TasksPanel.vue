@@ -2,10 +2,8 @@
 /**
  * 定时任务面板（Durable Tasks，AUT-101 的界面出口）。
  *
- * 一处集齐：建任务（一次 / 每天 / 每周 / cron / 事件，带时区、错过策略、并发
- * 策略、失败重试、预算、超时）、列表（保存时显示时区 / 下一次运行 / workspace /
- * Agent / Provider / 权限 / 预算 / 超时 / 失败策略）、以及 pause / resume /
- * run now / duplicate / delete，展开一条任务看它的 run（cancel / retry）。
+ * 列表说人话：下一跑时间和缺授权，不摊 cron / 时区 ID / 权限字面量。
+ * 建任务仍可从面板打开，但日常创建走对话。面板主责：暂停、重试、看上次成败。
  *
  * ## 为什么把「缺哪些预授权」画出来
  *
@@ -27,12 +25,17 @@ import {
 } from "naive-ui";
 import { useAppStore } from "../stores/app";
 import { useTasksStore } from "../stores/tasks";
-import type { RunStatus, TaskSchedule } from "@contract";
+import type { RunStatus, TaskListItem, TaskSchedule } from "@contract";
+import { humanTaskHeadline } from "../../../lib/task-plain";
 
 const app = useAppStore();
 const store = useTasksStore();
 
 const workspaceId = computed(() => app.workspaceId ?? "");
+
+function grantManage(): void {
+  if (workspaceId.value) store.authorize(workspaceId.value);
+}
 
 watch(
   () => [store.panelOpen, workspaceId.value] as const,
@@ -48,21 +51,15 @@ function fmt(ms: number | null): string {
   return new Date(ms).toLocaleString();
 }
 
-function scheduleText(s: TaskSchedule): string {
-  switch (s.kind) {
-    case "once":
-      return `一次：${new Date(s.at).toLocaleString()}`;
-    case "daily":
-      return `每天 ${s.time}`;
-    case "weekly": {
-      const names = ["日", "一", "二", "三", "四", "五", "六"];
-      return `每周${s.weekdays.map((d) => names[d]).join("、")} ${s.time}`;
-    }
-    case "cron":
-      return `cron：${s.expression}`;
-    case "event":
-      return `事件：${s.event}`;
-  }
+function statusLine(item: TaskListItem): string {
+  return humanTaskHeadline({
+    nextRunAt: item.task.nextRunAt,
+    timeZone: item.task.timezone,
+    missingPermissions: item.missingPermissions,
+    paused: item.task.status !== "active",
+    schedule: item.task.schedule,
+    now: Date.now(),
+  });
 }
 
 const RUN_STATUS_LABEL: Record<RunStatus, string> = {
@@ -85,6 +82,21 @@ const RUN_STATUS_TYPE: Record<RunStatus, "default" | "info" | "success" | "error
 // ------------------------------------------------------------ 建任务表单
 
 const showForm = ref(false);
+const showAdvanced = ref(false);
+
+const RECIPES = [
+  { name: "每天早上看待办", prompt: "每天早上9点提醒我看待办", kind: "daily" as const, time: "09:00" },
+  { name: "每周五整理一周", prompt: "每周五下午整理这一周做过的事", kind: "weekly" as const, time: "17:00", weekdays: [5] },
+];
+
+function applyRecipe(recipe: (typeof RECIPES)[number]): void {
+  showForm.value = true;
+  fName.value = recipe.name;
+  fPrompt.value = recipe.prompt;
+  fKind.value = recipe.kind;
+  fTime.value = recipe.time;
+  if (recipe.weekdays) fWeekdays.value = [...recipe.weekdays];
+}
 const fName = ref("");
 const fKind = ref<TaskSchedule["kind"]>("daily");
 const fOnceAt = ref<number>(Date.now() + 3600_000);
@@ -105,13 +117,17 @@ const fRetry = ref(false);
 const fMaxAttempts = ref(3);
 const fBackoff = ref(60000);
 
-const kindOptions = [
+const kindOptions = computed(() => [
   { label: "一次", value: "once" },
   { label: "每天", value: "daily" },
   { label: "每周", value: "weekly" },
-  { label: "cron 表达式", value: "cron" },
-  { label: "事件驱动", value: "event" },
-];
+  ...(showAdvanced.value
+    ? [
+        { label: "自定义时间表", value: "cron" },
+        { label: "等某件事发生", value: "event" },
+      ]
+    : []),
+]);
 const weekdayOptions = [
   { label: "周日", value: 0 },
   { label: "周一", value: 1 },
@@ -132,7 +148,15 @@ const tzOptions = [
   fTimezone.value,
 ]
   .filter((v, i, a) => a.indexOf(v) === i)
-  .map((v) => ({ label: v, value: v }));
+  .map((v) => ({
+    label:
+      v === "Asia/Shanghai"
+        ? "北京时间"
+        : v === Intl.DateTimeFormat().resolvedOptions().timeZone
+          ? "你所在的时区"
+          : v,
+    value: v,
+  }));
 const misfireOptions = [
   { label: "跳过错过的（skip）", value: "skip" },
   { label: "最多补一次（run-once）", value: "run-once" },
@@ -204,6 +228,10 @@ async function submit(): Promise<void> {
       <n-button size="small" quaternary @click="store.refresh(workspaceId)">刷新</n-button>
       <span v-if="store.lastError" class="err">{{ store.lastError }}</span>
     </div>
+    <p v-if="store.needsPermission" class="notice">
+      改定时任务需要你点一下允许。
+      <n-button size="tiny" type="primary" @click="grantManage">去允许</n-button>
+    </p>
 
     <!-- 建任务表单 -->
     <div v-if="showForm" class="form">
@@ -229,43 +257,59 @@ async function submit(): Promise<void> {
         </n-checkbox-group>
       </div>
       <div class="row">
-        <n-input v-model:value="fProvider" placeholder="Provider（留空用默认）" style="width: 200px" />
-        <n-input v-model:value="fModel" placeholder="模型（留空用默认）" style="width: 200px" />
-      </div>
-      <div class="row">
         <n-input
           v-model:value="fPrompt"
           type="textarea"
-          placeholder="要交给 Agent 的提示词"
+          placeholder="到点时让助手做什么"
           :autosize="{ minRows: 2, maxRows: 6 }"
         />
       </div>
       <div class="row">
-        <n-input
-          v-model:value="fPermissions"
-          placeholder="需要的权限（逗号分隔，如 process.git）"
-          style="width: 320px"
-        />
-        <n-input-number v-model:value="fBudget" placeholder="预算 $" :min="0" style="width: 130px" />
-        <n-input-number v-model:value="fTimeout" placeholder="超时 ms" :min="1" style="width: 140px" />
-      </div>
-      <div class="row">
-        <n-select v-model:value="fMisfire" :options="misfireOptions" style="width: 230px" />
-        <n-select v-model:value="fConcurrency" :options="concurrencyOptions" style="width: 180px" />
-      </div>
-      <div class="row">
-        <span>失败重试</span>
-        <n-switch v-model:value="fRetry" />
-        <template v-if="fRetry">
-          <n-input-number v-model:value="fMaxAttempts" :min="1" :max="10" style="width: 110px" />
-          <n-input-number v-model:value="fBackoff" :min="0" style="width: 140px" placeholder="退避 ms" />
-        </template>
+        <n-button size="tiny" quaternary @click="showAdvanced = !showAdvanced">
+          {{ showAdvanced ? "收起高级" : "高级选项" }}
+        </n-button>
         <n-button size="small" type="primary" @click="submit">保存</n-button>
       </div>
+      <template v-if="showAdvanced">
+        <div class="row">
+          <n-input v-model:value="fProvider" placeholder="模型服务商（可空）" />
+          <n-input v-model:value="fModel" placeholder="模型（可空）" />
+          <n-input v-model:value="fPermissions" placeholder="额外授权，逗号分隔" />
+        </div>
+        <div class="row">
+          <n-input-number v-model:value="fBudget" placeholder="预算" :min="0" style="width: 130px" />
+          <n-input-number v-model:value="fTimeout" placeholder="超时毫秒" :min="1" style="width: 140px" />
+        </div>
+        <div class="row">
+          <n-select v-model:value="fMisfire" :options="misfireOptions" style="width: 230px" />
+          <n-select v-model:value="fConcurrency" :options="concurrencyOptions" style="width: 180px" />
+        </div>
+        <div class="row">
+          <span>失败重试</span>
+          <n-switch v-model:value="fRetry" />
+          <template v-if="fRetry">
+            <n-input-number v-model:value="fMaxAttempts" :min="1" :max="10" style="width: 110px" />
+            <n-input-number v-model:value="fBackoff" :min="0" style="width: 140px" placeholder="退避毫秒" />
+          </template>
+        </div>
+      </template>
     </div>
 
     <!-- 任务列表 -->
-    <div v-if="store.items.length === 0" class="empty">还没有定时任务。</div>
+    <div v-if="store.items.length === 0 && !showForm" class="empty">
+      <p>还没有定时任务。直接说「每天早上9点提醒我看待办」，或点下面一张卡片。</p>
+      <div class="recipes">
+        <n-button
+          v-for="recipe in RECIPES"
+          :key="recipe.name"
+          size="small"
+          secondary
+          @click="applyRecipe(recipe)"
+        >
+          {{ recipe.name }}
+        </n-button>
+      </div>
+    </div>
     <div v-for="item in store.items" :key="item.task.id" class="task-card">
       <div class="task-head">
         <b>{{ item.task.name }}</b>
@@ -276,21 +320,12 @@ async function submit(): Promise<void> {
           最近：{{ RUN_STATUS_LABEL[item.lastRunStatus] }}
         </n-tag>
         <n-tag v-if="item.missingPermissions.length" size="small" type="error">
-          等待授权：{{ item.missingPermissions.join("、") }}
+          还差工作区授权
         </n-tag>
       </div>
       <div class="task-meta">
-        <span>{{ scheduleText(item.task.schedule) }}</span>
-        <span>时区 {{ item.task.timezone }}</span>
-        <span>下次 {{ fmt(item.task.nextRunAt) }}</span>
-        <span v-if="item.task.agent.provider">Provider {{ item.task.agent.provider }}</span>
-        <span v-if="item.task.agent.model">模型 {{ item.task.agent.model }}</span>
-        <span v-if="item.task.budgetUsd !== null">预算 ${{ item.task.budgetUsd }}</span>
-        <span v-if="item.task.timeoutMs !== null">超时 {{ item.task.timeoutMs }}ms</span>
-        <span>错过 {{ item.task.misfirePolicy }}</span>
-        <span>并发 {{ item.task.concurrencyPolicy }}</span>
-        <span v-if="item.task.failurePolicy.retry">重试 ×{{ item.task.failurePolicy.maxAttempts }}</span>
-        <span v-if="item.task.requiredPermissions.length">权限 {{ item.task.requiredPermissions.join("、") }}</span>
+        <span>{{ statusLine(item) }}</span>
+        <span v-if="item.task.agent.prompt" class="prompt">{{ item.task.agent.prompt }}</span>
       </div>
       <div class="task-actions">
         <n-button size="tiny" type="primary" @click="store.runNow(workspaceId, item.task.id)">立即运行</n-button>
@@ -345,6 +380,18 @@ async function submit(): Promise<void> {
   gap: 8px;
   align-items: center;
   margin-bottom: 12px;
+}
+.notice {
+  background: #fff4e5;
+  border: 1px solid #ffb74d;
+  color: #7a4a00;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
 }
 .err {
   color: #d03050;
@@ -409,9 +456,21 @@ async function submit(): Promise<void> {
   color: #888;
   cursor: help;
 }
+.prompt {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .empty {
   color: #999;
   font-size: 13px;
   padding: 8px 0;
+}
+.recipes {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
 }
 </style>

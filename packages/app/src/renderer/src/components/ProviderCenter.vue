@@ -219,8 +219,9 @@ const currentCapabilities = computed(() => {
           摆一个点了没反应的「登录」按钮 —— 后者会让用户以为是自己操作错了。
         -->
         <n-alert v-if="p.authKind === 'oauth'" type="info" :bordered="false">
-          这是订阅制账号，登录流程需要在终端里完成：运行 <code>pi</code> 后输入
-          <code>/login</code> 并选择 {{ p.name }}。登录后回到这里就会显示为已配置。
+          {{ p.name }} 用的是订阅账号，桌面里还不能直接弹出登录页。按这三步即可：
+          打开系统终端，输入 pi 回车，再输入 /login 并选 {{ p.name }}。
+          登完回到这里点刷新，就会变成已配置。
         </n-alert>
 
         <n-form v-else label-placement="left" label-width="88">

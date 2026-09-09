@@ -23,6 +23,8 @@ export interface TriggerContext {
   runId: string;
   taskId: string;
   workspaceId: string;
+  /** 取消本次 run；触发实现必须尽快停止其拥有的外部执行。 */
+  signal: AbortSignal;
   /** 触发时冻结的输入（provider / model / prompt） */
   input: RunInputSnapshot;
   /** 单次超时（ms）；null=不限 */

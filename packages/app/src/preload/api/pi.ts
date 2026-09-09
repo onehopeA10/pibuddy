@@ -53,6 +53,7 @@ export const pi = {
     images?: ImageContent[];
     attachmentTokens?: string[];
     streamingBehavior?: "steer" | "followUp";
+    workMode?: "act" | "plan";
   }) => invoke<RpcResponse>(CHANNELS.piPrompt, payload),
   steer: (payload: { message: string; images?: ImageContent[] }) =>
     invoke<RpcResponse>(CHANNELS.piSteer, payload),
@@ -60,9 +61,12 @@ export const pi = {
     invoke<RpcResponse>(CHANNELS.piFollowUp, payload),
   abort: () => invoke<RpcResponse>(CHANNELS.piAbort),
   newSession: () => invoke<RpcResponse<{ cancelled?: boolean }>>(CHANNELS.piNewSession),
-  /** sessionId 必须来自 sessions.query()；主进程会把它解成路径并重做收容校验 */
-  switchSession: (sessionId: string) =>
-    invoke<RpcResponse<{ cancelled?: boolean }>>(CHANNELS.piSwitchSession, { sessionId }),
+  /** sessionId 必须来自 sessions.query()；workspaceId 与之成对，主进程解路径并收容 */
+  switchSession: (workspaceId: string, sessionId: string) =>
+    invoke<RpcResponse<{ cancelled?: boolean }>>(CHANNELS.piSwitchSession, {
+      workspaceId,
+      sessionId,
+    }),
   setModel: (provider: string, modelId: string) =>
     invoke<RpcResponse>(CHANNELS.piSetModel, { provider, modelId }),
   setThinkingLevel: (level: ThinkingLevel) =>

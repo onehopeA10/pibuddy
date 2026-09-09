@@ -82,6 +82,7 @@ export interface PoolLaunchRequest {
   workspaceId: string | null;
   /** 谁拥有这次会话的重试决策。 */
   origin: PoolSessionOrigin;
+  inheritPermissions?: boolean;
 }
 
 /**
@@ -134,6 +135,8 @@ interface SessionRecord {
   lastActivityAt: number;
   queued: boolean;
   origin: PoolSessionOrigin;
+  /** false = 评估权限时忽略 once/session，只认 workspace 预授权。 */
+  inheritPermissions: boolean;
   /** 本会话事件序号闸门的上一帧（不串台的落点，per (sessionId, generation)）。 */
   lastFrame: SequencedFrame | null;
   /** 入池顺序，用于公平（FIFO）准入。 */
@@ -192,8 +195,10 @@ export class AgentPoolCore {
     workspaceId: string | null;
     origin?: PoolSessionOrigin;
     focus?: boolean;
+    inheritPermissions?: boolean;
   }): void {
     const origin = input.origin ?? "user";
+    const inheritPermissions = input.inheritPermissions ?? origin === "user";
     let record = this.sessions.get(input.sessionId);
     if (!record) {
       record = {
@@ -210,6 +215,7 @@ export class AgentPoolCore {
         lastActivityAt: 0,
         queued: true,
         origin,
+        inheritPermissions,
         lastFrame: null,
         seq: this.insertionSeq++,
       };
@@ -269,6 +275,7 @@ export class AgentPoolCore {
         lastActivityAt: now,
         queued: false,
         origin: "user",
+        inheritPermissions: true,
         lastFrame: null,
         seq: this.insertionSeq++,
       };
@@ -386,6 +393,27 @@ export class AgentPoolCore {
     // 停一个会话 = 它挂在 inbox 里的权限待办一并作废（进程都没了，没人再回答）。
     this.inbox = this.inbox.filter((i) => i.sessionId !== record.sessionId);
     if (record.listState === "waiting_permission") record.listState = "idle";
+    this.pruneDeadSessions();
+  }
+
+  /** 停掉的会话记录保留一段时间供 UI，但必须有上限，避免 Map 只增不减。 */
+  private pruneDeadSessions(keep = 32): void {
+    const dead = [...this.sessions.values()]
+      .filter((r) => r.runState === "stopped" || r.runState === "crashed")
+      .sort((a, b) => a.lastActivityAt - b.lastActivityAt);
+    const extra = dead.length - keep;
+    if (extra <= 0) return;
+    for (const record of dead.slice(0, extra)) {
+      if (this.focusedId === record.sessionId) continue;
+      this.sessions.delete(record.sessionId);
+    }
+  }
+
+  /** 子 Agent / task 默认 workspace-only；前台 user 继承 session grant。 */
+  sessionGrantPolicy(sessionId: string): "inherit" | "workspace-only" {
+    const record = this.sessions.get(sessionId);
+    if (!record) return "inherit";
+    return record.inheritPermissions ? "inherit" : "workspace-only";
   }
 
   // -------------------------------------------------------------- 准入判定
@@ -447,6 +475,7 @@ export class AgentPoolCore {
       sessionId: record.sessionId,
       workspaceId: record.workspaceId,
       origin: record.origin,
+      inheritPermissions: record.inheritPermissions,
     });
   }
 
@@ -584,6 +613,14 @@ export class AgentPoolCore {
    * **绝不自动允许**：这里只登记待办 + 设一个超时 deadline，最终裁决走既有
    * `decidePermission`。到 deadline 仍无人响应，`tick` 会把它记为拒绝并移除。
    */
+  /** 子 / task 以及非前台 user 会话的权限请求进统一 inbox，不弹前台框。 */
+  isInboxCandidate(sessionId: string): boolean {
+    const record = this.sessions.get(sessionId);
+    if (!record) return false;
+    if (record.origin === "child" || record.origin === "task") return true;
+    return record.runState !== "focused";
+  }
+
   enqueuePermission(input: {
     id: string;
     sessionId: string;
@@ -592,6 +629,18 @@ export class AgentPoolCore {
     resource?: string | null;
     now: number;
   }): void {
+    if (
+      this.inbox.some(
+        (item) =>
+          item.id === input.id ||
+          (item.sessionId === input.sessionId &&
+            item.capabilityId === input.capabilityId &&
+            item.permission === input.permission &&
+            item.resource === (input.resource ?? null))
+      )
+    ) {
+      return;
+    }
     const record = this.sessions.get(input.sessionId);
     const item: PoolInboxItem = {
       id: input.id,
@@ -627,6 +676,34 @@ export class AgentPoolCore {
     }
     this.emit();
     return item;
+  }
+
+  /** 用户在权限中心 / inbox 作答后，摘掉被这条决策覆盖的待办。 */
+  resolveMatchingInbox(match: {
+    capabilityId: string;
+    permission: string;
+    resource?: string | null;
+    workspaceId?: string | null;
+  }): number {
+    const resource = match.resource ?? null;
+    const ids = this.inbox
+      .filter((item) => {
+        if (item.capabilityId !== match.capabilityId || item.permission !== match.permission) {
+          return false;
+        }
+        if (resource !== null && item.resource !== resource) return false;
+        if (
+          match.workspaceId != null &&
+          item.workspaceId != null &&
+          item.workspaceId !== match.workspaceId
+        ) {
+          return false;
+        }
+        return true;
+      })
+      .map((item) => item.id);
+    for (const id of ids) this.resolveInbox(id);
+    return ids.length;
   }
 
   // -------------------------------------------------------------- 周期性维护

@@ -355,6 +355,61 @@ export class TaskStore {
     return Number(row?.n ?? 0) > 0;
   }
 
+  /** queue 准入只拦真正已经开始的 run；pending 由 FIFO 查询决定先后。 */
+  hasRunningRun(taskId: string): boolean {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND status = 'running'")
+      .get(taskId) as { n?: number } | undefined;
+    return Number(row?.n ?? 0) > 0;
+  }
+
+  /** 某任务最早创建的 pending run；rowid 为同毫秒创建提供稳定的插入顺序。 */
+  nextPendingRun(taskId: string): RunRecord | null {
+    const row = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE task_id = ? AND status = 'pending' ORDER BY created_at ASC, rowid ASC LIMIT 1"
+      )
+      .get(taskId) as RunRow | undefined;
+    return row ? runFromRow(row) : null;
+  }
+
+  /** 原子准入最早 pending；已有 running 或被别的调度器抢先时返回 null。 */
+  claimNextPendingRun(taskId: string): RunRecord | null {
+    const row = this.db
+      .prepare(
+        `UPDATE runs SET status = 'running'
+         WHERE id = (
+           SELECT id FROM runs
+           WHERE task_id = ? AND status = 'pending'
+           ORDER BY created_at ASC, rowid ASC
+           LIMIT 1
+         )
+           AND NOT EXISTS (
+             SELECT 1 FROM runs AS active
+             WHERE active.task_id = ? AND active.status = 'running'
+           )
+         RETURNING *`
+      )
+      .get(taskId, taskId) as RunRow | undefined;
+    return row ? runFromRow(row) : null;
+  }
+
+  /** tick / recovery 用：当前存在 pending run 的 queue 任务。 */
+  queueTasksWithPendingRuns(): TaskRecord[] {
+    const rows = this.db
+      .prepare(
+        `SELECT tasks.* FROM tasks
+         WHERE tasks.concurrency_policy = 'queue'
+           AND EXISTS (
+             SELECT 1 FROM runs
+             WHERE runs.task_id = tasks.id AND runs.status = 'pending'
+           )
+         ORDER BY tasks.created_at ASC, tasks.id ASC`
+      )
+      .all() as unknown as TaskRow[];
+    return rows.map(taskFromRow);
+  }
+
   runByIdempotency(key: string): RunRecord | null {
     const row = this.db
       .prepare("SELECT * FROM runs WHERE idempotency_key = ?")
@@ -499,6 +554,16 @@ export class TaskStore {
         "SELECT * FROM runs WHERE status IN ('pending','running') AND (lease_expires_at IS NULL OR lease_expires_at < ?)"
       )
       .all(now) as unknown as RunRow[];
+    return rows.map(runFromRow);
+  }
+
+  /** 应用关闭收口用：返回全部仍未终结的 run，不套 lease 过期判据。 */
+  activeRuns(): RunRecord[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE status IN ('pending','running') ORDER BY created_at ASC, rowid ASC"
+      )
+      .all() as unknown as RunRow[];
     return rows.map(runFromRow);
   }
 }

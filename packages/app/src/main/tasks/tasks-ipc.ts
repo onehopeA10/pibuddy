@@ -27,13 +27,15 @@ import {
   type RunRecord,
 } from "@pibuddy/contract";
 
+import { agentPool, reportPoolPermissionNeed } from "../agent-pool/pool.js";
 import { registerHandler } from "../ipc-guard.js";
 import { createLogger, type Logger } from "../logger.js";
 import { reviewedWorkspaceGrants } from "../permission/permission-store.js";
 import { systemClock } from "./clock.js";
 import { createPoolRunTrigger } from "./pool-run-trigger.js";
 import { nextRunAfter, Scheduler } from "./scheduler.js";
-import { evaluateScheduledPermissions } from "./task-permission.js";
+import { registerTasksPermissionRequirements } from "./task-ipc-permission.js";
+import { evaluateScheduledPermissions, inboxCapabilityOf } from "./task-permission.js";
 import { setAgentRunTrigger } from "./task-trigger.js";
 import { closeTaskStore, taskStore, type TaskStore } from "./task-store.js";
 import {
@@ -75,7 +77,9 @@ function workspaceGrants(workspaceId: string): readonly CapabilityGrant[] {
 }
 
 let sched: Scheduler | null = null;
+let tasksShutdown: Promise<void> | null = null;
 function scheduler(): Scheduler {
+  if (tasksShutdown) throw new Error("TASKS_SHUTTING_DOWN");
   if (!sched) {
     sched = new Scheduler({
       store: taskStore(),
@@ -85,6 +89,27 @@ function scheduler(): Scheduler {
       // 工具账本接线：触发实现被夹进 T1/T2，崩溃恢复因此能分辨「压根没跑」
       // 与「可能跑过了」——前者自动重跑，后者仍然判死并说清理由。
       recovery: { boundary: toolDispatchBoundary(), ledger: toolRecoveryLedger() },
+      onAwaitingAuth: ({ taskId, workspaceId, missing, now }) => {
+        const sessionId = `task:${taskId}`;
+        agentPool().requestSession({
+          sessionId,
+          workspaceId,
+          origin: "task",
+          focus: false,
+          inheritPermissions: false,
+        });
+        for (const permission of missing) {
+          reportPoolPermissionNeed({
+            sessionId,
+            workspaceId,
+            capabilityId: inboxCapabilityOf(permission),
+            permission,
+            resource: null,
+            now,
+            id: `task:${taskId}:${permission}`,
+          });
+        }
+      },
     });
   }
   return sched;
@@ -118,6 +143,7 @@ function listResult(store: TaskStore, workspaceId: string): TaskListResult {
 // ---------------------------------------------------------------- 注册
 
 export function registerTasksIpc(): void {
+  registerTasksPermissionRequirements();
   registerHandler<TaskListRequest, TaskListResult>(
     CHANNELS.tasksList,
     taskListRequestSchema,
@@ -127,7 +153,12 @@ export function registerTasksIpc(): void {
   registerHandler<TaskIdRequest, TaskDetail | null>(
     CHANNELS.tasksGet,
     taskIdRequestSchema,
-    (req) => detailOf(taskStore(), req.id)
+    (req) => {
+      const store = taskStore();
+      const task = store.getTask(req.id);
+      if (!task || task.workspaceId !== req.workspaceId) return null;
+      return detailOf(store, req.id);
+    }
   );
 
   registerHandler<TaskCreateRequest, TaskDetail>(
@@ -247,11 +278,11 @@ export function registerTasksIpc(): void {
   registerHandler<RunIdRequest, TaskDetail | null>(
     CHANNELS.tasksCancelRun,
     runIdRequestSchema,
-    (req) => {
+    async (req) => {
       const store = taskStore();
       const run = store.getRun(req.runId);
       if (!run || run.taskId !== req.taskId || run.workspaceId !== req.workspaceId) return null;
-      scheduler().cancelRun(req.runId);
+      await scheduler().cancelRun(req.runId);
       return detailOf(store, req.taskId);
     }
   );
@@ -328,10 +359,25 @@ export async function deliverTaskEvent(taskId: string): Promise<RunRecord | null
  * **tasks.db 里的任务与 run 一个都不动**（规则 5：卸载与删数据是两个动作）。
  */
 export function disposeTasksResources(): void {
-  sched?.stop();
-  sched = null;
-  closeTaskStore();
-  // 工具账本同样只关句柄。它是「上次到底跑没跑」的唯一依据，数据一个字节不动；
-  // 单例是惰性的，别的域（home.automation）之后再用会自己重新打开。
-  closeToolRecoveryLedger();
+  void shutdownTasksResources();
+}
+
+/** 应用退出用：等 scheduler 完全静止后，才关闭任务库与恢复账本。 */
+export function shutdownTasksResources(): Promise<void> {
+  if (tasksShutdown) return tasksShutdown;
+  const current = sched;
+  const pending = (async () => {
+    await current?.shutdown();
+    if (sched === current) sched = null;
+    closeTaskStore();
+    // 工具账本同样只关句柄。它是「上次到底跑没跑」的唯一依据，数据一个字节不动；
+    // 单例是惰性的，别的域（home.automation）之后再用会自己重新打开。
+    closeToolRecoveryLedger();
+  })();
+  tasksShutdown = pending;
+  const release = (): void => {
+    if (tasksShutdown === pending) tasksShutdown = null;
+  };
+  void pending.then(release, release);
+  return pending;
 }

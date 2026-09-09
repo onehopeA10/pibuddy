@@ -123,8 +123,11 @@ function capabilitySource(moduleRelative: string): string {
  * 每条标记都带 `\(`：要的是**一次调用**，不是一次提及。
  */
 const PERMISSION_MARKERS: Record<string, RegExp> = {
+  // open(..., "r") 也是读：preview 的 convert-worker 用句柄有界 read，
+  // 不走 readFile（避免把超限文件整份拉进内存）。只认显式 "r"，不把
+  // open(..., "w" / "wx") 算进 workspace.read。
   "workspace.read":
-    /\b(readFile|readFileSync|createReadStream|readdir|readdirSync|opendirSync)\s*\(/,
+    /\b(readFile|readFileSync|createReadStream|readdir|readdirSync|opendirSync)\s*\(|\.(?:open|openSync)\s*\(\s*[^,]+,\s*["']r["']/,
   "workspace.write":
     /\b(writeFile|writeFileSync|writeFileAtomic|writeJsonAtomic|mkdirSync|rmSync|renameSync|copyFile|copyFileSync|appendFileSync|cpSync)\s*\(|shell\.trashItem\s*\(/,
   "process.shell": /\b(execFile|execFileSync|spawn|spawnSync)\s*\(/,
@@ -140,6 +143,7 @@ const PERMISSION_MARKERS: Record<string, RegExp> = {
   // 经这两个受控原语之一出站；反向对账同样生效——用了它们却没声明，红。
   "network.local": /\bsafeLocalFetch\s*\(|\bopenLocalWebSocket\s*\(/,
   secret: /\b(readSecret|writeSecret)\s*\(/,
+  "tasks.manage": /registerTasksPermissionRequirements\s*\(/,
 };
 
 /** 拆卸种类 → 源码标记。 */

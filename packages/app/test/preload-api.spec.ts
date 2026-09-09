@@ -16,6 +16,7 @@ vi.mock("electron", () => ({
   ipcRenderer: {
     invoke: vi.fn(async (channel: string) => {
       invoked.push(channel);
+      if (channel === "file:stage-dropped") return { nonce: "n".repeat(16) };
       return null;
     }),
     on: vi.fn((channel: string) => {
@@ -119,6 +120,12 @@ describe("api 聚合对象", () => {
         CHANNELS.sessionTreeGraph,
       ].sort()
     );
+  });
+
+  it("file.fromDrop 先换 nonce 再兑附件，渲染层碰不到裸路径", async () => {
+    invoked.length = 0;
+    await api.file.fromDrop({} as File);
+    expect(invoked).toEqual([CHANNELS.fileStageDropped, CHANNELS.fileAttachDropped]);
   });
 
   it("pi 上没有任何形式的通用命令转发口", () => {

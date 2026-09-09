@@ -106,6 +106,38 @@ describe("档位语义", () => {
     expect(engine.evaluate(gitQuery).allowed).toBe(true);
   });
 
+  it("workspace-only：跳过 once/session，只认落盘预授权", () => {
+    const engine = makeEngine({
+      declared: { "kernel.git-probe": ["process.git"] },
+      workspace: {
+        wsA: [
+          {
+            capabilityId: "kernel.git-probe",
+            permission: "process.git",
+            resource: null,
+            grantedAt: 1,
+          },
+        ],
+      },
+    });
+    engine.grantSession({
+      capabilityId: "kernel.git-probe",
+      permission: "process.git",
+      resource: null,
+      grantedAt: 1,
+    });
+    expect(engine.evaluate({ ...gitQuery, sessionGrantPolicy: "workspace-only" }).allowed).toBe(
+      false
+    );
+    expect(
+      engine.evaluate({
+        ...gitQuery,
+        workspaceId: "wsA",
+        sessionGrantPolicy: "workspace-only",
+      }).allowed
+    ).toBe(true);
+  });
+
   it("allow-workspace：命中该 workspace 的落盘授权则放行，换一个 workspace 则拒", () => {
     const grant: CapabilityGrant = {
       capabilityId: "common.workspace-files",

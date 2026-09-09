@@ -13,6 +13,7 @@ import type { ArtifactLink as ArtifactLinkRef } from "@contract";
 import { renderMarkdown, truncateToolOutput } from "../markdown";
 import { openThinking, thinkingKey } from "../stores/chat-ui";
 import ToolActivity from "./ToolActivity.vue";
+import { stripPlanInstruction } from "../../../lib/work-mode";
 import ArtifactLink from "./ArtifactLink.vue";
 
 const props = defineProps<{
@@ -32,7 +33,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "resend", text: string): void;
-  (e: "fork"): void;
 }>();
 
 const role = computed(() => props.message.role);
@@ -42,11 +42,14 @@ const keyBase = computed(() => props.messageKey ?? "live");
 // --- 用户消息 ---
 const userText = computed(() => {
   const m = props.message as UserMessage;
-  if (typeof m.content === "string") return m.content;
-  return (m.content ?? [])
-    .filter((b): b is TextContent => b.type === "text")
-    .map((b) => b.text)
-    .join("\n");
+  const raw =
+    typeof m.content === "string"
+      ? m.content
+      : (m.content ?? [])
+          .filter((b): b is TextContent => b.type === "text")
+          .map((b) => b.text)
+          .join("\n");
+  return stripPlanInstruction(raw);
 });
 const userImages = computed(() => {
   const m = props.message as UserMessage;
@@ -106,12 +109,23 @@ async function copyText(text: string): Promise<void> {
         alt="图片附件"
       />
     </div>
-    <div class="msg-actions">
-      <button type="button" aria-label="复制这条消息" @click="copyText(userText)">复制</button>
-      <button type="button" aria-label="重新发送这条消息" @click="emit('resend', userText)">
-        重新发送
+    <div class="msg-actions user-actions">
+      <button
+        type="button"
+        aria-label="复制这条消息"
+        title="复制"
+        @click="copyText(userText)"
+      >
+        <span aria-hidden="true">⧉</span>
       </button>
-      <button type="button" aria-label="从这条消息分叉" @click="emit('fork')">分叉</button>
+      <button
+        type="button"
+        aria-label="重新发送这条消息"
+        title="重新发送"
+        @click="emit('resend', userText)"
+      >
+        <span aria-hidden="true">↻</span>
+      </button>
     </div>
   </div>
 
@@ -186,12 +200,10 @@ async function copyText(text: string): Promise<void> {
           <button
             type="button"
             aria-label="复制这条回复"
+            title="复制"
             @click="copyText(assistantText)"
           >
-            复制
-          </button>
-          <button type="button" aria-label="从这条消息分叉" @click="emit('fork')">
-            分叉
+            <span aria-hidden="true">⧉</span>
           </button>
         </div>
       </div>
@@ -208,21 +220,37 @@ async function copyText(text: string): Promise<void> {
 }
 .msg-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 4px;
+  align-items: center;
+  gap: 2px;
+  min-height: 28px;
+  margin-top: 3px;
+}
+.user-actions {
+  justify-content: flex-end;
 }
 .msg-actions button {
-  background: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
   border: none;
+  border-radius: 4px;
   color: #8a8f98;
-  font-size: 12px;
+  font-size: 18px;
+  line-height: 1;
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 0;
 }
 .msg-actions button:hover,
 .msg-actions button:focus-visible {
+  background: rgba(75, 85, 99, 0.08);
   color: #4b5563;
-  text-decoration: underline;
+  outline: none;
+}
+.msg-actions button:focus-visible {
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.35);
 }
 .thinking-toggle {
   background: none;

@@ -70,10 +70,11 @@ export const CHANNELS = {
   // capability-gate.spec.ts。
   sessionTreeGraph: "session-tree:graph",
 
-  // ---- 会话中心（SES-101，恰 9 条） ----
+  // ---- 会话中心（SES-101，恰 11 条） ----
   //
   // 取代原先那条一次性全量枚举的 `sessions:list`：列表、搜索、整理、草稿、
-  // 导出、向前翻页各有各的窄通道，渲染进程一律只持有不透明 sessionId。
+  // 导出、向前翻页、从本机 Pi CLI 导入各有各的窄通道，渲染进程一律只持有
+  // 不透明 sessionId / externalId。
   sessionsQuery: "sessions:query",
   sessionsRename: "sessions:rename",
   sessionsSetPinned: "sessions:set-pinned",
@@ -83,6 +84,8 @@ export const CHANNELS = {
   sessionsSaveDraft: "sessions:save-draft",
   sessionsExportHtml: "sessions:export-html",
   sessionsReadHistory: "sessions:read-history",
+  sessionsImportScan: "sessions:import-scan",
+  sessionsImportRun: "sessions:import-run",
 
   // ---- 设置 ----
   settingsGet: "settings:get",
@@ -114,6 +117,7 @@ export const CHANNELS = {
   workspaceCurrent: "workspace:current",
   dialogChooseFolder: "dialog:choose-folder",
   dialogChooseFiles: "dialog:choose-files",
+  fileStageDropped: "file:stage-dropped",
   fileAttachDropped: "file:attach-dropped",
   fileReadAttachment: "file:read-attachment",
   shellOpenPath: "shell:open-path",

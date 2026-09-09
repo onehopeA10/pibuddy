@@ -55,6 +55,13 @@ function makeScheduler(clock: InstanceType<typeof ManualClock>, opts: {
   grants?: CapabilityGrant[];
   sleep?: (ms: number) => Promise<void>;
   log?: (event: string, fields: Record<string, unknown>) => void;
+  onAwaitingAuth?: (info: {
+    taskId: string;
+    workspaceId: string;
+    runId: string | null;
+    missing: string[];
+    now: number;
+  }) => void;
 } = {}) {
   return new Scheduler({
     store,
@@ -63,6 +70,7 @@ function makeScheduler(clock: InstanceType<typeof ManualClock>, opts: {
     workspaceGrants: () => opts.grants ?? [],
     ...(opts.sleep ? { sleep: opts.sleep } : {}),
     ...(opts.log ? { log: opts.log } : {}),
+    ...(opts.onAwaitingAuth ? { onAwaitingAuth: opts.onAwaitingAuth } : {}),
   });
 }
 
@@ -387,6 +395,19 @@ describe("pause / run-now / cancel / retry", () => {
     expect(run?.sessionId).toBeNull();
     expect(run?.attempt).toBe(1);
     expect(run?.log.join(" ")).toContain("开始执行");
+  });
+
+  it("缺预授权时 runNow 挡住并通知 onAwaitingAuth（COR-009）", async () => {
+    const now = Date.now();
+    const t = store.createTask({ ...baseTask, requiredPermissions: ["process.git"] }, now, null);
+    const seen: string[][] = [];
+    const sched = makeScheduler(new ManualClock(now), {
+      onAwaitingAuth: (info) => seen.push(info.missing),
+    });
+    const run = await sched.runNow(t);
+    expect(run?.status).toBe("failed");
+    expect(run?.error).toContain("等待 owner 授权");
+    expect(seen).toEqual([["process.git"]]);
   });
 
   it("cancelRun 把 pending 的 run 置为 cancelled", async () => {

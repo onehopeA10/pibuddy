@@ -8,7 +8,29 @@
  */
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
-import type { PiResource, PiResourceScanResult, ProjectTrustState } from "@contract";
+import {
+  PI_RESOURCES_CAPABILITY_ID,
+  PI_RESOURCES_PERMISSION,
+  piPackagePermissionResource,
+  type PiResource,
+  type PiResourceScanResult,
+  type ProjectTrustState,
+} from "@contract";
+
+import { usePermissionStore } from "./permission";
+
+const PERMISSION_DENIED = "IPC_PERMISSION_DENIED";
+
+interface PiResourcesDeniedRequest {
+  workspaceId: string;
+  capabilityId: string;
+  permission: string;
+  resource: string;
+  command: string;
+  action: "install" | "remove";
+  scope: "user" | "project";
+  spec: string;
+}
 
 export const usePiResourcesStore = defineStore("piResources", () => {
   const loading = ref(false);
@@ -17,7 +39,12 @@ export const usePiResourcesStore = defineStore("piResources", () => {
   const panelOpen = ref(false);
   /** trust 对话框是否显示。needsPrompt 为真时由 AppShell 打开 */
   const trustOpen = ref(false);
+  const trustDeciding = ref(false);
   const busySpec = ref("");
+  const permissionDenied = ref(false);
+  const deniedNotice = ref("");
+  const deniedRequest = ref<PiResourcesDeniedRequest | null>(null);
+  const activeWorkspaceId = ref("");
   /**
    * trust 态**独立持有**，不挂在 scan 结果下。
    *
@@ -47,6 +74,45 @@ export const usePiResourcesStore = defineStore("piResources", () => {
   let trustSeq = 0;
   /** scan 同理：晚到的 A 的扫描结果会把 B 的列表和 trust 一起冲掉。 */
   let scanSeq = 0;
+  let refreshSeq = 0;
+  let workspaceGeneration = 0;
+  let workspaceInitialized = false;
+
+  function setWorkspace(workspaceId: string): void {
+    if (workspaceInitialized && activeWorkspaceId.value === workspaceId) return;
+    workspaceInitialized = true;
+    activeWorkspaceId.value = workspaceId;
+    workspaceGeneration += 1;
+    trustSeq += 1;
+    scanSeq += 1;
+    refreshSeq += 1;
+    loading.value = false;
+    scan.value = null;
+    trustState.value = null;
+    lastError.value = "";
+    trustOpen.value = false;
+    trustDeciding.value = false;
+    busySpec.value = "";
+    clearDenied();
+  }
+
+  function captureWorkspace(workspaceId: string): number | null {
+    if (!workspaceId) return null;
+    if (!workspaceInitialized) setWorkspace(workspaceId);
+    return activeWorkspaceId.value === workspaceId ? workspaceGeneration : null;
+  }
+
+  function isCurrent(workspaceId: string, generation: number): boolean {
+    return activeWorkspaceId.value === workspaceId && workspaceGeneration === generation;
+  }
+
+  function workspaceChangedResult(): { ok: false; output: string; reason: string } {
+    return {
+      ok: false,
+      output: "工作目录已经切换，旧操作的返回结果已忽略。",
+      reason: "workspace-changed",
+    };
+  }
 
   const resources = computed<PiResource[]>(() => scan.value?.resources ?? []);
   const trust = computed<ProjectTrustState | null>(() => trustState.value ?? scan.value?.trust ?? null);
@@ -66,18 +132,23 @@ export const usePiResourcesStore = defineStore("piResources", () => {
 
   async function refresh(workspaceId: string): Promise<void> {
     if (!workspaceId) return;
+    const generation = captureWorkspace(workspaceId);
+    if (generation === null) return;
     const seq = ++scanSeq;
+    const refresh = ++refreshSeq;
     loading.value = true;
     lastError.value = "";
     try {
       const result = await window.piBuddy.piResources.scan(workspaceId);
-      if (seq !== scanSeq) return; // 期间又切了工作目录：这份结果已经过期
+      if (seq !== scanSeq || !isCurrent(workspaceId, generation)) return;
       scan.value = result;
       trustState.value = result.trust;
     } catch (err) {
-      if (seq === scanSeq) lastError.value = (err as Error).message;
+      if (seq === scanSeq && isCurrent(workspaceId, generation)) {
+        lastError.value = (err as Error).message;
+      }
     } finally {
-      if (seq === scanSeq) loading.value = false;
+      if (refresh === refreshSeq && isCurrent(workspaceId, generation)) loading.value = false;
     }
   }
 
@@ -86,14 +157,80 @@ export const usePiResourcesStore = defineStore("piResources", () => {
     id: string,
     enabled: boolean
   ): Promise<void> {
+    const generation = captureWorkspace(workspaceId);
+    if (generation === null) return;
     const seq = ++scanSeq;
     try {
       const result = await window.piBuddy.piResources.setEnabled(workspaceId, id, enabled);
-      if (seq !== scanSeq) return; // 期间又切了工作目录
+      if (seq !== scanSeq || !isCurrent(workspaceId, generation)) return;
       scan.value = result;
+      trustState.value = result.trust;
     } catch (err) {
-      if (seq === scanSeq) lastError.value = (err as Error).message;
+      if (seq === scanSeq && isCurrent(workspaceId, generation)) {
+        lastError.value = (err as Error).message;
+      }
     }
+  }
+
+  function clearDenied(): void {
+    permissionDenied.value = false;
+    deniedNotice.value = "";
+    deniedRequest.value = null;
+  }
+
+  function permissionRequest(
+    action: "install" | "remove",
+    workspaceId: string,
+    spec: string,
+    scope: "user" | "project"
+  ): PiResourcesDeniedRequest {
+    const localFlag = scope === "project" ? " -l" : "";
+    return {
+      workspaceId,
+      capabilityId: PI_RESOURCES_CAPABILITY_ID,
+      permission: PI_RESOURCES_PERMISSION,
+      resource: piPackagePermissionResource(action, scope, workspaceId, spec),
+      command: `pi ${action} ${spec}${localFlag}`,
+      action,
+      scope,
+      spec,
+    };
+  }
+
+  function raisePermission(req: PiResourcesDeniedRequest): void {
+    permissionDenied.value = true;
+    deniedRequest.value = req;
+    const verb = req.action === "install" ? "安装" : "卸载";
+    const where = req.scope === "project" ? "当前项目" : "用户级环境";
+    const opened = usePermissionStore().request(req);
+    deniedNotice.value = opened
+      ? `${verb}包「${req.spec}」会在本机启动 pi 包管理进程；未授权，因此没有执行。` +
+        `请在权限申请中选择一档，授权范围只覆盖这次${verb}、${where}与当前工作区，然后重试。`
+      : `这次${verb}申请无法安全展示，已拒绝：${usePermissionStore().lastRejectedPrompt}`;
+  }
+
+  function handlePermissionDenied(err: unknown, req: PiResourcesDeniedRequest): boolean {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes(PERMISSION_DENIED)) return false;
+    raisePermission(req);
+    lastError.value = "";
+    return true;
+  }
+
+  function authorize(): void {
+    const req = deniedRequest.value;
+    if (!req) return;
+    if (req.workspaceId !== activeWorkspaceId.value) {
+      clearDenied();
+      return;
+    }
+    if (!usePermissionStore().request(req)) {
+      deniedNotice.value = `这次申请无法安全展示，已拒绝：${usePermissionStore().lastRejectedPrompt}`;
+    }
+  }
+
+  function openPermissionCenter(): void {
+    usePermissionStore().centerOpen = true;
   }
 
   /**
@@ -107,17 +244,28 @@ export const usePiResourcesStore = defineStore("piResources", () => {
     spec: string,
     scope: "user" | "project"
   ): Promise<{ ok: boolean; output: string; reason?: string }> {
+    const generation = captureWorkspace(workspaceId);
+    if (generation === null) return workspaceChangedResult();
     busySpec.value = spec;
     try {
       const result = await window.piBuddy.piResources.install(workspaceId, spec, scope);
-      if (result.ok) await refresh(workspaceId);
-      else lastError.value = result.output || result.reason || "安装失败";
+      if (!isCurrent(workspaceId, generation)) return workspaceChangedResult();
+      if (result.ok) {
+        clearDenied();
+        await refresh(workspaceId);
+        if (!isCurrent(workspaceId, generation)) return workspaceChangedResult();
+      } else lastError.value = result.output || result.reason || "安装失败";
       return result;
     } catch (err) {
+      if (!isCurrent(workspaceId, generation)) return workspaceChangedResult();
+      const req = permissionRequest("install", workspaceId, spec, scope);
+      if (handlePermissionDenied(err, req)) {
+        return { ok: false, output: deniedNotice.value, reason: "permission-denied" };
+      }
       lastError.value = (err as Error).message;
       return { ok: false, output: lastError.value, reason: "ipc-failed" };
     } finally {
-      busySpec.value = "";
+      if (isCurrent(workspaceId, generation) && busySpec.value === spec) busySpec.value = "";
     }
   }
 
@@ -126,25 +274,38 @@ export const usePiResourcesStore = defineStore("piResources", () => {
     spec: string,
     scope: "user" | "project"
   ): Promise<{ ok: boolean; output: string; reason?: string }> {
+    const generation = captureWorkspace(workspaceId);
+    if (generation === null) return workspaceChangedResult();
     busySpec.value = spec;
     try {
       const result = await window.piBuddy.piResources.remove(workspaceId, spec, scope);
-      if (result.ok) await refresh(workspaceId);
-      else lastError.value = result.output || result.reason || "卸载失败";
+      if (!isCurrent(workspaceId, generation)) return workspaceChangedResult();
+      if (result.ok) {
+        clearDenied();
+        await refresh(workspaceId);
+        if (!isCurrent(workspaceId, generation)) return workspaceChangedResult();
+      } else lastError.value = result.output || result.reason || "卸载失败";
       return result;
     } catch (err) {
+      if (!isCurrent(workspaceId, generation)) return workspaceChangedResult();
+      const req = permissionRequest("remove", workspaceId, spec, scope);
+      if (handlePermissionDenied(err, req)) {
+        return { ok: false, output: deniedNotice.value, reason: "permission-denied" };
+      }
       lastError.value = (err as Error).message;
       return { ok: false, output: lastError.value, reason: "ipc-failed" };
     } finally {
-      busySpec.value = "";
+      if (isCurrent(workspaceId, generation) && busySpec.value === spec) busySpec.value = "";
     }
   }
 
   async function openDir(workspaceId: string, id: string): Promise<void> {
+    const generation = captureWorkspace(workspaceId);
+    if (generation === null) return;
     try {
       await window.piBuddy.piResources.openDir(workspaceId, id);
     } catch (err) {
-      lastError.value = (err as Error).message;
+      if (isCurrent(workspaceId, generation)) lastError.value = (err as Error).message;
     }
   }
 
@@ -164,13 +325,15 @@ export const usePiResourcesStore = defineStore("piResources", () => {
   /** 启动时问一次：这个项目里有需要信任才会加载的资源吗？ */
   async function describeTrust(workspaceId: string): Promise<ProjectTrustState | null> {
     if (!workspaceId) return null;
+    const generation = captureWorkspace(workspaceId);
+    if (generation === null) return null;
     const seq = ++trustSeq;
     try {
       const state = await window.piBuddy.piResources.trust.describe(workspaceId);
       // 过期响应：期间又发过一次 describe / decide（多半是切了工作目录）。
       // 丢掉它 —— 覆盖下去的话，弹窗里列的是这个项目的资源，而提交时用的
       // 是当前项目，用户会把决定做给另一个项目。
-      if (seq !== trustSeq) return null;
+      if (seq !== trustSeq || !isCurrent(workspaceId, generation)) return null;
       // 主进程回的 state 自带 workspaceId（trust-store.describeTrust 原样回填）。
       // 对不上说明这份响应根本不是这次请求的，同样丢掉。
       if (state.workspaceId !== workspaceId) return null;
@@ -178,7 +341,9 @@ export const usePiResourcesStore = defineStore("piResources", () => {
       trustOpen.value = state.needsPrompt;
       return state;
     } catch (err) {
-      if (seq === trustSeq) lastError.value = (err as Error).message;
+      if (seq === trustSeq && isCurrent(workspaceId, generation)) {
+        lastError.value = (err as Error).message;
+      }
       return null;
     }
   }
@@ -191,29 +356,34 @@ export const usePiResourcesStore = defineStore("piResources", () => {
     // 提交前再校验一次：对话框上显示的是哪个项目的资源，就只能给哪个项目
     // 做决定。remember 会写进 pi 的 trust.json（与终端共享的文件），写错
     // 目录之后没有任何地方会提示，用户下次在终端里跑 pi 才会撞上。
+    if (trustDeciding.value) return null;
+    const generation = captureWorkspace(workspaceId);
     const shown = trustState.value;
-    if (!workspaceId || !shown || shown.workspaceId !== workspaceId) {
+    if (generation === null || !shown || shown.workspaceId !== workspaceId) {
       trustOpen.value = false;
       lastError.value = "工作目录已经切换，这次信任决定没有提交。请在需要确认的项目里重新选择。";
       return null;
     }
     const seq = ++trustSeq;
+    trustDeciding.value = true;
     try {
       const state = await window.piBuddy.piResources.trust.decide(
         workspaceId,
         decision,
         remember
       );
-      if (seq !== trustSeq) return null;
+      if (seq !== trustSeq || !isCurrent(workspaceId, generation)) return null;
       if (state.workspaceId !== workspaceId) return null;
       applyTrust(workspaceId, state);
       trustOpen.value = false;
       return state;
     } catch (err) {
-      if (seq !== trustSeq) return null;
+      if (seq !== trustSeq || !isCurrent(workspaceId, generation)) return null;
       lastError.value = (err as Error).message;
       trustOpen.value = false;
       return null;
+    } finally {
+      if (seq === trustSeq && isCurrent(workspaceId, generation)) trustDeciding.value = false;
     }
   }
 
@@ -224,16 +394,25 @@ export const usePiResourcesStore = defineStore("piResources", () => {
     lastError,
     panelOpen,
     trustOpen,
+    trustDeciding,
     busySpec,
+    permissionDenied,
+    deniedNotice,
+    deniedRequest,
+    activeWorkspaceId,
     resources,
     trust,
     scanErrors,
     mcpNote,
     byKind,
+    setWorkspace,
     refresh,
     setEnabled,
     install,
     remove,
+    authorize,
+    openPermissionCenter,
+    clearDenied,
     openDir,
     describeTrust,
     decideTrust,

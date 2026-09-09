@@ -21,10 +21,12 @@ const PROJECT_ROOT = path.join(ROOT, "project");
 vi.mock("../src/main/workspace-registry.js", () => ({
   requireWorkspaceRoot: () => PROJECT_ROOT,
 }));
+vi.mock("../src/main/pi-resources/project-trust.js", () => ({
+  currentProjectTrust: async () => ({ effective: "allow" }),
+}));
 
 const { listServers, testServer, startServer, stopServer, disposeMcpResources, __resetMcpRunning } =
   await import("../src/main/mcp/mcp-service.js");
-const { mcpServerId } = await import("../src/main/mcp/mcp-config.js");
 
 const STUB = `
 let buf = "";
@@ -43,10 +45,10 @@ process.stdin.on("data", (c) => {
 `;
 
 const stubPath = path.join(ROOT, "svc-stub.mjs");
-const stdioId = mcpServerId("project", "local");
-const httpId = mcpServerId("project", "remote");
+let stdioId = "";
+let httpId = "";
 
-beforeAll(() => {
+beforeAll(async () => {
   fs.mkdirSync(PROJECT_ROOT, { recursive: true });
   fs.writeFileSync(stubPath, STUB);
   fs.mkdirSync(path.join(PROJECT_ROOT, ".pi"), { recursive: true });
@@ -59,6 +61,9 @@ beforeAll(() => {
       },
     })
   );
+  const listed = await listServers("ws");
+  stdioId = listed.servers.find((server) => server.name === "local")!.id;
+  httpId = listed.servers.find((server) => server.name === "remote")!.id;
 });
 
 afterEach(() => {

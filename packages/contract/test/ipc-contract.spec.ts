@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   APP_SETTINGS_PUBLIC_KEYS,
+  MAX_ATTACHMENT_TOKEN_CHARS,
+  MAX_PROMPT_ATTACHMENT_TOKENS,
+  MAX_PROMPT_IMAGES,
+  MAX_PROMPT_IMAGE_BASE64_CHARS,
+  MAX_PROMPT_MESSAGE_BYTES,
   appSettingsSchema,
+  piMessageRequestSchema,
+  piPromptRequestSchema,
   rendererSettingsPatchSchema,
   sttTranscribeRequestSchema,
 } from "../src/index.js";
@@ -18,6 +25,67 @@ describe("CT-07 stt:transcribe 的请求形状唯一", () => {
   it("字段恰为 endpointId / audio / mimeType 三个", () => {
     const keys = Object.keys(sttTranscribeRequestSchema.shape).sort();
     expect(keys).toEqual(["audio", "endpointId", "mimeType"]);
+  });
+});
+
+describe("SEC-005 prompt 资源 schema 上限", () => {
+  const image = { type: "image" as const, data: "AAAA", mimeType: "image/png" as const };
+
+  it("prompt / steer / follow-up 都限制消息长度与图片数量", () => {
+    expect(
+      piPromptRequestSchema.safeParse({ message: "x", images: Array(MAX_PROMPT_IMAGES).fill(image) })
+        .success
+    ).toBe(true);
+    expect(
+      piPromptRequestSchema.safeParse({
+        message: "x",
+        images: Array(MAX_PROMPT_IMAGES + 1).fill(image),
+      }).success
+    ).toBe(false);
+    expect(
+      piMessageRequestSchema.safeParse({
+        message: "x",
+        images: Array(MAX_PROMPT_IMAGES + 1).fill(image),
+      }).success
+    ).toBe(false);
+    expect(
+      piMessageRequestSchema.safeParse({ message: "x".repeat(MAX_PROMPT_MESSAGE_BYTES + 1) })
+        .success
+    ).toBe(false);
+  });
+
+  it("消息长度按共享 UTF-8 字节单位校验，Unicode 在边界内不会被 guard 二次误拒", () => {
+    const unicodeAtLimit = "你".repeat(Math.floor(MAX_PROMPT_MESSAGE_BYTES / 3)) + "x";
+    expect(new TextEncoder().encode(unicodeAtLimit)).toHaveLength(MAX_PROMPT_MESSAGE_BYTES);
+    expect(piPromptRequestSchema.safeParse({ message: unicodeAtLimit }).success).toBe(true);
+    expect(piMessageRequestSchema.safeParse({ message: `${unicodeAtLimit}x` }).success).toBe(false);
+  });
+
+  it("attachment token 数量/长度与单张图片 base64 字符串都有界", () => {
+    expect(
+      piPromptRequestSchema.safeParse({
+        message: "x",
+        attachmentTokens: Array(MAX_PROMPT_ATTACHMENT_TOKENS).fill("token"),
+      }).success
+    ).toBe(true);
+    expect(
+      piPromptRequestSchema.safeParse({
+        message: "x",
+        attachmentTokens: Array(MAX_PROMPT_ATTACHMENT_TOKENS + 1).fill("token"),
+      }).success
+    ).toBe(false);
+    expect(
+      piPromptRequestSchema.safeParse({
+        message: "x",
+        attachmentTokens: ["t".repeat(MAX_ATTACHMENT_TOKEN_CHARS + 1)],
+      }).success
+    ).toBe(false);
+    expect(
+      piPromptRequestSchema.safeParse({
+        message: "x",
+        images: [{ ...image, data: "A".repeat(MAX_PROMPT_IMAGE_BASE64_CHARS + 1) }],
+      }).success
+    ).toBe(false);
   });
 });
 

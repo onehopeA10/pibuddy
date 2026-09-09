@@ -170,7 +170,9 @@ export function verifyBeforeInstall(
     return fail("disk", "下载好的安装包不见了");
   }
 
-  if (!candidate.expectedSha512) return { ok: true };
+  if (!candidate.expectedSha512) {
+    return fail("signature", "发布清单缺少 sha512，拒绝安装");
+  }
 
   const readSha512 = options.readSha512 ?? sha512OfFile;
   let actual: string;

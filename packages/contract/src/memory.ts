@@ -33,8 +33,11 @@ import { CHANNELS } from "./channels.js";
  * v1 → v2：新增语义检索的 `embeddings` 表、知识库的 `knowledge` / `knowledge_fts`
  * 表。迁移**只加表、不动 v1 已存的 memories/FTS/meta 一个字节**，老用户升级上来
  * 之前显式保存的记忆一条不丢；语义检索所需的向量按需补算（memory:reembed）。
+ *
+ * v2 → v3：Governed Hybrid Memory 的治理表（working_items / memory_candidates /
+ * memory_conflicts / memory_route_events）。同样只加表，不改 v1/v2 行字节。
  */
-export const MEMORY_DATA_SCHEMA_VERSION = 2;
+export const MEMORY_DATA_SCHEMA_VERSION = 3;
 
 /**
  * 记忆的类别。
@@ -62,6 +65,207 @@ export type MemoryType = z.infer<typeof memoryTypeSchema>;
  */
 export const memoryScopeSchema = z.enum(["workspace", "global"]);
 export type MemoryScope = z.infer<typeof memoryScopeSchema>;
+
+/**
+ * 治理层的 logical kind。持久化行仍用 MEMORY_TYPES；渲染 / Router 用这套。
+ *
+ * 兼容映射：instruction → constraint；context → fact（背景当已陈述事实）。
+ */
+export const MEMORY_LOGICAL_KINDS = [
+  "fact",
+  "preference",
+  "constraint",
+  "decision",
+  "procedure",
+  "experience",
+  "belief",
+] as const;
+export const memoryLogicalKindSchema = z.enum(MEMORY_LOGICAL_KINDS);
+export type MemoryLogicalKind = z.infer<typeof memoryLogicalKindSchema>;
+
+/**
+ * 治理层的 logical scope。持久化行仍用 workspace/global。
+ *
+ * 兼容映射：workspace → project；global → user。
+ */
+export const MEMORY_LOGICAL_SCOPES = ["working", "user", "project", "agent", "organization"] as const;
+export const memoryLogicalScopeSchema = z.enum(MEMORY_LOGICAL_SCOPES);
+export type MemoryLogicalScope = z.infer<typeof memoryLogicalScopeSchema>;
+
+export const MEMORY_AUTHORITY_TIERS = ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7"] as const;
+export const memoryAuthorityTierSchema = z.enum(MEMORY_AUTHORITY_TIERS);
+export type MemoryAuthorityTier = z.infer<typeof memoryAuthorityTierSchema>;
+
+export const MEMORY_ENVELOPE_SOURCES = [
+  "live",
+  "current_user",
+  "working",
+  "canonical",
+  "hindsight_world",
+  "hindsight_experience",
+  "hindsight_observation",
+  "hindsight_reflect",
+  "archive",
+] as const;
+export const memoryEnvelopeSourceSchema = z.enum(MEMORY_ENVELOPE_SOURCES);
+export type MemoryEnvelopeSource = z.infer<typeof memoryEnvelopeSourceSchema>;
+
+export const MEMORY_ENVELOPE_BACKENDS = ["runtime", "filesystem", "sqlite", "hindsight", "tool"] as const;
+export const memoryEnvelopeBackendSchema = z.enum(MEMORY_ENVELOPE_BACKENDS);
+export type MemoryEnvelopeBackend = z.infer<typeof memoryEnvelopeBackendSchema>;
+
+export const MEMORY_ENVELOPE_STATUSES = [
+  "active",
+  "possibly_stale",
+  "stale",
+  "superseded",
+  "conflicted",
+] as const;
+export const memoryEnvelopeStatusSchema = z.enum(MEMORY_ENVELOPE_STATUSES);
+export type MemoryEnvelopeStatus = z.infer<typeof memoryEnvelopeStatusSchema>;
+
+export const memoryEvidenceRefSchema = z.object({
+  type: z.enum([
+    "tool_execution",
+    "current_file",
+    "user_explicit",
+    "canonical_file",
+    "historical_episode",
+    "observation_sources",
+    "inference",
+  ]),
+  ref: z.string().nullable(),
+});
+export type MemoryEvidenceRef = z.infer<typeof memoryEvidenceRefSchema>;
+
+export const memoryRetrievalScoreSchema = z.object({
+  semantic: z.number().nullable(),
+  keyword: z.number().nullable(),
+  reranker: z.number().nullable(),
+  final: z.number().nullable(),
+});
+export type MemoryRetrievalScore = z.infer<typeof memoryRetrievalScoreSchema>;
+
+/** 进入 Resolver 之前的统一来源模型。检索分不得参与 Authority 排名。 */
+export const memoryEnvelopeSchema = z.object({
+  id: z.string().min(1),
+  scope: memoryLogicalScopeSchema,
+  logicalKind: memoryLogicalKindSchema,
+  claimSubject: z.string().nullable(),
+  claimPredicate: z.string().nullable(),
+  claimObjectJson: z.string().nullable(),
+  source: memoryEnvelopeSourceSchema,
+  backend: memoryEnvelopeBackendSchema,
+  sourceRef: z.string().nullable(),
+  sourceHash: z.string().nullable(),
+  status: memoryEnvelopeStatusSchema,
+  observedAt: z.number().nullable(),
+  verifiedAt: z.number().nullable(),
+  validFrom: z.number().nullable(),
+  validUntil: z.number().nullable(),
+  evidence: z.array(memoryEvidenceRefSchema),
+  retrieval: memoryRetrievalScoreSchema.nullable(),
+  content: z.string(),
+  estimatedTokens: z.number().int().nonnegative(),
+});
+export type MemoryEnvelope = z.infer<typeof memoryEnvelopeSchema>;
+
+export const workingExpirySchema = z.enum(["task_end", "session_end", "manual"]);
+export type WorkingExpiry = z.infer<typeof workingExpirySchema>;
+
+export const workingItemSchema = z.object({
+  id: z.string().min(1),
+  kind: z.string().min(1),
+  content: z.string(),
+  sourceMemoryId: z.string().nullable(),
+  sourceHash: z.string().nullable(),
+  createdTurn: z.number().int(),
+  expires: workingExpirySchema,
+  refreshOnSourceChange: z.boolean(),
+});
+export type WorkingItem = z.infer<typeof workingItemSchema>;
+
+export const taskIntentSchema = z.enum([
+  "knowledge",
+  "coding",
+  "personal",
+  "action",
+  "planning",
+  "analysis",
+  "conversation",
+  "mixed",
+]);
+export const memorySignalSchema = z.enum(["none", "implicit", "explicit"]);
+export const historyNeedSchema = z.enum(["none", "continuation", "episodic", "pattern"]);
+export const currentStateNeedSchema = z.enum(["none", "preferred", "required"]);
+
+export const taskAnalysisSchema = z.object({
+  intent: taskIntentSchema,
+  memorySignal: memorySignalSchema,
+  historyNeed: historyNeedSchema,
+  currentStateNeed: currentStateNeedSchema,
+  scopes: z.object({
+    user: z.boolean(),
+    project: z.boolean(),
+    agent: z.boolean(),
+    organization: z.boolean(),
+  }),
+  logicalKinds: z.array(z.string()),
+  entities: z.array(z.string()),
+  temporalExpressions: z.array(z.string()),
+  ambiguity: z.number().min(0).max(1),
+  genericKnowledge: z.boolean(),
+});
+export type TaskAnalysis = z.infer<typeof taskAnalysisSchema>;
+
+export const memoryModeSchema = z.enum(["none", "canonical", "recall", "reflect"]);
+export type MemoryMode = z.infer<typeof memoryModeSchema>;
+
+export const canonicalReadPlanSchema = z.object({
+  scope: z.enum(["user", "project", "organization"]),
+  kind: z.enum(["fact", "preference", "constraint", "decision", "procedure"]),
+  route: z.enum(["l1_pointer", "direct_id", "fts"]),
+  key: z.string(),
+  maxTokens: z.number().int(),
+  validateLive: z.boolean(),
+});
+export type CanonicalReadPlan = z.infer<typeof canonicalReadPlanSchema>;
+
+export const memoryPlanSchema = z.object({
+  mode: memoryModeSchema,
+  working: z.object({
+    read: z.boolean(),
+    write: z.boolean(),
+    dedupeLoadedSources: z.boolean(),
+  }),
+  canonicalReads: z.array(canonicalReadPlanSchema),
+  /** 本期不接 Hindsight：可出现在计划里，实现必须降级 canonical */
+  recalls: z.array(z.object({ query: z.string() })),
+  reflections: z.array(z.object({ query: z.string() })),
+  liveValidations: z.array(z.object({ ref: z.string() })),
+});
+export type MemoryPlan = z.infer<typeof memoryPlanSchema>;
+
+/** 持久化 type → logical kind。旧值必须继续能 round-trip。 */
+export function logicalKindFromType(type: MemoryType): MemoryLogicalKind {
+  if (type === "instruction") return "constraint";
+  if (type === "context") return "fact";
+  return type;
+}
+
+/** 持久化 scope → logical scope。 */
+export function logicalScopeFromMemoryScope(scope: MemoryScope): MemoryLogicalScope {
+  return scope === "global" ? "user" : "project";
+}
+
+/** logical kind → 仍可写入 memories.type 的旧枚举。 */
+export function memoryTypeFromLogicalKind(kind: MemoryLogicalKind): MemoryType {
+  if (kind === "constraint") return "instruction";
+  if (kind === "decision" || kind === "procedure" || kind === "experience" || kind === "belief") {
+    return "context";
+  }
+  return kind;
+}
 
 /**
  * 敏感度。

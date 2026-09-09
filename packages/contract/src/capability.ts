@@ -65,6 +65,9 @@ export const CAPABILITY_PERMISSION_ATOMS = [
   // 授权时绑进 grant.resource（形态由 permission.ts 的 LOCAL_ENDPOINT_RESOURCE_RE
   // 强制，null-resource 通配在 decidePermission 里被结构性挡死）。
   "network.local",
+  // 定时任务的交互管理面（创建 / 改 / 删 / 立即跑）。不是 process.shell：
+  // tasks 自己不 spawn，但渲染层不能在未授权时改无人值守调度表。
+  "tasks.manage",
 ] as const;
 export type CapabilityPermissionAtom = (typeof CAPABILITY_PERMISSION_ATOMS)[number];
 

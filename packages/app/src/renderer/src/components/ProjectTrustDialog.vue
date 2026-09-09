@@ -88,8 +88,17 @@ async function decide(decision: "allow" | "deny"): Promise<void> {
 
     <template #footer>
       <n-space justify="end">
-        <n-button @click="decide('deny')">不信任，先跳过这些</n-button>
-        <n-button type="primary" @click="decide('allow')">信任这个项目</n-button>
+        <n-button :disabled="piRes.trustDeciding" @click="decide('deny')">
+          不信任，先跳过这些
+        </n-button>
+        <n-button
+          type="primary"
+          :loading="piRes.trustDeciding"
+          :disabled="piRes.trustDeciding"
+          @click="decide('allow')"
+        >
+          信任这个项目
+        </n-button>
       </n-space>
       <n-text depth="3" class="hint">
         选「不信任」时项目里的这些设置与技能不会被加载，其余功能一切照常。

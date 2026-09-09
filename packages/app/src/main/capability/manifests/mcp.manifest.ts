@@ -29,9 +29,9 @@
  * （`network:*` 通配被禁）。等那一半落地、真的调 safeFetch 时再申请，
  * 否则会撞上「声明了却没用到」的正向对账。
  */
-import { defineCapability, CHANNELS } from "@pibuddy/contract";
+import { defineCapability, CHANNELS, MCP_CAPABILITY_ID } from "@pibuddy/contract";
 
-export const MCP_CAPABILITY_ID = "common.mcp";
+export { MCP_CAPABILITY_ID };
 
 export const mcpCapability = defineCapability({
   manifestVersion: 1,

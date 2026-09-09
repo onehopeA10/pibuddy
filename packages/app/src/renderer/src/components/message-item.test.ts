@@ -81,10 +81,21 @@ describe("MessageItem · 展开态住在 store 里", () => {
 describe("MessageItem · 键盘/屏幕阅读器语义", () => {
   beforeEach(() => setActivePinia(createPinia()));
 
-  it("复制 / 分叉 / 思考展开都有 aria-label", () => {
+  it("复制图标保留 aria-label，且不再显示分叉", () => {
     const wrapper = mountItem(false);
     const labels = wrapper.findAll("button").map((b) => b.attributes("aria-label"));
     expect(labels).toContain("复制这条回复");
-    expect(labels).toContain("从这条消息分叉");
+    expect(labels).not.toContain("从这条消息分叉");
+    expect(wrapper.text()).not.toContain("分叉");
+  });
+
+  it("用户消息的复制与重新发送使用图标，并位于气泡后的操作区", () => {
+    const userMessage = { role: "user", content: "你好" } as const;
+    const wrapper = mount(MessageItem, { props: { message: userMessage as never } });
+    const bubble = wrapper.find(".msg-user-bubble");
+    const actions = wrapper.find(".user-actions");
+    expect(actions.exists()).toBe(true);
+    expect(bubble.element.nextElementSibling).toBe(actions.element);
+    expect(actions.findAll("button").map((b) => b.attributes("title"))).toEqual(["复制", "重新发送"]);
   });
 });

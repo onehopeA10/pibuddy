@@ -33,9 +33,14 @@ vi.mock("electron", () => ({
   },
 }));
 
-const { CHANNELS, PERMISSION_PROBE_CAPABILITY_ID, PERMISSION_PROBE_PERMISSION } = await import(
-  "@pibuddy/contract"
-);
+const {
+  CHANNELS,
+  PERMISSION_PROBE_CAPABILITY_ID,
+  PERMISSION_PROBE_PERMISSION,
+  PI_RESOURCES_CAPABILITY_ID,
+  PI_RESOURCES_PERMISSION,
+  piPackagePermissionResource,
+} = await import("@pibuddy/contract");
 const { __resetRegisteredChannels } = await import("../src/main/ipc-guard.js");
 const { __setCapabilityPrefsDir, saveCapabilityPrefs } = await import(
   "../src/main/capability/capability-prefs.js"
@@ -139,6 +144,44 @@ describe("篡改后的记录读回即被拒（再推导边界）", () => {
       capabilityId: "home.assistant",
       permission: "network.local",
       resource: "10.0.0.2:8123",
+      grantedAt: 1,
+    });
+    expect(permStore.describePermissions(workspaceId).workspaceGrants).toHaveLength(1);
+  });
+
+  it("pi-resources 的通配或跨工作区授权：读回时都被拒", () => {
+    tamper({
+      capabilityId: PI_RESOURCES_CAPABILITY_ID,
+      permission: PI_RESOURCES_PERMISSION,
+      resource: null,
+      grantedAt: 1,
+    });
+    expect(permStore.describePermissions(workspaceId).workspaceGrants).toEqual([]);
+
+    permStore.__resetPermissionStore();
+    tamper({
+      capabilityId: PI_RESOURCES_CAPABILITY_ID,
+      permission: PI_RESOURCES_PERMISSION,
+      resource: piPackagePermissionResource(
+        "install",
+        "user",
+        "f".repeat(32),
+        "npm:@scope/pkg@1.0.0"
+      ),
+      grantedAt: 1,
+    });
+    expect(permStore.describePermissions(workspaceId).workspaceGrants).toEqual([]);
+
+    permStore.__resetPermissionStore();
+    tamper({
+      capabilityId: PI_RESOURCES_CAPABILITY_ID,
+      permission: PI_RESOURCES_PERMISSION,
+      resource: piPackagePermissionResource(
+        "install",
+        "user",
+        workspaceId,
+        "npm:@scope/pkg@1.0.0"
+      ),
       grantedAt: 1,
     });
     expect(permStore.describePermissions(workspaceId).workspaceGrants).toHaveLength(1);

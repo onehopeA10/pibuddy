@@ -29,7 +29,6 @@ import {
   workspaceScopedRequestSchema,
   type PiResource,
   type PiResourceScanResult,
-  type ProjectTrustState,
 } from "@pibuddy/contract";
 
 import { writeJsonAtomic } from "../fs-atomic.js";
@@ -38,8 +37,15 @@ import { buildPiSpawn } from "../pi-launcher.js";
 import { loadSettings } from "../settings.js";
 import { requireWorkspaceRoot } from "../workspace-registry.js";
 import { runPackageCommand } from "./package-install.js";
+import { registerPiResourcesPermissionRequirements } from "./pi-resources-permission.js";
+import {
+  __resetProjectTrustState,
+  currentProjectTrust,
+  notifyProjectTrustChange,
+  setSessionTrustDecision,
+} from "./project-trust.js";
 import { scanResources } from "./resource-scanner.js";
-import { describeTrust, writeTrustDecision } from "./trust-store.js";
+import { writeTrustDecision } from "./trust-store.js";
 
 /** 本任务新增的 7 条通道。单测据它断言注册面，不引用本文件路径以外的东西。 */
 export const PI_RESOURCES_CHANNELS = [
@@ -61,27 +67,9 @@ export const PI_RESOURCES_CHANNELS = [
  */
 const lastScan = new Map<string, PiResourceScanResult>();
 
-/**
- * 本次运行的 trust 决定（未 remember 时只影响这一次启动）。
- *
- * pi-ipc 在拼 buildPiSpawn 的参数时读它。写进 trust.json 的决定不放这里 ——
- * 那种情况下应该让 pi 自己去读文件，两处表达同一个决定必然有不一致的时候。
- */
-const sessionTrust = new Map<string, "allow" | "deny">();
-
-export function sessionTrustFor(workspaceId: string): "allow" | "deny" | undefined {
-  return sessionTrust.get(workspaceId);
-}
-
 export function __resetPiResourcesState(): void {
   lastScan.clear();
-  sessionTrust.clear();
-}
-
-function defaultProjectTrustOf(): "ask" | "always" | "never" {
-  // PiBuddy 自己不代管 defaultProjectTrust —— 它是 pi 的全局设置，用户可能
-  // 在终端里改过。这里读 pi 的那份，读不到才用 pi 的默认值 "ask"。
-  return "ask";
+  __resetProjectTrustState();
 }
 
 async function readPiUserSettings(): Promise<Record<string, unknown>> {
@@ -93,30 +81,9 @@ async function readPiUserSettings(): Promise<Record<string, unknown>> {
   }
 }
 
-async function currentTrust(
-  workspaceId: string,
-  workspaceRoot: string
-): Promise<ProjectTrustState> {
-  const piSettings = await readPiUserSettings();
-  const raw = piSettings.defaultProjectTrust;
-  const fallback =
-    raw === "always" || raw === "never" || raw === "ask" ? raw : defaultProjectTrustOf();
-  const state = await describeTrust({
-    workspaceId,
-    workspaceRoot,
-    defaultProjectTrust: fallback,
-  });
-  // 本次运行里用户已经答过（但没勾「记住」）时，以那个答案为准
-  const once = sessionTrust.get(workspaceId);
-  if (once && state.saved === "none") {
-    return { ...state, effective: once, needsPrompt: false };
-  }
-  return state;
-}
-
 async function doScan(workspaceId: string): Promise<PiResourceScanResult> {
   const root = requireWorkspaceRoot(workspaceId);
-  const trust = await currentTrust(workspaceId, root);
+  const trust = await currentProjectTrust(workspaceId, root);
   const result = await scanResources({
     workspaceRoot: root,
     workspaceId,
@@ -165,6 +132,8 @@ async function setEnabled(
 }
 
 export function registerPiResourcesIpc(): void {
+  registerPiResourcesPermissionRequirements();
+
   registerHandler(CHANNELS.piResourcesScan, workspaceScopedRequestSchema, (payload) =>
     doScan(payload.workspaceId)
   );
@@ -175,7 +144,7 @@ export function registerPiResourcesIpc(): void {
 
   registerHandler(CHANNELS.piResourcesInstall, piPackageCommandRequestSchema, async (payload) => {
     const root = requireWorkspaceRoot(payload.workspaceId);
-    const trust = await currentTrust(payload.workspaceId, root);
+    const trust = await currentProjectTrust(payload.workspaceId, root);
     const spawn = buildPiSpawn({
       packaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
@@ -195,7 +164,7 @@ export function registerPiResourcesIpc(): void {
 
   registerHandler(CHANNELS.piResourcesRemove, piPackageCommandRequestSchema, async (payload) => {
     const root = requireWorkspaceRoot(payload.workspaceId);
-    const trust = await currentTrust(payload.workspaceId, root);
+    const trust = await currentProjectTrust(payload.workspaceId, root);
     const spawn = buildPiSpawn({
       packaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
@@ -224,7 +193,7 @@ export function registerPiResourcesIpc(): void {
   });
 
   registerHandler(CHANNELS.trustDescribe, workspaceScopedRequestSchema, (payload) =>
-    currentTrust(payload.workspaceId, requireWorkspaceRoot(payload.workspaceId))
+    currentProjectTrust(payload.workspaceId, requireWorkspaceRoot(payload.workspaceId))
   );
 
   registerHandler(CHANNELS.trustDecide, trustDecideRequestSchema, async (payload) => {
@@ -232,11 +201,13 @@ export function registerPiResourcesIpc(): void {
     if (payload.remember) {
       // 跨应用共享状态：writeTrustDecision 内部先读再合并，绝不整文件覆盖
       await writeTrustDecision(root, payload.decision === "allow");
-      sessionTrust.delete(payload.workspaceId);
+      setSessionTrustDecision(payload.workspaceId, undefined);
     } else {
-      sessionTrust.set(payload.workspaceId, payload.decision);
+      setSessionTrustDecision(payload.workspaceId, payload.decision);
     }
     lastScan.delete(payload.workspaceId);
-    return currentTrust(payload.workspaceId, root);
+    const state = await currentProjectTrust(payload.workspaceId, root);
+    await notifyProjectTrustChange(payload.workspaceId, state);
+    return state;
   });
 }

@@ -12,6 +12,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Model } from "@sdk";
+import {
+  MAX_PROMPT_ATTACHMENT_BYTES,
+  MAX_PROMPT_ATTACHMENT_TOKENS,
+  MAX_PROMPT_IMAGES,
+  MAX_PROMPT_IMAGE_BYTES,
+  MAX_PROMPT_TOTAL_ATTACHMENT_BYTES,
+} from "@contract";
 import { send, useAppStore } from "./app";
 
 /**
@@ -149,6 +156,60 @@ describe("(b) 放行：模型收得下图，图片必须真的发出去", () => 
     await expect(send({ text: "三张", images: [IMAGE, IMAGE, IMAGE] })).resolves.toBe(true);
     const payload = promptSpy.mock.calls[0][0] as { images?: unknown[] };
     expect(payload.images).toHaveLength(3);
+  });
+});
+
+describe("SEC-005 renderer send 资源边界", () => {
+  beforeEach(() => {
+    setCurrentModel({ id: "multimodal-model", provider: "acme", input: ["text", "image"] });
+  });
+
+  it("绕过 InputBar 传入过多图片时仍不发 RPC", async () => {
+    await expect(
+      send({ text: "too many", images: Array(MAX_PROMPT_IMAGES + 1).fill(IMAGE) })
+    ).resolves.toBe(false);
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(notified).toContainEqual(["warning", `图片最多添加 ${MAX_PROMPT_IMAGES} 张`]);
+  });
+
+  it("绕过 InputBar 传入超大图片时仍不发 RPC", async () => {
+    const encoded = "A".repeat(4 * Math.ceil((MAX_PROMPT_IMAGE_BYTES + 1) / 3));
+    await expect(
+      send({
+        text: "too large",
+        images: [{ type: "image", data: encoded, mimeType: "image/png" }],
+      })
+    ).resolves.toBe(false);
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(notified.some(([, text]) => text.includes("单张图片不能超过"))).toBe(true);
+  });
+
+  it("非图片附件的数量和单文件大小同样在 RPC 前受限", async () => {
+    const attachment = (index: number, size = 1) => ({
+      token: `t-${index}`,
+      name: `${index}.txt`,
+      size,
+      kind: "other" as const,
+    });
+    await expect(
+      send({
+        text: "too many files",
+        attachments: Array.from({ length: MAX_PROMPT_ATTACHMENT_TOKENS + 1 }, (_, index) =>
+          attachment(index)
+        ),
+      })
+    ).resolves.toBe(false);
+    await expect(
+      send({ text: "huge file", attachments: [attachment(0, MAX_PROMPT_ATTACHMENT_BYTES + 1)] })
+    ).resolves.toBe(false);
+    const halfPlusOne = Math.floor(MAX_PROMPT_TOTAL_ATTACHMENT_BYTES / 2) + 1;
+    await expect(
+      send({
+        text: "too much total",
+        attachments: [attachment(1, halfPlusOne), attachment(2, halfPlusOne)],
+      })
+    ).resolves.toBe(false);
+    expect(promptSpy).not.toHaveBeenCalled();
   });
 });
 

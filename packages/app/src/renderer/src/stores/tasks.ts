@@ -9,6 +9,12 @@ import { defineStore } from "pinia";
 import { ref, shallowRef } from "vue";
 import type { TaskCreateRequest, TaskDetail, TaskListItem, TaskUpdateRequest } from "@contract";
 
+import { usePermissionStore } from "./permission";
+
+const PERMISSION_DENIED = "IPC_PERMISSION_DENIED";
+const TASKS_CAPABILITY_ID = "common.tasks";
+const TASKS_PERMISSION = "tasks.manage";
+
 export const useTasksStore = defineStore("tasks", () => {
   const panelOpen = ref(false);
   const items = shallowRef<TaskListItem[]>([]);
@@ -16,9 +22,37 @@ export const useTasksStore = defineStore("tasks", () => {
   const selectedId = ref<string | null>(null);
   const lastError = ref("");
   const loading = ref(false);
+  /** 上一次改调度表是否因缺 tasks.manage 被挡下（供面板显示「去授权」）。 */
+  const needsPermission = ref(false);
 
   function fail(err: unknown): void {
     lastError.value = (err as Error).message;
+  }
+
+  function handleDenied(err: unknown, workspaceId?: string): boolean {
+    const message = (err as Error)?.message ?? String(err);
+    if (!message.includes(PERMISSION_DENIED)) {
+      fail(err);
+      return false;
+    }
+    needsPermission.value = true;
+    lastError.value = "";
+    usePermissionStore().request({
+      capabilityId: TASKS_CAPABILITY_ID,
+      permission: TASKS_PERMISSION,
+      resource: null,
+      workspaceId,
+    });
+    return true;
+  }
+
+  function authorize(workspaceId: string): void {
+    usePermissionStore().request({
+      capabilityId: TASKS_CAPABILITY_ID,
+      permission: TASKS_PERMISSION,
+      resource: null,
+      workspaceId,
+    });
   }
 
   async function refresh(workspaceId: string): Promise<void> {
@@ -57,9 +91,10 @@ export const useTasksStore = defineStore("tasks", () => {
       await refresh(req.workspaceId);
       await select(req.workspaceId, d.task.id);
       lastError.value = "";
+      needsPermission.value = false;
       return true;
     } catch (err) {
-      fail(err);
+      handleDenied(err, req.workspaceId);
       return false;
     }
   }
@@ -68,8 +103,9 @@ export const useTasksStore = defineStore("tasks", () => {
     try {
       await window.piBuddy.tasks.update(req);
       await refresh(req.workspaceId);
+      needsPermission.value = false;
     } catch (err) {
-      fail(err);
+      handleDenied(err, req.workspaceId);
     }
   }
 
@@ -77,8 +113,9 @@ export const useTasksStore = defineStore("tasks", () => {
     try {
       items.value = (await window.piBuddy.tasks.delete(workspaceId, id)).items;
       if (selectedId.value === id) clearSelection();
+      needsPermission.value = false;
     } catch (err) {
-      fail(err);
+      handleDenied(err, workspaceId);
     }
   }
 
@@ -86,8 +123,9 @@ export const useTasksStore = defineStore("tasks", () => {
     try {
       await window.piBuddy.tasks.pause(workspaceId, id);
       await refresh(workspaceId);
+      needsPermission.value = false;
     } catch (err) {
-      fail(err);
+      handleDenied(err, workspaceId);
     }
   }
 
@@ -95,8 +133,9 @@ export const useTasksStore = defineStore("tasks", () => {
     try {
       await window.piBuddy.tasks.resume(workspaceId, id);
       await refresh(workspaceId);
+      needsPermission.value = false;
     } catch (err) {
-      fail(err);
+      handleDenied(err, workspaceId);
     }
   }
 
@@ -104,8 +143,9 @@ export const useTasksStore = defineStore("tasks", () => {
     try {
       await window.piBuddy.tasks.runNow(workspaceId, id);
       await refresh(workspaceId);
+      needsPermission.value = false;
     } catch (err) {
-      fail(err);
+      handleDenied(err, workspaceId);
     }
   }
 
@@ -113,8 +153,9 @@ export const useTasksStore = defineStore("tasks", () => {
     try {
       await window.piBuddy.tasks.cancelRun(workspaceId, taskId, runId);
       await refresh(workspaceId);
+      needsPermission.value = false;
     } catch (err) {
-      fail(err);
+      handleDenied(err, workspaceId);
     }
   }
 
@@ -122,8 +163,9 @@ export const useTasksStore = defineStore("tasks", () => {
     try {
       await window.piBuddy.tasks.retryRun(workspaceId, taskId, runId);
       await refresh(workspaceId);
+      needsPermission.value = false;
     } catch (err) {
-      fail(err);
+      handleDenied(err, workspaceId);
     }
   }
 
@@ -131,8 +173,9 @@ export const useTasksStore = defineStore("tasks", () => {
     try {
       await window.piBuddy.tasks.duplicate(workspaceId, id);
       await refresh(workspaceId);
+      needsPermission.value = false;
     } catch (err) {
-      fail(err);
+      handleDenied(err, workspaceId);
     }
   }
 
@@ -143,6 +186,8 @@ export const useTasksStore = defineStore("tasks", () => {
     selectedId,
     lastError,
     loading,
+    needsPermission,
+    authorize,
     refresh,
     select,
     clearSelection,

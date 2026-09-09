@@ -18,6 +18,7 @@
 import { computed } from "vue";
 import { NButton, NModal, NSpace, NTag, NText } from "naive-ui";
 import type { PermissionDisposition } from "@contract";
+import { humanCapability, humanPermission } from "../../../lib/permission-plain";
 import { usePermissionStore } from "../stores/permission";
 
 const store = usePermissionStore();
@@ -40,10 +41,10 @@ async function choose(disposition: PermissionDisposition): Promise<void> {
     <template v-if="pending">
       <n-space vertical size="large">
         <n-space vertical size="small">
-          <n-text depth="3">能力</n-text>
-          <n-tag :bordered="false">{{ pending.capabilityId }}</n-tag>
-          <n-text depth="3">申请权限</n-text>
-          <n-tag type="warning" :bordered="false">{{ pending.permission }}</n-tag>
+          <n-text depth="3">它想动哪一块</n-text>
+          <n-tag :bordered="false">{{ humanCapability(pending.capabilityId) }}</n-tag>
+          <n-text depth="3">具体要做什么</n-text>
+          <n-tag type="warning" :bordered="false">{{ humanPermission(pending.permission) }}</n-tag>
           <template v-if="pending.resource">
             <n-text depth="3">资源</n-text>
             <n-tag :bordered="false">{{ pending.resource }}</n-tag>
@@ -58,11 +59,11 @@ async function choose(disposition: PermissionDisposition): Promise<void> {
           </template>
         </n-space>
         <n-space justify="end">
-          <n-button size="small" @click="choose('deny')">拒绝</n-button>
-          <n-button size="small" @click="choose('allow-once')">仅此一次</n-button>
-          <n-button size="small" @click="choose('allow-session')">本次运行</n-button>
+          <n-button size="small" @click="choose('deny')">这次不行</n-button>
+          <n-button size="small" @click="choose('allow-once')">就这一次</n-button>
+          <n-button size="small" @click="choose('allow-session')">这次对话都行</n-button>
           <n-button size="small" type="primary" @click="choose('allow-workspace')">
-            始终允许（本工作区）
+            以后在这个文件夹都允许
           </n-button>
         </n-space>
       </n-space>

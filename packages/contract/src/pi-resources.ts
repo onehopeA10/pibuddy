@@ -16,6 +16,8 @@
  */
 import { z } from "zod";
 
+import { CHANNELS } from "./channels.js";
+
 /** 资源大类。与 pi docs/packages.md 的资源种类一一对应。 */
 export const piResourceKindSchema = z.enum([
   "package",
@@ -133,12 +135,17 @@ export const piResourceSetEnabledRequestSchema = z.object({
  * `spec` 会在 main 侧再过一次注入校验（shell 元字符一律拒绝）；
  * 这里的 max(200) 只是第一道，不是唯一一道。
  */
-export const piPackageCommandRequestSchema = z.object({
-  workspaceId: z.string().min(1),
-  spec: z.string().min(1).max(200),
-  /** project 作用域写 .pi/settings.json，**必须先通过 trust** */
-  scope: z.enum(["user", "project"]),
-});
+export const piPackageCommandRequestSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    spec: z.string().min(1).max(200),
+    /** project 作用域写 .pi/settings.json，**必须先通过 trust** */
+    scope: z.enum(["user", "project"]),
+  })
+  .superRefine((value, ctx) => {
+    const issue = piPackageSpecIssue(value.spec);
+    if (issue !== null) ctx.addIssue({ code: "custom", path: ["spec"], message: issue });
+  });
 
 export const piPackageCommandResultSchema = z.object({
   ok: z.boolean(),
@@ -148,6 +155,96 @@ export const piPackageCommandResultSchema = z.object({
   reason: z.string().optional(),
 });
 export type PiPackageCommandResult = z.infer<typeof piPackageCommandResultSchema>;
+
+// ------------------------------------------------------- 第五道闸：权限需求
+
+/**
+ * Pi 资源中心属于不可关闭的平台内核，不是 capability manifest。权限模型仍以
+ * `capabilityId` 为主体键，因此用一个不进能力注册表的保留主体表达它的上界，
+ * 与 `kernel.git-probe` 同一机制。
+ */
+export const PI_RESOURCES_CAPABILITY_ID = "kernel.pi-resources";
+export const PI_RESOURCES_PERMISSION = "process.shell";
+
+/** 真正到达 `execFile` 的两条通道；其余 scan / trust / open-dir 不启动进程。 */
+export const PI_RESOURCES_GATED_CHANNELS = [
+  CHANNELS.piResourcesInstall,
+  CHANNELS.piResourcesRemove,
+] as const;
+
+export type PiPackagePermissionAction = "install" | "remove";
+
+const PI_PACKAGE_SPEC_UNSAFE_RE =
+  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
+const PI_PACKAGE_SPEC_INJECTION_RE = /;|&&|\||`|\$\(|&/u;
+const PI_PACKAGE_PREFIXES = ["npm:", "git:", "https://", "ssh://"] as const;
+const WORKSPACE_PERMISSION_ID_RE = /^[a-f0-9]{32}$/;
+
+function looksLikePackagePath(spec: string): boolean {
+  return (
+    spec.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(spec) ||
+    spec.startsWith("./") ||
+    spec.startsWith(".\\")
+  );
+}
+
+/**
+ * 包规格的单一校验口径。权限资源、IPC schema 与 `execFile` 前的最后一道输入
+ * 校验都调用它，避免一边批准了、另一边却按不同语法执行。
+ */
+export function piPackageSpecIssue(spec: unknown): string | null {
+  if (typeof spec !== "string" || spec.trim().length === 0) return "包规格为空";
+  if (spec.length > 200) return "包规格超过 200 个字符";
+  if (PI_PACKAGE_SPEC_UNSAFE_RE.test(spec)) return "包规格含控制字符或 BiDi 覆写字符";
+  if (PI_PACKAGE_SPEC_INJECTION_RE.test(spec)) return "包规格含 shell 控制符";
+  if (!PI_PACKAGE_PREFIXES.some((prefix) => spec.startsWith(prefix)) && !looksLikePackagePath(spec)) {
+    return "包规格前缀不被接受，只支持 npm:、git:、https://、ssh:// 或本地路径";
+  }
+  return null;
+}
+
+/**
+ * 精确授权轴：动作、作用域、工作区与包规格缺一不可。spec 取剩余全部字符，
+ * 不按冒号继续切分，因为 npm scope、Git URL 与 Windows 路径都合法含冒号。
+ */
+export function piPackagePermissionResource(
+  action: PiPackagePermissionAction,
+  scope: "user" | "project",
+  workspaceId: string,
+  spec: string
+): string {
+  if (!WORKSPACE_PERMISSION_ID_RE.test(workspaceId)) {
+    throw new Error("PI_PACKAGE_PERMISSION_RESOURCE_INVALID: workspaceId");
+  }
+  const issue = piPackageSpecIssue(spec);
+  if (issue !== null) throw new Error(`PI_PACKAGE_PERMISSION_RESOURCE_INVALID: ${issue}`);
+  return `pi-package:${action}:${scope}:${workspaceId}:${spec}`;
+}
+
+export interface PiPackageGrantResource {
+  action: PiPackagePermissionAction;
+  scope: "user" | "project";
+  workspaceId: string;
+  spec: string;
+}
+
+export function parsePiPackageGrantResource(raw: string): PiPackageGrantResource | null {
+  const match = /^pi-package:(install|remove):(user|project):([a-f0-9]{32}):([\s\S]+)$/u.exec(raw);
+  if (!match) return null;
+  const [, action, scope, workspaceId, spec] = match;
+  if (piPackageSpecIssue(spec) !== null) return null;
+  return {
+    action: action as PiPackagePermissionAction,
+    scope: scope as "user" | "project",
+    workspaceId,
+    spec,
+  };
+}
+
+export function isPiResourcesShellGrant(capabilityId: string, permission: string): boolean {
+  return capabilityId === PI_RESOURCES_CAPABILITY_ID && permission === PI_RESOURCES_PERMISSION;
+}
 
 export const piResourceIdRequestSchema = z.object({
   workspaceId: z.string().min(1),

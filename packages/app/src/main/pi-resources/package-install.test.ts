@@ -7,6 +7,7 @@
  * 并直接数 execFile 的调用次数。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ChildProcess } from "node:child_process";
 import type { PiPackageCommandResult } from "@pibuddy/contract";
 
 vi.mock("node:child_process", () => ({
@@ -15,7 +16,12 @@ vi.mock("node:child_process", () => ({
 
 import { execFile } from "node:child_process";
 
-import { ALLOWED_SUBCOMMANDS, assertSafeSpec, runPackageCommand } from "./package-install.js";
+import {
+  ALLOWED_SUBCOMMANDS,
+  assertSafeSpec,
+  disposePackageCommands,
+  runPackageCommand,
+} from "./package-install.js";
 
 const execFileMock = vi.mocked(execFile);
 
@@ -26,6 +32,7 @@ const BASE = {
 } as const;
 
 beforeEach(() => {
+  disposePackageCommands();
   execFileMock.mockReset();
 });
 
@@ -173,6 +180,34 @@ describe("runPackageCommand", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("exec-failed");
     expect(result.output).toContain("找不到这个包");
+  });
+
+  it("应用退出时 dispose 会终止仍在运行的包管理子进程", async () => {
+    let callback!: (err: Error | null, stdout: string, stderr: string) => void;
+    const child = {
+      kill: vi.fn(() => true),
+    } as unknown as ChildProcess;
+    execFileMock.mockImplementation(((
+      _file: string,
+      _args: string[],
+      _options: unknown,
+      done: (err: Error | null, stdout: string, stderr: string) => void
+    ) => {
+      callback = done;
+      return child;
+    }) as unknown as typeof execFile);
+
+    const pending = runPackageCommand({
+      ...BASE,
+      subcommand: "install",
+      scope: "user",
+      trusted: true,
+    });
+    disposePackageCommands();
+
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    callback(new Error("terminated"), "", "");
+    await expect(pending).resolves.toMatchObject({ ok: false, reason: "exec-failed" });
   });
 });
 

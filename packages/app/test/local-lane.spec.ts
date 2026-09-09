@@ -21,7 +21,7 @@ const userData = fs.mkdtempSync(path.join(os.tmpdir(), "pibuddy-local-lane-"));
 
 vi.mock("electron", () => ({
   app: { getPath: () => userData, isPackaged: false, getVersion: () => "0.0.0" },
-  dialog: { showMessageBox: vi.fn() },
+  dialog: { showMessageBox: vi.fn(async () => ({ response: 1 })) },
 }));
 
 // 决策层用例需要一个「声明了 network.local 的能力」。本阶段还没有真实的 HA

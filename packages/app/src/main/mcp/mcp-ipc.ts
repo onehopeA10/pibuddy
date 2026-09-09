@@ -27,14 +27,23 @@ import {
 } from "@pibuddy/contract";
 
 import { registerHandler } from "../ipc-guard.js";
+import {
+  currentProjectTrust,
+  onProjectTrustChange,
+} from "../pi-resources/project-trust.js";
 import { removeServer, saveServer } from "./mcp-config.js";
+import { registerMcpPermissionRequirements } from "./mcp-permission.js";
 import {
   disposeMcpResources as killAllMcpProcesses,
   listServers,
   startServer,
+  stopProjectServers,
   stopServer,
+  stopServersByRef,
   testServer,
 } from "./mcp-service.js";
+
+let removeTrustListener: (() => void) | null = null;
 
 /** 本能力注册的全部通道。单测据它断言注册面。 */
 export const MCP_CHANNELS: InvokeChannel[] = [
@@ -47,16 +56,30 @@ export const MCP_CHANNELS: InvokeChannel[] = [
 ];
 
 export function registerMcpIpc(): void {
+  registerMcpPermissionRequirements();
+  removeTrustListener?.();
+  removeTrustListener = onProjectTrustChange(async (workspaceId, state) => {
+    if (state.effective !== "allow") await stopProjectServers(workspaceId);
+  });
+
   registerHandler(CHANNELS.mcpList, mcpListRequestSchema, (payload) =>
     listServers(payload.workspaceId)
   );
 
   registerHandler(CHANNELS.mcpSave, mcpSaveRequestSchema, async (payload) => {
+    if (payload.scope === "project") {
+      const trust = await currentProjectTrust(payload.workspaceId);
+      if (trust.effective !== "allow") {
+        throw new Error("MCP_PROJECT_NOT_TRUSTED: 项目 MCP 配置尚未受信，未保存");
+      }
+    }
+    await stopServersByRef(payload.workspaceId, payload.scope, payload.config.name);
     await saveServer(payload.workspaceId, payload.scope, payload.config);
     return listServers(payload.workspaceId);
   });
 
   registerHandler(CHANNELS.mcpRemove, mcpRemoveRequestSchema, async (payload) => {
+    await stopServersByRef(payload.workspaceId, payload.scope, payload.name);
     await removeServer(payload.workspaceId, payload.scope, payload.name);
     return listServers(payload.workspaceId);
   });
@@ -76,5 +99,7 @@ export function registerMcpIpc(): void {
 
 /** 禁用 / 退出时 kill 全部活进程（manifest.runtime.teardown = ["child-process"]）。 */
 export function disposeMcpResources(): void {
+  removeTrustListener?.();
+  removeTrustListener = null;
   killAllMcpProcesses();
 }

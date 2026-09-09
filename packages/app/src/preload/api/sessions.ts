@@ -12,6 +12,8 @@ import { CHANNELS } from "@pibuddy/contract/channels";
 import type {
   DraftRecord,
   SessionHistoryPage,
+  SessionImportScanResult,
+  SessionImportRunResult,
   SessionQuery,
   SessionRow,
   SessionStatus,
@@ -80,4 +82,8 @@ export const sessions = {
    */
   tree: (workspaceId: string, sessionId: string) =>
     invoke<SessionTreeGraph>(CHANNELS.sessionTreeGraph, { workspaceId, sessionId }),
+  importScan: (workspaceId: string) =>
+    invoke<SessionImportScanResult>(CHANNELS.sessionsImportScan, { workspaceId }),
+  importRun: (workspaceId: string, externalIds: string[]) =>
+    invoke<SessionImportRunResult>(CHANNELS.sessionsImportRun, { workspaceId, externalIds }),
 };

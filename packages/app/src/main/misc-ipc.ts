@@ -8,6 +8,7 @@ import { BrowserWindow, dialog } from "electron";
 import {
   CHANNELS,
   attachDroppedRequestSchema,
+  attachDroppedStageRequestSchema,
   piRuntimeChoiceRequestSchema,
   rendererSettingsPatchSchema,
   secretQueryRequestSchema,
@@ -177,11 +178,14 @@ export function registerMiscIpc(): void {
     return refs;
   });
 
-  // 拖拽进窗口的文件：preload 内部用 webUtils 取到路径后立刻换成凭证，
-  // 路径本身从不进入渲染进程的 JS 作用域。
-  registerHandler(CHANNELS.fileAttachDropped, attachDroppedRequestSchema, async (payload) =>
-    attachments.toAttachmentRef(await attachments.issue(payload.droppedPath))
-  );
+  // 拖拽：preload 用 webUtils 取路径后先换一次性 nonce，再凭 nonce 换附件凭证。
+  registerHandler(CHANNELS.fileStageDropped, attachDroppedStageRequestSchema, (payload, event) => ({
+    nonce: attachments.stageDroppedPath(payload.droppedPath, event.sender.id),
+  }));
+  registerHandler(CHANNELS.fileAttachDropped, attachDroppedRequestSchema, async (payload, event) => {
+    const droppedPath = attachments.consumeDroppedNonce(payload.nonce, event.sender.id);
+    return attachments.toAttachmentRef(await attachments.issue(droppedPath));
+  });
 
   registerHandler(CHANNELS.fileReadAttachment, tokenRequestSchema, (payload) =>
     attachments.readImage(payload.token)

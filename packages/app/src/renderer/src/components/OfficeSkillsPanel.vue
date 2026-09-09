@@ -6,17 +6,27 @@
  * 说什么就能用起来」，右上角的徽标显示**可证伪的**物化状态——来源是主进程
  * 读 R4 归属账本的结果，不是面板自己认定的「应该已就绪」。
  *
- * 技能的执行不在这里：用户在会话里用 /skill:<name> 或直接吩咐，pi agent
- * 按 SKILL.md 的操作规程干活。面板因此没有任何「运行」按钮——一个假装能
- * 点的按钮比没有更糟。
+ * 技能的执行不在这里：用户在会话里直接吩咐，pi agent 按 SKILL.md 干活。
+ * 「说到输入框」只是把用法填进 composer，不是假装在这里运行。
  */
 import { onMounted, ref } from "vue";
 import { NButton, NSpin, NTag } from "naive-ui";
-import type { OfficeSkillsState } from "@contract";
+import type { OfficeSkillStatus, OfficeSkillsState } from "@contract";
+import { useAppStore } from "../stores/app";
 
+const app = useAppStore();
 const state = ref<OfficeSkillsState | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
+
+function promptOf(skill: OfficeSkillStatus): string {
+  const quoted = skill.usageHint.match(/「(.+)」/);
+  return quoted?.[1]?.trim() || skill.usageHint;
+}
+
+function fillComposer(skill: OfficeSkillStatus): void {
+  app.editorText = promptOf(skill);
+}
 
 async function reload(): Promise<void> {
   loading.value = true;
@@ -58,13 +68,15 @@ onMounted(() => void reload());
           </div>
           <p class="summary">{{ skill.summary }}</p>
           <p class="usage">{{ skill.usageHint }}</p>
-          <p class="command">
-            也可以在会话里输入 <code>{{ skill.command }}</code>
-            <span v-if="skill.materialized" class="files">（{{ skill.fileCount }} 个文件已物化）</span>
-          </p>
+          <div class="card-actions">
+            <NButton size="tiny" type="primary" secondary :disabled="!skill.materialized" @click="fillComposer(skill)">
+              说到输入框
+            </NButton>
+            <span v-if="skill.materialized" class="files">{{ skill.fileCount }} 个文件已就绪</span>
+          </div>
         </article>
         <p class="foot-hint">
-          技能由 AI 助手按写好的操作规程执行：先列清单预览、经你确认才动手，绝不静默覆盖文件。
+          点「说到输入框」再发送即可。助手会按写好的规程先预览、经你确认才动手。
           停用本能力包并重启，会把物化的技能收回（你自己改过的文件会保留）。
         </p>
       </template>
@@ -146,19 +158,15 @@ onMounted(() => void reload());
   color: #0f766e;
   line-height: 1.5;
 }
-.command {
-  margin: 6px 0 0;
-  font-size: 11px;
-  color: #64748b;
-}
-.command code {
-  background: #f1f5f9;
-  border-radius: 4px;
-  padding: 1px 5px;
-  font-size: 11px;
+.card-actions {
+  margin: 8px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .files {
-  margin-left: 4px;
+  font-size: 11px;
+  color: #64748b;
 }
 .foot-hint {
   margin: 2px 0 0;

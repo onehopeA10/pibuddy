@@ -110,6 +110,20 @@ export const useAgentPoolStore = defineStore("agentPool", () => {
     applySnapshot(await window.piBuddy.agentPool.setCaps(next));
   }
 
+  async function decideInbox(
+    item: { capabilityId: string; permission: string; resource: string | null; workspaceId: string | null },
+    allow: boolean
+  ): Promise<void> {
+    await window.piBuddy.permission.decide({
+      capabilityId: item.capabilityId,
+      permission: item.permission,
+      resource: item.resource,
+      disposition: allow ? "allow-once" : "deny",
+      workspaceId: item.workspaceId,
+    });
+    applySnapshot(await window.piBuddy.agentPool.describe());
+  }
+
   return {
     sessions,
     inbox,
@@ -130,5 +144,6 @@ export const useAgentPoolStore = defineStore("agentPool", () => {
     focus,
     stop,
     setCaps,
+    decideInbox,
   };
 });

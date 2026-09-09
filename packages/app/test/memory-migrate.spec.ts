@@ -7,11 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * v1 → v2 迁移：**不丢用户已存的记忆**（MEM-101 第二版）。
  *
  * 这不是「断言 migrate 被调用过」这种恒真判据，而是造一个**真正的 v1 格式库**
- * （只有 v1 的三张表、user_version=1、里面躺着一条 v1 记录），用 v2 代码打开它，
+ * （只有 v1 的三张表、user_version=1、里面躺着一条 v1 记录），用当前代码打开它，
  * 再逐项验证：
- *   1. 代际被推到 2；
+ *   1. 代际被推到 MEMORY_DATA_SCHEMA_VERSION（现为 3）；
  *   2. v1 那条记录**还在**、字段原样、FTS 仍能查到、仍能被注入候选选中；
- *   3. v2 的新表（embeddings / knowledge）已建好，老记录能被重嵌拿到语义检索能力。
+ *   3. v2 的新表（embeddings / knowledge）已建好，老记录能被重嵌拿到语义检索能力；
+ *   4. v3 治理表（working_items 等）已建好，且 memories 行字节未改。
  *
  * 少了迁移的非破坏性（比如 migrate 里 DROP/重建），第 2 步就会红。
  */
@@ -21,6 +22,7 @@ vi.mock("electron", () => ({
   app: { getPath: () => userData, isPackaged: false, getVersion: () => "0.0.0" },
 }));
 
+const { MEMORY_DATA_SCHEMA_VERSION } = await import("@pibuddy/contract");
 const { MemoryStore, extractTerms } = await import("../src/main/memory/memory-store.js");
 const { __setEmbedder, disposeEmbedder } = await import("../src/main/memory/memory-embed.js");
 const { reembedWorkspace, searchMemories } = await import("../src/main/memory/memory-search.js");
@@ -61,15 +63,25 @@ beforeEach(() => {
 });
 afterEach(() => disposeEmbedder());
 
-describe("用 v2 代码打开 v1 库", () => {
-  it("代际被推到 2，且 v1 记录一条不丢", () => {
+describe("用当前代码打开 v1 库", () => {
+  it("代际被推到当前版本，且 v1 记录一条不丢", () => {
     const store = new MemoryStore(dbFile);
     try {
-      // 代际到 2
       const raw = new DatabaseSync(dbFile);
       const ver = raw.prepare("PRAGMA user_version").get() as { user_version: number };
+      const tables = (
+        raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+      ).map((r) => r.name);
       raw.close();
-      expect(ver.user_version).toBe(2);
+      expect(ver.user_version).toBe(MEMORY_DATA_SCHEMA_VERSION);
+      expect(tables).toEqual(
+        expect.arrayContaining([
+          "working_items",
+          "memory_candidates",
+          "memory_conflicts",
+          "memory_route_events",
+        ])
+      );
 
       // v1 那条记录还在、字段原样
       const got = store.get(V1_ID);

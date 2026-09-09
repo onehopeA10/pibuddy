@@ -30,6 +30,12 @@ export interface PermissionQuery {
   resource: string | null;
   /** 当前上下文 workspace；null = 无工作区 */
   workspaceId: string | null;
+  /**
+   * inherit：once + session + workspace（默认，前台交互）。
+   * workspace-only：只认落盘预授权。子 Agent inheritPermissions=false、
+   * 定时任务、Remote 批准后的后续评估都走这条，避免前台 allow-session 渗入无人值守。
+   */
+  sessionGrantPolicy?: "inherit" | "workspace-only";
 }
 
 export interface PermissionEngineDecision {
@@ -77,14 +83,16 @@ export class CapabilityPermissionEngine {
       };
     }
 
-    const onceIdx = this.onceGrantList.findIndex((g) => grantCovers(g, query));
-    if (onceIdx >= 0) {
-      this.onceGrantList.splice(onceIdx, 1); // 用后即焚
-      return { allowed: true, reason: null };
-    }
+    if (query.sessionGrantPolicy !== "workspace-only") {
+      const onceIdx = this.onceGrantList.findIndex((g) => grantCovers(g, query));
+      if (onceIdx >= 0) {
+        this.onceGrantList.splice(onceIdx, 1); // 用后即焚
+        return { allowed: true, reason: null };
+      }
 
-    if (this.sessionGrantList.some((g) => grantCovers(g, query))) {
-      return { allowed: true, reason: null };
+      if (this.sessionGrantList.some((g) => grantCovers(g, query))) {
+        return { allowed: true, reason: null };
+      }
     }
 
     if (this.deps.workspaceGrants(query.workspaceId).some((g) => grantCovers(g, query))) {

@@ -35,6 +35,7 @@ import {
   NText,
 } from "naive-ui";
 import type { McpScope, McpServerInput, McpTransport } from "@contract";
+import { parseMcpImport } from "../../../lib/mcp-import";
 import { useAppStore } from "../stores/app";
 import { useMcpStore } from "../stores/mcp";
 
@@ -65,8 +66,12 @@ const form = reactive({
   oauth: false,
 });
 const showForm = ref(false);
+const showPaste = ref(false);
+const pasteText = ref("");
+const pasteNotice = ref("");
 const saving = ref(false);
 const formError = ref("");
+let submitSeq = 0;
 
 function resetForm(): void {
   form.scope = "user";
@@ -113,6 +118,11 @@ async function submit(): Promise<void> {
     formError.value = "http 服务器需要填写 URL";
     return;
   }
+  const workspaceId = app.workspaceId;
+  if (!workspaceId) {
+    formError.value = "请先选择工作文件夹";
+    return;
+  }
   const config: McpServerInput = {
     name: form.name.trim(),
     transport: form.transport,
@@ -123,17 +133,60 @@ async function submit(): Promise<void> {
     headers: {},
     oauth: form.oauth,
   };
+  const my = ++submitSeq;
   saving.value = true;
   try {
-    const ok = await mcp.save(app.workspaceId, form.scope, config);
+    const ok = await mcp.save(workspaceId, form.scope, config);
+    if (my !== submitSeq || app.workspaceId !== workspaceId) return;
     if (ok) {
       showForm.value = false;
       resetForm();
     } else {
-      formError.value = mcp.lastError || "保存失败";
+      formError.value = mcp.permissionDenied ? "" : mcp.lastError || "保存失败";
     }
   } finally {
-    saving.value = false;
+    if (my === submitSeq && app.workspaceId === workspaceId) saving.value = false;
+  }
+}
+
+async function importPasted(): Promise<void> {
+  pasteNotice.value = "";
+  const parsed = parseMcpImport(pasteText.value);
+  if (parsed.servers.length === 0) {
+    pasteNotice.value = parsed.skipped[0] || "没认出任何服务器";
+    return;
+  }
+  const workspaceId = app.workspaceId;
+  if (!workspaceId) {
+    pasteNotice.value = "请先选择工作文件夹";
+    return;
+  }
+  let saved = 0;
+  let blocked = 0;
+  for (const server of parsed.servers) {
+    if (server.transport !== "stdio") {
+      blocked += 1;
+      continue;
+    }
+    const config: McpServerInput = {
+      name: server.name,
+      transport: "stdio",
+      command: server.command,
+      args: server.args,
+      env: server.env,
+      headers: {},
+      oauth: false,
+    };
+    const ok = await mcp.save(workspaceId, "user", config);
+    if (ok) saved += 1;
+  }
+  const bits = [`已写入 ${saved} 台本地工具`];
+  if (blocked) bits.push(`${blocked} 台远程/登录工具这轮还接不上`);
+  if (parsed.skipped.length) bits.push(parsed.skipped[0]);
+  pasteNotice.value = bits.join("。");
+  if (saved > 0) {
+    showPaste.value = false;
+    pasteText.value = "";
   }
 }
 
@@ -142,6 +195,11 @@ const hasServers = computed(() => mcp.servers.length > 0);
 watch(
   () => app.workspaceId,
   (id) => {
+    submitSeq += 1;
+    saving.value = false;
+    showForm.value = false;
+    resetForm();
+    mcp.setWorkspace(id);
     if (id) void mcp.refresh(id);
   },
   { immediate: true }
@@ -153,13 +211,13 @@ watch(
     <n-space vertical size="medium">
       <div class="head">
         <n-text depth="3" class="hint">
-          MCP（Model Context Protocol）服务器：把外部工具接进对话。stdio 服务器可
-          直接连接测试；http / 远程与 OAuth 本轮仅枚举展示（原因见每台服务器的诊断）。
+          把外部工具接进对话。本机启动的工具可以马上测；网上的远程工具和登录授权这轮还接不上，名单里看得到，但连不上。
         </n-text>
         <n-space size="small">
           <n-button size="small" :loading="mcp.loading" @click="mcp.refresh(app.workspaceId)">
             🔄 刷新
           </n-button>
+          <n-button size="small" @click="showPaste = !showPaste">粘贴导入</n-button>
           <n-button
             size="small"
             type="primary"
@@ -169,6 +227,27 @@ watch(
           </n-button>
         </n-space>
       </div>
+
+      <n-card v-if="showPaste" size="small" title="粘贴别人给的工具配置" class="form-card">
+        <n-input
+          v-model:value="pasteText"
+          type="textarea"
+          :rows="6"
+          placeholder='{"mcpServers":{"filesystem":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem"]}}}'
+        />
+        <n-text depth="3" style="display: block; margin: 8px 0">
+          认 Claude / Cursor 那种 mcpServers JSON。远程网址和需要登录的会跳过。
+        </n-text>
+        <n-alert v-if="pasteNotice" type="info" :bordered="false" style="margin-bottom: 8px">
+          {{ pasteNotice }}
+        </n-alert>
+        <n-space>
+          <n-button type="primary" size="small" :loading="mcp.loading" @click="importPasted">
+            认一下并写入
+          </n-button>
+          <n-button size="small" @click="showPaste = false">取消</n-button>
+        </n-space>
+      </n-card>
 
       <!-- 新建 / 编辑表单 -->
       <n-card v-if="showForm" size="small" title="新建 MCP 服务器" class="form-card">
@@ -225,6 +304,20 @@ watch(
           </n-space>
         </n-form>
       </n-card>
+
+      <n-alert
+        v-if="mcp.permissionDenied"
+        type="warning"
+        title="需要授权才能运行这台 MCP 服务器"
+        closable
+        @close="mcp.clearDenied()"
+      >
+        <pre class="err">{{ mcp.deniedNotice }}</pre>
+        <n-space size="small" style="margin-top: 8px">
+          <n-button size="tiny" type="primary" @click="mcp.authorize()">去授权</n-button>
+          <n-button size="tiny" @click="mcp.openPermissionCenter()">授权中心</n-button>
+        </n-space>
+      </n-alert>
 
       <n-alert v-if="mcp.lastError" type="error" closable @close="mcp.lastError = ''">
         <pre class="err">{{ mcp.lastError }}</pre>

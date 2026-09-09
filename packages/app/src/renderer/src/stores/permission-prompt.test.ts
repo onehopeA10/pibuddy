@@ -14,13 +14,49 @@
  * 对应用例立刻变红。
  */
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it } from "vitest";
-import { PERMISSION_REVIEW_COMMAND_MAX_BYTES } from "@pibuddy/contract";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  PERMISSION_REVIEW_COMMAND_MAX_BYTES,
+  PI_RESOURCES_CAPABILITY_ID,
+  PI_RESOURCES_PERMISSION,
+  piPackagePermissionResource,
+} from "@pibuddy/contract";
 
 import { usePermissionStore } from "./permission.js";
 
+const decideSpy = vi.fn();
+const describeSpy = vi.fn();
+const revokeSpy = vi.fn();
+
+function permissionState(workspaceId: string | null) {
+  return { workspaceId, workspaceGrants: [], sessionGrants: [], audit: [] };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   setActivePinia(createPinia());
+  decideSpy.mockReset();
+  describeSpy.mockReset();
+  revokeSpy.mockReset();
+  decideSpy.mockImplementation(async (req: { workspaceId: string | null }) =>
+    permissionState(req.workspaceId)
+  );
+  describeSpy.mockImplementation(async (workspaceId: string | null) =>
+    permissionState(workspaceId)
+  );
+  revokeSpy.mockImplementation(async (req: { workspaceId: string | null }) =>
+    permissionState(req.workspaceId)
+  );
+  (globalThis as Record<string, unknown>).window = {
+    piBuddy: { permission: { describe: describeSpy, decide: decideSpy, revoke: revokeSpy } },
+  };
 });
 
 describe("request 的投影闸门", () => {
@@ -93,6 +129,122 @@ describe("request 的投影闸门", () => {
       })
     ).toBe(false);
     expect(store.pending).toBeNull();
+  });
+
+  it("真实 refresh -> request -> decide 流程使用当前工作区，不需手写 store 状态", async () => {
+    const store = usePermissionStore();
+    const workspaceId = "a".repeat(32);
+    await store.refresh(workspaceId);
+    store.request({
+      capabilityId: PI_RESOURCES_CAPABILITY_ID,
+      permission: PI_RESOURCES_PERMISSION,
+      resource: piPackagePermissionResource("install", "user", workspaceId, "npm:a"),
+      workspaceId,
+    });
+
+    await store.decide("allow-session");
+
+    expect(decideSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId, disposition: "allow-session" })
+    );
+    expect(store.lastError).toBe("");
+  });
+
+  it("晚到的 A refresh 不覆盖已切到的 B", async () => {
+    let resolveA!: (value: ReturnType<typeof permissionState>) => void;
+    let resolveB!: (value: ReturnType<typeof permissionState>) => void;
+    describeSpy.mockImplementation(
+      (workspaceId: string | null) =>
+        new Promise((resolve) => {
+          if (workspaceId === "A") resolveA = resolve;
+          else resolveB = resolve;
+        })
+    );
+    const store = usePermissionStore();
+    const pendingA = store.refresh("A");
+    const pendingB = store.refresh("B");
+    resolveB(permissionState("B"));
+    await pendingB;
+    resolveA(permissionState("A"));
+    await pendingA;
+    expect(store.workspaceId).toBe("B");
+  });
+
+  it("已经发出的 A decide 晚到时不覆盖 B，也不清掉 B 的新申请", async () => {
+    const decided = deferred<ReturnType<typeof permissionState>>();
+    decideSpy.mockReturnValueOnce(decided.promise);
+    const store = usePermissionStore();
+    const workspaceA = "a".repeat(32);
+    const workspaceB = "b".repeat(32);
+    store.setWorkspaceContext(workspaceA);
+    store.request({
+      capabilityId: PI_RESOURCES_CAPABILITY_ID,
+      permission: PI_RESOURCES_PERMISSION,
+      resource: piPackagePermissionResource("install", "user", workspaceA, "npm:a"),
+      workspaceId: workspaceA,
+    });
+
+    const pendingA = store.decide("allow-session");
+    store.setWorkspaceContext(workspaceB);
+    store.request({
+      capabilityId: PI_RESOURCES_CAPABILITY_ID,
+      permission: PI_RESOURCES_PERMISSION,
+      resource: piPackagePermissionResource("install", "user", workspaceB, "npm:b"),
+      workspaceId: workspaceB,
+    });
+    decided.resolve(permissionState(workspaceA));
+    await pendingA;
+
+    expect(store.workspaceId).toBe(workspaceB);
+    expect(store.pendingWorkspaceId).toBe(workspaceB);
+    expect(store.pending?.resource).toContain("npm:b");
+  });
+
+  it("A 的 revoke 响应晚到时不把权限状态切回 A", async () => {
+    const revoked = deferred<ReturnType<typeof permissionState>>();
+    revokeSpy.mockReturnValueOnce(revoked.promise);
+    const store = usePermissionStore();
+    const workspaceA = "a".repeat(32);
+    const workspaceB = "b".repeat(32);
+    store.setWorkspaceContext(workspaceA);
+
+    const pendingA = store.revoke(
+      {
+        capabilityId: PI_RESOURCES_CAPABILITY_ID,
+        permission: PI_RESOURCES_PERMISSION,
+        resource: piPackagePermissionResource("install", "user", workspaceA, "npm:a"),
+        grantedAt: 1,
+      },
+      "session"
+    );
+    store.setWorkspaceContext(workspaceB);
+    revoked.resolve(permissionState(workspaceA));
+    await pendingA;
+
+    expect(store.workspaceId).toBe(workspaceB);
+    expect(store.lastError).toBe("");
+  });
+
+  it("工作目录切换后旧申请作废，不把 A 的授权提交给 B", async () => {
+    const store = usePermissionStore();
+    const workspaceA = "a".repeat(32);
+    const workspaceB = "b".repeat(32);
+    store.workspaceId = workspaceA;
+    expect(
+      store.request({
+        capabilityId: PI_RESOURCES_CAPABILITY_ID,
+        permission: PI_RESOURCES_PERMISSION,
+        resource: piPackagePermissionResource("install", "user", workspaceA, "npm:a"),
+        workspaceId: workspaceA,
+      })
+    ).toBe(true);
+
+    store.workspaceId = workspaceB;
+    await store.decide("allow-session");
+
+    expect(decideSpy).not.toHaveBeenCalled();
+    expect(store.pending).toBeNull();
+    expect(store.lastError).toContain("工作目录已经切换");
   });
 
   it("一次被拒之后，下一次合法申请照常弹（拒绝不是粘性状态）", () => {

@@ -309,9 +309,9 @@ describe.skipIf(!runningDistro)("R5.1 真机：PtyManager 用 wsl:<distro> profi
     expect(meta.shellId).toBe(`wsl:${runningDistro}`);
     expect(meta.running).toBe(true);
 
-    manager.input(meta.tabId, 'echo "MARK:$WSL_DISTRO_NAME:$(pwd)"\r');
+    manager.input("ws-wsl", meta.tabId, 'echo "MARK:$WSL_DISTRO_NAME:$(pwd)"\r');
     const seen = await waitFor(() => text.includes(`MARK:${runningDistro}:/tmp`));
     expect(seen).toBe(true);
-    manager.kill(meta.tabId);
+    manager.kill("ws-wsl", meta.tabId);
   });
 });

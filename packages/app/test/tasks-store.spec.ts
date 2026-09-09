@@ -62,3 +62,23 @@ describe("schema 版本 + 迁移", () => {
     expect(TASKS_STORE_SCHEMA_VERSION).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("queue 原子准入", () => {
+  it("只 claim FIFO 首项；已有 running 时下一条不能被重复准入", () => {
+    const now = 1_000;
+    const task = store.createTask({ ...mk("ws"), concurrencyPolicy: "queue" }, now, null);
+    const first = store.createRun({
+      taskId: task.id, workspaceId: "ws", scheduledFor: 20, idempotencyKey: "first",
+      attempt: 1, input: task.agent, status: "pending", now,
+    })!;
+    const second = store.createRun({
+      taskId: task.id, workspaceId: "ws", scheduledFor: 10, idempotencyKey: "second",
+      attempt: 1, input: task.agent, status: "pending", now,
+    })!;
+
+    expect(store.claimNextPendingRun(task.id)?.id).toBe(first.id);
+    expect(store.claimNextPendingRun(task.id)).toBeNull();
+    store.updateRun(first.id, { status: "succeeded", finishedAt: now + 1 });
+    expect(store.claimNextPendingRun(task.id)?.id).toBe(second.id);
+  });
+});

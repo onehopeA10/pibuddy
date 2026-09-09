@@ -122,11 +122,65 @@ export function clearMarkdownCache(): void {
   cacheBytes = 0;
 }
 
+const SAFE_TAGS = new Set([
+  "A",
+  "BLOCKQUOTE",
+  "BR",
+  "CODE",
+  "EM",
+  "H1",
+  "H2",
+  "H3",
+  "H4",
+  "H5",
+  "H6",
+  "HR",
+  "IMG",
+  "LI",
+  "OL",
+  "P",
+  "PRE",
+  "SPAN",
+  "STRONG",
+  "TABLE",
+  "TBODY",
+  "TD",
+  "TH",
+  "THEAD",
+  "TR",
+  "UL",
+]);
+
+const SAFE_ATTRS = new Set(["href", "src", "alt", "title", "class", "rel", "target", "data-blocked-link"]);
+
+/** markdown-it 之后的第二道消毒：只留白名单标签/属性，剥掉 on* 与 script。 */
+export function sanitizeMarkdownHtml(html: string): string {
+  if (typeof DOMParser === "undefined") return html;
+  const doc = new DOMParser().parseFromString(`<div id="md-root">${html}</div>`, "text/html");
+  const root = doc.getElementById("md-root");
+  if (!root) return "";
+  for (const el of root.querySelectorAll("script,style,iframe,object,embed,link,meta")) {
+    el.remove();
+  }
+  const unwrap: Element[] = [];
+  for (const el of root.querySelectorAll("*")) {
+    if (!SAFE_TAGS.has(el.tagName)) unwrap.push(el);
+  }
+  for (const el of unwrap) el.replaceWith(...el.childNodes);
+  for (const el of root.querySelectorAll("*")) {
+    for (const attr of [...el.attributes]) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on") || !SAFE_ATTRS.has(name)) el.removeAttribute(attr.name);
+    }
+  }
+  return root.innerHTML;
+}
+
 export function renderMarkdown(text: string): string {
   const key = text ?? "";
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
-  const html = md.render(key);
+  const html = sanitizeMarkdownHtml(md.render(key));
   cache.set(key, html);
   cacheBytes += entryBytes(key, html);
   while (cache.size > MAX_CACHE || cacheBytes > MAX_CACHE_BYTES) {

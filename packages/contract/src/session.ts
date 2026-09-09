@@ -91,7 +91,8 @@ export type SessionQuery = z.infer<typeof sessionQuerySchema>;
 /**
  * 输入区草稿（B02 消费）。
  *
- * 与会话一对一。`attachments` 存的是能力凭证而不是路径，`queue` 保留
+ * 与会话一对一。`attachments` 为兼容既有存储形状保留，但新版本恒写空数组：
+ * 附件 token 是短期 capability，不能作为 durable draft 恢复。`queue` 保留
  * 插话 / 追问两条队列的未发送文本。
  */
 export const draftRecordSchema = z.object({
@@ -142,3 +143,36 @@ export const sessionHistoryPageSchema = z.object({
   skippedPartial: z.number().int().nonnegative(),
 });
 export type SessionHistoryPage = z.infer<typeof sessionHistoryPageSchema>;
+
+/** sessions:import-scan 只返回摘要，不带源文件路径。 */
+export const sessionImportCandidateSchema = z.object({
+  source: z.literal("pi"),
+  externalId: z.string().min(1),
+  title: z.string(),
+  projectPath: z.string().nullable(),
+  messageCount: z.number().int().nonnegative(),
+  updatedAt: z.number(),
+  alreadyHere: z.boolean(),
+});
+export type SessionImportCandidate = z.infer<typeof sessionImportCandidateSchema>;
+
+export const sessionImportScanRequestSchema = z.object({
+  workspaceId: z.string().min(1),
+});
+
+export const sessionImportScanResultSchema = z.object({
+  items: z.array(sessionImportCandidateSchema),
+});
+export type SessionImportScanResult = z.infer<typeof sessionImportScanResultSchema>;
+
+export const sessionImportRunRequestSchema = z.object({
+  workspaceId: z.string().min(1),
+  externalIds: z.array(z.string().min(1)).max(100),
+});
+
+export const sessionImportRunResultSchema = z.object({
+  imported: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+});
+export type SessionImportRunResult = z.infer<typeof sessionImportRunResultSchema>;

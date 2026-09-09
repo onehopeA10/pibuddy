@@ -22,8 +22,12 @@
  * 替换成一个 20MB 的东西。因此 resolve 里重新 realpath、重新 stat、
  * 重新嗅探 magic bytes，声明的类型与实际字节不符即拒绝。
  */
-import { shell } from "electron";
-import type { AttachmentDescriptor, AttachmentRef } from "@pibuddy/contract";
+import { app, shell } from "electron";
+import {
+  MAX_PROMPT_ATTACHMENT_BYTES,
+  type AttachmentDescriptor,
+  type AttachmentRef,
+} from "@pibuddy/contract";
 import { createHash, randomBytes } from "node:crypto";
 import nodeFs from "node:fs";
 import fsp from "node:fs/promises";
@@ -40,6 +44,73 @@ import path from "node:path";
  * 写法，词法比较认不出来，凭证兑付时的收容校验会因此对不上。只有操作系统
  * 认得这件事。
  */
+const DROP_NONCE_TTL_MS = 15_000;
+
+interface DropNonceRecord {
+  path: string;
+  webContentsId: number;
+  expiresAt: number;
+}
+
+const dropNonces = new Map<string, DropNonceRecord>();
+
+function pruneDropNonces(now: number): void {
+  for (const [nonce, rec] of dropNonces) {
+    if (rec.expiresAt <= now) dropNonces.delete(nonce);
+  }
+}
+
+/** preload 交出路径后，主进程签发一次性 nonce（绑定 sender，15s 过期）。 */
+export function stageDroppedPath(
+  absPath: string,
+  webContentsId: number,
+  now = Date.now()
+): string {
+  assertSafeDroppedPath(absPath);
+  pruneDropNonces(now);
+  const nonce = randomBytes(16).toString("hex");
+  dropNonces.set(nonce, { path: absPath, webContentsId, expiresAt: now + DROP_NONCE_TTL_MS });
+  return nonce;
+}
+
+/** 消费 nonce：先摘掉再校验，一次性、必须是签发时的同一个 webContents。 */
+export function consumeDroppedNonce(
+  nonce: string,
+  webContentsId: number,
+  now = Date.now()
+): string {
+  const rec = dropNonces.get(nonce);
+  if (!rec) {
+    pruneDropNonces(now);
+    throw new Error("DROP_NONCE_UNKNOWN");
+  }
+  dropNonces.delete(nonce);
+  pruneDropNonces(now);
+  if (rec.webContentsId !== webContentsId) throw new Error("DROP_NONCE_SENDER_MISMATCH");
+  if (rec.expiresAt <= now) throw new Error("DROP_NONCE_EXPIRED");
+  return rec.path;
+}
+
+/** 拖拽路径不得指向密钥目录；绝对路径 + 规范化后做前缀判定。 */
+export function assertSafeDroppedPath(absPath: string): void {
+  if (typeof absPath !== "string" || absPath.includes("\0")) {
+    throw new Error("ATTACHMENT_PATH_INVALID");
+  }
+  const normalized = path.normalize(absPath);
+  if (!path.isAbsolute(normalized)) throw new Error("ATTACHMENT_PATH_NOT_ABSOLUTE");
+  const blocked = [
+    app.getPath("userData"),
+    path.join(app.getPath("home"), ".ssh"),
+    path.join(app.getPath("home"), ".aws"),
+  ];
+  for (const root of blocked) {
+    const rel = path.relative(root, normalized);
+    if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
+      throw new Error("ATTACHMENT_PATH_FORBIDDEN");
+    }
+  }
+}
+
 function realpathNative(p: string): Promise<string> {
   return new Promise((resolve, reject) => {
     nodeFs.realpath.native(p, (err, resolved) => {
@@ -54,8 +125,8 @@ import { assertContained, lookupWorkspace } from "./workspace-registry.js";
 /** 30 分钟滑动过期（访问即续期）。 */
 export const ATTACHMENT_TTL_MS = 1800000;
 
-/** 单个图片附件的字节上限。超过它的图片对模型也没有意义，只会打满内存。 */
-export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+/** 保留既有导出名；图片与其他 prompt 附件使用同一个单文件上限。 */
+export const MAX_IMAGE_BYTES = MAX_PROMPT_ATTACHMENT_BYTES;
 
 /** 附件能力：读成 base64 内联给模型 / 用系统默认程序打开 / 在文件管理器里定位。 */
 export type AttachmentCapability = "read" | "open" | "reveal";
@@ -82,7 +153,8 @@ export interface AttachmentRecord {
   /** 签发时的 canonical realpath —— 只存在于主进程 */
   canonicalPath: string;
   name: string;
-  size: number;
+  /** 签发时稳定读取到的大小；兑付时不得用当前 stat 覆盖。 */
+  readonly size: number;
   kind: AttachmentKind;
   capabilities: AttachmentCapability[];
   /** 读 / 读写。写请求经 resolveAttachment({access:"read-write"}) 校验 */
@@ -94,7 +166,7 @@ export interface AttachmentRecord {
   sourceName: string;
   mimeType: string;
   /** 签发时刻的全文件 sha256，供变更集与冲突检测比对 */
-  sha256: string;
+  readonly sha256: string;
   /** 归属工作区；为 null 表示由用户经系统文件对话框显式授权的单文件 */
   workspaceId: string | null;
   /** 归属会话；会话切换时按它批量撤销 */
@@ -103,7 +175,25 @@ export interface AttachmentRecord {
   expiresAt: number;
 }
 
+/** 只在 main 内部流转；snapshotPath 从不进入 renderer 契约。 */
+export interface PromptAttachmentSnapshot {
+  token: string;
+  sourceLabel: string;
+  sourceName: string;
+  relativePath: string;
+  mimeType: string;
+  size: number;
+  sha256: string;
+  snapshotPath: string;
+}
+
+interface CachedPromptSnapshot extends PromptAttachmentSnapshot {
+  directory: string;
+}
+
 const tokens = new Map<string, AttachmentRecord>();
+const promptSnapshots = new Map<string, CachedPromptSnapshot>();
+const promptSnapshotPromises = new Map<string, Promise<PromptAttachmentSnapshot>>();
 
 /**
  * 访问即续期：把过期时刻顺延一个完整的 TTL。
@@ -115,9 +205,30 @@ function renewOnAccess(record: AttachmentRecord, now: number): void {
   record.expiresAt = now + ATTACHMENT_TTL_MS;
 }
 
+function promptSnapshotRoot(): string {
+  return path.join(app.getPath("temp"), "pibuddy-prompt-attachments", String(process.pid));
+}
+
+function tokenSnapshotDirectory(token: string): string {
+  return path.join(promptSnapshotRoot(), token);
+}
+
+function removeSnapshotFiles(token: string): void {
+  const cached = promptSnapshots.get(token);
+  promptSnapshots.delete(token);
+  const directory = cached?.directory ?? tokenSnapshotDirectory(token);
+  nodeFs.rmSync(directory, { recursive: true, force: true });
+}
+
+function deleteToken(token: string): boolean {
+  const removed = tokens.delete(token);
+  removeSnapshotFiles(token);
+  return removed;
+}
+
 function sweep(now: number): void {
   for (const [token, record] of tokens) {
-    if (record.expiresAt <= now) tokens.delete(token);
+    if (record.expiresAt <= now) deleteToken(token);
   }
 }
 
@@ -224,10 +335,59 @@ export interface IssueOptions {
   now?: number;
 }
 
-/** 全文件 sha256。附件都是用户亲手选的单个文件，整读一遍是可接受的代价。 */
-async function hashFile(absPath: string): Promise<string> {
-  const buffer = await fsp.readFile(absPath);
-  return createHash("sha256").update(buffer).digest("hex");
+interface StableRead {
+  bytes: Buffer;
+  size: number;
+  sha256: string;
+}
+
+/** 单个已打开句柄最多读取 maxBytes + 1；文件增长也不可能变成无界内存读取。 */
+async function readHandleBounded(
+  handle: Awaited<ReturnType<typeof fsp.open>>,
+  maxBytes: number
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  while (total < maxBytes + 1) {
+    const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1 - total));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
+    if (bytesRead === 0) break;
+    chunks.push(chunk.subarray(0, bytesRead));
+    total += bytesRead;
+  }
+  return Buffer.concat(chunks, total);
+}
+
+/**
+ * 从一个文件句柄完成 fstat → bounded read → fstat。
+ *
+ * 路径在 open 之后即使被替换，句柄仍钉在同一个文件对象上；前后大小不一致、
+ * 实读字节不一致或超过上限都拒绝，调用方永远拿不到半截或增长后的内容。
+ */
+async function readPathStable(absPath: string, maxBytes: number): Promise<StableRead> {
+  const handle = await fsp.open(absPath, "r");
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) throw new Error("ATTACHMENT_NOT_A_FILE");
+    if (before.size > maxBytes) {
+      throw new Error(`ATTACHMENT_TOO_LARGE: ${before.size} > ${maxBytes}`);
+    }
+    const bytes = await readHandleBounded(handle, maxBytes);
+    if (bytes.byteLength > maxBytes) {
+      throw new Error(`ATTACHMENT_TOO_LARGE: ${bytes.byteLength} > ${maxBytes}`);
+    }
+    const after = await handle.stat();
+    if (before.size !== after.size || after.size !== bytes.byteLength) {
+      throw new Error("ATTACHMENT_CHANGED_DURING_READ");
+    }
+    return {
+      bytes,
+      size: bytes.byteLength,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  } finally {
+    await handle.close();
+  }
 }
 
 /**
@@ -244,6 +404,11 @@ export async function issue(
   const canonicalPath = await realpathNative(absPath);
   const stat = await fsp.stat(canonicalPath);
   if (!stat.isFile()) throw new Error(`ATTACHMENT_NOT_A_FILE: ${absPath}`);
+  if (stat.size > MAX_PROMPT_ATTACHMENT_BYTES) {
+    throw new Error(
+      `ATTACHMENT_TOO_LARGE: ${stat.size} > ${MAX_PROMPT_ATTACHMENT_BYTES}`
+    );
+  }
 
   const workspaceId = options.workspaceId ?? null;
   // 工作区外的单文件授权（系统文件对话框 / 拖拽）没有 root 可相对，
@@ -256,19 +421,22 @@ export async function issue(
     relativePath = path.relative(record.root, canonicalPath).split(path.sep).join("/");
   }
 
+  const stable = await readPathStable(canonicalPath, MAX_PROMPT_ATTACHMENT_BYTES);
+  if (stable.size !== stat.size) throw new Error("ATTACHMENT_CHANGED_DURING_ISSUE");
+
   const token = randomBytes(24).toString("base64url");
   const entry: AttachmentRecord = {
     token,
     canonicalPath,
     name: path.basename(canonicalPath),
-    size: stat.size,
+    size: stable.size,
     kind: kindOf(canonicalPath),
     capabilities: options.capabilities ?? ["read", "open", "reveal"],
     access: options.access ?? "read",
     relativePath,
     sourceName: path.basename(canonicalPath),
     mimeType: mimeTypeOf(canonicalPath),
-    sha256: await hashFile(canonicalPath),
+    sha256: stable.sha256,
     workspaceId,
     sessionId: options.sessionId ?? null,
     expiresAt: now + ATTACHMENT_TTL_MS,
@@ -315,37 +483,28 @@ export interface ResolveOptions {
   now?: number;
 }
 
-/**
- * 兑付凭证：重做过期、能力、收容与存在性校验，命中即滑动续期。
- *
- * 这里刻意不信任签发时记下的任何东西 —— canonicalPath 也要重新 realpath
- * 一遍并与记录比对，因为符号链接可以在签发之后被指向别处。
- */
-export async function resolveAttachment(
-  token: string,
-  options: ResolveOptions = {}
-): Promise<AttachmentRecord> {
+function requireRecord(token: string, options: ResolveOptions): AttachmentRecord {
   const now = options.now ?? Date.now();
   sweep(now);
-
   const record = tokens.get(token);
   if (!record) throw new Error("ATTACHMENT_TOKEN_INVALID");
   if (record.expiresAt <= now) {
-    tokens.delete(token);
+    deleteToken(token);
     throw new Error("ATTACHMENT_TOKEN_EXPIRED");
   }
-  const capability = options.capability;
-  if (capability && !record.capabilities.includes(capability)) {
-    throw new Error(`ATTACHMENT_CAPABILITY_DENIED: ${capability}`);
+  if (options.capability && !record.capabilities.includes(options.capability)) {
+    throw new Error(`ATTACHMENT_CAPABILITY_DENIED: ${options.capability}`);
   }
-  // 写请求撞上只读凭证：拒。这一句就是 capability 字段全部的意义所在。
   if (options.access === "read-write" && record.access !== "read-write") {
     throw new Error("ATTACHMENT_ACCESS_DENIED: read-write");
   }
+  return record;
+}
 
+async function validateRecordPath(record: AttachmentRecord): Promise<string> {
   const real = await realpathNative(record.canonicalPath);
   if (real !== record.canonicalPath) {
-    tokens.delete(token);
+    deleteToken(record.token);
     throw new Error("ATTACHMENT_TARGET_MOVED");
   }
   if (record.workspaceId) {
@@ -353,17 +512,139 @@ export async function resolveAttachment(
     if (!workspace) throw new Error(`WORKSPACE_UNKNOWN: ${record.workspaceId}`);
     await assertContained(workspace.root, real);
   }
+  return real;
+}
+
+async function readVerifiedRecord(
+  record: AttachmentRecord,
+  maxBytes: number
+): Promise<StableRead> {
+  const real = await validateRecordPath(record);
+  const stable = await readPathStable(real, maxBytes);
+  if (stable.size !== record.size || stable.sha256 !== record.sha256) {
+    throw new Error("ATTACHMENT_CONTENT_CHANGED");
+  }
+  return stable;
+}
+
+/**
+ * 兑付凭证：重做过期、能力、收容与存在性校验，命中即滑动续期。
+ * open/reveal 仍返回原路径；所有送进模型的数据路径走下面的 immutable snapshot。
+ */
+export async function resolveAttachment(
+  token: string,
+  options: ResolveOptions = {}
+): Promise<AttachmentRecord> {
+  const now = options.now ?? Date.now();
+  const record = requireRecord(token, options);
+  const real = await validateRecordPath(record);
   const stat = await fsp.stat(real);
   if (!stat.isFile()) throw new Error("ATTACHMENT_NOT_A_FILE");
-  record.size = stat.size;
-
+  if (stat.size !== record.size) throw new Error("ATTACHMENT_CONTENT_CHANGED");
   renewOnAccess(record, now);
   return record;
 }
 
-/** 兑付后返回**主进程内部使用**的绝对路径（拼接给模型的文件引用块）。 */
+/** 兑付后返回主进程内部使用的原路径；prompt/model 路径禁止调用这一函数。 */
 export async function resolvePath(token: string, options: ResolveOptions = {}): Promise<string> {
   return (await resolveAttachment(token, options)).canonicalPath;
+}
+
+function safeSnapshotName(sourceName: string): string {
+  const candidateExt = path.extname(sourceName).toLowerCase();
+  const ext = /^\.[a-z0-9]{1,12}$/.test(candidateExt) ? candidateExt : "";
+  const rawBase = path.basename(sourceName, candidateExt);
+  const base = rawBase
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^\.+/, "")
+    .slice(0, 64);
+  return `${base || "attachment"}${ext}`;
+}
+
+async function writePromptSnapshot(
+  record: AttachmentRecord,
+  stable: StableRead
+): Promise<CachedPromptSnapshot> {
+  const root = promptSnapshotRoot();
+  const directory = tokenSnapshotDirectory(record.token);
+  await fsp.mkdir(root, { recursive: true, mode: 0o700 });
+  await fsp.chmod(root, 0o700);
+  await fsp.mkdir(directory, { recursive: true, mode: 0o700 });
+  await fsp.chmod(directory, 0o700);
+
+  const finalPath = path.join(directory, safeSnapshotName(record.sourceName));
+  const temporaryPath = path.join(
+    directory,
+    `.snapshot-${randomBytes(12).toString("hex")}.tmp`
+  );
+  try {
+    const handle = await fsp.open(temporaryPath, "wx", 0o600);
+    try {
+      await handle.writeFile(stable.bytes);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fsp.chmod(temporaryPath, 0o400);
+    if (tokens.get(record.token) !== record) throw new Error("ATTACHMENT_TOKEN_INVALID");
+    await fsp.rename(temporaryPath, finalPath);
+    if (tokens.get(record.token) !== record) throw new Error("ATTACHMENT_TOKEN_INVALID");
+  } catch (err) {
+    await fsp.rm(temporaryPath, { force: true }).catch(() => undefined);
+    await fsp.rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    throw err;
+  }
+
+  return {
+    token: record.token,
+    sourceLabel: record.workspaceId ? record.relativePath : record.sourceName,
+    sourceName: record.sourceName,
+    relativePath: record.relativePath,
+    mimeType: record.mimeType,
+    size: stable.size,
+    sha256: stable.sha256,
+    snapshotPath: finalPath,
+    directory,
+  };
+}
+
+/**
+ * 非图片 prompt 附件兑付为 main-owned immutable snapshot。
+ * 原路径只用于一次单句柄稳定读取，绝不会返回给 pi 或 renderer。
+ */
+export async function snapshotPromptAttachment(
+  token: string,
+  options: ResolveOptions = {}
+): Promise<PromptAttachmentSnapshot> {
+  const now = options.now ?? Date.now();
+  const record = requireRecord(token, { ...options, capability: "read" });
+  if (record.kind === "image") throw new Error("ATTACHMENT_IMAGE_REQUIRES_INLINE_READ");
+
+  const cached = promptSnapshots.get(token);
+  if (cached) {
+    const stat = await fsp.stat(cached.snapshotPath).catch(() => null);
+    if (stat?.isFile() && stat.size === cached.size) {
+      renewOnAccess(record, now);
+      return cached;
+    }
+    removeSnapshotFiles(token);
+  }
+
+  const existing = promptSnapshotPromises.get(token);
+  if (existing) return existing;
+
+  const promise = (async (): Promise<PromptAttachmentSnapshot> => {
+    const stable = await readVerifiedRecord(record, MAX_PROMPT_ATTACHMENT_BYTES);
+    if (tokens.get(token) !== record) throw new Error("ATTACHMENT_TOKEN_INVALID");
+    const snapshot = await writePromptSnapshot(record, stable);
+    promptSnapshots.set(token, snapshot);
+    renewOnAccess(record, now);
+    return snapshot;
+  })().finally(() => {
+    promptSnapshotPromises.delete(token);
+  });
+  promptSnapshotPromises.set(token, promise);
+  return promise;
 }
 
 export interface AttachmentImage {
@@ -371,24 +652,18 @@ export interface AttachmentImage {
   mimeType: string;
 }
 
-/**
- * 读取图片附件为 base64。
- *
- * 用 fs/promises 而不是 readFileSync：早先这里是同步读，一个 10MB 的图片
- * 会把主进程（也就是整个 UI 的事件循环）按住不动。
- */
+/** 图片同样只从一个句柄做 MAX+1 有界稳定读取，并复核签发时的大小与 sha256。 */
 export async function readImage(
   token: string,
   options: ResolveOptions = {}
 ): Promise<AttachmentImage> {
-  const record = await resolveAttachment(token, { ...options, capability: "read" });
-  if (record.size > MAX_IMAGE_BYTES) {
-    throw new Error(`ATTACHMENT_TOO_LARGE: ${record.size} > ${MAX_IMAGE_BYTES}`);
-  }
-  const buffer = await fsp.readFile(record.canonicalPath);
-  const mimeType = sniffImageMime(buffer.subarray(0, 16));
+  const now = options.now ?? Date.now();
+  const record = requireRecord(token, { ...options, capability: "read" });
+  const stable = await readVerifiedRecord(record, MAX_IMAGE_BYTES);
+  const mimeType = sniffImageMime(stable.bytes.subarray(0, 16));
   if (!mimeType) throw new Error("ATTACHMENT_NOT_AN_IMAGE");
-  return { data: buffer.toString("base64"), mimeType };
+  renewOnAccess(record, now);
+  return { data: stable.bytes.toString("base64"), mimeType };
 }
 
 /** 全 main 唯一调用 shell.openPath 的地方：只接受凭证，不接受路径。 */
@@ -416,19 +691,34 @@ export function revokeAllForSession(sessionId: string): number {
   let removed = 0;
   for (const [token, record] of tokens) {
     if (record.sessionId === sessionId) {
-      tokens.delete(token);
+      deleteToken(token);
       removed++;
     }
   }
   return removed;
 }
 
-/** 应用退出 / 窗口销毁时撤销全部未消费凭证。 */
+/** 应用退出 / 窗口销毁时撤销全部未消费凭证及其 immutable snapshots。 */
 export function revokeAll(): number {
   const removed = tokens.size;
-  tokens.clear();
+  for (const token of [...tokens.keys()]) deleteToken(token);
+  promptSnapshots.clear();
+  nodeFs.rmSync(promptSnapshotRoot(), { recursive: true, force: true });
   return removed;
 }
+
+/** 单测重置与 app exit 共用同一条清理路径。 */
+export function __resetForTests(): void {
+  revokeAll();
+  promptSnapshotPromises.clear();
+}
+
+(app as unknown as { once?: (event: string, listener: () => void) => void }).once?.(
+  "will-quit",
+  () => {
+    revokeAll();
+  }
+);
 
 /**
  * 记录 → 渲染侧视图。
@@ -451,4 +741,9 @@ export function toAttachmentRef(record: AttachmentRecord): AttachmentRef {
 /** 仅供诊断与单测：当前未消费凭证数量。 */
 export function outstandingCount(): number {
   return tokens.size;
+}
+
+/** 仅供单测：token 当前是否持有 main-owned snapshot。 */
+export function snapshotPathForTest(token: string): string | null {
+  return promptSnapshots.get(token)?.snapshotPath ?? null;
 }

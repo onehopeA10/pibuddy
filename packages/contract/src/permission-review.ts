@@ -40,6 +40,11 @@
 import { z } from "zod";
 
 import { isCapabilityPermission } from "./capability.js";
+import { isMcpShellGrant, parseMcpGrantResource } from "./mcp.js";
+import {
+  isPiResourcesShellGrant,
+  parsePiPackageGrantResource,
+} from "./pi-resources.js";
 import {
   capabilityGrantSchema,
   isDangerousPermission,
@@ -392,6 +397,11 @@ export interface PermissionPromptInput {
   permission: string;
   resource: string | null;
   /**
+   * 发起申请时的工作区。带工作区资源轴的权限必须与它逐字一致，防止用户切换
+   * 项目后把 A 的弹窗授权给 B。普通无资源权限可省略。
+   */
+  workspaceId?: string | null;
+  /**
    * 危险命令原文（终端 / git 之类的消费者提供）。
    *
    * 给了命令，就意味着弹窗要把它显示出来——于是「截断后类别必须不变」这条
@@ -441,6 +451,30 @@ function canonicalField(value: string, maxBytes: number, label: string): string 
   return value;
 }
 
+/** 带工作区资源轴的两类权限共用同一条「可解析 + 归属一致」判据。 */
+function boundPermissionResourceIssue(
+  capabilityId: string,
+  permission: string,
+  resource: string | null,
+  workspaceId?: string | null
+): string | null {
+  if (isMcpShellGrant(capabilityId, permission)) {
+    const parsed = parseMcpGrantResource(resource ?? "");
+    if (parsed === null) return "MCP 的 process.shell 必须绑定具体工作区、服务器与执行配置";
+    if (workspaceId !== undefined && (workspaceId === null || parsed.workspaceId !== workspaceId)) {
+      return "MCP 授权资源所属工作区与本次申请不一致";
+    }
+  }
+  if (isPiResourcesShellGrant(capabilityId, permission)) {
+    const parsed = parsePiPackageGrantResource(resource ?? "");
+    if (parsed === null) return "Pi 包操作的 process.shell 必须绑定动作、作用域、工作区与包规格";
+    if (workspaceId !== undefined && (workspaceId === null || parsed.workspaceId !== workspaceId)) {
+      return "Pi 包操作授权资源所属工作区与本次申请不一致";
+    }
+  }
+  return null;
+}
+
 /**
  * 把一次权限申请投影成"可以安全显示"的视图。**任何不一致都抛错 = 拒绝弹窗**。
  *
@@ -474,6 +508,13 @@ export function projectPermissionPrompt(input: PermissionPromptInput): Permissio
   if (permission === "network.local" && parseLocalEndpointResource(resource ?? "") === null) {
     throw new PermissionPromptProjectionError("network.local 必须绑定具体 host:port");
   }
+  const boundIssue = boundPermissionResourceIssue(
+    capabilityId,
+    permission,
+    resource,
+    input.workspaceId
+  );
+  if (boundIssue !== null) throw new PermissionPromptProjectionError(boundIssue);
 
   const raw = input.command ?? null;
   let command: PermissionCommandReview | null = null;
@@ -532,6 +573,8 @@ export const CAPABILITY_GRANT_SHAPE = defineObjectShape<CapabilityGrant>()(
 /** 再推导需要的外部事实：某能力 manifest **声明**过哪些权限。 */
 export interface CapabilityGrantReviewDeps {
   declaredPermissions(capabilityId: string): ReadonlySet<string>;
+  /** 这条持久授权实际存在哪个工作区；资源轴内嵌的 id 必须与它一致。 */
+  workspaceId?: string | null;
 }
 
 export type CapabilityGrantReview =
@@ -596,6 +639,13 @@ export function reviewCapabilityGrant(
   ) {
     return { ok: false, reason: "network.local 授权未绑定具体 host:port" };
   }
+  const boundIssue = boundPermissionResourceIssue(
+    grant.capabilityId,
+    grant.permission,
+    grant.resource,
+    deps.workspaceId
+  );
+  if (boundIssue !== null) return { ok: false, reason: boundIssue };
   // 能力确实声明过该权限（manifest 上界）。能力被降级 / 权限被从 manifest 拿掉
   // 之后，旧的落库授权必须随之失效，而不是继续生效到下一次有人想起来清理。
   if (!deps.declaredPermissions(grant.capabilityId).has(grant.permission)) {

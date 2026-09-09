@@ -94,6 +94,7 @@ const host: ChildHost = {
       workspaceId: req.workspaceId,
       origin: "child",
       focus: false,
+      inheritPermissions: req.inheritPermissions,
     });
   },
   stop(nodeId) {

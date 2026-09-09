@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const handled = new Map<string, (event: unknown, raw: unknown) => unknown>();
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), "pibuddy-term-perm-"));
 const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), "pibuddy-term-ws-"));
+const otherWsDir = fs.mkdtempSync(path.join(os.tmpdir(), "pibuddy-term-other-ws-"));
 
 vi.mock("electron", () => ({
   app: { getPath: () => userData, isPackaged: false, getVersion: () => "0.0.0" },
@@ -46,10 +47,12 @@ const event = { senderFrame: frame, sender: { id: 9, mainFrame: frame } };
 const call = (channel: string, raw: unknown): unknown => handled.get(channel)!(event, raw);
 
 let workspaceId = "";
+let otherWorkspaceId = "";
 
 beforeAll(() => {
   __setWorkspaceDataDir(userData);
   workspaceId = registerWorkspace(fs.realpathSync.native(wsDir)).workspaceId;
+  otherWorkspaceId = registerWorkspace(fs.realpathSync.native(otherWsDir)).workspaceId;
   __resetRegisteredChannels();
   handled.clear();
   registerTerminalIpc();
@@ -117,5 +120,67 @@ describe("放行路径：授权后 terminal:open 真的 spawn 出 shell", () => 
     await expect(
       call(CHANNELS.terminalOpen, { workspaceId, profileId: null, cols: 80, rows: 24 })
     ).rejects.toThrow(/IPC_PERMISSION_DENIED/);
+  });
+
+  it("workspace B 不能经 IPC 操作 A 的 tab，A 的七种操作仍全部可用", async () => {
+    permStore.__resetPermissionStore();
+    await permStore.decidePermission({
+      capabilityId: TERMINAL_CAPABILITY_ID,
+      permission: TERMINAL_PERMISSION,
+      resource: null,
+      disposition: "allow-session",
+      workspaceId: null,
+    });
+
+    const meta = (await call(CHANNELS.terminalOpen, {
+      workspaceId,
+      profileId: null,
+      cols: 80,
+      rows: 24,
+    })) as { tabId: string; generation: number };
+
+    await expect(
+      call(CHANNELS.terminalInput, { workspaceId: otherWorkspaceId, tabId: meta.tabId, data: "blocked" })
+    ).resolves.toMatchObject({ ok: false });
+    await expect(
+      call(CHANNELS.terminalResize, { workspaceId: otherWorkspaceId, tabId: meta.tabId, cols: 100, rows: 30 })
+    ).resolves.toMatchObject({ ok: false });
+    await expect(
+      call(CHANNELS.terminalSnapshot, { workspaceId: otherWorkspaceId, tabId: meta.tabId })
+    ).resolves.toMatchObject({ found: false });
+    await expect(
+      call(CHANNELS.terminalClear, { workspaceId: otherWorkspaceId, tabId: meta.tabId })
+    ).resolves.toMatchObject({ ok: false });
+    await expect(
+      call(CHANNELS.terminalKill, { workspaceId: otherWorkspaceId, tabId: meta.tabId })
+    ).resolves.toMatchObject({ ok: false });
+    await expect(
+      call(CHANNELS.terminalRestart, { workspaceId: otherWorkspaceId, tabId: meta.tabId })
+    ).rejects.toThrow(/TERMINAL_TAB_UNKNOWN/);
+    await expect(
+      call(CHANNELS.terminalRename, { workspaceId: otherWorkspaceId, tabId: meta.tabId, title: "blocked" })
+    ).rejects.toThrow(/TERMINAL_TAB_UNKNOWN/);
+
+    await expect(
+      call(CHANNELS.terminalInput, { workspaceId, tabId: meta.tabId, data: "" })
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      call(CHANNELS.terminalResize, { workspaceId, tabId: meta.tabId, cols: 120, rows: 40 })
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      call(CHANNELS.terminalSnapshot, { workspaceId, tabId: meta.tabId })
+    ).resolves.toMatchObject({ found: true, generation: meta.generation });
+    await expect(
+      call(CHANNELS.terminalClear, { workspaceId, tabId: meta.tabId })
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      call(CHANNELS.terminalRename, { workspaceId, tabId: meta.tabId, title: "allowed" })
+    ).resolves.toMatchObject({ title: "allowed" });
+    await expect(
+      call(CHANNELS.terminalRestart, { workspaceId, tabId: meta.tabId })
+    ).resolves.toMatchObject({ generation: meta.generation + 1, running: true });
+    await expect(
+      call(CHANNELS.terminalKill, { workspaceId, tabId: meta.tabId })
+    ).resolves.toMatchObject({ ok: true });
   });
 });

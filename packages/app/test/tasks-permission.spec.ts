@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   evaluateScheduledPermissions,
+  inboxCapabilityOf,
   TASKS_CAPABILITY_ID,
 } from "../src/main/tasks/task-permission.js";
 import { CapabilityPermissionEngine } from "../src/main/permission/permission-engine.js";
@@ -73,6 +74,21 @@ describe("对照：交互引擎的 session 授权，定时判定不认（不继�
     const scheduled = evaluateScheduledPermissions(["process.git"], "ws1", []);
     expect(scheduled.allowed).toBe(false);
     expect(scheduled.missing).toEqual(["process.git"]);
+  });
+
+  it("inboxCapabilityOf 把定时权限映射到声明了该权限的能力", () => {
+    expect(inboxCapabilityOf("process.git")).toBe("coding.git");
+    expect(inboxCapabilityOf("process.shell")).toBe("coding.terminal");
+    expect(inboxCapabilityOf("workspace.read")).toBe("common.workspace-files");
+    expect(inboxCapabilityOf("network.local")).toBe("home.assistant");
+    expect(inboxCapabilityOf("tasks.manage")).toBe(TASKS_CAPABILITY_ID);
+  });
+
+  it("coding.git 落盘的 process.git 也能覆盖定时判定（不要求 capabilityId=common.tasks）", () => {
+    const scheduled = evaluateScheduledPermissions(["process.git"], "ws1", [
+      { capabilityId: "coding.git", permission: "process.git", resource: null, grantedAt: 0 },
+    ]);
+    expect(scheduled.allowed).toBe(true);
   });
 
   it("补上 workspace 授权后，定时判定才放行（预授权是唯一通路）", () => {

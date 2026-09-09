@@ -26,10 +26,22 @@
  */
 import type { CapabilityGrant } from "@pibuddy/contract";
 
-import { grantCovers, type PermissionQuery } from "../permission/permission-engine.js";
+import { grantCovers } from "../permission/permission-engine.js";
 
 /** 定时任务权限授予时归属的 capabilityId（授权中心里以此为键落 allow-workspace）。 */
 export const TASKS_CAPABILITY_ID = "common.tasks";
+
+/** inbox / 裁决弹窗要用声明了该权限的能力，否则 decidePermission 会因越上界拒掉。 */
+export function inboxCapabilityOf(permission: string): string {
+  if (permission === "process.git") return "coding.git";
+  if (permission === "process.shell") return "coding.terminal";
+  if (permission === "workspace.read" || permission === "workspace.write") {
+    return "common.workspace-files";
+  }
+  if (permission === "network.local") return "home.assistant";
+  if (permission === "tasks.manage") return TASKS_CAPABILITY_ID;
+  return TASKS_CAPABILITY_ID;
+}
 
 export interface ScheduledPermissionResult {
   allowed: boolean;
@@ -50,13 +62,14 @@ export function evaluateScheduledPermissions(
 ): ScheduledPermissionResult {
   const missing: string[] = [];
   for (const permission of required) {
-    const query: PermissionQuery = {
-      capabilityId: TASKS_CAPABILITY_ID,
-      permission,
-      resource: null,
-      workspaceId,
-    };
-    const covered = workspaceGrants.some((grant) => grantCovers(grant, query));
+    const covered = workspaceGrants.some((grant) =>
+      grantCovers(grant, {
+        capabilityId: grant.capabilityId,
+        permission,
+        resource: null,
+        workspaceId,
+      })
+    );
     if (!covered) missing.push(permission);
   }
   return { allowed: missing.length === 0, missing };

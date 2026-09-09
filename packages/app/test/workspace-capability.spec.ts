@@ -73,6 +73,23 @@ describe("workspaceId 由 canonical realpath 派生且跨重启稳定（裁定3�
     expect(second.requireWorkspaceRoot(id)).toBe(fs.realpathSync.native(workspaceDir));
   });
 
+  it("落盘 key 被改绑到另一个 root 时拒绝载入", async () => {
+    const first = await freshRegistry();
+    const id = first.registerWorkspace(workspaceDir).workspaceId;
+    const other = path.join(tmpRoot, "other-work");
+    fs.mkdirSync(other);
+    fs.writeFileSync(
+      path.join(userDataDir, "workspaces.json"),
+      JSON.stringify({
+        [id]: { root: fs.realpathSync.native(other), registeredAt: 1 },
+      }),
+      "utf8"
+    );
+
+    const second = await freshRegistry();
+    expect(() => second.requireWorkspaceRoot(id)).toThrow(/WORKSPACE_UNKNOWN/);
+  });
+
   it("两个不同目录得到不同的 id", async () => {
     const reg = await freshRegistry();
     const other = path.join(tmpRoot, "work2");

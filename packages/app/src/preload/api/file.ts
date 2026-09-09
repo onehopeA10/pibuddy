@@ -12,11 +12,12 @@ import type { AttachmentRef, ReadImageResult } from "@pibuddy/contract";
 import { invoke } from "./bridge.js";
 
 export const file = {
-  /** 拖拽进来的文件 → 能力凭证。 */
-  fromDrop: (dropped: File) =>
-    invoke<AttachmentRef>(CHANNELS.fileAttachDropped, {
-      droppedPath: webUtils.getPathForFile(dropped),
-    }),
+  /** 拖拽进来的文件 → 能力凭证。路径只在 preload→main 的 stage 步出现。 */
+  fromDrop: async (dropped: File) => {
+    const droppedPath = webUtils.getPathForFile(dropped);
+    const staged = await invoke<{ nonce: string }>(CHANNELS.fileStageDropped, { droppedPath });
+    return invoke<AttachmentRef>(CHANNELS.fileAttachDropped, { nonce: staged.nonce });
+  },
   readImage: (token: string) => invoke<ReadImageResult>(CHANNELS.fileReadAttachment, { token }),
   /** 换会话 / 关窗口时作废全部已签发凭证。 */
   revokeAll: () => invoke<void>(CHANNELS.attachmentRevokeAll),

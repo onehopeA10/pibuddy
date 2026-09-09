@@ -43,6 +43,8 @@ import {
   type MemoryScope,
   type MemorySensitivity,
   type MemoryType,
+  type WorkingExpiry,
+  type WorkingItem,
 } from "@pibuddy/contract";
 
 import { classifyContent } from "./memory-secret.js";
@@ -152,6 +154,68 @@ const DDL_KNOWLEDGE = `CREATE TABLE IF NOT EXISTS knowledge (
 const DDL_KNOWLEDGE_FTS = `CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts
   USING fts5(id UNINDEXED, content, tokenize = 'trigram')`;
 
+/** v3：当前任务缓存（Working）。不改 memories 行。 */
+const DDL_WORKING_ITEMS = `CREATE TABLE IF NOT EXISTS working_items (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  content TEXT NOT NULL,
+  source_memory_id TEXT,
+  source_hash TEXT,
+  created_turn INTEGER NOT NULL,
+  expires TEXT NOT NULL,
+  refresh_on_source_change INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`;
+
+const DDL_WORKING_SESSION_IDX = `CREATE INDEX IF NOT EXISTS idx_working_session
+  ON working_items(session_id, expires)`;
+
+const DDL_WORKING_SOURCE_IDX = `CREATE UNIQUE INDEX IF NOT EXISTS idx_working_session_source
+  ON working_items(session_id, source_memory_id) WHERE source_memory_id IS NOT NULL`;
+
+const DDL_MEMORY_CANDIDATES = `CREATE TABLE IF NOT EXISTS memory_candidates (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  workspace_id TEXT,
+  logical_kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  evidence_json TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  rejection_reason TEXT,
+  created_at TEXT NOT NULL,
+  reviewed_at TEXT
+)`;
+
+const DDL_MEMORY_CONFLICTS = `CREATE TABLE IF NOT EXISTS memory_conflicts (
+  id TEXT PRIMARY KEY,
+  claim_key TEXT NOT NULL,
+  memory_ids_json TEXT NOT NULL,
+  resolution TEXT,
+  requires_validation INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+)`;
+
+const DDL_MEMORY_ROUTE_EVENTS = `CREATE TABLE IF NOT EXISTS memory_route_events (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL,
+  session_id TEXT,
+  mode TEXT NOT NULL,
+  scopes_json TEXT NOT NULL,
+  retrieved INTEGER NOT NULL DEFAULT 0,
+  admitted INTEGER NOT NULL DEFAULT 0,
+  injected INTEGER NOT NULL DEFAULT 0,
+  conflicts INTEGER NOT NULL DEFAULT 0,
+  live_validations INTEGER NOT NULL DEFAULT 0,
+  token_cost INTEGER NOT NULL DEFAULT 0,
+  latency_ms INTEGER,
+  task_success INTEGER,
+  memory_helpful INTEGER,
+  created_at TEXT NOT NULL
+)`;
+
 /** meta 键：全局注入总开关。 */
 const META_GLOBAL_INJECTION = "global_injection_enabled";
 /** meta 键前缀：逐工作区注入开关。 */
@@ -217,6 +281,13 @@ export class MemoryStore {
     this.db.exec(DDL_EMBEDDINGS);
     this.db.exec(DDL_KNOWLEDGE);
     this.db.exec(DDL_KNOWLEDGE_FTS);
+    // v3 治理表：同样 IF NOT EXISTS，不动 memories / FTS / embeddings 一个字节。
+    this.db.exec(DDL_WORKING_ITEMS);
+    this.db.exec(DDL_WORKING_SESSION_IDX);
+    this.db.exec(DDL_WORKING_SOURCE_IDX);
+    this.db.exec(DDL_MEMORY_CANDIDATES);
+    this.db.exec(DDL_MEMORY_CONFLICTS);
+    this.db.exec(DDL_MEMORY_ROUTE_EVENTS);
     this.migrate();
   }
 
@@ -224,9 +295,12 @@ export class MemoryStore {
    * 用 `PRAGMA user_version` 记代际；升级在这里补分支，绝不静默重建。
    *
    * v1(1) → v2(2)：新表已在构造里以 IF NOT EXISTS 建好（非破坏性），这里只把
-   * 代际推到 2。老库里已有的 memories 一条不动，语义检索所需的向量按需补算
-   * （memory:reembed / 保存时嵌入），因此「迁移不丢数据」是真的——v1 的记录
-   * 迁移后仍能被 FTS 查到、能被注入，只是尚无向量直到被重嵌。
+   * 代际推到当前版本。老库里已有的 memories 一条不动，语义检索所需的向量按需
+   * 补算（memory:reembed / 保存时嵌入），因此「迁移不丢数据」是真的——v1 的
+   * 记录迁移后仍能被 FTS 查到、能被注入，只是尚无向量直到被重嵌。
+   *
+   * v2(2) → v3(3)：只加 working / candidates / conflicts / route_events，
+   * 不改 v1/v2 行字节。
    */
   private migrate(): void {
     const row = this.db.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined;
@@ -415,6 +489,8 @@ export class MemoryStore {
     // v2：向量也要清 —— 否则「删除后语义检索仍命中」，与「删除后 FTS 零命中」
     // 是同一条安全承诺的另一半。少清这一处，一条被删的记忆还能被向量余弦捞回来。
     this.db.prepare("DELETE FROM embeddings WHERE kind = 'memory' AND ref_id = ?").run(id);
+    // v3：Working 指针也要清，否则删除后下一轮仍会注入已死来源。
+    this.db.prepare("DELETE FROM working_items WHERE source_memory_id = ?").run(id);
   }
 
   // ------------------------------------------------------------ 读取
@@ -856,6 +932,189 @@ export class MemoryStore {
       )
       .run(key, value);
   }
+
+  // ------------------------------------------------------------ Working（v3）
+
+  upsertWorkingItem(input: {
+    sessionId: string;
+    kind: string;
+    content: string;
+    sourceMemoryId?: string | null;
+    sourceHash?: string | null;
+    createdTurn?: number;
+    expires?: WorkingExpiry;
+    refreshOnSourceChange?: boolean;
+  }): WorkingItem {
+    const now = new Date().toISOString();
+    const sourceId = input.sourceMemoryId ?? null;
+    if (sourceId) {
+      const existing = this.db
+        .prepare("SELECT id FROM working_items WHERE session_id = ? AND source_memory_id = ?")
+        .get(input.sessionId, sourceId) as { id?: string } | undefined;
+      if (existing?.id) {
+        this.db
+          .prepare(
+            `UPDATE working_items SET kind=?, content=?, source_hash=?, expires=?,
+             refresh_on_source_change=?, updated_at=? WHERE id=?`
+          )
+          .run(
+            input.kind,
+            input.content,
+            input.sourceHash ?? null,
+            input.expires ?? "task_end",
+            (input.refreshOnSourceChange ?? true) ? 1 : 0,
+            now,
+            existing.id
+          );
+        return this.getWorkingItem(existing.id)!;
+      }
+    }
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO working_items (id, session_id, kind, content, source_memory_id, source_hash,
+           created_turn, expires, refresh_on_source_change, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        id,
+        input.sessionId,
+        input.kind,
+        input.content,
+        sourceId,
+        input.sourceHash ?? null,
+        input.createdTurn ?? 0,
+        input.expires ?? "task_end",
+        (input.refreshOnSourceChange ?? true) ? 1 : 0,
+        now,
+        now
+      );
+    return this.getWorkingItem(id)!;
+  }
+
+  getWorkingItem(id: string): WorkingItem | null {
+    const row = this.db.prepare("SELECT * FROM working_items WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined;
+    return row ? toWorkingItem(row) : null;
+  }
+
+  listWorkingItems(sessionId: string): WorkingItem[] {
+    const rows = this.db
+      .prepare("SELECT * FROM working_items WHERE session_id = ? ORDER BY updated_at DESC")
+      .all(sessionId) as Record<string, unknown>[];
+    return rows.map(toWorkingItem);
+  }
+
+  listWorkingSourceIds(sessionId: string): string[] {
+    const rows = this.db
+      .prepare(
+        "SELECT source_memory_id FROM working_items WHERE session_id = ? AND source_memory_id IS NOT NULL"
+      )
+      .all(sessionId) as { source_memory_id: string }[];
+    return rows.map((r) => r.source_memory_id);
+  }
+
+  /**
+   * source_hash 变了且 refresh_on_source_change=1 时删掉该 Working 项。
+   * @returns true = 该项已失效并被删除
+   */
+  invalidateWorkingIfHashChanged(sessionId: string, sourceMemoryId: string, currentHash: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT id, source_hash, refresh_on_source_change FROM working_items
+         WHERE session_id = ? AND source_memory_id = ?`
+      )
+      .get(sessionId, sourceMemoryId) as
+      | { id: string; source_hash: string | null; refresh_on_source_change: number }
+      | undefined;
+    if (!row) return false;
+    if (!row.refresh_on_source_change) return false;
+    if (!row.source_hash || row.source_hash === currentHash) return false;
+    this.db.prepare("DELETE FROM working_items WHERE id = ?").run(row.id);
+    return true;
+  }
+
+  insertCandidate(input: {
+    workspaceId: string;
+    scope: string;
+    logicalKind: string;
+    payload: unknown;
+    evidence: unknown;
+  }): string | null {
+    const scanned = `${JSON.stringify(input.payload)}\n${JSON.stringify(input.evidence)}`;
+    if (classifyContent(scanned).rejected) return null;
+    const id = randomUUID();
+    this.db
+      .prepare(
+        `INSERT INTO memory_candidates (id, scope, workspace_id, logical_kind, payload_json, evidence_json, status, created_at)
+         VALUES (?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        id,
+        input.scope,
+        input.workspaceId,
+        input.logicalKind,
+        JSON.stringify(input.payload),
+        JSON.stringify(input.evidence),
+        "pending",
+        new Date().toISOString()
+      );
+    return id;
+  }
+
+  listCandidates(workspaceId: string): Array<{ id: string; logicalKind: string; status: string }> {
+    const rows = this.db
+      .prepare("SELECT id, logical_kind, status FROM memory_candidates WHERE workspace_id = ?")
+      .all(workspaceId) as { id: string; logical_kind: string; status: string }[];
+    return rows.map((r) => ({ id: r.id, logicalKind: r.logical_kind, status: r.status }));
+  }
+
+  recordRouteEvent(input: {
+    requestId: string;
+    sessionId?: string | null;
+    mode: string;
+    scopes: string[];
+    retrieved: number;
+    admitted: number;
+    injected: number;
+    conflicts: number;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO memory_route_events (id, request_id, session_id, mode, scopes_json,
+           retrieved, admitted, injected, conflicts, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        randomUUID(),
+        input.requestId,
+        input.sessionId ?? null,
+        input.mode,
+        JSON.stringify(input.scopes),
+        input.retrieved,
+        input.admitted,
+        input.injected,
+        input.conflicts,
+        new Date().toISOString()
+      );
+  }
+}
+
+function toWorkingItem(row: Record<string, unknown>): WorkingItem {
+  const expires = String(row.expires ?? "task_end");
+  const expiry: WorkingExpiry =
+    expires === "session_end" || expires === "manual" ? expires : "task_end";
+  return {
+    id: String(row.id),
+    kind: String(row.kind ?? "fact"),
+    content: String(row.content ?? ""),
+    sourceMemoryId: row.source_memory_id == null ? null : String(row.source_memory_id),
+    sourceHash: row.source_hash == null ? null : String(row.source_hash),
+    createdTurn: Number(row.created_turn ?? 0),
+    expires: expiry,
+    refreshOnSourceChange: Number(row.refresh_on_source_change ?? 1) === 1,
+  };
 }
 
 /** DB 行 → 渲染侧视图。workspace_id 在这一步被丢掉（分区键不外发）。 */

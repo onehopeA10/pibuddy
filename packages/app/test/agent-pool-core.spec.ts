@@ -365,6 +365,30 @@ describe("统一权限 inbox：超时拒绝，绝不自动允许", () => {
     // 不存在的 id → null（不误摘别的）。
     expect(pool.resolveInbox("nope")).toBeNull();
   });
+
+  it("重复入队同一权限不叠两条；resolveMatchingInbox 按能力/权限摘掉", () => {
+    const { host } = makeHost();
+    const pool = new AgentPoolCore({ host });
+    pool.requestSession({ sessionId: "T", workspaceId: "ws", origin: "task" });
+    const req = {
+      id: "task:t1:process.git",
+      sessionId: "T",
+      capabilityId: "coding.git",
+      permission: "process.git",
+      now: 0,
+    };
+    pool.enqueuePermission(req);
+    pool.enqueuePermission(req);
+    expect(pool.snapshot().inbox).toHaveLength(1);
+    expect(
+      pool.resolveMatchingInbox({
+        capabilityId: "coding.git",
+        permission: "process.git",
+        workspaceId: "ws",
+      })
+    ).toBe(1);
+    expect(pool.snapshot().inbox).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------- 关闭语义
@@ -432,6 +456,43 @@ describe("adoptRunning：纳入已在跑的会话，不重复派生进程", () =
     pool.adoptRunning({ sessionId: "B", workspaceId: "ws", runtimeId: "rt-B-1", generation: 1 });
     pool.handleExit("B", "crash", 2000);
     expect(pool.snapshot().sessions.find((s) => s.sessionId === "B")!.crashCount).toBe(1);
+  });
+});
+
+describe("inheritPermissions 决定 sessionGrantPolicy", () => {
+  it("user 默认 inherit；child/task 默认 workspace-only", () => {
+    const { host } = makeHost();
+    const pool = new AgentPoolCore({ host });
+    pool.requestSession({ sessionId: "U", workspaceId: "ws" });
+    pool.requestSession({ sessionId: "C", workspaceId: "ws", origin: "child" });
+    pool.requestSession({ sessionId: "T", workspaceId: "ws", origin: "task" });
+    expect(pool.sessionGrantPolicy("U")).toBe("inherit");
+    expect(pool.sessionGrantPolicy("C")).toBe("workspace-only");
+    expect(pool.sessionGrantPolicy("T")).toBe("workspace-only");
+  });
+
+  it("isInboxCandidate：child/task 恒进 inbox，focused user 不进", () => {
+    const { host } = makeHost();
+    const pool = new AgentPoolCore({ host });
+    pool.requestSession({ sessionId: "U", workspaceId: "ws", focus: true });
+    pool.requestSession({ sessionId: "C", workspaceId: "ws", origin: "child" });
+    pool.requestSession({ sessionId: "T", workspaceId: "ws", origin: "task" });
+    expect(pool.isInboxCandidate("U")).toBe(false);
+    expect(pool.isInboxCandidate("C")).toBe(true);
+    expect(pool.isInboxCandidate("T")).toBe(true);
+    expect(pool.isInboxCandidate("missing")).toBe(false);
+  });
+
+  it("显式 inheritPermissions=true 的 child 仍可 inherit", () => {
+    const { host } = makeHost();
+    const pool = new AgentPoolCore({ host });
+    pool.requestSession({
+      sessionId: "C",
+      workspaceId: "ws",
+      origin: "child",
+      inheritPermissions: true,
+    });
+    expect(pool.sessionGrantPolicy("C")).toBe("inherit");
   });
 });
 

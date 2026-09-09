@@ -24,13 +24,17 @@ import {
   NTag,
   NText,
 } from "naive-ui";
-import type { PoolListState, PoolRunState, PoolSessionView } from "@contract";
+import type { PoolInboxItem, PoolListState, PoolRunState, PoolSessionView } from "@contract";
 import { useAgentPoolStore } from "../stores/agent-pool";
 
 const props = defineProps<{ show: boolean }>();
 const emit = defineEmits<{ (e: "update:show", v: boolean): void }>();
 
 const store = useAgentPoolStore();
+
+async function decideInbox(item: PoolInboxItem, allow: boolean): Promise<void> {
+  await store.decideInbox(item, allow);
+}
 
 onMounted(() => {
   void store.init();
@@ -138,6 +142,10 @@ const costPercent = computed(() => {
                 </n-space>
                 <n-text depth="3" style="font-size: 12px">会话 {{ item.sessionId }}</n-text>
                 <n-text depth="3" style="font-size: 12px">无人响应将在超时后自动拒绝，绝不自动允许</n-text>
+                <n-space size="small">
+                  <n-button size="tiny" type="primary" @click="decideInbox(item, true)">允许一次</n-button>
+                  <n-button size="tiny" @click="decideInbox(item, false)">拒绝</n-button>
+                </n-space>
               </n-space>
             </n-list-item>
           </n-list>

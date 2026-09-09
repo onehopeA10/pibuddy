@@ -2,10 +2,13 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { McpServerInput } from "@pibuddy/contract";
-import { connectStdio } from "../src/main/mcp/mcp-client.js";
+import {
+  connectStdio,
+  terminateStdioChild,
+} from "../src/main/mcp/mcp-client.js";
 
 /**
  * MCP stdio 客户端的**真机握手**测试（FEAT-mcp.md 铁律 2：连接测试要真的连
@@ -49,9 +52,17 @@ const SILENT_STUB = `setInterval(() => {}, 1000); process.stdin.resume();`;
 /** 一个启动即崩溃的 stub。 */
 const CRASH_STUB = `process.exit(3);`;
 
+/** 一个只输出不带换行字节的 stub：验证握手缓冲有上界，不会无限累积。 */
+const FLOOD_STUB = `
+const junk = "x".repeat(1024 * 1024);
+setInterval(() => process.stdout.write(junk), 5);
+process.stdin.resume();
+`;
+
 const responsivePath = path.join(TMP, "responsive.mjs");
 const silentPath = path.join(TMP, "silent.mjs");
 const crashPath = path.join(TMP, "crash.mjs");
+const floodPath = path.join(TMP, "flood.mjs");
 
 function stdioConfig(scriptPath: string): McpServerInput {
   return {
@@ -70,6 +81,7 @@ beforeAll(() => {
   fs.writeFileSync(responsivePath, RESPONSIVE_STUB);
   fs.writeFileSync(silentPath, SILENT_STUB);
   fs.writeFileSync(crashPath, CRASH_STUB);
+  fs.writeFileSync(floodPath, FLOOD_STUB);
 });
 
 afterAll(() => {
@@ -121,6 +133,37 @@ describe("connectStdio 真机握手", () => {
     });
     expect(probe.ok).toBe(false);
     expect(probe.diagnostics.some((d) => d.includes("退出") || d.includes("code=3"))).toBe(true);
+  });
+
+  it("只灌不带换行字节的服务器 → 在超时之前按缓冲超限失败，而不是内存无限累积", async () => {
+    const { child, probe } = await connectStdio(stdioConfig(floodPath), {
+      // 超时给足：本条要证明的是「缓冲上限先于超时兜住」，若靠超时收场则
+      // 诊断信息不会包含「累积超过」，断言会红。
+      timeoutMs: 30_000,
+      keepAlive: false,
+    });
+    expect(probe.ok).toBe(false);
+    expect(probe.diagnostics.some((d) => d.includes("累积超过"))).toBe(true);
+    expect(child).toBeNull();
+  });
+
+  it("外部 teardown 与 client exit 收尾共享幂等 kill", async () => {
+    let spawned: import("node:child_process").ChildProcess | null = null;
+    const pending = connectStdio(stdioConfig(silentPath), {
+      timeoutMs: 4000,
+      keepAlive: false,
+      onSpawn: (child) => {
+        spawned = child;
+      },
+    });
+    await vi.waitFor(() => expect(spawned).not.toBeNull());
+    const kill = vi.spyOn(spawned!, "kill");
+
+    terminateStdioChild(spawned!);
+    const { probe } = await pending;
+
+    expect(probe.ok).toBe(false);
+    expect(kill).toHaveBeenCalledTimes(1);
   });
 
   it("命令为空 → 立即失败，不 spawn", async () => {

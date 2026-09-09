@@ -22,7 +22,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("electron", () => ({
   app: { getPath: () => "/tmp/pibuddy-git-test", isPackaged: false, getVersion: () => "0.0.0" },
   shell: { trashItem: vi.fn(async () => undefined), openPath: vi.fn(), showItemInFolder: vi.fn() },
-  dialog: { showOpenDialog: vi.fn(), showSaveDialog: vi.fn(), showMessageBox: vi.fn() },
+  dialog: {
+    showOpenDialog: vi.fn(),
+    showSaveDialog: vi.fn(),
+    showMessageBox: vi.fn(async () => ({ response: 1 })),
+  },
   BrowserWindow: { fromWebContents: vi.fn() },
   ipcMain: { handle: vi.fn() },
 }));

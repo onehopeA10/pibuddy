@@ -16,7 +16,8 @@ import {
 } from "@pibuddy/contract";
 
 import { redactSecrets } from "../logger-redact.js";
-import { connectStdio } from "./mcp-client.js";
+import { currentProjectTrust } from "../pi-resources/project-trust.js";
+import { connectStdio, terminateStdioChild } from "./mcp-client.js";
 import {
   findServer,
   resolveServers,
@@ -24,25 +25,82 @@ import {
   type ResolvedMcpServer,
 } from "./mcp-config.js";
 
-/**
- * 活进程表：serverId → 子进程。
- *
- * 键是 `${scope}:${name}` 派生的稳定 id，因此重命名 / 改配置后再 start 会被
- * 视为另一台服务器，旧进程仍能被 stop —— 与「按 name 覆盖配置」是两条正交
- * 的轴。
- */
-const running = new Map<string, ChildProcess>();
-
-/** 仅供单测：清掉活进程登记（不 kill，测试自己造的是假 child）。 */
-export function __resetMcpRunning(): void {
-  running.clear();
+interface ProcessSlot {
+  workspaceId: string;
+  scope: ResolvedMcpServer["scope"];
+  name: string;
+  child: ChildProcess | null;
+  startingChild: ChildProcess | null;
+  starting: Promise<McpConnectionResult> | null;
+  stopRequested: boolean;
 }
 
-/** 枚举全部服务器，附带 main 侧的活进程状态。 */
+/** serverId → 单一生命周期槽；同一 id 不允许并发派生多个 child。 */
+const processSlots = new Map<string, ProcessSlot>();
+/** 连接测试同样会 spawn；握手期间也必须能被全局 teardown 回收。 */
+const probeChildren = new Set<ChildProcess>();
+let lifecycleEpoch = 0;
+
+function killChild(child: ChildProcess): void {
+  terminateStdioChild(child);
+}
+
+async function stopProcess(id: string): Promise<void> {
+  const slot = processSlots.get(id);
+  if (!slot) return;
+  slot.stopRequested = true;
+  if (slot.startingChild) {
+    const child = slot.startingChild;
+    slot.startingChild = null;
+    killChild(child);
+  }
+  if (slot.child) {
+    const child = slot.child;
+    slot.child = null;
+    killChild(child);
+  }
+  const starting = slot.starting;
+  if (starting) await starting.catch(() => undefined);
+  if (slot.startingChild) {
+    const child = slot.startingChild;
+    slot.startingChild = null;
+    killChild(child);
+  }
+  if (slot.child) {
+    const child = slot.child;
+    slot.child = null;
+    killChild(child);
+  }
+  if (
+    processSlots.get(id) === slot &&
+    slot.starting === null &&
+    slot.startingChild === null &&
+    slot.child === null
+  ) {
+    processSlots.delete(id);
+  }
+}
+
+/** 仅供单测：回收并清掉全部生命周期槽。 */
+export function __resetMcpRunning(): void {
+  disposeMcpResources();
+}
+
+/** 枚举全部服务器，附带进程状态，并回收已不在当前配置里的旧进程。 */
 export async function listServers(workspaceId: string): Promise<McpListResult> {
   const { servers, errors } = await resolveServers(workspaceId);
+  const currentIds = new Set(servers.map((server) => server.id));
+  const trust = await currentProjectTrust(workspaceId);
+  const staleIds = [...processSlots.entries()]
+    .filter(([, slot]) => slot.workspaceId === workspaceId)
+    .filter(
+      ([id, slot]) =>
+        !currentIds.has(id) || (slot.scope === "project" && trust.effective !== "allow")
+    )
+    .map(([id]) => id);
+  await Promise.all(staleIds.map((id) => stopProcess(id)));
   return {
-    servers: servers.map((s) => toDescriptor(s, running.has(s.id))),
+    servers: servers.map((server) => toDescriptor(server, processSlots.get(server.id)?.child != null)),
     errors,
     scannedAt: Date.now(),
   };
@@ -50,74 +108,225 @@ export async function listServers(workspaceId: string): Promise<McpListResult> {
 
 /** 连接测试：真的连一次，握手完就回收进程。 */
 export async function testServer(workspaceId: string, id: string): Promise<McpConnectionResult> {
+  const epoch = lifecycleEpoch;
   const server = await findServer(workspaceId, id);
   if (!server) return notFound(id);
+  if (epoch !== lifecycleEpoch) return lifecycleStopped(server);
   if (server.config.transport !== "stdio") return httpNotImplemented(server);
+  const trustFailure = await projectTrustFailure(workspaceId, server);
+  if (trustFailure) return trustFailure;
+  if (epoch !== lifecycleEpoch) return lifecycleStopped(server);
 
-  const { probe } = await connectStdio(server.config, { keepAlive: false });
-  return buildResult(server, probe, false);
-}
-
-/** 启动：握手成功则保留活进程，登记进 running 表。 */
-export async function startServer(workspaceId: string, id: string): Promise<McpConnectionResult> {
-  const server = await findServer(workspaceId, id);
-  if (!server) return notFound(id);
-  if (server.config.transport !== "stdio") return httpNotImplemented(server);
-
-  const existing = running.get(id);
-  if (existing) {
-    // 已经在跑：不重复 spawn，回一份「已在运行」的结果（工具列表这次不重取）。
-    return {
-      ok: true,
-      serverId: id,
-      serverName: server.config.name,
-      serverInfo: null,
-      protocolVersion: null,
-      tools: [],
-      diagnostics: ["该服务器已在运行"],
-      oauth: oauthStatus(server),
-      running: true,
-    };
-  }
-
-  const { child, probe } = await connectStdio(server.config, { keepAlive: true });
-  if (child) {
-    running.set(id, child);
-    // 进程自行退出（崩溃 / 被外部杀）时从表里摘掉，别让 list 一直显示 running。
-    child.on("exit", () => {
-      if (running.get(id) === child) running.delete(id);
+  let spawned: ChildProcess | null = null;
+  try {
+    const { probe } = await connectStdio(server.config, {
+      keepAlive: false,
+      onSpawn: (child) => {
+        spawned = child;
+        if (epoch !== lifecycleEpoch) {
+          killChild(child);
+          return;
+        }
+        probeChildren.add(child);
+      },
     });
+    return buildResult(server, probe, false);
+  } finally {
+    if (spawned) probeChildren.delete(spawned);
   }
-  return buildResult(server, probe, child !== null);
 }
 
-/** 停止：kill 活进程，返回刷新后的列表。 */
-export async function stopServer(workspaceId: string, id: string): Promise<McpListResult> {
-  const child = running.get(id);
-  if (child) {
-    running.delete(id);
-    try {
-      child.kill();
-    } catch {
-      /* 已退出 */
+/** 启动：同一 id 共用一个 in-flight promise，避免并发 spawn。 */
+export async function startServer(workspaceId: string, id: string): Promise<McpConnectionResult> {
+  const epoch = lifecycleEpoch;
+  const server = await findServer(workspaceId, id);
+  if (!server) return notFound(id);
+  if (epoch !== lifecycleEpoch) return lifecycleStopped(server);
+  if (server.config.transport !== "stdio") return httpNotImplemented(server);
+  const trustFailure = await projectTrustFailure(workspaceId, server);
+  if (trustFailure) return trustFailure;
+  if (epoch !== lifecycleEpoch) return lifecycleStopped(server);
+
+  const existing = processSlots.get(id);
+  if (existing?.starting) return existing.starting;
+  if (existing?.child) return alreadyRunning(server);
+
+  const slot: ProcessSlot =
+    existing ?? {
+      workspaceId,
+      scope: server.scope,
+      name: server.config.name,
+      child: null,
+      startingChild: null,
+      starting: null,
+      stopRequested: false,
+    };
+  slot.workspaceId = workspaceId;
+  slot.scope = server.scope;
+  slot.name = server.config.name;
+  slot.stopRequested = false;
+  processSlots.set(id, slot);
+
+  const starting = (async (): Promise<McpConnectionResult> => {
+    const { child, probe } = await connectStdio(server.config, {
+      keepAlive: true,
+      onSpawn: (spawned) => {
+        if (
+          epoch !== lifecycleEpoch ||
+          slot.stopRequested ||
+          processSlots.get(id) !== slot
+        ) {
+          killChild(spawned);
+          return;
+        }
+        slot.startingChild = spawned;
+      },
+    });
+    if (child && slot.startingChild === child) slot.startingChild = null;
+    if (!child) return buildResult(server, probe, false);
+    if (
+      epoch !== lifecycleEpoch ||
+      slot.stopRequested ||
+      processSlots.get(id) !== slot
+    ) {
+      killChild(child);
+      return buildResult(
+        server,
+        { ...probe, diagnostics: [...probe.diagnostics, "启动期间收到停止请求，进程已回收"] },
+        false
+      );
+    }
+    slot.child = child;
+    child.on("exit", () => {
+      if (slot.child === child) slot.child = null;
+      if (slot.starting === null && slot.child === null && processSlots.get(id) === slot) {
+        processSlots.delete(id);
+      }
+    });
+    return buildResult(server, probe, true);
+  })();
+  slot.starting = starting;
+  try {
+    return await starting;
+  } finally {
+    if (slot.starting === starting) slot.starting = null;
+    if (slot.startingChild) {
+      const child = slot.startingChild;
+      slot.startingChild = null;
+      killChild(child);
+    }
+    if (
+      slot.child === null &&
+      slot.startingChild === null &&
+      processSlots.get(id) === slot
+    ) {
+      processSlots.delete(id);
     }
   }
+}
+
+/** 停止：包括正在握手但尚未登记 child 的启动。 */
+export async function stopServer(workspaceId: string, id: string): Promise<McpListResult> {
+  const slot = processSlots.get(id);
+  if (slot && slot.workspaceId !== workspaceId) {
+    throw new Error(`MCP_SERVER_WORKSPACE_MISMATCH: ${id}`);
+  }
+  await stopProcess(id);
   return listServers(workspaceId);
 }
 
-/** 拆卸：kill 全部活进程（D4 规则 4）。数据（配置文件）一个字节不动。 */
+/** project trust 被撤销时，只回收该工作区的 project MCP，user 级不受影响。 */
+export async function stopProjectServers(workspaceId: string): Promise<void> {
+  const ids = [...processSlots.entries()]
+    .filter(([, slot]) => slot.workspaceId === workspaceId && slot.scope === "project")
+    .map(([id]) => id);
+  await Promise.all(ids.map((id) => stopProcess(id)));
+}
+
+/** 配置 save/remove 前按逻辑身份回收旧 id，包括配置变更后已不可见的进程。 */
+export async function stopServersByRef(
+  workspaceId: string,
+  scope: ResolvedMcpServer["scope"],
+  name: string
+): Promise<void> {
+  const ids = [...processSlots.entries()]
+    .filter(([, slot]) =>
+      slot.workspaceId === workspaceId && slot.scope === scope && slot.name === name
+    )
+    .map(([id]) => id);
+  await Promise.all(ids.map((id) => stopProcess(id)));
+}
+
+/** 拆卸：活 child 立即 kill；in-flight start 会在返回时看到 stopRequested 并回收。 */
 export function disposeMcpResources(): void {
-  for (const child of running.values()) {
-    try {
-      child.kill();
-    } catch {
-      /* 已退出 */
+  lifecycleEpoch += 1;
+  for (const slot of processSlots.values()) {
+    slot.stopRequested = true;
+    if (slot.startingChild) {
+      const child = slot.startingChild;
+      slot.startingChild = null;
+      killChild(child);
+    }
+    if (slot.child) {
+      const child = slot.child;
+      slot.child = null;
+      killChild(child);
     }
   }
-  running.clear();
+  for (const child of probeChildren) killChild(child);
+  probeChildren.clear();
+  processSlots.clear();
 }
 
 // ---------------------------------------------------------------- 结果构造
+
+function lifecycleStopped(server: ResolvedMcpServer): McpConnectionResult {
+  return buildResult(
+    server,
+    {
+      ok: false,
+      serverInfo: null,
+      protocolVersion: null,
+      tools: [],
+      diagnostics: ["MCP 能力已停用，本次尚未启动任何进程"],
+    },
+    false
+  );
+}
+
+function alreadyRunning(server: ResolvedMcpServer): McpConnectionResult {
+  return {
+    ok: true,
+    serverId: server.id,
+    serverName: server.config.name,
+    serverInfo: null,
+    protocolVersion: null,
+    tools: [],
+    diagnostics: ["该服务器已在运行"],
+    oauth: oauthStatus(server),
+    running: true,
+  };
+}
+
+async function projectTrustFailure(
+  workspaceId: string,
+  server: ResolvedMcpServer
+): Promise<McpConnectionResult | null> {
+  if (server.scope !== "project") return null;
+  const trust = await currentProjectTrust(workspaceId);
+  if (trust.effective === "allow") return null;
+  return {
+    ok: false,
+    serverId: server.id,
+    serverName: server.config.name,
+    serverInfo: null,
+    protocolVersion: null,
+    tools: [],
+    diagnostics: ["项目 MCP 配置尚未受信，未启动任何本机进程"],
+    oauth: oauthStatus(server),
+    running: false,
+  };
+}
 
 function buildResult(
   server: ResolvedMcpServer,

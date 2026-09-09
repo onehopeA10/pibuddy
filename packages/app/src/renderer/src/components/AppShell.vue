@@ -12,41 +12,12 @@ import SettingsModal from "./SettingsModal.vue";
 import UpdateBanner from "./UpdateBanner.vue";
 import SafeModeBanner from "./SafeModeBanner.vue";
 import InstallBlockerDialog from "./InstallBlockerDialog.vue";
-import PiResourcesPanel from "./PiResourcesPanel.vue";
 import ProjectTrustDialog from "./ProjectTrustDialog.vue";
 import OnboardingWizard from "./OnboardingWizard.vue";
-import ProviderCenter from "./ProviderCenter.vue";
-import UsagePanel from "./UsagePanel.vue";
 import FileTreePanel from "./FileTreePanel.vue";
 import FileEditorPane from "./FileEditorPane.vue";
 import ChangesetPanel from "./ChangesetPanel.vue";
-import ArtifactLibrary from "./ArtifactLibrary.vue";
-import MemoryPanel from "./MemoryPanel.vue";
 import PreviewPane from "./PreviewPane.vue";
-import SessionTreePanel from "./SessionTreePanel.vue";
-import GitPanel from "./GitPanel.vue";
-import TerminalPanel from "./TerminalPanel.vue";
-import TasksPanel from "./TasksPanel.vue";
-import ChildAgentPanel from "./ChildAgentPanel.vue";
-import ConnectorPanel from "./ConnectorPanel.vue";
-import ConnectorChannelsPanel from "./ConnectorChannelsPanel.vue";
-import RemotePanel from "./RemotePanel.vue";
-import WorkflowPanel from "./WorkflowPanel.vue";
-import PromptLibraryPanel from "./PromptLibraryPanel.vue";
-import OfficeSkillsPanel from "./OfficeSkillsPanel.vue";
-import HomeAdvisorPanel from "./HomeAdvisorPanel.vue";
-import RulesPanel from "./RulesPanel.vue";
-import EduPanel from "./EduPanel.vue";
-
-/**
- * 家居监控面板（home.dashboard）——**首个 loading:"lazy" 能力包的渲染侧一半**。
- *
- * 静态 import 会把组件打进主 chunk，manifest 里的 lazy 声明就成了一句空话；
- * 这里用 defineAsyncComponent + 动态 import：electron-vite 据此单独拆 chunk，
- * 不开面板不加载（manifest.runtime.entry 指向的就是这个文件，bundleBudgetKb
- * 是它的预算上界）。
- */
-const HomeDashboardPanel = defineAsyncComponent(() => import("./HomeDashboardPanel.vue"));
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useMcpStore } from "../stores/mcp";
@@ -63,6 +34,35 @@ import {
   type DirtyDecision,
   type EditorTab,
 } from "../stores/workspace";
+
+/**
+ * 家居监控面板（home.dashboard）——**首个 loading:"lazy" 能力包的渲染侧一半**。
+ *
+ * 静态 import 会把组件打进主 chunk，manifest 里的 lazy 声明就成了一句空话；
+ * 这里用 defineAsyncComponent + 动态 import：electron-vite 据此单独拆 chunk，
+ * 不开面板不加载（manifest.runtime.entry 指向的就是这个文件，bundleBudgetKb
+ * 是它的预算上界）。
+ */
+const HomeDashboardPanel = defineAsyncComponent(() => import("./HomeDashboardPanel.vue"));
+const PiResourcesPanel = defineAsyncComponent(() => import("./PiResourcesPanel.vue"));
+const ProviderCenter = defineAsyncComponent(() => import("./ProviderCenter.vue"));
+const UsagePanel = defineAsyncComponent(() => import("./UsagePanel.vue"));
+const ArtifactLibrary = defineAsyncComponent(() => import("./ArtifactLibrary.vue"));
+const MemoryPanel = defineAsyncComponent(() => import("./MemoryPanel.vue"));
+const SessionTreePanel = defineAsyncComponent(() => import("./SessionTreePanel.vue"));
+const GitPanel = defineAsyncComponent(() => import("./GitPanel.vue"));
+const TerminalPanel = defineAsyncComponent(() => import("./TerminalPanel.vue"));
+const TasksPanel = defineAsyncComponent(() => import("./TasksPanel.vue"));
+const ChildAgentPanel = defineAsyncComponent(() => import("./ChildAgentPanel.vue"));
+const ConnectorPanel = defineAsyncComponent(() => import("./ConnectorPanel.vue"));
+const ConnectorChannelsPanel = defineAsyncComponent(() => import("./ConnectorChannelsPanel.vue"));
+const RemotePanel = defineAsyncComponent(() => import("./RemotePanel.vue"));
+const WorkflowPanel = defineAsyncComponent(() => import("./WorkflowPanel.vue"));
+const PromptLibraryPanel = defineAsyncComponent(() => import("./PromptLibraryPanel.vue"));
+const OfficeSkillsPanel = defineAsyncComponent(() => import("./OfficeSkillsPanel.vue"));
+const HomeAdvisorPanel = defineAsyncComponent(() => import("./HomeAdvisorPanel.vue"));
+const RulesPanel = defineAsyncComponent(() => import("./RulesPanel.vue"));
+const EduPanel = defineAsyncComponent(() => import("./EduPanel.vue"));
 
 const store = useAppStore();
 const updateStore = useUpdateStore();
@@ -387,7 +387,8 @@ function onDrop(): void {
       <template v-else-if="store.started && store.models.length === 0">
         <div class="onboarding">
           <h1>还没有可用的模型</h1>
-          <p>需要先配置一个 AI 服务商的账号，才能开始对话。</p>
+          <p v-if="store.modelsError">未能列出模型：{{ store.modelsError }}</p>
+          <p v-else>需要先配置一个 AI 服务商的账号，才能开始对话。</p>
           <n-button type="primary" @click="providers.panelOpen = true">去配置账号</n-button>
           <n-button quaternary @click="store.start()">重新检查</n-button>
         </div>

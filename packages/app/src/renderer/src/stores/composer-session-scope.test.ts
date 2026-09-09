@@ -38,6 +38,7 @@ describe("草稿防抖捕获发起时的 sessionId", () => {
     store.currentSessionId = "sess-A";
 
     store.editorText = "只属于 A 的一段话";
+    store.draftAttachments = [attachment("not-durable.txt")];
     store.scheduleSaveDraft();
 
     // ——— 时序的要害：防抖窗口只走了 200ms，定时器还没触发 ———
@@ -58,6 +59,7 @@ describe("草稿防抖捕获发起时的 sessionId", () => {
     expect(workspaceId).toBe("ws-1");
     expect(sessionId).toBe("sess-A");
     expect(draft.text).toBe("只属于 A 的一段话");
+    expect(draft.attachments).toEqual([]);
     vi.useRealTimers();
   });
 
@@ -128,6 +130,9 @@ describe("composer 四样状态都按会话存放", () => {
     // currentSessionId 初始是占位空串 —— pi 还没回报会话 id
     expect(store.currentSessionId).toBe("");
     store.editorText = "开机就打的一段话";
+    store.draftImages = [{ type: "image", data: "AAAA", mimeType: "image/png", name: "a.png" }];
+    store.draftAttachments = [attachment("ephemeral.txt")];
+    store.enqueueLocal("稍后发送", "followUp");
 
     // newTask → refreshState → adoptSession("s-real")，走真实路径
     const piBuddy = (globalThis as unknown as { window: { piBuddy: Record<string, unknown> } })
@@ -142,6 +147,9 @@ describe("composer 四样状态都按会话存放", () => {
 
     expect(store.currentSessionId).toBe("s-real");
     expect(store.editorText).toBe("开机就打的一段话");
+    expect(store.draftImages).toHaveLength(1);
+    expect(store.localQueue.map((item) => item.text)).toEqual(["稍后发送"]);
+    expect(store.draftAttachments).toHaveLength(0);
   });
 
   it("换工作区时输入区整表作废（两个工作区可能有同 id 的会话）", () => {
@@ -176,11 +184,17 @@ describe("restoreDraft 写进发起恢复的那个会话", () => {
     // 还没回来就切走
     store.currentSessionId = "sess-B";
     store.editorText = "B 里正在打的字";
-    release({ text: "A 的旧草稿", attachments: [], queue: { steering: [], followUp: [] }, updatedAt: 1 });
+    release({
+      text: "A 的旧草稿",
+      attachments: [attachment("stale.txt")],
+      queue: { steering: [], followUp: [] },
+      updatedAt: 1,
+    });
     await pending;
 
     expect(store.editorText).toBe("B 里正在打的字");
     store.currentSessionId = "sess-A";
     expect(store.editorText).toBe("A 的旧草稿");
+    expect(store.draftAttachments).toHaveLength(0);
   });
 });
