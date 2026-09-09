@@ -157,6 +157,7 @@ const DDL_KNOWLEDGE_FTS = `CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts
 /** v3：当前任务缓存（Working）。不改 memories 行。 */
 const DDL_WORKING_ITEMS = `CREATE TABLE IF NOT EXISTS working_items (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT '',
   session_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   content TEXT NOT NULL,
@@ -169,11 +170,11 @@ const DDL_WORKING_ITEMS = `CREATE TABLE IF NOT EXISTS working_items (
   updated_at TEXT NOT NULL
 )`;
 
-const DDL_WORKING_SESSION_IDX = `CREATE INDEX IF NOT EXISTS idx_working_session
-  ON working_items(session_id, expires)`;
+const DDL_WORKING_SESSION_IDX = `CREATE INDEX IF NOT EXISTS idx_working_workspace_session
+  ON working_items(workspace_id, session_id, expires)`;
 
-const DDL_WORKING_SOURCE_IDX = `CREATE UNIQUE INDEX IF NOT EXISTS idx_working_session_source
-  ON working_items(session_id, source_memory_id) WHERE source_memory_id IS NOT NULL`;
+const DDL_WORKING_SOURCE_IDX = `CREATE UNIQUE INDEX IF NOT EXISTS idx_working_workspace_session_source
+  ON working_items(workspace_id, session_id, source_memory_id) WHERE source_memory_id IS NOT NULL`;
 
 const DDL_MEMORY_CANDIDATES = `CREATE TABLE IF NOT EXISTS memory_candidates (
   id TEXT PRIMARY KEY,
@@ -301,6 +302,8 @@ export class MemoryStore {
    *
    * v2(2) → v3(3)：只加 working / candidates / conflicts / route_events，
    * 不改 v1/v2 行字节。
+   *
+   * v3(3) → v4(4)：working_items 补 workspace_id，重建按工作区隔离的索引。
    */
   private migrate(): void {
     const row = this.db.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined;
@@ -308,7 +311,19 @@ export class MemoryStore {
     if (current === MEMORY_DATA_SCHEMA_VERSION) return;
     // 用旧版打开新版库：不动它，别把用户在新版里整理好的记忆搞坏。
     if (current > MEMORY_DATA_SCHEMA_VERSION) return;
+    if (current < 4) this.migrateWorkingWorkspace();
     this.db.exec(`PRAGMA user_version = ${MEMORY_DATA_SCHEMA_VERSION}`);
+  }
+
+  private migrateWorkingWorkspace(): void {
+    const cols = this.db.prepare("PRAGMA table_info(working_items)").all() as { name: string }[];
+    if (!cols.some((col) => col.name === "workspace_id")) {
+      this.db.exec(`ALTER TABLE working_items ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`);
+    }
+    this.db.exec("DROP INDEX IF EXISTS idx_working_session");
+    this.db.exec("DROP INDEX IF EXISTS idx_working_session_source");
+    this.db.exec(DDL_WORKING_SESSION_IDX);
+    this.db.exec(DDL_WORKING_SOURCE_IDX);
   }
 
   close(): void {
@@ -936,6 +951,7 @@ export class MemoryStore {
   // ------------------------------------------------------------ Working（v3）
 
   upsertWorkingItem(input: {
+    workspaceId: string;
     sessionId: string;
     kind: string;
     content: string;
@@ -947,10 +963,13 @@ export class MemoryStore {
   }): WorkingItem {
     const now = new Date().toISOString();
     const sourceId = input.sourceMemoryId ?? null;
+    const workspaceId = input.workspaceId.trim();
     if (sourceId) {
       const existing = this.db
-        .prepare("SELECT id FROM working_items WHERE session_id = ? AND source_memory_id = ?")
-        .get(input.sessionId, sourceId) as { id?: string } | undefined;
+        .prepare(
+          "SELECT id FROM working_items WHERE workspace_id = ? AND session_id = ? AND source_memory_id = ?"
+        )
+        .get(workspaceId, input.sessionId, sourceId) as { id?: string } | undefined;
       if (existing?.id) {
         this.db
           .prepare(
@@ -972,12 +991,13 @@ export class MemoryStore {
     const id = randomUUID();
     this.db
       .prepare(
-        `INSERT INTO working_items (id, session_id, kind, content, source_memory_id, source_hash,
+        `INSERT INTO working_items (id, workspace_id, session_id, kind, content, source_memory_id, source_hash,
            created_turn, expires, refresh_on_source_change, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
       )
       .run(
         id,
+        workspaceId,
         input.sessionId,
         input.kind,
         input.content,
@@ -999,33 +1019,44 @@ export class MemoryStore {
     return row ? toWorkingItem(row) : null;
   }
 
-  listWorkingItems(sessionId: string): WorkingItem[] {
+  listWorkingItems(workspaceId: string, sessionId: string): WorkingItem[] {
     const rows = this.db
-      .prepare("SELECT * FROM working_items WHERE session_id = ? ORDER BY updated_at DESC")
-      .all(sessionId) as Record<string, unknown>[];
+      .prepare(
+        "SELECT * FROM working_items WHERE workspace_id = ? AND session_id = ? ORDER BY updated_at DESC"
+      )
+      .all(workspaceId, sessionId) as Record<string, unknown>[];
     return rows.map(toWorkingItem);
   }
 
-  listWorkingSourceIds(sessionId: string): string[] {
+  listWorkingSourceIds(workspaceId: string, sessionId: string): string[] {
     const rows = this.db
       .prepare(
-        "SELECT source_memory_id FROM working_items WHERE session_id = ? AND source_memory_id IS NOT NULL"
+        "SELECT source_memory_id FROM working_items WHERE workspace_id = ? AND session_id = ? AND source_memory_id IS NOT NULL"
       )
-      .all(sessionId) as { source_memory_id: string }[];
+      .all(workspaceId, sessionId) as { source_memory_id: string }[];
     return rows.map((r) => r.source_memory_id);
+  }
+
+  deleteWorkingItem(id: string): void {
+    this.db.prepare("DELETE FROM working_items WHERE id = ?").run(id);
   }
 
   /**
    * source_hash 变了且 refresh_on_source_change=1 时删掉该 Working 项。
    * @returns true = 该项已失效并被删除
    */
-  invalidateWorkingIfHashChanged(sessionId: string, sourceMemoryId: string, currentHash: string): boolean {
+  invalidateWorkingIfHashChanged(
+    workspaceId: string,
+    sessionId: string,
+    sourceMemoryId: string,
+    currentHash: string
+  ): boolean {
     const row = this.db
       .prepare(
         `SELECT id, source_hash, refresh_on_source_change FROM working_items
-         WHERE session_id = ? AND source_memory_id = ?`
+         WHERE workspace_id = ? AND session_id = ? AND source_memory_id = ?`
       )
-      .get(sessionId, sourceMemoryId) as
+      .get(workspaceId, sessionId, sourceMemoryId) as
       | { id: string; source_hash: string | null; refresh_on_source_change: number }
       | undefined;
     if (!row) return false;

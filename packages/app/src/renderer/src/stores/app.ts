@@ -306,6 +306,12 @@ function promptResourceError(images: ImageContent[], attachments: AttachmentRef[
   return null;
 }
 
+let sendGeneration = 0;
+
+export function bumpSendGeneration(): void {
+  sendGeneration += 1;
+}
+
 export async function send(opts: SendOptions = {}): Promise<boolean> {
   const store = useAppStore();
   const images = opts.images ?? [];
@@ -352,13 +358,22 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
 
   const deliver = async (): Promise<boolean> => {
     const targetSession = store.currentSessionId;
-    await store.whenPiReady();
+    const gen = sendGeneration;
+    const ready = await store.whenPiReady();
+    if (gen !== sendGeneration) {
+      store.discardUserEcho(echo);
+      removeLocalUserMessage(store, localKey);
+      return false;
+    }
     if (
+      !ready ||
       store.currentSessionId !== targetSession ||
       store.currentSessionId !== store.piLoadedSessionId
     ) {
       store.discardUserEcho(echo);
       removeLocalUserMessage(store, localKey);
+      if (!store.editorText.trim()) store.editorText = message;
+      store.notify("warning", "这条还没发出去，内容已放回输入框");
       return false;
     }
     let resp: { success: boolean; error?: string };
@@ -373,12 +388,14 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
     } catch (err) {
       store.discardUserEcho(echo);
       removeLocalUserMessage(store, localKey);
+      if (!store.editorText.trim()) store.editorText = message;
       store.notify("error", err instanceof Error ? err.message : "发送失败");
       return false;
     }
     if (!resp.success) {
       store.discardUserEcho(echo);
       removeLocalUserMessage(store, localKey);
+      if (!store.editorText.trim()) store.editorText = message;
       store.notify("error", resp.error ?? "发送失败");
       return false;
     }
@@ -520,13 +537,16 @@ export const useAppStore = defineStore("app", () => {
    * 浏览会话只读本地 JSONL；点开会话时后台预热 switch_session，
    * 发送 / 换模型 / 压缩时只 join 这次 in-flight，不再从零等一整遍。
    */
-  async function ensurePiOnCurrentSession(forcedId?: string): Promise<void> {
+  async function ensurePiOnCurrentSession(forcedId?: string): Promise<boolean> {
     for (;;) {
-      const target = forcedId ?? currentSessionId.value;
-      if (!target || target === piLoadedSessionId.value) return;
       if (ensurePiInflight) {
         await ensurePiInflight;
         continue;
+      }
+      const target = forcedId ?? currentSessionId.value;
+      if (!target) return true;
+      if (target === piLoadedSessionId.value && piSwitchingSessionId.value === null) {
+        return true;
       }
       const attempted = target;
       const run = (async () => {
@@ -541,10 +561,12 @@ export const useAppStore = defineStore("app", () => {
             notify("warning", "扩展取消了会话切换，当前会话保持不变");
             return;
           }
-          piLoadedSessionId.value = attempted;
-          skipSettledRefreshAfterSwitch = true;
-          // 切完立刻停。get_state / get_session_stats 会占住 Pi 的 RPC 队列，
-          // 发送被排在后面，体感就是「又等了一次整份重建」。
+          const stillWanted = (forcedId ?? currentSessionId.value) === attempted;
+          if (stillWanted) {
+            piLoadedSessionId.value = attempted;
+            skipSettledRefreshAfterSwitch = true;
+            adoptCapabilitiesForSession(attempted);
+          }
         } catch (err) {
           notify("error", err instanceof Error ? err.message : "打开会话失败");
         } finally {
@@ -558,19 +580,53 @@ export const useAppStore = defineStore("app", () => {
       } finally {
         if (ensurePiInflight === run) ensurePiInflight = null;
       }
-      if (piLoadedSessionId.value !== attempted) return;
+      return (
+        piLoadedSessionId.value === attempted &&
+        (forcedId ?? currentSessionId.value) === attempted
+      );
     }
   }
 
-  /** 输入框不锁；真发送时再等 Pi 切到当前会话。 */
-  function whenPiReady(): Promise<void> {
-    if (currentSessionId.value && currentSessionId.value !== piLoadedSessionId.value) {
-      return ensurePiOnCurrentSession();
-    }
-    if (piSwitchingSessionId.value === null) return Promise.resolve();
-    return new Promise((resolve) => {
-      piSwitchWaiters.push(resolve);
-    }).then(() => whenPiReady());
+  /**
+   * 切换成功后立刻对齐模型显示与图片守卫，不另发 get_state。
+   * switch 刚回来就 get_state 会再挡一轮发送；会话索引里的 modelId
+   * 加上已加载的模型表足够纠正「还显示上一个会话的模型」。
+   */
+  function adoptCapabilitiesForSession(sessionId: string): void {
+    const row = useSessionsStore().rowOf(sessionId);
+    const listed = row?.modelId
+      ? models.value.find((m) => m.id === row.modelId)
+      : undefined;
+    const prev = agentState.value;
+    const nextModel =
+      listed ??
+      (row?.modelId
+        ? {
+            id: row.modelId,
+            provider: prev?.model?.provider ?? "",
+            input: prev?.model?.id === row.modelId ? prev.model.input : undefined,
+          }
+        : (prev?.model ?? null));
+    if (!prev && !nextModel) return;
+    agentState.value = {
+      model: nextModel,
+      thinkingLevel: prev?.thinkingLevel ?? "off",
+      isStreaming: prev?.isStreaming ?? false,
+      isCompacting: prev?.isCompacting ?? false,
+      steeringMode: prev?.steeringMode ?? "all",
+      followUpMode: prev?.followUpMode ?? "all",
+      sessionFile: prev?.sessionFile,
+      sessionId,
+      sessionName: row?.name ?? prev?.sessionName,
+      autoCompactionEnabled: prev?.autoCompactionEnabled ?? false,
+      messageCount: row?.messageCount ?? prev?.messageCount ?? 0,
+      pendingMessageCount: prev?.pendingMessageCount ?? 0,
+    };
+  }
+
+  /** 输入框不锁；真发送时再等 Pi 切到当前会话。失败返回 false，不假装就绪。 */
+  function whenPiReady(): Promise<boolean> {
+    return ensurePiOnCurrentSession();
   }
 
   /**
@@ -1400,15 +1456,20 @@ export const useAppStore = defineStore("app", () => {
     for (const msg of messages) {
       if (msg.role === "user" || msg.role === "assistant") {
         nextItems.push({ key: ++keySeq, message: msg });
-      } else if (msg.role === "toolResult") {
+      } else if (
+        msg.role === "toolResult" &&
+        typeof msg.toolCallId === "string" &&
+        typeof msg.toolName === "string"
+      ) {
         const existing = nextRuns[msg.toolCallId] ?? toolRuns[msg.toolCallId];
+        const content = Array.isArray(msg.content) ? msg.content : undefined;
         nextRuns[msg.toolCallId] = {
           toolCallId: msg.toolCallId,
           toolName: msg.toolName,
           args: existing?.args ?? {},
           status: msg.isError ? "error" : "done",
-          output: textOf(msg.content),
-          images: imagesOf(msg.content),
+          output: textOf(content),
+          images: imagesOf(content),
         };
       }
     }
@@ -1708,6 +1769,7 @@ export const useAppStore = defineStore("app", () => {
   }
 
   async function abortRun(): Promise<void> {
+    bumpSendGeneration();
     await window.piBuddy.pi.abort();
   }
 
@@ -1746,7 +1808,10 @@ export const useAppStore = defineStore("app", () => {
       notify("warning", "请先等这一轮结束，再整理对话记忆");
       return;
     }
-    await whenPiReady();
+    if (!(await whenPiReady())) {
+      notify("warning", "当前会话还没接通，没有整理记忆");
+      return;
+    }
     try {
       const resp = await window.piBuddy.pi.compact();
       if (!resp?.success) {
@@ -1832,7 +1897,7 @@ export const useAppStore = defineStore("app", () => {
         toolRuns: { ...toolRuns },
       };
       clearEphemeralComposerAttachments();
-      resetSessionScopedState();
+      resetSessionScopedState({ skip: ["extensionUi"] });
       if (previewOk && keepPreview.items.length > 0) {
         items.value = keepPreview.items;
         Object.assign(toolRuns, keepPreview.toolRuns);
@@ -1902,7 +1967,7 @@ export const useAppStore = defineStore("app", () => {
    * 由 ChatView 的「重试」按钮再调一次，绝不静默留白。
    */
   async function reloadMessages(): Promise<void> {
-    await whenPiReady();
+    if (!(await whenPiReady())) return;
     sessionLoadError.value = "";
     let resp: { success: boolean; error?: string; data?: { messages: AgentMessage[] } };
     try {
@@ -2086,7 +2151,10 @@ export const useAppStore = defineStore("app", () => {
     modelId: string,
     persist = true
   ): Promise<void> {
-    await whenPiReady();
+    if (!(await whenPiReady())) {
+      notify("warning", "当前会话还没接通，模型没有改");
+      return;
+    }
     const resp = await window.piBuddy.pi.setModel(provider, modelId);
     if (!resp.success) {
       notify("error", resp.error ?? "切换模型失败");
@@ -2117,7 +2185,10 @@ export const useAppStore = defineStore("app", () => {
   }
 
   async function setThinkingLevel(level: ThinkingLevel): Promise<void> {
-    await whenPiReady();
+    if (!(await whenPiReady())) {
+      notify("warning", "当前会话还没接通，思考等级没有改");
+      return;
+    }
     const resp = await window.piBuddy.pi.setThinkingLevel(level);
     if (resp.success) {
       settings.value = await window.piBuddy.settings.set({ thinkingLevel: level });

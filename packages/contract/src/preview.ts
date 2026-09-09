@@ -123,18 +123,24 @@ export type PreviewResult = z.infer<typeof previewResultSchema>;
 /**
  * 预览目标。
  *
- * 两种表达方式，都不含绝对路径：
+ * 三种表达方式，都不含绝对路径：
  *   - `token` —— attachment-registry 签发的一次性能力凭证（CT-17）；
  *   - `workspaceId` + `relativePath` —— 工作区内的文件，main 侧经
- *     resolveInWorkspace 收容（CT-18）。
+ *     resolveInWorkspace 收容（CT-18）；
+ *   - `artifactId` —— 按产物记录定位，并核对该版 sha256。
  *
- * 两个都不传即在 schema 之后被 handler 拒绝：这里不用 union 表达
- * 「二选一」是因为 `.shape` 必须能被单测按键名检查（c[19]）。
+ * 都不传即在 schema 之后被 handler 拒绝：这里不用 union 表达
+ * 「多选一」是因为 `.shape` 必须能被单测按键名检查（c[19]）。
  */
 export const previewTargetSchema = z.object({
   token: z.string().min(1).optional(),
   workspaceId: z.string().min(1).optional(),
   relativePath: z.string().optional(),
+  /**
+   * 产物记录 id。带上时按该版 sha256 核对磁盘；对不上就明确说这一版
+   * 已经不在，而不是把当前文件当成旧版打开。
+   */
+  artifactId: z.string().min(1).optional(),
 });
 export type PreviewTarget = z.infer<typeof previewTargetSchema>;
 

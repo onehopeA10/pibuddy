@@ -202,7 +202,7 @@ function resend(text: string): void {
       <template
         v-for="item in visualItems"
         :key="item.key"
-        v-memo="[item.key, item.streaming, item.streaming ? item.message : item.key, win.unreadDivider.value]"
+        v-memo="[item.key, item.streaming, item.message, artifactsOf(item), win.unreadDivider.value]"
       >
         <div
           v-if="item.sourceKeys.includes(win.unreadDivider.value ?? -1)"

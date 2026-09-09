@@ -11,6 +11,7 @@ import { isCapabilityEnabled } from "../capability/capability-state.js";
 import { MEMORY_CAPABILITY_ID } from "../capability/manifests/memory.manifest.js";
 import { OFFICE_SKILLS_CAPABILITY_ID } from "../capability/manifests/office-skills.manifest.js";
 import { TASKS_CAPABILITY_ID } from "../capability/manifests/tasks.manifest.js";
+import { isPlanApprove, type WorkMode } from "../../lib/work-mode.js";
 import { memoryStore } from "../memory/memory-store.js";
 import { humanTaskCreated } from "../../lib/task-plain.js";
 import { computeNextRun, wallToEpoch, zonedParts } from "../tasks/schedule.js";
@@ -27,6 +28,7 @@ export interface ConversationActionContext {
   sessionId?: string;
   now?: number;
   timeZone?: string;
+  workMode?: WorkMode;
 }
 
 export interface AppliedConversationActions {
@@ -67,7 +69,23 @@ function resolveSchedule(intent: ScheduleIntent, timeZone: string, now: number):
   return intent;
 }
 
-function saveRemember(content: string, workspaceId: string, sessionId?: string): boolean {
+const HYPOTHESIS_RE = /我猜|可能是|也许是|大概是|待确认|不确定|好像是|似乎是/;
+
+function saveRemember(
+  content: string,
+  workspaceId: string,
+  sessionId?: string
+): "fact" | "candidate" | null {
+  if (HYPOTHESIS_RE.test(content)) {
+    const id = memoryStore().insertCandidate({
+      workspaceId,
+      scope: "workspace",
+      logicalKind: "fact",
+      payload: { content, sourceSessionId: sessionId ?? null },
+      evidence: { origin: "user", hypothesis: true },
+    });
+    return id ? "candidate" : null;
+  }
   const outcome = memoryStore().save({
     workspaceId,
     content,
@@ -76,7 +94,7 @@ function saveRemember(content: string, workspaceId: string, sessionId?: string):
     sourceSessionId: sessionId ?? null,
     origin: "user",
   });
-  return outcome.ok;
+  return outcome.ok ? "fact" : null;
 }
 
 function createScheduleTask(
@@ -117,9 +135,18 @@ function createScheduleTask(
 
 function describe(
   intent: ConversationIntent,
-  extras?: { nextRunAt: number | null; timeZone: string; now: number }
+  extras?: {
+    nextRunAt: number | null;
+    timeZone: string;
+    now: number;
+    rememberKind?: "fact" | "candidate";
+  }
 ): string {
-  if (intent.kind === "remember") return `已记下：${intent.content}`;
+  if (intent.kind === "remember") {
+    return extras?.rememberKind === "candidate"
+      ? `已记下待确认：${intent.content}`
+      : `已记下：${intent.content}`;
+  }
   if (intent.kind === "schedule") {
     return humanTaskCreated({
       nextRunAt: extras?.nextRunAt ?? null,
@@ -154,6 +181,7 @@ export function applyConversationActions(
     skillAttached: null,
   };
   if (!message.trim() || message.includes("[PiBuddy 已处理]")) return empty;
+  if (ctx.workMode === "plan" && !isPlanApprove(message)) return empty;
 
   const intents = parseConversationIntents(message);
   if (intents.length === 0) return empty;
@@ -169,9 +197,10 @@ export function applyConversationActions(
   for (const intent of intents) {
     if (intent.kind === "remember") {
       if (!workspaceId || !isCapabilityEnabled(MEMORY_CAPABILITY_ID)) continue;
-      if (saveRemember(intent.content, workspaceId, ctx.sessionId)) {
+      const rememberKind = saveRemember(intent.content, workspaceId, ctx.sessionId);
+      if (rememberKind) {
         remembered += 1;
-        notes.push(describe(intent));
+        notes.push(describe(intent, { nextRunAt: null, timeZone, now, rememberKind }));
       }
       continue;
     }

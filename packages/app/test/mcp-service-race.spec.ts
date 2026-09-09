@@ -34,6 +34,7 @@ const {
   stopServer,
   testServer,
   stopServersByRef,
+  stopProjectServers,
 } = await import("../src/main/mcp/mcp-service.js");
 
 class FakeChild extends EventEmitter {
@@ -207,6 +208,37 @@ describe("MCP process lifecycle races", () => {
     expect(child.kill).toHaveBeenCalledTimes(1);
     pending.resolve({ child: null, probe: { ...probe, ok: false } });
     await expect(starting).resolves.toMatchObject({ running: false });
+  });
+
+  it("撤销信任后，旧 trust 检查完成也不能 spawn", async () => {
+    const id = await alphaId();
+    const trust = deferred<{ effective: "allow" | "deny" }>();
+    trustControl.wait = trust.promise;
+
+    const starting = startServer("ws", id);
+    await Promise.resolve();
+    await stopProjectServers("ws");
+    trust.resolve({ effective: "allow" });
+
+    await expect(starting).resolves.toMatchObject({ running: false, ok: false });
+    expect(connectMock).not.toHaveBeenCalled();
+  });
+
+  it("连接测试握手期间撤销信任会杀掉 probe", async () => {
+    const id = await alphaId();
+    const pending = deferred<{ child: null; probe: typeof probe }>();
+    const child = new FakeChild();
+    connectMock.mockImplementationOnce((_config, opts) => {
+      opts.onSpawn?.(child);
+      return pending.promise;
+    });
+
+    const testing = testServer("ws", id);
+    await vi.waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1));
+    await stopProjectServers("ws");
+    expect(child.kill).toHaveBeenCalledTimes(1);
+    pending.resolve({ child: null, probe: { ...probe, ok: false } });
+    await expect(testing).resolves.toMatchObject({ running: false });
   });
 
   it("dispose 同样回收连接测试的握手期 child", async () => {

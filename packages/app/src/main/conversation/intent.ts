@@ -113,32 +113,35 @@ function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
+const AFTERNOON_RE = /下午|晚上|今晚|傍晚|明晚/;
+
 function parseClock(text: string): string | null {
   const hm = text.match(/(\d{1,2})\s*[:：]\s*(\d{1,2})/);
   if (hm) {
-    const h = Number(hm[1]);
+    let h = Number(hm[1]);
     const m = Number(hm[2]);
+    if (AFTERNOON_RE.test(text) && h > 0 && h < 12) h += 12;
     if (h <= 23 && m <= 59) return `${pad2(h)}:${pad2(m)}`;
   }
   const dotted = text.match(/(\d{1,2})\s*点\s*(半|(\d{1,2})\s*分?)?/);
   if (dotted) {
     let h = Number(dotted[1]);
     const m = dotted[2] === "半" ? 30 : dotted[3] ? Number(dotted[3]) : 0;
-    if (/下午|晚上|今晚|傍晚/.test(text) && h > 0 && h < 12) h += 12;
+    if (AFTERNOON_RE.test(text) && h > 0 && h < 12) h += 12;
     if (/中午/.test(text) && h === 0) h = 12;
     if (h <= 23 && m <= 59) return `${pad2(h)}:${pad2(m)}`;
   }
   if (/早上|早晨|上午/.test(text)) return "09:00";
   if (/中午/.test(text)) return "12:00";
   if (/下午/.test(text)) return "15:00";
-  if (/晚上|今晚|夜里/.test(text)) return "20:00";
+  if (/晚上|今晚|明晚|夜里/.test(text)) return "20:00";
   return null;
 }
 
 function parseWeekdays(text: string): number[] | null {
   if (/工作日/.test(text)) return [1, 2, 3, 4, 5];
   const hits: number[] = [];
-  const re = /周([一二三四五六日天])/g;
+  const re = /(?:周|星期|礼拜)([一二三四五六日天])/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
     const d = WEEKDAY_MAP[m[1]];
@@ -155,8 +158,15 @@ function scheduleName(schedule: TaskSchedule, prompt: string): string {
   return short || "对话创建的任务";
 }
 
+function hasNonExecutingIntent(text: string): boolean {
+  if (/不要|别再|别去|不用|千万别|别帮我|别创建|不要创建/.test(text)) return true;
+  if (/解释|什么意思|是什么意思|这句话是|只是问问|假如|如果.+就/.test(text)) return true;
+  return false;
+}
+
 function parseSchedule(text: string): ScheduleIntent | null {
   if (!ACTION_RE.test(text)) return null;
+  if (hasNonExecutingIntent(text)) return null;
   const time = parseClock(text);
   if (DAILY_RE.test(text)) {
     if (!time) return null;
@@ -165,7 +175,8 @@ function parseSchedule(text: string): ScheduleIntent | null {
   }
   if (WEEKLY_RE.test(text)) {
     if (!time) return null;
-    const weekdays = parseWeekdays(text) ?? [1];
+    const weekdays = parseWeekdays(text);
+    if (!weekdays) return null;
     const schedule: TaskSchedule = { kind: "weekly", weekdays, time };
     return { kind: "schedule", schedule, name: scheduleName(schedule, text), prompt: text };
   }

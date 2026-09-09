@@ -14,8 +14,8 @@ export function inferClaim(content: string, fallbackKind: string): { subject: st
 export function claimIdentity(env: {
   id: string;
   logicalKind: string;
-  claimSubject: string;
-  claimPredicate: string;
+  claimSubject?: string | null;
+  claimPredicate?: string | null;
   content: string;
 }): string {
   const inferred = inferClaim(env.content, env.logicalKind);

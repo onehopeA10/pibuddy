@@ -37,6 +37,7 @@ import {
 import { log } from "../log.js";
 import { buildPiSpawn, verifyRuntimeHandshake } from "../pi-launcher.js";
 import { resolveSessionDir } from "../sessions/session-dir.js";
+import { sessionIndex } from "../sessions/session-index.js";
 import { loadSettings } from "../settings.js";
 import { requireWorkspaceRoot } from "../workspace-registry.js";
 import type {
@@ -68,6 +69,8 @@ export interface PoolRuntimeSpawnSpec {
   cwd: string;
   sessionDir: string;
   generation: number;
+  /** 恢复已有 user 会话时传入 JSONL 路径；新建 child/task 不传。 */
+  sessionPath?: string;
 }
 
 export type PoolRuntimeClientFactory = (spec: PoolRuntimeSpawnSpec) => PoolRuntimeClient;
@@ -94,6 +97,7 @@ const realClientFactory: PoolRuntimeClientFactory = (spec) => {
     cwd: spec.cwd,
     sessionDir: spec.sessionDir,
     generation: spec.generation,
+    ...(spec.sessionPath ? { session: spec.sessionPath } : {}),
   }) as unknown as PoolRuntimeClient;
 };
 
@@ -288,6 +292,10 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
     }
 
     const generation = ++this.generationCounter;
+    const sessionPath =
+      req.origin === "user" && req.workspaceId
+        ? sessionIndex().bySessionId(req.sessionId, req.workspaceId)?.sourcePath
+        : undefined;
     let client: PoolRuntimeClient;
     try {
       client = this.clientFactory({
@@ -296,6 +304,7 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
         cwd,
         sessionDir,
         generation,
+        sessionPath,
       });
     } catch (err) {
       this.failLaunch(intent, "agent_pool_launch_spawn_failed", err);
@@ -373,6 +382,18 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
       try {
         const state = await client.getState();
         if (this.runtimes.get(req.sessionId) !== record) return;
+        if (
+          sessionPath &&
+          state.sessionId &&
+          state.sessionId !== req.sessionId
+        ) {
+          log().warn("agent_pool_runtime_session_mismatch", {
+            sessionId: req.sessionId,
+            actual: state.sessionId,
+          });
+          this.finalizeRuntime(req.sessionId, record, "session-mismatch", true);
+          return;
+        }
         if (record.origin === "child" && this.childReadySink) {
           let goalAccepted = false;
           try {

@@ -20,6 +20,7 @@ import {
   lookupMcpPermissionTargetByRef,
   mcpExecutionFingerprint,
 } from "./mcp-config.js";
+import { isOwnedMcpProcess } from "./mcp-service.js";
 
 const runResourceOf: PermissionResourceResolver = (payload) => {
   const parsed = mcpIdRequestSchema.safeParse(payload);
@@ -56,11 +57,19 @@ const removeResourceOf: PermissionResourceResolver = (payload) => {
   return target.resource ?? undefined;
 };
 
+const stopResourceOf: PermissionResourceResolver = (payload) => {
+  const parsed = mcpIdRequestSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  // 已经由本工作区启动的进程，停止是生命周期回收，不再消耗新的执行授权。
+  if (isOwnedMcpProcess(parsed.data.workspaceId, parsed.data.id)) return undefined;
+  return runResourceOf(payload);
+};
+
 const RESOURCE_OF: Record<(typeof MCP_GATED_CHANNELS)[number], PermissionResourceResolver> = {
   [CHANNELS.mcpSave]: configResourceOf,
   [CHANNELS.mcpTest]: runResourceOf,
   [CHANNELS.mcpStart]: runResourceOf,
-  [CHANNELS.mcpStop]: runResourceOf,
+  [CHANNELS.mcpStop]: stopResourceOf,
   [CHANNELS.mcpRemove]: removeResourceOf,
 };
 

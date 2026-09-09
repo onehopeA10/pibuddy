@@ -38,13 +38,13 @@ import { listLiveEvidence, resetLiveEvidence } from "./live-evidence.js";
 import { collectLiveEvidence, resetLiveSourceProviders } from "./live-sources.js";
 import { appendPrepLog, resetPrepLog } from "./prep-log.js";
 import { fastAnalyze } from "./memory-analyzer.js";
-import { envelopeFromRecord } from "./memory-normalizer.js";
+import { envelopeFromRecord, envelopeFromWorking } from "./memory-normalizer.js";
 import { retainAsCandidate, shouldRetain } from "./memory-post-task.js";
 import { compileQuery } from "./query-compiler.js";
 import { effectiveMode, planMemory } from "./memory-router.js";
 import { MAX_INJECTED, rankedMemories } from "./memory-search.js";
 import { memoryStore } from "./memory-store.js";
-import { admitToWorking, workingForSession } from "./working-memory.js";
+import { admitToWorking, refreshWorkingForSession } from "./working-memory.js";
 
 const MAX_HITS_PER_WS = 100;
 const recentHits = new Map<string, MemoryHit[]>();
@@ -152,13 +152,7 @@ export async function prepareMemoryContext(
     return commitPrepared(workspaceId, sid, message, "");
   }
 
-  const working = plan.working.read
-    ? workingForSession(store, sid).filter((item) => {
-        if (!item.sourceMemoryId) return true;
-        const src = store.get(item.sourceMemoryId);
-        return Boolean(src && !src.excluded && src.sensitivity !== "sensitive");
-      })
-    : [];
+  const working = plan.working.read ? refreshWorkingForSession(store, workspaceId, sid) : [];
   const already = new Set(
     plan.working.dedupeLoadedSources
       ? working.map((item) => item.sourceMemoryId).filter((id): id is string => Boolean(id))
@@ -180,7 +174,14 @@ export async function prepareMemoryContext(
     plan.reflections.length > 0
       ? reflectHindsight(plan.reflections[0]?.query || recallQuery, { workspaceId })
       : [];
-  const resolvedEnvs = resolveEnvelopes([...liveEnvs, ...canonicalEnvs, ...hindsightEnvs, ...reflectEnvs]);
+  const workingEnvs = working.map((item) => envelopeFromWorking(item));
+  const resolvedEnvs = resolveEnvelopes([
+    ...workingEnvs,
+    ...liveEnvs,
+    ...canonicalEnvs,
+    ...hindsightEnvs,
+    ...reflectEnvs,
+  ]);
   const byId = new Map(fresh.map((r) => [r.id, r]));
   const recordsOf = (envs: typeof resolvedEnvs.admitted): MemoryRecord[] =>
     envs.map((e) => byId.get(e.id)).filter((r): r is MemoryRecord => Boolean(r));
@@ -194,7 +195,7 @@ export async function prepareMemoryContext(
 
   if (plan.working.write) {
     for (const record of verified) {
-      admitToWorking(store, sid, record);
+      admitToWorking(store, workspaceId, sid, record);
     }
   }
 
@@ -219,8 +220,15 @@ export async function prepareMemoryContext(
     })
     .map((e) => ({ id: e.id, content: e.content }));
 
+  const admittedWorkingIds = new Set(
+    resolvedEnvs.admitted.filter((e) => e.source === "working").map((e) => e.id)
+  );
+  const workingAdmitted = working.filter((item) =>
+    admittedWorkingIds.has(item.sourceMemoryId ?? item.id)
+  );
+
   const block = mergeMemoryContext({
-    working: already.size > 0 ? working : [],
+    working: workingAdmitted,
     verified,
     live,
     shadowed,

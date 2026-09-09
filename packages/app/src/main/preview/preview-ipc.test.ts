@@ -236,6 +236,30 @@ describe("CT-18 · 收容", () => {
     await setup();
     await expect(invoke(CHANNELS.previewOpen, {})).rejects.toThrow("PREVIEW_TARGET_REQUIRED");
   });
+
+  it("旧版产物磁盘对不上时不把当前文件当成旧版打开", async () => {
+    const { artifacts, previewIpc } = await setup();
+    const store = artifacts.artifactStore();
+    fs.writeFileSync(path.join(workspaceDir, "report.md"), "第一版", "utf8");
+    const v1 = store.markReady(store.begin({ workspaceId, relativePath: "report.md" }).id);
+    fs.writeFileSync(path.join(workspaceDir, "report.md"), "第二版", "utf8");
+    const v2 = store.markReady(store.begin({ workspaceId, relativePath: "report.md" }).id);
+
+    const old = (await invoke(CHANNELS.previewConvert, {
+      workspaceId,
+      artifactId: v1.id,
+    })) as { code: string; text: string; suggestion: string };
+    expect(old.code).toBe("unsupported");
+    expect(old.text).toBe("");
+    expect(old.suggestion).toBe(previewIpc.ARTIFACT_VERSION_UNAVAILABLE);
+
+    const latest = (await invoke(CHANNELS.previewConvert, {
+      workspaceId,
+      artifactId: v2.id,
+    })) as { code: string; text: string };
+    expect(latest.code).toBe("ok");
+    expect(latest.text).toBe("内容");
+  });
 });
 
 describe("artifacts 通道", () => {

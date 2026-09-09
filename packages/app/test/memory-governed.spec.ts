@@ -260,14 +260,15 @@ describe("§27 本期实现", () => {
 
   it("14. Working source_hash 变化则失效", () => {
     memoryStore().upsertWorkingItem({
+      workspaceId: WS,
       sessionId: SESS,
       kind: "fact",
       content: "Node >=20",
       sourceMemoryId: "m-node",
       sourceHash: "aaa",
     });
-    expect(memoryStore().invalidateWorkingIfHashChanged(SESS, "m-node", "bbb")).toBe(true);
-    expect(memoryStore().listWorkingItems(SESS)).toHaveLength(0);
+    expect(memoryStore().invalidateWorkingIfHashChanged(WS, SESS, "m-node", "bbb")).toBe(true);
+    expect(memoryStore().listWorkingItems(WS, SESS)).toHaveLength(0);
   });
 
   it("16. 同任务第二次命中 Working，不再 Recall 同一来源", async () => {
@@ -612,9 +613,27 @@ describe("dsh 可迁移缝", () => {
   });
 });
 
+describe("Working 按工作区隔离", () => {
+  it("同一 sessionId 在 B 读不到 A 的 Working", () => {
+    memoryStore().upsertWorkingItem({
+      workspaceId: WS,
+      sessionId: SESS,
+      kind: "fact",
+      content: "A 的私有事实",
+    });
+    expect(memoryStore().listWorkingItems(WS, SESS)).toHaveLength(1);
+    expect(memoryStore().listWorkingItems(WS_B, SESS)).toHaveLength(0);
+  });
+});
+
 describe("v3 表存在", () => {
   it("打开库后 working_items 可写入", () => {
-    const item = memoryStore().upsertWorkingItem({ sessionId: SESS, kind: "fact", content: "x" });
-    expect(memoryStore().listWorkingItems(SESS).map((w) => w.id)).toContain(item.id);
+    const item = memoryStore().upsertWorkingItem({
+      workspaceId: WS,
+      sessionId: SESS,
+      kind: "fact",
+      content: "x",
+    });
+    expect(memoryStore().listWorkingItems(WS, SESS).map((w) => w.id)).toContain(item.id);
   });
 });

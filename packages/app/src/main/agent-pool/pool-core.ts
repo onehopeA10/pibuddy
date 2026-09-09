@@ -684,6 +684,7 @@ export class AgentPoolCore {
     permission: string;
     resource?: string | null;
     workspaceId?: string | null;
+    sessionId?: string | null;
   }): number {
     const resource = match.resource ?? null;
     const ids = this.inbox
@@ -699,6 +700,7 @@ export class AgentPoolCore {
         ) {
           return false;
         }
+        if (match.sessionId && item.sessionId !== match.sessionId) return false;
         return true;
       })
       .map((item) => item.id);

@@ -204,6 +204,7 @@ export const permissionDecideRequestSchema = z
     resource: z.string().min(1).nullable().default(null),
     disposition: permissionDispositionSchema,
     workspaceId: z.string().min(1).nullable().default(null),
+    sessionId: z.string().min(1).optional(),
   })
   .strict();
 export type PermissionDecideRequest = z.infer<typeof permissionDecideRequestSchema>;

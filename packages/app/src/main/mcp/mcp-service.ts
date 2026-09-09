@@ -37,9 +37,39 @@ interface ProcessSlot {
 
 /** serverId → 单一生命周期槽；同一 id 不允许并发派生多个 child。 */
 const processSlots = new Map<string, ProcessSlot>();
-/** 连接测试同样会 spawn；握手期间也必须能被全局 teardown 回收。 */
-const probeChildren = new Set<ChildProcess>();
+/** 连接测试同样会 spawn；握手期间必须能按工作区撤销并被全局 teardown 回收。 */
+const probeChildren = new Map<ChildProcess, string>();
 let lifecycleEpoch = 0;
+/** 工作区项目信任撤销代际：撤销时推进，未登记的启动/探测据此作废。 */
+const trustRevokeEpoch = new Map<string, number>();
+
+function currentTrustEpoch(workspaceId: string): number {
+  return trustRevokeEpoch.get(workspaceId) ?? 0;
+}
+
+function bumpTrustEpoch(workspaceId: string): number {
+  const next = currentTrustEpoch(workspaceId) + 1;
+  trustRevokeEpoch.set(workspaceId, next);
+  return next;
+}
+
+function killWorkspaceProbes(workspaceId: string): void {
+  for (const [child, owner] of probeChildren) {
+    if (owner !== workspaceId) continue;
+    killChild(child);
+    probeChildren.delete(child);
+  }
+}
+
+/** 主进程已拥有该工作区的启动生命周期时，停止不再消耗新的执行授权。 */
+export function isOwnedMcpProcess(workspaceId: string, id: string): boolean {
+  const slot = processSlots.get(id);
+  return Boolean(
+    slot &&
+      slot.workspaceId === workspaceId &&
+      (slot.child || slot.startingChild || slot.starting)
+  );
+}
 
 function killChild(child: ChildProcess): void {
   terminateStdioChild(child);
@@ -109,6 +139,7 @@ export async function listServers(workspaceId: string): Promise<McpListResult> {
 /** 连接测试：真的连一次，握手完就回收进程。 */
 export async function testServer(workspaceId: string, id: string): Promise<McpConnectionResult> {
   const epoch = lifecycleEpoch;
+  const trustEpoch = currentTrustEpoch(workspaceId);
   const server = await findServer(workspaceId, id);
   if (!server) return notFound(id);
   if (epoch !== lifecycleEpoch) return lifecycleStopped(server);
@@ -116,6 +147,9 @@ export async function testServer(workspaceId: string, id: string): Promise<McpCo
   const trustFailure = await projectTrustFailure(workspaceId, server);
   if (trustFailure) return trustFailure;
   if (epoch !== lifecycleEpoch) return lifecycleStopped(server);
+  if (trustEpoch !== currentTrustEpoch(workspaceId)) {
+    return projectTrustDenied(server);
+  }
 
   let spawned: ChildProcess | null = null;
   try {
@@ -123,11 +157,11 @@ export async function testServer(workspaceId: string, id: string): Promise<McpCo
       keepAlive: false,
       onSpawn: (child) => {
         spawned = child;
-        if (epoch !== lifecycleEpoch) {
+        if (epoch !== lifecycleEpoch || trustEpoch !== currentTrustEpoch(workspaceId)) {
           killChild(child);
           return;
         }
-        probeChildren.add(child);
+        probeChildren.set(child, workspaceId);
       },
     });
     return buildResult(server, probe, false);
@@ -139,6 +173,7 @@ export async function testServer(workspaceId: string, id: string): Promise<McpCo
 /** 启动：同一 id 共用一个 in-flight promise，避免并发 spawn。 */
 export async function startServer(workspaceId: string, id: string): Promise<McpConnectionResult> {
   const epoch = lifecycleEpoch;
+  const trustEpoch = currentTrustEpoch(workspaceId);
   const server = await findServer(workspaceId, id);
   if (!server) return notFound(id);
   if (epoch !== lifecycleEpoch) return lifecycleStopped(server);
@@ -146,6 +181,9 @@ export async function startServer(workspaceId: string, id: string): Promise<McpC
   const trustFailure = await projectTrustFailure(workspaceId, server);
   if (trustFailure) return trustFailure;
   if (epoch !== lifecycleEpoch) return lifecycleStopped(server);
+  if (trustEpoch !== currentTrustEpoch(workspaceId)) {
+    return projectTrustDenied(server);
+  }
 
   const existing = processSlots.get(id);
   if (existing?.starting) return existing.starting;
@@ -173,6 +211,7 @@ export async function startServer(workspaceId: string, id: string): Promise<McpC
       onSpawn: (spawned) => {
         if (
           epoch !== lifecycleEpoch ||
+          trustEpoch !== currentTrustEpoch(workspaceId) ||
           slot.stopRequested ||
           processSlots.get(id) !== slot
         ) {
@@ -186,6 +225,7 @@ export async function startServer(workspaceId: string, id: string): Promise<McpC
     if (!child) return buildResult(server, probe, false);
     if (
       epoch !== lifecycleEpoch ||
+      trustEpoch !== currentTrustEpoch(workspaceId) ||
       slot.stopRequested ||
       processSlots.get(id) !== slot
     ) {
@@ -237,6 +277,8 @@ export async function stopServer(workspaceId: string, id: string): Promise<McpLi
 
 /** project trust 被撤销时，只回收该工作区的 project MCP，user 级不受影响。 */
 export async function stopProjectServers(workspaceId: string): Promise<void> {
+  bumpTrustEpoch(workspaceId);
+  killWorkspaceProbes(workspaceId);
   const ids = [...processSlots.entries()]
     .filter(([, slot]) => slot.workspaceId === workspaceId && slot.scope === "project")
     .map(([id]) => id);
@@ -273,9 +315,10 @@ export function disposeMcpResources(): void {
       killChild(child);
     }
   }
-  for (const child of probeChildren) killChild(child);
+  for (const child of probeChildren.keys()) killChild(child);
   probeChildren.clear();
   processSlots.clear();
+  trustRevokeEpoch.clear();
 }
 
 // ---------------------------------------------------------------- 结果构造
@@ -308,13 +351,7 @@ function alreadyRunning(server: ResolvedMcpServer): McpConnectionResult {
   };
 }
 
-async function projectTrustFailure(
-  workspaceId: string,
-  server: ResolvedMcpServer
-): Promise<McpConnectionResult | null> {
-  if (server.scope !== "project") return null;
-  const trust = await currentProjectTrust(workspaceId);
-  if (trust.effective === "allow") return null;
+function projectTrustDenied(server: ResolvedMcpServer): McpConnectionResult {
   return {
     ok: false,
     serverId: server.id,
@@ -326,6 +363,16 @@ async function projectTrustFailure(
     oauth: oauthStatus(server),
     running: false,
   };
+}
+
+async function projectTrustFailure(
+  workspaceId: string,
+  server: ResolvedMcpServer
+): Promise<McpConnectionResult | null> {
+  if (server.scope !== "project") return null;
+  const trust = await currentProjectTrust(workspaceId);
+  if (trust.effective === "allow") return null;
+  return projectTrustDenied(server);
 }
 
 function buildResult(

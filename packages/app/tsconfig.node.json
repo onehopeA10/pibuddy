@@ -9,6 +9,7 @@
     "electron.vite.config.ts",
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
+    "src/lib/**/*.ts",
     "../pi-sdk/src/**/*.ts",
     "../contract/src/**/*.ts"
   ]

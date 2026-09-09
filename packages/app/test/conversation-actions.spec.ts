@@ -85,6 +85,23 @@ describe("parseConversationIntents 只认明确口令", () => {
     );
     expect(parseConversationIntents("提醒我一下这个文件怎么打开")).toEqual([]);
     expect(parseConversationIntents("每天都这样")).toEqual([]);
+    expect(parseConversationIntents("不要每天早上9点提醒我看待办")).toEqual([]);
+    expect(parseConversationIntents("解释这句话，不要创建任务")).toEqual([]);
+    const friday = parseConversationIntents("每星期五9:00提醒我交周报");
+    expect(friday).toContainEqual(
+      expect.objectContaining({
+        kind: "schedule",
+        schedule: { kind: "weekly", weekdays: [5], time: "09:00" },
+      })
+    );
+    const tomorrowNight = parseConversationIntents("明晚8点提醒我开会");
+    expect(tomorrowNight).toContainEqual(
+      expect.objectContaining({
+        kind: "schedule",
+        resolve: "tomorrow",
+        wallTime: "20:00",
+      })
+    );
   });
 
   it("办公技能按关键词挂上；已有 /skill:office- 不再挂", () => {
@@ -163,6 +180,24 @@ describe("applyConversationActions 按能力落库", () => {
     const off = applyConversationActions(text, { workspaceId: WS });
     expect(off.skillAttached).toBeNull();
     expect(off.message).toBe(text);
+  });
+
+  it("计划模式不落库", () => {
+    const out = applyConversationActions("每天早上9点提醒我看待办", {
+      workspaceId: WS,
+      now: NOW,
+      timeZone: TZ,
+      workMode: "plan",
+    });
+    expect(out.tasksCreated).toBe(0);
+    expect(taskStore().listTasks(WS)).toHaveLength(0);
+  });
+
+  it("猜测记住只进待审 candidate", () => {
+    const out = applyConversationActions("记住：我猜数据库是 PostgreSQL", { workspaceId: WS });
+    expect(out.remembered).toBe(1);
+    expect(memoryStore().query({ workspaceId: WS })).toEqual([]);
+    expect(memoryStore().listCandidates(WS).some((c) => c.status === "pending")).toBe(true);
   });
 
   it("没有 workspace 时不写记忆、不建任务", () => {

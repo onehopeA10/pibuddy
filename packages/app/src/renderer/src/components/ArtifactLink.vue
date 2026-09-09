@@ -74,6 +74,7 @@ function open(): void {
   void store.preview({
     workspaceId: record.value.workspaceId,
     relativePath: record.value.exportPath,
+    artifactId: record.value.id,
   });
   store.panelOpen = false;
 }
@@ -97,7 +98,11 @@ async function acceptChange(): Promise<void> {
   reviewing.value = true;
   reviewError.value = "";
   try {
-    await window.piBuddy.workspace.acceptChange(id);
+    const result = await window.piBuddy.workspace.acceptChange(id);
+    if (!result?.ok) {
+      reviewError.value = reviewFailMessage(result?.message ?? "这次没办成");
+      return;
+    }
     pendingChangeId.value = null;
   } catch (err) {
     reviewError.value = reviewFailMessage(err);
@@ -112,7 +117,11 @@ async function rejectChange(): Promise<void> {
   reviewing.value = true;
   reviewError.value = "";
   try {
-    await window.piBuddy.workspace.rejectChange(id);
+    const result = await window.piBuddy.workspace.rejectChange(id);
+    if (!result.ok) {
+      reviewError.value = reviewFailMessage(result.message ?? result.errorCode ?? "这次没办成");
+      return;
+    }
     pendingChangeId.value = null;
   } catch (err) {
     reviewError.value = reviewFailMessage(err);

@@ -7,6 +7,7 @@ import {
   logicalScopeFromMemoryScope,
   type MemoryEnvelope,
   type MemoryRecord,
+  type WorkingItem,
 } from "@pibuddy/contract";
 
 import { inferClaim } from "./claim-key.js";
@@ -34,6 +35,31 @@ export function envelopeFromRecord(record: MemoryRecord, live = false): MemoryEn
     retrieval: null,
     content: record.content,
     estimatedTokens: Math.max(1, Math.ceil(record.content.length / 4)),
+  };
+}
+
+export function envelopeFromWorking(item: WorkingItem): MemoryEnvelope {
+  const claim = inferClaim(item.content, item.kind);
+  return {
+    id: item.sourceMemoryId ?? item.id,
+    scope: "project",
+    logicalKind: item.kind as MemoryEnvelope["logicalKind"],
+    claimSubject: claim.subject,
+    claimPredicate: claim.predicate,
+    claimObjectJson: null,
+    source: "working",
+    backend: "sqlite",
+    sourceRef: item.sourceMemoryId ?? item.id,
+    sourceHash: item.sourceHash,
+    status: "active",
+    observedAt: null,
+    verifiedAt: null,
+    validFrom: null,
+    validUntil: null,
+    evidence: [],
+    retrieval: null,
+    content: item.content,
+    estimatedTokens: Math.max(1, Math.ceil(item.content.length / 4)),
   };
 }
 

@@ -68,6 +68,18 @@ import { assertContained, requireWorkspaceRoot, workspaceIdFor } from "../worksp
 const clients = new Map<number, PiRpcClient>();
 /** webContents → 该 runtime 启动时绑定的 workspaceId（记忆注入 / 切会话不得回退 settings）。 */
 const clientWorkspaces = new Map<number, string>();
+/** 切换 / 新建 / 中止推进代际，作废仍在预处理的旧 prompt。 */
+const promptEpochBySender = new Map<number, number>();
+
+function currentPromptEpoch(senderId: number): number {
+  return promptEpochBySender.get(senderId) ?? 0;
+}
+
+function bumpPromptEpoch(senderId: number): number {
+  const next = currentPromptEpoch(senderId) + 1;
+  promptEpochBySender.set(senderId, next);
+  return next;
+}
 
 let supervisorInstance: PiSupervisor | null = null;
 /** 全应用唯一的运行时监管者（代际、序号、信封、33ms 转发都归它管）。 */
@@ -112,6 +124,7 @@ export function __resetExtUi(): void {
 export function disposeClientFor(webContentsId: number): void {
   clients.delete(webContentsId);
   clientWorkspaces.delete(webContentsId);
+  promptEpochBySender.delete(webContentsId);
   // 先作废挂起弹窗再停进程：反过来的话，广播 expire 时 supervisor 里已经
   // 没有这个 target 的记录，信封发不出去，渲染进程会留着一排永远等不到
   // 回答的框。
@@ -451,16 +464,20 @@ export function registerPiIpc(): void {
 
   registerHandler(CHANNELS.piPrompt, piPromptRequestSchema, async (payload, event) => {
     const preprocessStartedAt = Date.now();
+    const senderId = event.sender.id;
+    const promptEpoch = currentPromptEpoch(senderId);
+    const sessionAtStart = supervisor().currentActive()?.sessionId;
     const inlineImages = validateInlineImages(payload.images);
     const tokens = payload.attachmentTokens ?? [];
     const attachmentSnapshots = await resolvePromptAttachments(tokens);
-    const client = clientFor(event.sender.id);
-    const promptWorkspaceId = clientWorkspaces.get(event.sender.id);
+    const client = clientFor(senderId);
+    const promptWorkspaceId = clientWorkspaces.get(senderId);
     // 对话即动作：在拼附件 / 注入记忆之前认「记住 / 定时 / 办公技能」。
     // 关掉对应能力时 applyConversationActions 原样返回，这段等价于不存在。
     const acted = applyConversationActions(payload.message, {
       workspaceId: promptWorkspaceId,
       sessionId: supervisor().currentActive()?.sessionId,
+      workMode: payload.workMode ?? "act",
     });
     // 非图片附件先在 main 内完成稳定读取与 immutable snapshot，再把 snapshot 路径
     // 交给 pi。原 workspace / 系统文件路径不会进入 prompt，也不会返回 renderer。
@@ -481,6 +498,13 @@ export function registerPiIpc(): void {
       );
     }
     const preprocessMs = Date.now() - preprocessStartedAt;
+    const sessionNow = supervisor().currentActive()?.sessionId;
+    if (
+      promptEpoch !== currentPromptEpoch(senderId) ||
+      (sessionAtStart && sessionNow && sessionAtStart !== sessionNow)
+    ) {
+      return { success: false, error: "会话已切换，未发送" };
+    }
     const rpcStartedAt = Date.now();
     const resp = await client.send({
       type: "prompt",
@@ -511,18 +535,29 @@ export function registerPiIpc(): void {
     return clientFor(event.sender.id).followUp(payload.message, inlineImages);
   });
 
-  registerHandler(CHANNELS.piAbort, voidRequestSchema, (_p, event) =>
-    clientFor(event.sender.id).abort()
-  );
+  registerHandler(CHANNELS.piAbort, voidRequestSchema, (_p, event) => {
+    bumpPromptEpoch(event.sender.id);
+    return clientFor(event.sender.id).abort();
+  });
 
   registerHandler(CHANNELS.piNewSession, voidRequestSchema, async (_p, event) => {
-    const resp = await clientFor(event.sender.id).newSession();
+    bumpPromptEpoch(event.sender.id);
+    const client = clientFor(event.sender.id);
+    const resp = await client.newSession();
+    if (resp.success && (resp.data as { cancelled?: boolean } | undefined)?.cancelled !== true) {
+      const nextId =
+        resp.data && typeof resp.data === "object" && "sessionId" in resp.data
+          ? String((resp.data as { sessionId?: unknown }).sessionId ?? "")
+          : "";
+      if (nextId) supervisor().adoptSession(client.runtimeId, nextId);
+    }
     // 换会话 = 上一段对话里签发的附件凭证全部作废
     if (shouldRevokeAttachmentsAfterSessionChange(resp)) attachments.revokeAll();
     return resp;
   });
 
   registerHandler(CHANNELS.piSwitchSession, piSwitchSessionRequestSchema, async (payload, event) => {
+    bumpPromptEpoch(event.sender.id);
     const root = requireWorkspaceRoot(payload.workspaceId);
     const settings = loadSettings();
     // 只允许切到该 workspace 会话目录里的文件，禁止回退 settings.workspace
@@ -558,6 +593,7 @@ export function registerPiIpc(): void {
     if (!resp) throw new Error("switch_session 没有返回");
     if (resp.success && (resp.data as { cancelled?: boolean } | undefined)?.cancelled !== true) {
       clientWorkspaces.set(event.sender.id, payload.workspaceId);
+      supervisor().adoptSession(client.runtimeId, payload.sessionId);
     }
     if (shouldRevokeAttachmentsAfterSessionChange(resp)) attachments.revokeAll();
     return resp;

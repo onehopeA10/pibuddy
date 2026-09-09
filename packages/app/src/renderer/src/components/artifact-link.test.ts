@@ -102,6 +102,28 @@ describe("ArtifactLink", () => {
     expect(wrapper.text()).toContain("已移入回收站，点击恢复");
   });
 
+  it("打开产物时按记录 id 预览，不把当前路径当成旧版", async () => {
+    installBridge([RECORD]);
+    const api = (
+      window as unknown as {
+        piBuddy: { preview: { convert: ReturnType<typeof vi.fn> } };
+      }
+    ).piBuddy;
+    const wrapper = mount(ArtifactLink, {
+      props: { artifactId: "a-1", version: 1, name: "季度报告.docx" },
+      global: { stubs: { NButton: false, NTag: false } },
+    });
+    await flushPromises();
+    await wrapper.get('[aria-label="打开产物 季度报告.docx 的第 1 版"]').trigger("click");
+    expect(api.preview.convert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        artifactId: "a-1",
+        workspaceId: "w1",
+        relativePath: "reports/q1.docx",
+      })
+    );
+  });
+
   it("产物整个找不到时如实说找不到，不静默渲染成空", async () => {
     installBridge([]);
     const wrapper = mount(ArtifactLink, {

@@ -168,6 +168,18 @@ describe("拒绝一条变更", () => {
     expect(after.mtime).toBe(before.mtime);
     expect(store.changesetStore().get(record.id)?.status).toBe("rejected");
   });
+
+  it("磁盘已是 after 时，拒绝会把 before 写回去", async () => {
+    const { store, apply } = await freshModules();
+    const record = await stage(store, "one\ntwo\nthree\n");
+    const file = path.join(workspaceDir, "note.txt");
+    fs.writeFileSync(file, "one\ntwo\nthree\n", "utf8");
+
+    const result = apply.rejectChange(record.id);
+    expect(result.ok).toBe(true);
+    expect(fs.readFileSync(file, "utf8")).toBe("one\ntwo\n");
+    expect(store.changesetStore().get(record.id)?.status).toBe("rejected");
+  });
 });
 
 describe("unverified 变更", () => {

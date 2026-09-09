@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import { useAppStore } from "./app";
+import { useSessionsStore } from "./sessions";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -152,6 +153,79 @@ describe("openSession local preview", () => {
     expect(store.items.map((item) => (item.message as { content?: string }).content)).toEqual([
       "session b",
     ]);
+  });
+
+  it("切换成功后模型显示切到目标会话，不沿用上一个，也不另发 get_state", async () => {
+    const switched = deferred<{ success: true; data: Record<string, never> }>();
+    const getState = vi.fn(async () => ({ success: true, data: { sessionId: "session-target" } }));
+    (globalThis as unknown as { window: unknown }).window = {
+      piBuddy: {
+        sessions: { readHistoryBefore: vi.fn(async () => historyPage()) },
+        pi: {
+          switchSession: vi.fn(() => switched.promise),
+          getState,
+          getSessionStats: vi.fn(async () => ({ success: false })),
+        },
+      },
+    };
+
+    const store = seedPreviousState();
+    store.workspaceId = "w1";
+    store.agentState = {
+      model: { id: "model-A", provider: "acme", input: ["text"] },
+      thinkingLevel: "low",
+      isStreaming: false,
+      isCompacting: false,
+      steeringMode: "all",
+      followUpMode: "all",
+      sessionId: "session-old",
+      autoCompactionEnabled: false,
+      messageCount: 1,
+      pendingMessageCount: 0,
+    };
+    store.models = [
+      { id: "model-A", provider: "acme", input: ["text"] },
+      { id: "model-B", provider: "acme", input: ["text", "image"] },
+    ];
+    useSessionsStore().rows = [
+      {
+        sessionId: "session-old",
+        preview: "old",
+        messageCount: 1,
+        tokenTotal: 0,
+        costTotal: 0,
+        modelId: "model-A",
+        status: "active",
+        pinned: false,
+        unread: false,
+        running: false,
+        modified: 1,
+        sizeBytes: 10,
+      },
+      {
+        sessionId: "session-target",
+        preview: "target",
+        messageCount: 2,
+        tokenTotal: 0,
+        costTotal: 0,
+        modelId: "model-B",
+        status: "active",
+        pinned: false,
+        unread: false,
+        running: false,
+        modified: 2,
+        sizeBytes: 20,
+      },
+    ];
+
+    const opening = store.openSession({ sessionId: "session-target", sizeBytes: 20 });
+    await opening;
+    switched.resolve({ success: true, data: {} });
+    await store.whenPiReady();
+
+    expect(store.piLoadedSessionId).toBe("session-target");
+    expect(store.currentModel?.id).toBe("model-B");
+    expect(getState).not.toHaveBeenCalled();
   });
 
   it("预览失败也不锁输入框，发送先落地再等 switch", async () => {

@@ -96,12 +96,18 @@ export function productionBackend(): RemoteBackend {
     async decideInbox(inboxId: string, allow: boolean): Promise<RemoteActionResult> {
       const item: PoolInboxItem | null = agentPool().resolveInbox(inboxId);
       if (!item) return { ok: false, reason: "inbox item gone" };
+      const policy = agentPool().sessionGrantPolicy(item.sessionId);
       await decidePermission({
         capabilityId: item.capabilityId,
         permission: item.permission,
         resource: item.resource,
-        disposition: allow ? "allow-once" : "deny",
+        disposition: allow
+          ? policy === "workspace-only"
+            ? "allow-workspace"
+            : "allow-once"
+          : "deny",
         workspaceId: item.workspaceId,
+        sessionId: item.sessionId,
       });
       return { ok: true, reason: "ok" };
     },

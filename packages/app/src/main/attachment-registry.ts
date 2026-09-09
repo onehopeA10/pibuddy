@@ -193,6 +193,8 @@ interface CachedPromptSnapshot extends PromptAttachmentSnapshot {
 
 const tokens = new Map<string, AttachmentRecord>();
 const promptSnapshots = new Map<string, CachedPromptSnapshot>();
+/** 已写入 prompt 的快照归属会话，token 撤销 / TTL 不再删这些字节。 */
+const consumedPromptTokens = new Set<string>();
 const promptSnapshotPromises = new Map<string, Promise<PromptAttachmentSnapshot>>();
 
 /**
@@ -220,9 +222,11 @@ function removeSnapshotFiles(token: string): void {
   nodeFs.rmSync(directory, { recursive: true, force: true });
 }
 
-function deleteToken(token: string): boolean {
+function deleteToken(token: string, forceSnapshot = false): boolean {
   const removed = tokens.delete(token);
-  removeSnapshotFiles(token);
+  if (forceSnapshot || !consumedPromptTokens.has(token)) {
+    removeSnapshotFiles(token);
+  }
   return removed;
 }
 
@@ -638,6 +642,7 @@ export async function snapshotPromptAttachment(
     if (tokens.get(token) !== record) throw new Error("ATTACHMENT_TOKEN_INVALID");
     const snapshot = await writePromptSnapshot(record, stable);
     promptSnapshots.set(token, snapshot);
+    consumedPromptTokens.add(token);
     renewOnAccess(record, now);
     return snapshot;
   })().finally(() => {
@@ -702,15 +707,16 @@ export function revokeAllForSession(sessionId: string): number {
 export function revokeAll(): number {
   const removed = tokens.size;
   for (const token of [...tokens.keys()]) deleteToken(token);
-  promptSnapshots.clear();
-  nodeFs.rmSync(promptSnapshotRoot(), { recursive: true, force: true });
   return removed;
 }
 
 /** 单测重置与 app exit 共用同一条清理路径。 */
 export function __resetForTests(): void {
-  revokeAll();
+  for (const token of [...tokens.keys()]) deleteToken(token, true);
+  for (const token of [...consumedPromptTokens]) removeSnapshotFiles(token);
+  consumedPromptTokens.clear();
   promptSnapshotPromises.clear();
+  nodeFs.rmSync(promptSnapshotRoot(), { recursive: true, force: true });
 }
 
 (app as unknown as { once?: (event: string, listener: () => void) => void }).once?.(

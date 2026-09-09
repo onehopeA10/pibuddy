@@ -19,7 +19,7 @@
  *    与完整执行配置指纹；配置或工作区变化后旧授权不再覆盖新的 spawn。
  *  - 进程一定被回收：无论握手成败，非 keepAlive 路径在 finally 里 kill。
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -36,6 +36,14 @@ const terminatedChildren = new WeakSet<ChildProcess>();
 export function terminateStdioChild(child: ChildProcess): void {
   if (terminatedChildren.has(child)) return;
   terminatedChildren.add(child);
+  const pid = child.pid;
+  if (process.platform === "win32" && typeof pid === "number" && pid > 0) {
+    // .cmd/.bat 经 cmd.exe 启动时，child 只是包装进程；必须带 /T 收整棵树。
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+    });
+  }
   try {
     child.kill();
   } catch {

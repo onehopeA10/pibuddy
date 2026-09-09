@@ -319,7 +319,7 @@ describe("单句柄稳定读取与 prompt snapshots", () => {
     expect(fs.readFileSync(second.snapshotPath, "utf8")).toBe("stable prompt bytes");
   });
 
-  it("revoke 删除 token-owned snapshot directory", async () => {
+  it("已写入 prompt 的快照在 revoke token 后仍保留", async () => {
     const { reg } = await freshModules();
     const file = path.join(workspaceDir, "revoke.txt");
     fs.writeFileSync(file, "snapshot", "utf8");
@@ -328,8 +328,8 @@ describe("单句柄稳定读取与 prompt snapshots", () => {
     expect(fs.existsSync(snapshot.snapshotPath)).toBe(true);
 
     expect(reg.revokeAll()).toBe(1);
-    expect(fs.existsSync(snapshot.snapshotPath)).toBe(false);
-    expect(reg.snapshotPathForTest(token)).toBe(null);
+    expect(fs.existsSync(snapshot.snapshotPath)).toBe(true);
+    expect(reg.snapshotPathForTest(token)).toBe(snapshot.snapshotPath);
   });
 });
 

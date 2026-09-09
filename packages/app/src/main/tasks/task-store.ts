@@ -548,12 +548,24 @@ export class TaskStore {
    * 恢复时据 lease 过期把它们捞出来判死（failed / 重排），这是 crash recovery
    * 的入口。
    */
-  staleRuns(now: number): RunRecord[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM runs WHERE status IN ('pending','running') AND (lease_expires_at IS NULL OR lease_expires_at < ?)"
-      )
-      .all(now) as unknown as RunRow[];
+  staleRuns(now: number, currentOwner?: string): RunRecord[] {
+    const rows = (
+      currentOwner
+        ? this.db
+            .prepare(
+              `SELECT * FROM runs WHERE status IN ('pending','running') AND (
+                 lease_expires_at IS NULL
+                 OR lease_expires_at < ?
+                 OR (lease_owner IS NOT NULL AND lease_owner <> ?)
+               )`
+            )
+            .all(now, currentOwner)
+        : this.db
+            .prepare(
+              "SELECT * FROM runs WHERE status IN ('pending','running') AND (lease_expires_at IS NULL OR lease_expires_at < ?)"
+            )
+            .all(now)
+    ) as unknown as RunRow[];
     return rows.map(runFromRow);
   }
 

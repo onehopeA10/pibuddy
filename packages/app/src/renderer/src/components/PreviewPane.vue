@@ -22,10 +22,11 @@ import { NButton, NSpin, NTag } from "naive-ui";
 import { useArtifactsStore } from "../stores/artifacts";
 
 const props = defineProps<{
-  /** attachment token，与 workspaceId+relativePath 二选一 */
+  /** attachment token、产物 id 或 workspaceId+relativePath */
   token?: string;
   workspaceId?: string;
   relativePath?: string;
+  artifactId?: string;
 }>();
 
 const store = useArtifactsStore();
@@ -51,6 +52,7 @@ function reload(): void {
     token: props.token,
     workspaceId: props.workspaceId,
     relativePath: props.relativePath,
+    artifactId: props.artifactId,
   });
 }
 
@@ -59,6 +61,7 @@ function openWindow(): void {
     token: props.token,
     workspaceId: props.workspaceId,
     relativePath: props.relativePath,
+    artifactId: props.artifactId,
   });
 }
 </script>

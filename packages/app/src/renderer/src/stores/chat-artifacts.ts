@@ -137,8 +137,10 @@ export const useChatArtifactsStore = defineStore("chat-artifacts", () => {
   let recordsInflight: Promise<ArtifactRecord[]> | null = null;
   let changesKey = "";
   let changesInflight: Promise<void> | null = null;
+  let queryEpoch = 0;
 
   function reset(): void {
+    queryEpoch += 1;
     byKey.value = {};
     records.value = [];
     pendingByKey.value = {};
@@ -149,6 +151,7 @@ export const useChatArtifactsStore = defineStore("chat-artifacts", () => {
   }
 
   function invalidateRecords(): void {
+    queryEpoch += 1;
     recordsKey = "";
     recordsInflight = null;
     changesKey = "";
@@ -189,22 +192,27 @@ export const useChatArtifactsStore = defineStore("chat-artifacts", () => {
       if (recordsInflight) return recordsInflight;
       return records.value;
     }
+    const epoch = queryEpoch;
     recordsKey = key;
-    recordsInflight = (async () => {
+    const run = (async () => {
       try {
         const filter = sessionId ? { sessionId } : {};
         const [page, trash] = await Promise.all([
           api.query({ workspaceId, ...filter, limit: 200 }),
           api.query({ workspaceId, ...filter, trashed: true, limit: 200 }),
         ]);
+        if (epoch !== queryEpoch || recordsKey !== key) return records.value;
         records.value = [...page.items, ...trash.items];
         return records.value;
       } catch {
+        if (epoch !== queryEpoch || recordsKey !== key) return records.value;
         records.value = [];
         return records.value;
       }
-    })().finally(() => {
-      recordsInflight = null;
+    })();
+    recordsInflight = run;
+    void run.finally(() => {
+      if (recordsInflight === run) recordsInflight = null;
     });
     return recordsInflight;
   }
@@ -217,13 +225,15 @@ export const useChatArtifactsStore = defineStore("chat-artifacts", () => {
       if (changesInflight) return changesInflight;
       return;
     }
+    const epoch = queryEpoch;
     changesKey = key;
-    changesInflight = (async () => {
+    const run = (async () => {
       try {
         const page = await api.changesets({
           workspaceId,
           ...(sessionId ? { sessionId } : {}),
         });
+        if (epoch !== queryEpoch || changesKey !== key) return;
         const next: Record<string, string> = {};
         for (const entry of page.entries) {
           if (entry.status !== "pending" && entry.status !== "unverified") continue;
@@ -232,10 +242,13 @@ export const useChatArtifactsStore = defineStore("chat-artifacts", () => {
         }
         pendingByKey.value = next;
       } catch {
+        if (epoch !== queryEpoch || changesKey !== key) return;
         pendingByKey.value = {};
       }
-    })().finally(() => {
-      changesInflight = null;
+    })();
+    changesInflight = run;
+    void run.finally(() => {
+      if (changesInflight === run) changesInflight = null;
     });
     return changesInflight;
   }

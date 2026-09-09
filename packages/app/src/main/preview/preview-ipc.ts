@@ -1,14 +1,12 @@
 /**
  * 安全预览的 IPC handler（ART-101）——**恰 3 条通道**。
  *
- * 跨进程边界上只有两种目标表达：attachment token（CT-17）或
- * workspaceId + relativePath（CT-18）。没有第三种，尤其没有绝对路径 ——
- * 于是「预览 C:\Users\…\auth.json」这个意图在结构上就说不出来。
+ * 跨进程边界上只有 token（CT-17）、workspaceId + relativePath（CT-18）
+ * 或 artifactId（按记录 sha256 核对版本）。没有绝对路径 —— 于是
+ * 「预览 C:\Users\…\auth.json」这个意图在结构上就说不出来。
  *
  * 收容判定一律走 TASK-007 的 `resolveInWorkspace`：那是全计划唯一的
- * 收容原语，本文件一行都不重新实现它。两个需要定位文件的 handler 各自
- * 显式调用一次，而不是共用一个隐藏在下面的辅助函数 —— 校验写在入口上
- * 才看得见，藏起来的校验迟早会有一个新 handler 忘了走。
+ * 收容原语。artifactId 路径先查产物记录再收容，避免把当前文件当成旧版。
  *
  * 本文件不出现 ipcMain.handle：注册一律经 ipc-guard 的 registerHandler。
  */
@@ -21,15 +19,21 @@ import {
   type PreviewResult,
   type PreviewTarget,
 } from "@pibuddy/contract";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 
 import { resolveAttachment } from "../attachment-registry.js";
+import { artifactStore } from "../artifacts/artifact-store.js";
 import { registerHandler } from "../ipc-guard.js";
 import { resolveInWorkspace } from "../workspace-registry.js";
 import { convert } from "./convert-host.js";
 import { SUGGESTION } from "./convert-worker.js";
 import { closeAllPreviewWindows, closePreviewWindow, openPreviewWindow } from "./preview-window.js";
+
+/** 历史版本磁盘对不上时给用户的那句话。不能把当前文件当成旧版打开。 */
+export const ARTIFACT_VERSION_UNAVAILABLE =
+  "这一版的内容已经不在磁盘上了。当前文件是更新后的版本，不能当成旧版打开。";
 
 /** 本域注册的全部通道。单测据它断言逐一出现在 ipc-guard 的注册表里。 */
 export const PREVIEW_CHANNELS: InvokeChannel[] = [
@@ -76,15 +80,75 @@ function flatten(
   };
 }
 
-/** 两种目标表达都不给 = 说不清要看什么，直接拒。 */
+/** 三种目标表达都不给 = 说不清要看什么，直接拒。 */
 function assertAddressable(target: PreviewTarget): void {
   const byToken = typeof target.token === "string" && target.token.length > 0;
+  const byArtifact = typeof target.artifactId === "string" && target.artifactId.length > 0;
   const byPath =
     typeof target.workspaceId === "string" &&
     target.workspaceId.length > 0 &&
     typeof target.relativePath === "string" &&
     target.relativePath.length > 0;
-  if (!byToken && !byPath) throw new Error("PREVIEW_TARGET_REQUIRED");
+  if (!byToken && !byArtifact && !byPath) throw new Error("PREVIEW_TARGET_REQUIRED");
+}
+
+type LocatedSource =
+  | { ok: true; inputPath: string; sourceName: string }
+  | { ok: false; result: PreviewResult };
+
+function versionUnavailable(sourceName: string): PreviewResult {
+  return {
+    kind: "text",
+    code: "unsupported",
+    text: "",
+    suggestion: ARTIFACT_VERSION_UNAVAILABLE,
+    notices: [],
+    tables: [],
+    dataUrl: null,
+    sourceName,
+    sizeBytes: 0,
+    elapsedMs: 0,
+  };
+}
+
+async function locatePreviewSource(target: PreviewTarget): Promise<LocatedSource> {
+  if (target.token) {
+    const record = await resolveAttachment(target.token, { capability: "read" });
+    return { ok: true, inputPath: record.canonicalPath, sourceName: path.basename(record.canonicalPath) };
+  }
+
+  if (target.artifactId) {
+    const record = artifactStore().get(target.artifactId);
+    if (!record) throw new Error(`ARTIFACT_UNKNOWN: ${target.artifactId}`);
+    if (target.workspaceId && target.workspaceId !== record.workspaceId) {
+      throw new Error("ARTIFACT_WORKSPACE_MISMATCH");
+    }
+    const resolved = await resolveInWorkspace(record.workspaceId, record.exportPath, {
+      requireFile: true,
+    });
+    if (record.sha256) {
+      const actual = createHash("sha256").update(fs.readFileSync(resolved.realPath)).digest("hex");
+      if (actual !== record.sha256) {
+        return { ok: false, result: versionUnavailable(record.name || path.basename(record.exportPath)) };
+      }
+    }
+    return {
+      ok: true,
+      inputPath: resolved.realPath,
+      sourceName: record.name || path.basename(resolved.realPath),
+    };
+  }
+
+  const resolved = await resolveInWorkspace(
+    target.workspaceId as string,
+    target.relativePath as string,
+    { requireFile: true }
+  );
+  return {
+    ok: true,
+    inputPath: resolved.realPath,
+    sourceName: path.basename(resolved.realPath),
+  };
 }
 
 export function registerPreviewIpc(): void {
@@ -95,23 +159,13 @@ export function registerPreviewIpc(): void {
     previewTargetSchema,
     async (target) => {
       assertAddressable(target);
-
-      let inputPath: string;
-      if (target.token) {
-        // token 路径：兑付时 attachment-registry 会重做过期、能力、收容
-        // 与存在性校验（它内部同样用 assertContained，与收容原语同判据）。
-        const record = await resolveAttachment(target.token, { capability: "read" });
-        inputPath = record.canonicalPath;
-      } else {
-        const resolved = await resolveInWorkspace(
-          target.workspaceId as string,
-          target.relativePath as string,
-          { requireFile: true }
-        );
-        inputPath = resolved.realPath;
+      const located = await locatePreviewSource(target);
+      if (!located.ok) {
+        const previewId = randomUUID();
+        openPreviewWindow({ previewId, title: located.result.sourceName, result: located.result });
+        return { previewId, result: located.result };
       }
-
-      const sourceName = path.basename(inputPath);
+      const { inputPath, sourceName } = located;
       const outcome = await convert({ inputPath, sourceName });
       const result = flatten(outcome, sourceName);
       const previewId = randomUUID();
@@ -129,25 +183,12 @@ export function registerPreviewIpc(): void {
     previewTargetSchema,
     async (target) => {
       assertAddressable(target);
-
-      let inputPath: string;
-      if (target.token) {
-        const record = await resolveAttachment(target.token, { capability: "read" });
-        inputPath = record.canonicalPath;
-      } else {
-        const resolved = await resolveInWorkspace(
-          target.workspaceId as string,
-          target.relativePath as string,
-          { requireFile: true }
-        );
-        inputPath = resolved.realPath;
-      }
-
-      const sourceName = path.basename(inputPath);
+      const located = await locatePreviewSource(target);
+      if (!located.ok) return located.result;
       try {
-        return flatten(await convert({ inputPath, sourceName }), sourceName);
+        return flatten(await convert({ inputPath: located.inputPath, sourceName: located.sourceName }), located.sourceName);
       } catch {
-        return refused(sourceName);
+        return refused(located.sourceName);
       }
     }
   );

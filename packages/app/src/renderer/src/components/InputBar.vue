@@ -319,11 +319,39 @@ watch(
   () => store.inboundAttachments,
   (list) => {
     if (list.length === 0) return;
-    for (const attachment of list) appendAttachment(attachment);
+    const incoming = [...list];
     store.inboundAttachments = [];
+    const scope = captureScope();
+    for (const attachment of incoming) {
+      if (attachment.kind === "image") {
+        void addImageFromToken(attachment, scope);
+      } else {
+        appendAttachment(attachment, scope);
+      }
+    }
   },
   { immediate: true, deep: true }
 );
+
+async function addImageFromToken(
+  attachment: AttachmentRef,
+  scope: ReturnType<typeof captureScope>
+): Promise<void> {
+  const reservationId = reserveImage(scope, attachment.size);
+  if (!reservationId) return;
+  try {
+    const img = await window.piBuddy.file.readImage(attachment.token);
+    release(reservationId);
+    appendDecodedImage(img.data, img.mimeType, attachment.name, scope);
+  } catch (err) {
+    release(reservationId);
+    if (isCurrentScope(scope)) {
+      message.warning(
+        err instanceof Error ? `${attachment.name}：${err.message}` : `无法读取图片：${attachment.name}`
+      );
+    }
+  }
+}
 
 function onPaste(e: ClipboardEvent): void {
   const scope = captureScope();

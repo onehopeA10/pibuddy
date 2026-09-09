@@ -301,18 +301,18 @@ describe("崩溃恢复：孤儿 run（lease 过期）被判死，不盲目重跑
     expect(store.getRun(run.id)?.error).toContain("进程中断");
   });
 
-  it("lease 未过期的 running run 不被判死", () => {
+  it("上一进程未到期的 running run 也会被恢复，避免重启后漏跑", () => {
     const now = 1_000_000;
     const t = store.createTask(baseTask, now, null);
     const run = store.createRun({
       taskId: t.id, workspaceId: "ws1", scheduledFor: 1, idempotencyKey: "alive",
       attempt: 1, input: baseTask.agent, status: "running", now,
     })!;
-    store.updateRun(run.id, { leaseOwner: "me", leaseExpiresAt: now + 100000 });
+    store.updateRun(run.id, { leaseOwner: "dead-process", leaseExpiresAt: now + 100000 });
 
     const sched = makeScheduler(new ManualClock(now));
-    expect(sched.recover(now)).toBe(0);
-    expect(store.getRun(run.id)?.status).toBe("running");
+    expect(sched.recover(now)).toBe(1);
+    expect(store.getRun(run.id)?.status).toBe("failed");
   });
 
   it("recovery：未派发的 queue pending 保留原 run，并按插入顺序 FIFO 排空", async () => {

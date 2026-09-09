@@ -70,6 +70,7 @@ export function agentPool(): AgentPoolCore {
           permission: need.permission,
           resource: need.resource,
           workspaceId: need.workspaceId,
+          sessionId: need.sessionId,
         }),
     });
   }

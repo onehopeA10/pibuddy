@@ -235,7 +235,7 @@ async function attachToInput(): Promise<void> {
         token: descriptor.token,
         name: descriptor.sourceName,
         size: descriptor.sizeBytes,
-        kind: "other",
+        kind: descriptor.mimeType.startsWith("image/") ? "image" : "other",
         relativePath: descriptor.relativePath,
       },
     ];

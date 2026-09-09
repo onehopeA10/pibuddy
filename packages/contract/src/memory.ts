@@ -36,8 +36,11 @@ import { CHANNELS } from "./channels.js";
  *
  * v2 → v3：Governed Hybrid Memory 的治理表（working_items / memory_candidates /
  * memory_conflicts / memory_route_events）。同样只加表，不改 v1/v2 行字节。
+ *
+ * v3 → v4：working_items 补 workspace_id，缓存键改为 workspace + session，
+ * 避免同 sessionId 跨工作区串入。
  */
-export const MEMORY_DATA_SCHEMA_VERSION = 3;
+export const MEMORY_DATA_SCHEMA_VERSION = 4;
 
 /**
  * 记忆的类别。

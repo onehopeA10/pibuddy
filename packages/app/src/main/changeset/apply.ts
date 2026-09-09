@@ -189,7 +189,10 @@ export function composeAccepted(record: ChangesetRecord, hunkIndexes?: number[])
 }
 
 /**
- * 拒绝一条变更。**不产生任何磁盘写**。
+ * 拒绝一条变更。
+ *
+ * 尚未落盘的提案只改状态。工具已经把 after 写到磁盘时，先核对 after hash，
+ * 再把 before 写回去——否则「退回」只是藏掉按钮，文件还留着改动。
  */
 export function rejectChange(id: string): ChangesetApplyResult {
   const store = changesetStore();
@@ -197,6 +200,29 @@ export function rejectChange(id: string): ChangesetApplyResult {
   if (!record) return { ok: false, errorCode: "missing", message: "变更不存在或已被清理" };
   if (record.status === "applied") {
     return { ok: false, alreadyApplied: true, message: "这条变更已经生效，请用编辑器撤销" };
+  }
+  if (record.status === "rejected") return { ok: true };
+
+  const abs = targetPathOf(record);
+  const disk = readDisk(abs);
+  if (record.afterSha256 && disk.sha256 === record.afterSha256) {
+    try {
+      writeFileAtomic(abs, record.beforeBytes ?? EMPTY);
+    } catch (err) {
+      return { ok: false, ...classifyWriteError(err) };
+    }
+  } else if (record.beforeSha256 && disk.sha256 !== record.beforeSha256 && disk.sha256 !== "") {
+    return {
+      ok: false,
+      conflict: true,
+      errorCode: "conflict",
+      message: "这份后来又被动过，没法替你退回",
+      current: {
+        mtimeMs: disk.mtimeMs,
+        sha256: disk.sha256,
+        preview: disk.bytes.toString("utf8").slice(0, CONFLICT_PREVIEW_CHARS),
+      },
+    };
   }
   store.setStatus(id, "rejected");
   return { ok: true };

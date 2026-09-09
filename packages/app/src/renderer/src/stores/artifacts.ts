@@ -19,14 +19,16 @@ import type {
   PreviewResult,
 } from "@contract";
 
-/** 预览目标：token 或 workspaceId + relativePath，二选一。 */
+/** 预览目标：token、产物 id，或 workspaceId + relativePath。 */
 export interface PreviewRequest {
   token?: string;
   workspaceId?: string;
   relativePath?: string;
+  artifactId?: string;
 }
 
 function keyOf(target: PreviewRequest): string {
+  if (target.artifactId) return `artifact:${target.artifactId}`;
   return target.token ?? `${target.workspaceId ?? ""}#${target.relativePath ?? ""}`;
 }
 
@@ -155,6 +157,8 @@ export const useArtifactsStore = defineStore("artifacts", () => {
    * 断的写法 —— 而它断掉的表现是预览区永远空着。
    */
   const previewRelativePath = ref("");
+  /** 按产物版本预览时记下 id，刷新不能退化成只按路径读当前文件。 */
+  const previewArtifactId = ref("");
 
   /**
    * 转换并显示。**失败时同样把结果设进 current** —— 那里带着
@@ -165,6 +169,7 @@ export const useArtifactsStore = defineStore("artifacts", () => {
     const key = keyOf(target);
     previewTarget.value = key;
     previewRelativePath.value = target.relativePath ?? "";
+    previewArtifactId.value = target.artifactId ?? "";
     const cached = previewCache.get(key);
     if (cached) {
       current.value = cached;
@@ -201,6 +206,7 @@ export const useArtifactsStore = defineStore("artifacts", () => {
     current.value = null;
     previewTarget.value = "";
     previewRelativePath.value = "";
+    previewArtifactId.value = "";
   }
 
   return {
@@ -229,6 +235,7 @@ export const useArtifactsStore = defineStore("artifacts", () => {
     previewing,
     previewTarget,
     previewRelativePath,
+    previewArtifactId,
     preview,
     openInWindow,
     clearPreview,

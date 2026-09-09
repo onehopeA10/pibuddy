@@ -364,7 +364,7 @@ export class Scheduler {
    */
   recover(now: number): number {
     if (this.shuttingDown) return 0;
-    const stale = this.deps.store.staleRuns(now);
+    const stale = this.deps.store.staleRuns(now, this.owner);
     const resumable: RunRecord[] = [];
     const queuedTaskIds = new Set<string>();
     for (const run of stale) {
@@ -488,7 +488,7 @@ export class Scheduler {
   }
 
   private async tickImpl(now: number): Promise<void> {
-    await this.drainPendingQueues(now);
+    this.kickPendingQueues(now);
     if (this.shuttingDown) return;
     for (const task of this.deps.store.activeDueTasks()) {
       if (this.shuttingDown) return;
@@ -496,13 +496,14 @@ export class Scheduler {
       if (task.nextRunAt > now) continue; // 还没到点
       await this.processTask(task, now);
     }
-    if (!this.shuttingDown) await this.drainPendingQueues(now);
+    if (!this.shuttingDown) this.kickPendingQueues(now);
   }
 
-  private async drainPendingQueues(now: number): Promise<void> {
+  /** 只踢准入，不等待整条执行队列；按 taskId 的 FIFO 仍由 drainQueue 单链保证。 */
+  private kickPendingQueues(now: number): void {
     for (const task of this.deps.store.queueTasksWithPendingRuns()) {
       if (this.shuttingDown) return;
-      await this.drainQueue(task, now);
+      void this.drainQueue(task, now);
     }
   }
 

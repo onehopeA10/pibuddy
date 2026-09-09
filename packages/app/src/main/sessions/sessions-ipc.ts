@@ -208,11 +208,16 @@ export function registerSessionsIpc(): void {
 
       // 索引过期：同步一次再**重试一次**（只一次 —— 会话正在流式写入时，
       // 无限重试会把主进程钉在这里）。
+      const oldSize = row.sizeBytes;
       await index.syncWorkspace(row.workspaceRoot, loadSettings());
       row = await requireRow(payload.workspaceId, payload.sessionId);
+      const fromTail = payload.beforeOffset >= oldSize;
+      const retryOffset = fromTail
+        ? row.sizeBytes
+        : Math.min(payload.beforeOffset, row.sizeBytes);
       const second = await readEntriesBefore({
         sourcePath: row.sourcePath,
-        beforeOffset: Math.max(payload.beforeOffset, row.sizeBytes),
+        beforeOffset: retryOffset,
         limit: payload.limit,
         expect: { mtimeMs: row.mtimeMs, sizeBytes: row.sizeBytes },
       });
@@ -220,7 +225,7 @@ export function registerSessionsIpc(): void {
       // 文件还在被追加：切会话预览不能因此空窗，按当前磁盘尽力读。
       return readEntriesBefore({
         sourcePath: row.sourcePath,
-        beforeOffset: Math.max(payload.beforeOffset, row.sizeBytes),
+        beforeOffset: retryOffset,
         limit: payload.limit,
       });
     }

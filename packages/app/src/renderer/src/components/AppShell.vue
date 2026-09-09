@@ -575,9 +575,10 @@ function onDrop(): void {
                缺任何一个这块都没有意义（ADR-0002 D5 记的那个「一个 filesOpen
                同时控制两个能力域」的问题，在这里先按两个判据拆开表达）。 -->
           <PreviewPane
-            v-if="filesOpen && filesEnabled && previewEnabled"
+            v-if="previewEnabled && (filesOpen || Boolean(artifacts.previewRelativePath) || Boolean(artifacts.previewArtifactId))"
             :workspace-id="store.workspaceId ?? undefined"
             :relative-path="artifacts.previewRelativePath || undefined"
+            :artifact-id="artifacts.previewArtifactId || undefined"
           />
           <ChangesetPanel v-if="changesOpen && reviewEnabled" />
           <SessionTreePanel v-if="sessionTreeOpen && sessionTreeEnabled" />

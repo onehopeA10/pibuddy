@@ -25,8 +25,12 @@ export function registerSessionScopedReset(
 }
 
 /** 依次执行全部已注册的清空回调。 */
-export function resetSessionScopedState(): void {
-  for (const reset of sessionScopedResets.values()) reset();
+export function resetSessionScopedState(opts?: { skip?: readonly string[] }): void {
+  const skip = new Set(opts?.skip ?? []);
+  for (const [key, reset] of sessionScopedResets) {
+    if (skip.has(key)) continue;
+    reset();
+  }
 }
 
 /** 仅供单测：已注册的 key 列表。 */
