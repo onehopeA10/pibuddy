@@ -51,6 +51,7 @@ import { ExtensionUiService, type ExtUiHost } from "../extension-ui/ext-ui-servi
 import { registerHandler, forgetSender } from "../ipc-guard.js";
 import { log } from "../log.js";
 import { buildPiSpawn, verifyRuntimeHandshake } from "../pi-launcher.js";
+import { kernelExtensionArgs } from "./kernel-extensions.js";
 import { sessionTrustFor } from "../pi-resources/project-trust.js";
 import { describeTrust, trustArgsFor } from "../pi-resources/trust-store.js";
 import { PiSupervisor } from "../pi-supervisor.js";
@@ -381,6 +382,8 @@ export function registerPiIpc(): void {
       sessionPath,
       // 主进程列目录与 pi 写目录必须同源，否则历史会话恒为空（SES-001）
       sessionDir,
+      // 内核级 extension（按模型追加工具使用提示等），随包投递、不进用户目录
+      extraArgs: kernelExtensionArgs(log()),
     });
     clients.set(wc.id, client);
     clientWorkspaces.set(wc.id, opts.workspaceId);

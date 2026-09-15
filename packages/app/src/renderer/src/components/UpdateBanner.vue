@@ -119,14 +119,14 @@ const releaseDateText = computed(() => {
   justify-content: space-between;
   gap: 16px;
   padding: 10px 16px;
-  background: #eef4ff;
-  border-bottom: 1px solid #d6e2fb;
-  font-size: 13px;
-  color: #1f2937;
+  background: var(--info-bg);
+  border-bottom: var(--border-w) solid var(--border-subtle);
+  font-size: var(--font-ui-13);
+  color: var(--text-primary);
 }
 .update-banner.is-error {
-  background: #fef2f2;
-  border-bottom-color: #fcd9d9;
+  background: var(--danger-bg);
+  border-bottom-color: var(--status-error);
 }
 .body {
   display: flex;
@@ -136,28 +136,28 @@ const releaseDateText = computed(() => {
 }
 .meta {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-tertiary);
 }
 .notes {
   margin: 4px 0 0;
   max-height: 72px;
   overflow: auto;
   white-space: pre-wrap;
-  font-size: 12px;
-  color: #4b5563;
+  font-size: var(--font-ui-12);
+  color: var(--text-secondary);
 }
 .bar {
   margin-top: 6px;
   width: 260px;
   height: 4px;
   border-radius: 2px;
-  background: #d6e2fb;
+  background: var(--bg-hover);
   overflow: hidden;
 }
 .bar i {
   display: block;
   height: 100%;
-  background: #2563eb;
+  background: var(--accent);
   transition: width 0.2s;
 }
 .actions {
@@ -168,14 +168,15 @@ const releaseDateText = computed(() => {
 .actions button {
   padding: 4px 12px;
   border-radius: 4px;
-  border: 1px solid #d0d5dd;
-  background: #fff;
+  border: var(--border-w) solid var(--border-strong);
+  background: var(--bg-surface-raised);
+  color: var(--text-primary);
   cursor: pointer;
-  font-size: 12.5px;
+  font-size: var(--font-ui-13);
 }
 .actions button.primary {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-on-accent);
 }
 </style>

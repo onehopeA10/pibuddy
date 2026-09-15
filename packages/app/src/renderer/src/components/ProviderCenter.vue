@@ -22,17 +22,82 @@ import {
   NForm,
   NFormItem,
   NInput,
-  NModal,
   NSpace,
   NTag,
+  useMessage,
 } from "naive-ui";
-import type { ProviderTestResult } from "@contract";
+import type { ModelInputModality, ProviderModel, ProviderTestResult } from "@contract";
 import { adviseModelError } from "../model-error-advice";
 import { useProvidersStore } from "../stores/providers";
 import { useAppStore } from "../stores/app";
+import PanelFrame from "./PanelFrame.vue";
+
+defineProps<{ embedded?: boolean }>();
 
 const providers = useProvidersStore();
 const app = useAppStore();
+const message = useMessage();
+
+/** 正在写回的 `providerId/modelId`；期间所有选项禁用，避免并发写同一个文件。 */
+const togglingModel = ref("");
+
+/** 模型接受的输入：文 / 图 / 图文。与 models.json 的 `input` 数组一一对应。 */
+type Modality = "text" | "image" | "both";
+const MODALITY_OPTIONS: { key: Modality; label: string; title: string }[] = [
+  { key: "text", label: "文", title: "只接受文字" },
+  { key: "image", label: "图", title: "只接受图片" },
+  { key: "both", label: "图文", title: "文字和图片都接受" },
+];
+
+function modalityOf(m: ProviderModel): Modality {
+  const input = m.input ?? ["text"];
+  const text = input.includes("text");
+  const image = input.includes("image");
+  if (text && image) return "both";
+  if (image) return "image";
+  return "text";
+}
+
+function modalityToInput(key: Modality): ModelInputModality[] {
+  if (key === "both") return ["text", "image"];
+  return [key];
+}
+
+/**
+ * 改一个模型接受的输入：写回 models.json，再让 pi 重新载入模型表。
+ *
+ * pi 只在启动时读 models.json（运行中不监听文件），所以光写盘不会让当前
+ * 会话的判定变化 —— 用户改完拖图进来照样被拦，且看不出为什么。
+ * 因此写盘成功后原地重启一次运行时（带着当前会话继续）；正在生成时不能
+ * 打断，退化为提示「下次开始任务时生效」。
+ */
+async function setModality(
+  providerId: string,
+  modelId: string,
+  model: ProviderModel,
+  key: Modality
+): Promise<void> {
+  if (modalityOf(model) === key) return;
+  togglingModel.value = `${providerId}/${modelId}`;
+  try {
+    const ok = await providers.setModelInput(providerId, modelId, modalityToInput(key));
+    if (!ok) return;
+    const label = MODALITY_OPTIONS.find((o) => o.key === key)?.label ?? key;
+    if (app.started && !app.streaming) {
+      message.info("已保存，正在重新载入模型表…");
+      const reloaded = await app.reloadRuntime();
+      if (reloaded) {
+        message.success(`「${modelId}」现在接受：${label}`);
+      } else {
+        message.warning(`已保存，但重新载入失败：${app.startError || "未知原因"}`);
+      }
+    } else {
+      message.success("已保存，下次开始任务时生效");
+    }
+  } finally {
+    togglingModel.value = "";
+  }
+}
 
 /** providerId → 当前输入框里的明文。**不持久化**，关面板即丢。 */
 const keyInputs = ref<Record<string, string>>({});
@@ -141,6 +206,7 @@ const currentCapabilities = computed(() => {
   return {
     id: model.id,
     image: (model.input ?? []).includes("image"),
+    modality: MODALITY_OPTIONS.find((o) => o.key === modalityOf(model))?.label ?? "文",
     reasoning: model.reasoning === true,
     contextWindow: model.contextWindow ?? 0,
     cost: model.cost,
@@ -149,13 +215,12 @@ const currentCapabilities = computed(() => {
 </script>
 
 <template>
-  <n-modal
-    v-model:show="providers.panelOpen"
-    preset="card"
-    style="max-width: 720px"
+  <PanelFrame
+    :embedded="embedded"
+    :show="providers.panelOpen"
     title="账号与模型"
-    role="dialog"
-    aria-labelledby="provider-center-title"
+    width="720px"
+    @update:show="providers.panelOpen = $event"
   >
     <p id="provider-center-title" class="intro">
       在这里填写 AI 服务商的 API Key，填好就能直接用 —— 不需要打开终端。
@@ -180,7 +245,7 @@ const currentCapabilities = computed(() => {
       <span class="caps-label">当前模型</span>
       <n-tag size="small" :bordered="false">{{ currentCapabilities.id }}</n-tag>
       <n-tag size="small" :bordered="false" :type="currentCapabilities.image ? 'success' : 'default'">
-        {{ currentCapabilities.image ? "支持图片" : "不支持图片" }}
+        输入：{{ currentCapabilities.modality }}
       </n-tag>
       <n-tag v-if="currentCapabilities.reasoning" size="small" :bordered="false" type="info">
         支持深度思考
@@ -299,7 +364,46 @@ const currentCapabilities = computed(() => {
           {{ testText(p.id) }}
         </p>
 
-        <p v-if="p.models.length" class="models">
+        <!--
+          自定义端点的模型逐条列出并带「能收图片」开关：中转 / 自建端点的
+          /models 只回 id，pi 对缺省的 input 补成 ["text"]，一个明明能看图的
+          grok / gpt 中转模型就会被判成「不支持图片」。开关写回的是 models.json
+          里那条模型的 input —— 能力判据仍然只有 Model.input，不另存名单。
+        -->
+        <div v-if="p.custom && p.models.length" class="model-list" :data-testid="`models-${p.id}`">
+          <div class="model-list-head">
+            <span>可用模型</span>
+            <span class="model-list-hint">输入</span>
+          </div>
+          <div v-for="m in p.models" :key="m.id" class="model-row">
+            <span class="model-id" :title="m.name ? `${m.name}（${m.id}）` : m.id">
+              {{ m.id }}
+              <span v-if="m.name && m.name !== m.id" class="model-name">{{ m.name }}</span>
+            </span>
+            <div
+              class="modality-seg"
+              role="radiogroup"
+              :aria-label="`${m.id} 接受的输入`"
+              :class="{ busy: togglingModel === `${p.id}/${m.id}` }"
+            >
+              <button
+                v-for="opt in MODALITY_OPTIONS"
+                :key="opt.key"
+                type="button"
+                role="radio"
+                class="modality-opt"
+                :class="{ on: modalityOf(m) === opt.key }"
+                :aria-checked="modalityOf(m) === opt.key"
+                :disabled="togglingModel !== ''"
+                :title="opt.title"
+                @click="setModality(p.id, m.id, m, opt.key)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-else-if="p.models.length" class="models">
           可用模型：{{ p.models.map((m) => m.id).join("、") }}
         </p>
       </n-collapse-item>
@@ -344,16 +448,16 @@ const currentCapabilities = computed(() => {
       </n-collapse-item>
     </n-collapse>
 
-    <n-space justify="end" style="margin-top: 12px">
+    <n-space v-if="!embedded" justify="end" style="margin-top: 12px">
       <n-button @click="providers.panelOpen = false">关闭</n-button>
     </n-space>
-  </n-modal>
+  </PanelFrame>
 </template>
 
 <style scoped>
 .intro {
-  font-size: 12.5px;
-  color: #8a8f98;
+  font-size: var(--font-ui-12);
+  color: var(--text-secondary);
   margin: 0 0 12px;
   line-height: 1.6;
 }
@@ -365,26 +469,89 @@ const currentCapabilities = computed(() => {
   margin-bottom: 12px;
 }
 .caps-label {
-  font-size: 12px;
-  color: #8a8f98;
+  font-size: var(--font-ui-12);
+  color: var(--text-secondary);
 }
 .confirm-hint {
-  font-size: 12px;
-  color: #d03050;
+  font-size: var(--font-ui-12);
+  color: var(--status-error);
   align-self: center;
 }
 .test-result {
   margin: 8px 0 0;
-  font-size: 12.5px;
-  color: #d03050;
+  font-size: var(--font-ui-12);
+  color: var(--status-error);
   white-space: pre-wrap;
 }
 .test-result.ok {
-  color: #18a058;
+  color: var(--status-success);
 }
 .models {
   margin: 8px 0 0;
-  font-size: 12px;
-  color: #8a8f98;
+  font-size: var(--font-ui-12);
+  color: var(--text-secondary);
+}
+.model-list {
+  margin: 10px 0 0;
+  border-top: var(--border-w) solid var(--border-subtle);
+  padding-top: 6px;
+}
+.model-list-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--font-ui-11);
+  color: var(--text-tertiary);
+  padding: 2px 0 4px;
+}
+.model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: var(--font-ui-12);
+  color: var(--text-primary);
+}
+.model-id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-name {
+  margin-left: 6px;
+  color: var(--text-tertiary);
+}
+.modality-seg {
+  display: inline-flex;
+  flex-shrink: 0;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+}
+.modality-seg.busy {
+  opacity: 0.6;
+}
+.modality-opt {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--font-ui-12);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.modality-opt + .modality-opt {
+  border-left: var(--border-w) solid var(--border-subtle);
+}
+.modality-opt:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.modality-opt.on {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+.modality-opt:disabled {
+  cursor: default;
 }
 </style>

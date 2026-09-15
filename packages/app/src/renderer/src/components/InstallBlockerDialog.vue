@@ -36,10 +36,10 @@ const show = computed(() => store.blockerDialogOpen && store.blockers.length > 0
     :closable="false"
     :mask-closable="false"
   >
-    <p style="margin: 0 0 8px; font-size: 13px; color: #4b5563">
+    <p style="margin: 0 0 8px; font-size: var(--font-ui-13); color: var(--text-secondary)">
       更新已经下载好了，但现在重启会打断下面这些：
     </p>
-    <ul style="margin: 0 0 14px; padding-left: 20px; font-size: 13px; color: #1f2937">
+    <ul style="margin: 0 0 14px; padding-left: 20px; font-size: var(--font-ui-13); color: var(--text-primary)">
       <li v-for="b in store.blockers" :key="b.kind">{{ b.label }}</li>
     </ul>
 

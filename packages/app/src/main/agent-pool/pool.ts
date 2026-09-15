@@ -25,12 +25,48 @@ import {
 } from "../permission/permission-store.js";
 import { AgentPoolCore, type PoolObserver } from "./pool-core.js";
 import { PoolRuntimeHostImpl } from "./pool-runtime-host.js";
+import { readProcessRssMb, type RssReader } from "./process-rss.js";
 
 let instance: AgentPoolCore | null = null;
 let tickTimer: NodeJS.Timeout | null = null;
 
-/** 周期性维护节拍（空闲回收 / 权限超时 / 准入排队）。分钟级足够，不必密。 */
+/** 周期性维护节拍（空闲回收 / 权限超时 / 准入排队 / RSS 采样）。分钟级足够，不必密。 */
 const TICK_INTERVAL_MS = 15_000;
+
+/** RSS 读取器（单测可替换；生产恒为按平台的真读取）。 */
+let rssReader: RssReader = readProcessRssMb;
+/** 上一拍采样还没回来就跳过这一拍，绝不让采样堆积。 */
+let samplingInFlight = false;
+
+/**
+ * 一拍 RSS 采样：把每个在跑会话的常驻内存回填进池的 memoryMb。
+ *
+ * 这是 `memoryCeilingMb` 真正被对照的那一侧——此前 memoryMb 恒为 0，上界
+ * 形同虚设。采样失败只记日志、保留旧值；进程刚退出的 pid 在读取结果里缺席，
+ * 由 stopRecord / onCrash 负责清零，这里不猜。
+ */
+export async function sampleRuntimeMemory(pool: AgentPoolCore = agentPool()): Promise<void> {
+  if (samplingInFlight) return;
+  const live = pool.livePids();
+  if (live.length === 0) return;
+  samplingInFlight = true;
+  try {
+    const rss = await rssReader(live.map((l) => l.pid));
+    const samples: Array<{ sessionId: string; memoryMb: number }> = [];
+    for (const { sessionId, pid } of live) {
+      const mb = rss.get(pid);
+      if (mb !== undefined) samples.push({ sessionId, memoryMb: mb });
+    }
+    pool.recordMemoryBatch(samples);
+  } catch (err) {
+    log().warn("agent_pool_memory_sample_failed", {
+      pids: live.length,
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  } finally {
+    samplingInFlight = false;
+  }
+}
 
 function broadcastSnapshot(_snapshot: PoolSnapshot): void {
   // 从内核取一份带信封的快照（sequence 单调、generation 固定）。
@@ -123,6 +159,7 @@ export function startPoolMaintenance(): void {
   const pool = agentPool();
   if (!tickTimer) {
     tickTimer = setInterval(() => {
+      void sampleRuntimeMemory(pool);
       const expired = pool.tick(Date.now());
       // 超时的权限待办（AGT-101 §7 第二个接线点落地）：经 `decidePermission(deny)`
       // 把超时收口到权限引擎——不再只记审计。**绝不自动允许**：这里恒传
@@ -157,12 +194,19 @@ export function setPoolCaps(caps: PoolCaps): void {
   agentPool().setCaps(caps);
 }
 
+/** 仅供单测：替换 RSS 读取器（传 null 恢复真读取）。 */
+export function __setRssReader(reader: RssReader | null): void {
+  rssReader = reader ?? readProcessRssMb;
+}
+
 /** 仅供单测：拆掉单例与节拍。 */
 export function __resetAgentPool(): void {
   if (tickTimer) {
     clearInterval(tickTimer);
     tickTimer = null;
   }
+  samplingInFlight = false;
+  rssReader = readProcessRssMb;
   instance = null;
   setSessionGrantPolicyResolver(null);
   setPermissionInboxHooks(null);

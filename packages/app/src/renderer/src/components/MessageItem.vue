@@ -61,9 +61,26 @@ const userImages = computed(() => {
 });
 
 // --- 助手消息 ---
-const blocks = computed<AssistantContent[]>(
-  () => (props.message as AssistantMessage).content ?? []
-);
+const blocks = computed<AssistantContent[]>(() => {
+  const raw = (props.message as AssistantMessage).content ?? [];
+  // 相邻的同类块在展示层合并成一块：有的模型会把一段思考拆成很多个
+  // thinking 块推上来，原样渲染就是一屏「思考过程」条。只动展示，不动数据。
+  const merged: AssistantContent[] = [];
+  for (const block of raw) {
+    const prev = merged[merged.length - 1];
+    if (block.type === "thinking" && prev?.type === "thinking") {
+      merged[merged.length - 1] = {
+        type: "thinking",
+        thinking: (prev.thinking ?? "") + (block.thinking ?? ""),
+      };
+    } else if (block.type === "text" && prev?.type === "text") {
+      merged[merged.length - 1] = { type: "text", text: (prev.text ?? "") + (block.text ?? "") };
+    } else {
+      merged.push(block);
+    }
+  }
+  return merged;
+});
 const errorMessage = computed(
   () => (props.message as AssistantMessage).errorMessage
 );
@@ -143,7 +160,7 @@ async function copyText(text: string): Promise<void> {
               aria-label="展开或收起思考过程"
               @click="toggleThinking(i)"
             >
-              💭 思考过程 {{ isThinkingOpen(i) ? "▲" : "▼" }}
+              思考过程 {{ isThinkingOpen(i) ? "收起" : "展开" }}
             </button>
             <div v-if="isThinkingOpen(i)" class="thinking-content" role="region">
               {{ block.thinking }}
@@ -191,9 +208,9 @@ async function copyText(text: string): Promise<void> {
         </n-alert>
         <div
           v-else-if="aborted"
-          style="color: #9ca3af; font-size: 12.5px; margin-top: 6px"
+          style="color: var(--text-tertiary); font-size: 12px; margin-top: 6px"
         >
-          ⏹ 已按你的要求停止
+          已按你的要求停止
         </div>
 
         <div v-if="!props.streaming" class="msg-actions">
@@ -237,20 +254,20 @@ async function copyText(text: string): Promise<void> {
   background: transparent;
   border: none;
   border-radius: 4px;
-  color: #8a8f98;
-  font-size: 18px;
+  color: var(--text-tertiary);
+  font-size: 16px;
   line-height: 1;
   cursor: pointer;
   padding: 0;
 }
 .msg-actions button:hover,
 .msg-actions button:focus-visible {
-  background: rgba(75, 85, 99, 0.08);
-  color: #4b5563;
+  background: var(--bg-hover);
+  color: var(--text-primary);
   outline: none;
 }
 .msg-actions button:focus-visible {
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .thinking-toggle {
   background: none;

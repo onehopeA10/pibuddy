@@ -16,7 +16,6 @@ import {
   NButton,
   NInput,
   NInputNumber,
-  NModal,
   NSelect,
   NSwitch,
   NTag,
@@ -27,6 +26,9 @@ import { useAppStore } from "../stores/app";
 import { useTasksStore } from "../stores/tasks";
 import type { RunStatus, TaskListItem, TaskSchedule } from "@contract";
 import { humanTaskHeadline } from "../../../lib/task-plain";
+import PanelFrame from "./PanelFrame.vue";
+
+defineProps<{ embedded?: boolean }>();
 
 const app = useAppStore();
 const store = useTasksStore();
@@ -215,11 +217,12 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <n-modal
-    v-model:show="store.panelOpen"
-    preset="card"
-    title="⏰ 定时任务"
-    style="width: 860px; max-width: 92vw"
+  <PanelFrame
+    :embedded="embedded"
+    :show="store.panelOpen"
+    title="定时任务"
+    width="860px"
+    @update:show="store.panelOpen = $event"
   >
     <div class="tasks-toolbar">
       <n-button size="small" type="primary" @click="showForm = !showForm">
@@ -371,7 +374,7 @@ async function submit(): Promise<void> {
         </div>
       </div>
     </div>
-  </n-modal>
+  </PanelFrame>
 </template>
 
 <style scoped>
@@ -382,9 +385,9 @@ async function submit(): Promise<void> {
   margin-bottom: 12px;
 }
 .notice {
-  background: #fff4e5;
-  border: 1px solid #ffb74d;
-  color: #7a4a00;
+  background: var(--warning-bg);
+  border: var(--border-w) solid var(--status-warning);
+  color: var(--text-primary);
   padding: 6px 8px;
   border-radius: 4px;
   font-size: 12px;
@@ -394,7 +397,7 @@ async function submit(): Promise<void> {
   margin-bottom: 10px;
 }
 .err {
-  color: #d03050;
+  color: var(--status-error);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -402,8 +405,8 @@ async function submit(): Promise<void> {
   max-width: 320px;
 }
 .form {
-  border: 1px solid var(--n-border-color, #eee);
-  border-radius: 8px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-m);
   padding: 12px;
   margin-bottom: 12px;
 }
@@ -415,8 +418,8 @@ async function submit(): Promise<void> {
   flex-wrap: wrap;
 }
 .task-card {
-  border: 1px solid var(--n-border-color, #eee);
-  border-radius: 8px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-m);
   padding: 10px 12px;
   margin-bottom: 10px;
 }
@@ -431,7 +434,7 @@ async function submit(): Promise<void> {
   gap: 12px;
   flex-wrap: wrap;
   font-size: 12px;
-  color: #888;
+  color: var(--text-secondary);
   margin-bottom: 8px;
 }
 .task-actions {
@@ -441,7 +444,7 @@ async function submit(): Promise<void> {
 }
 .runs {
   margin-top: 10px;
-  border-top: 1px dashed var(--n-border-color, #eee);
+  border-top: 1px dashed var(--border-subtle);
   padding-top: 8px;
 }
 .run-row {
@@ -453,7 +456,7 @@ async function submit(): Promise<void> {
   flex-wrap: wrap;
 }
 .run-log {
-  color: #888;
+  color: var(--text-tertiary);
   cursor: help;
 }
 .prompt {
@@ -463,7 +466,7 @@ async function submit(): Promise<void> {
   white-space: nowrap;
 }
 .empty {
-  color: #999;
+  color: var(--text-tertiary);
   font-size: 13px;
   padding: 8px 0;
 }

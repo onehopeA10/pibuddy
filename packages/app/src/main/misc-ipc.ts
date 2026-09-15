@@ -4,6 +4,8 @@
  * 与 pi-ipc.ts / sessions-ipc.ts 同构：本文件不出现 ipcMain.handle，
  * 注册一律经 ipc-guard 的 registerHandler。
  */
+import fs from "node:fs";
+import path from "node:path";
 import { BrowserWindow, dialog } from "electron";
 import {
   CHANNELS,
@@ -16,6 +18,7 @@ import {
   sttTranscribeRequestSchema,
   tokenRequestSchema,
   voidRequestSchema,
+  workspaceIdRequestSchema,
   type AppSettings,
   type AttachmentRef,
   type SttTranscribeResult,
@@ -30,7 +33,14 @@ import { resolveExternalCommand } from "./pi-launcher.js";
 import { applyPiRuntimeChoice } from "./security/pi-runtime-approval.js";
 import { SECRET_KEYS, describeSecret, loadSecret, saveSecret } from "./secret-store.js";
 import { loadSettings, publicSettings, saveSettings } from "./settings.js";
-import { describeWorkspace, registerWorkspace } from "./workspace-registry.js";
+import { applyThemeChrome } from "./theme-chrome.js";
+import {
+  describeWorkspace,
+  listWorkspaces,
+  lookupWorkspace,
+  registerWorkspace,
+  touchWorkspace,
+} from "./workspace-registry.js";
 
 /**
  * 单次语音载荷上限（25MB，与 CHANNEL_MAX_BYTES 里 stt:transcribe 的放宽值一致）。
@@ -67,7 +77,10 @@ export function registerMiscIpc(): void {
     } else if (patch.sttBaseUrl !== undefined) {
       next.sttEndpointId = undefined;
     }
-    return publicSettings(saveSettings(next as Partial<AppSettings>));
+    const saved = saveSettings(next as Partial<AppSettings>);
+    // 配色变了要同步刷窗口外壳（底色 + 标题栏 overlay），这块 CSS 管不到。
+    if (patch.theme !== undefined) applyThemeChrome(saved.theme);
+    return publicSettings(saved);
   });
 
   // 密钥**只进不出**：这条通道能写、能清，但仓库里没有任何一条能把明文
@@ -140,10 +153,38 @@ export function registerMiscIpc(): void {
     if (!saved) return null;
     try {
       // 目录可能已被用户删掉 / 移走：注册失败就当作「还没选工作文件夹」
-      return { ...describeWorkspace(registerWorkspace(saved).workspaceId) };
+      const record = registerWorkspace(saved);
+      touchWorkspace(record.workspaceId);
+      return { ...describeWorkspace(record.workspaceId) };
     } catch {
       return null;
     }
+  });
+
+  // 项目列表：全部已注册的工作目录。只外发不透明 id + 展示路径 + 目录名。
+  registerHandler(CHANNELS.workspaceList, voidRequestSchema, () =>
+    listWorkspaces().map((record) => ({
+      workspaceId: record.workspaceId,
+      displayPath: record.root,
+      name: path.basename(record.root) || record.root,
+      lastOpenedAt: record.lastOpenedAt,
+    }))
+  );
+
+  // 切到已注册的工作目录：与 chooseFolder 同一落盘方式（绝对路径只在主进程
+  // 内部从注册表取，渲染进程给的只有 id），不弹系统对话框。
+  registerHandler(CHANNELS.workspaceSelect, workspaceIdRequestSchema, (payload) => {
+    const record = lookupWorkspace(payload.workspaceId);
+    if (!record) return null;
+    try {
+      // 注册表是启动时载入的，目录可能之后被删：切之前再确认一次它还在。
+      if (!fs.statSync(record.root).isDirectory()) return null;
+    } catch {
+      return null;
+    }
+    saveSettings({ workspace: record.root });
+    touchWorkspace(record.workspaceId);
+    return describeWorkspace(record.workspaceId);
   });
 
   registerHandler(CHANNELS.dialogChooseFolder, voidRequestSchema, async (_p, event) => {
@@ -157,6 +198,7 @@ export function registerMiscIpc(): void {
     const record = registerWorkspace(result.filePaths[0]);
     // 绝对路径只写进主进程的设置文件，不经由渲染进程中转
     saveSettings({ workspace: record.root });
+    touchWorkspace(record.workspaceId);
     return describeWorkspace(record.workspaceId);
   });
 

@@ -10,6 +10,7 @@ import {
   CHANNELS,
   providerCustomRequestSchema,
   providerIdRequestSchema,
+  providerModelInputRequestSchema,
   providerSaveKeyRequestSchema,
   setScopeDefaultRequestSchema,
   usageExportRequestSchema,
@@ -40,6 +41,7 @@ import {
   discoverModels,
   listCustomProviders,
   removeCustomProvider,
+  setCustomModelInput,
   upsertCustomProvider,
 } from "./models-store.js";
 import { PROVIDER_CATALOG, catalogEntry } from "./provider-catalog.js";
@@ -57,6 +59,7 @@ export const PROVIDERS_CHANNELS: InvokeChannel[] = [
   CHANNELS.providersAddCustom,
   CHANNELS.providersTest,
   CHANNELS.providersDiscoverModels,
+  CHANNELS.providersSetModelInput,
   CHANNELS.providersSetScopeDefault,
 ];
 
@@ -205,6 +208,12 @@ export function registerProvidersIpc(): void {
       return listProviders();
     }
   );
+
+  // 只对 models.json 里的自定义端点生效：内置 provider 的模型能力表归 pi。
+  registerHandler(CHANNELS.providersSetModelInput, providerModelInputRequestSchema, (payload) => {
+    setCustomModelInput(payload.providerId, payload.modelId, payload.input);
+    return listProviders();
+  });
 
   // workspace 层的 key 是不透明 workspaceId，但必须先确认它真的指向一个
   // 已注册的工作目录 —— 否则渲染进程可以往设置里塞任意键值对。

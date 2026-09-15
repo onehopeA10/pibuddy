@@ -38,6 +38,7 @@ import {
   providerCustomRequestSchema,
   providerIdRequestSchema,
   providerListResultSchema,
+  providerModelInputRequestSchema,
   providerSaveKeyRequestSchema,
   providerTestResultSchema,
   setScopeDefaultRequestSchema,
@@ -176,6 +177,18 @@ export const workspaceRefSchema = z.object({
   displayPath: z.string(),
 });
 export type WorkspaceRef = z.infer<typeof workspaceRefSchema>;
+
+/**
+ * 项目列表里的一项（`workspace:list`）。
+ *
+ * 在 WorkspaceRef 之上只多两个展示字段：`name` 是目录名（由主进程按平台取
+ * basename，渲染进程不自己拆路径），`lastOpenedAt` 供排序（0 = 从未打开）。
+ */
+export const workspaceListItemSchema = workspaceRefSchema.extend({
+  name: z.string(),
+  lastOpenedAt: z.number().int().nonnegative(),
+});
+export type WorkspaceListItem = z.infer<typeof workspaceListItemSchema>;
 
 /**
  * 附件 capability 的渲染侧视图（取代早先直接外发绝对路径的 PickedFile）。
@@ -684,6 +697,15 @@ export const attachmentsContractShard = defineContractShard("attachments", {
     request: voidRequestSchema,
     response: workspaceRefSchema.nullable(),
   },
+  [CHANNELS.workspaceList]: {
+    request: voidRequestSchema,
+    response: z.array(workspaceListItemSchema),
+  },
+  [CHANNELS.workspaceSelect]: {
+    request: workspaceIdRequestSchema,
+    // 该 id 已不在注册表里（目录被删 / 移走）时返回 null，不抛错
+    response: workspaceRefSchema.nullable(),
+  },
   [CHANNELS.dialogChooseFolder]: {
     request: voidRequestSchema,
     response: workspaceRefSchema.nullable(),
@@ -817,6 +839,10 @@ export const providersContractShard = defineContractShard("providers", {
   },
   [CHANNELS.providersDiscoverModels]: {
     request: providerIdRequestSchema,
+    response: providerListResultSchema,
+  },
+  [CHANNELS.providersSetModelInput]: {
+    request: providerModelInputRequestSchema,
     response: providerListResultSchema,
   },
   [CHANNELS.providersSetScopeDefault]: {

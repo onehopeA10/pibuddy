@@ -179,6 +179,34 @@ describe("资源上界与公平准入（防止开 100 个会话打爆机器）",
     expect(pool.snapshot().sessions.find((s) => s.sessionId === "B")!.queued).toBe(true);
   });
 
+  it("RSS 回填驱动内存上界：采样越界拦准入，回落后同一拍放行", () => {
+    const { host } = makeHost();
+    const pool = new AgentPoolCore({
+      host,
+      caps: { maxConcurrent: 9, maxPerWorkspace: 9, memoryCeilingMb: 1000, costCeilingUsd: 9999 },
+    });
+    pool.requestSession({ sessionId: "A", workspaceId: "ws" });
+    pool.onRuntimeReady("A", { runtimeId: "r1", generation: 1, pid: 4242 }, 10);
+    expect(pool.livePids()).toEqual([{ sessionId: "A", pid: 4242 }]);
+
+    // 采样到 1200 MB：越过 1000 的上界，新会话只能排队
+    pool.recordMemoryBatch([{ sessionId: "A", memoryMb: 1200 }]);
+    expect(pool.snapshot().totalMemoryMb).toBe(1200);
+    pool.requestSession({ sessionId: "B", workspaceId: "ws" });
+    expect(pool.snapshot().sessions.find((s) => s.sessionId === "B")!.queued).toBe(true);
+
+    // 下一拍回落到 300 MB：批量回填自己重跑准入，B 不必等别的事件
+    pool.recordMemoryBatch([{ sessionId: "A", memoryMb: 300 }]);
+    expect(pool.snapshot().sessions.find((s) => s.sessionId === "B")!.queued).toBe(false);
+
+    // 没有 pid 的会话（排队 / 假 client）不接受回填；停掉后 pid 与内存一并清零
+    pool.recordMemoryBatch([{ sessionId: "B", memoryMb: 999 }]);
+    expect(pool.snapshot().sessions.find((s) => s.sessionId === "B")!.memoryMb).toBe(0);
+    pool.stopSession("A");
+    expect(pool.livePids()).toEqual([]);
+    expect(pool.snapshot().totalMemoryMb).toBe(0);
+  });
+
   it("永久崩溃释放并发位后立即准入队首会话", () => {
     const { host, calls } = makeHost();
     const pool = new AgentPoolCore({

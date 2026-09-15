@@ -150,6 +150,45 @@ export async function upsertCustomProvider(
   return entry;
 }
 
+/**
+ * 标注自定义端点某个模型接受的输入模态（文 / 图 / 图文）：写回该条目的 `input`。
+ *
+ * 中转 / 自建端点的 `/models` 只回 id，pi 对缺省的 `input` 补成 `["text"]`，
+ * 一个明明能看图的模型就被判成「不支持图片」。能力判据仍然只有 `input`
+ * （不引入模型名单），这里只是让用户把真实能力写进去。
+ *
+ * 只动 `text` / `image` 两项：其它模态（audio 之类）用户手写的照样保留。
+ * provider / model 不存在时抛错而不是静默 —— 静默的表现是「改了，图还是
+ * 发不出去」。
+ */
+export function setCustomModelInput(
+  providerId: string,
+  modelId: string,
+  modalities: ("text" | "image")[]
+): void {
+  if (modalities.length === 0) throw new Error("MODEL_INPUT_EMPTY: 至少保留一种输入");
+  const file = readModelsFile();
+  const providers = { ...(file.providers ?? {}) };
+  const entry = providers[providerId];
+  if (!entry || typeof entry !== "object" || typeof entry.baseUrl !== "string") {
+    throw new Error("PROVIDER_NOT_FOUND: 这个自定义端点已经不在了，请重新添加");
+  }
+  const models = entry.models ?? [];
+  const index = models.findIndex((m) => m.id === modelId);
+  if (index < 0) {
+    throw new Error(`MODEL_NOT_FOUND: 端点「${providerId}」下没有模型「${modelId}」`);
+  }
+  const current = models[index];
+  const kept = (current.input ?? ["text"]).filter((k) => k !== "image" && k !== "text");
+  const ordered = (["text", "image"] as const).filter((k) => modalities.includes(k));
+  const input = [...ordered, ...kept];
+  const nextModels = models.slice();
+  nextModels[index] = { ...current, input };
+  providers[providerId] = { ...entry, models: nextModels };
+  writeModelsFile({ ...file, providers });
+  providerLogger().info("provider_model_input_set", { providerId, modelId, input });
+}
+
 /** 删除一个自定义 provider。不存在时是 no-op（不抛）。 */
 export function removeCustomProvider(providerId: string): void {
   const file = readModelsFile();

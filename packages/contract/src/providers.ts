@@ -107,6 +107,26 @@ export const providerCustomRequestSchema = z.object({
 export type ProviderCustomRequest = z.infer<typeof providerCustomRequestSchema>;
 
 /**
+ * providers:set-model-input 的入参：给自定义端点的一个模型标注输入模态。
+ *
+ * 为什么需要它：中转 / 自建端点的 `GET /models` 只回 id，pi 对缺省的
+ * `input` 一律补成 `["text"]`，于是一个明明能看图的 grok / gpt 中转模型会被
+ * 判成「不支持图片」。能力判据仍然只有 `Model.input`（不引入模型名单），
+ * 这里只是给用户一个把真实能力**写进 input** 的入口。只允许自定义端点：
+ * 内置 provider 的模型表归 pi 所有。
+ */
+export const modelInputModalitySchema = z.enum(["text", "image"]);
+export type ModelInputModality = z.infer<typeof modelInputModalitySchema>;
+
+export const providerModelInputRequestSchema = z.object({
+  providerId: z.string().min(1),
+  modelId: z.string().min(1),
+  /** 该模型接受的输入：文 / 图 / 图文，至少一项 */
+  input: z.array(modelInputModalitySchema).min(1),
+});
+export type ProviderModelInputRequest = z.infer<typeof providerModelInputRequestSchema>;
+
+/**
  * 连通性测试的错误词汇。
  *
  * ## 为什么它等于 `ModelErrorKind`（去 abort）再加一个 `model`

@@ -14,8 +14,10 @@
  *  2. **受控环境**。`GIT_TERMINAL_PROMPT=0` / 空 askpass 让任何要凭据、要
  *     passphrase 的操作**立刻失败**而不是挂起等输入；`GIT_OPTIONAL_LOCKS=0`
  *     避免只读操作也去抢锁；`GIT_PAGER=cat` 关分页器；`LC_ALL=C` 让报错稳定
- *     可读。凭据 / token 既不入 argv 也不入日志（本批全是本地操作，压根不碰
- *     网络与 credential helper；push/fetch 属 deferred）。
+ *     可读。凭据由 git 自己经 credential helper 处理，token 不入 argv / 日志。
+ *     Windows 上必须把 Git 的 `usr\\bin` 补进 PATH：`gh auth setup-git` 写的
+ *     `!...` helper 要靠 `sh` 启动；Git 2.55.0.3 找不到 `sh` 时
+ *     `git-remote-https` 会空指针崩溃，而不是报一句可读错误。
  *  3. **在途进程可被拆卸**。每个 child 登记在 `inflight` 里，`disposeGitCli`
  *     一次性 kill —— 能力被禁用时不留一个还在跑的 clone/log 子进程
  *     （ADR-0002 D4 规则 4：teardown child-process）。
@@ -24,6 +26,8 @@
  * 记全 argv 会把提交信息 / 分支名等用户内容原样落盘，没有必要。
  */
 import { execFile as execGit, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 import { createLogger, type Logger } from "../logger.js";
 
@@ -69,13 +73,45 @@ function truncate(text: string): string {
 }
 
 /**
+ * 从 PATH 里的 `Git\\cmd` 反推安装根。只认磁盘上真有 `usr\\bin\\sh.exe` 的根，
+ * 避免把同名目录误当成 Git。
+ */
+export function resolveGitInstallRoot(pathEnv: string): string | null {
+  for (const part of pathEnv.split(path.delimiter)) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    if (!/[\\/](?:Git|git)[\\/]cmd$/i.test(trimmed)) continue;
+    const root = path.resolve(trimmed, "..");
+    if (existsSync(path.join(root, "usr", "bin", "sh.exe"))) return root;
+  }
+  const fallback = "C:\\Program Files\\Git";
+  if (existsSync(path.join(fallback, "usr", "bin", "sh.exe"))) return fallback;
+  return null;
+}
+
+/** 把 Git 自带的 `sh` 放到 PATH 最前，避免 git-remote-https 在 Windows 上空指针。 */
+export function withGitUnixToolsOnPath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const current = env.PATH ?? env.Path ?? "";
+  const root = resolveGitInstallRoot(current);
+  if (!root) return env;
+  const extras = [path.join(root, "usr", "bin"), path.join(root, "mingw64", "bin")].filter((p) =>
+    existsSync(p)
+  );
+  const parts = current.split(path.delimiter).filter(Boolean);
+  const seen = new Set(parts.map((p) => p.toLowerCase()));
+  const prefix = extras.filter((p) => !seen.has(p.toLowerCase()));
+  if (prefix.length === 0) return env;
+  return { ...env, PATH: [...prefix, ...parts].join(path.delimiter) };
+}
+
+/**
  * 受控环境。派生自 process.env，只覆盖那几个决定「非交互 / 稳定输出」的键。
  *
  * 不整份重写 env：git 要靠 PATH 找到自己、要靠 HOME / 用户 gitconfig 拿到
  * user.name（commit 需要）。覆盖的都是「别弹窗、别分页、别抢锁、别本地化」。
  */
 function controlledEnv(): NodeJS.ProcessEnv {
-  return {
+  return withGitUnixToolsOnPath({
     ...process.env,
     GIT_TERMINAL_PROMPT: "0",
     GIT_OPTIONAL_LOCKS: "0",
@@ -84,7 +120,7 @@ function controlledEnv(): NodeJS.ProcessEnv {
     SSH_ASKPASS: "",
     GCM_INTERACTIVE: "never",
     LC_ALL: "C",
-  };
+  });
 }
 
 /**

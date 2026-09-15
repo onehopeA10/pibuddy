@@ -38,6 +38,7 @@ const NEW_CHANNELS: InvokeChannel[] = [
   CHANNELS.providersAddCustom,
   CHANNELS.providersTest,
   CHANNELS.providersDiscoverModels,
+  CHANNELS.providersSetModelInput,
   CHANNELS.providersSetScopeDefault,
   CHANNELS.usageQuery,
   CHANNELS.usageExport,

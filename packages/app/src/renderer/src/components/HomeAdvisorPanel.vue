@@ -38,7 +38,7 @@ onMounted(() => void reload());
 <template>
   <aside class="home-advisor-panel">
     <header class="head">
-      <span class="title">🏠 家居建议</span>
+      <span class="title">家居建议</span>
       <span class="count" v-if="state">{{ state.skills.length }} 个建议技能</span>
       <NButton size="tiny" quaternary :loading="loading" @click="reload">刷新</NButton>
     </header>
@@ -76,8 +76,8 @@ onMounted(() => void reload());
   flex-direction: column;
   width: 320px;
   height: 100%;
-  border-left: 1px solid var(--border-color, #e2e8f0);
-  background: var(--panel-bg, #fff);
+  border-left: var(--border-w) solid var(--border-subtle);
+  background: var(--bg-surface);
   overflow: hidden;
 }
 .head {
@@ -85,7 +85,7 @@ onMounted(() => void reload());
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .title {
   font-weight: 600;
@@ -93,7 +93,7 @@ onMounted(() => void reload());
 }
 .count {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-secondary);
   margin-right: auto;
 }
 .msg {
@@ -102,12 +102,12 @@ onMounted(() => void reload());
   font-size: 12px;
 }
 .msg.error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--status-error);
+  background: var(--danger-bg);
 }
 .msg.notice {
-  color: #92400e;
-  background: #fffbeb;
+  color: var(--status-warning);
+  background: var(--warning-bg);
 }
 .body {
   flex: 1;
@@ -118,7 +118,7 @@ onMounted(() => void reload());
   gap: 10px;
 }
 .card {
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: var(--border-w) solid var(--border-subtle);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -135,19 +135,19 @@ onMounted(() => void reload());
 .summary {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #334155;
+  color: var(--text-primary);
   line-height: 1.5;
 }
 .usage {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #0f766e;
+  color: var(--status-info);
   line-height: 1.5;
 }
 .foot-hint {
   margin: 2px 0 0;
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-tertiary);
   line-height: 1.6;
 }
 </style>

@@ -9,15 +9,17 @@
  * 会话但读不出来」，比悄悄藏起来强 —— 这里的体现是 preview 为空时显示
  * 「（还没有消息）」而不是把整条过滤掉。
  */
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { NButton, NDropdown, NInput, NSpin, useDialog, useMessage } from "naive-ui";
-import type { SessionRow, SessionStatus } from "@contract";
+import type { SessionRow, SessionStatus, WorkspaceListItem } from "@contract";
 import { useAppStore } from "../stores/app";
+import { useProjectsStore } from "../stores/projects";
 import { sessionDisplayName, useSessionsStore } from "../stores/sessions";
 import { formatTime } from "../friendly";
 
 const app = useAppStore();
 const store = useSessionsStore();
+const projects = useProjectsStore();
 const message = useMessage();
 const dialog = useDialog();
 
@@ -39,8 +41,74 @@ const searchText = computed({
 /** 当前打开的会话；用于列表高亮。 */
 const currentSessionId = computed(() => app.currentSessionId);
 
+/**
+ * 项目维度（Codex 式两级侧栏）：项目 → 会话。
+ *
+ * 当前项目排第一且默认展开，它的会话行来自 sessions store（带整理菜单）；
+ * 其它项目折叠，点开才惰性拉取，行只能「打开」—— 打开即切换工作目录并
+ * 直接进入那个会话。
+ */
+const currentOpen = ref(true);
+
+const orderedProjects = computed<WorkspaceListItem[]>(() => {
+  const list = projects.items;
+  const cur = list.find((p) => p.workspaceId === app.workspaceId);
+  const rest = list.filter((p) => p.workspaceId !== app.workspaceId);
+  return cur ? [cur, ...rest] : rest;
+});
+
+const projectFilter = computed(() => ({
+  status: store.filters.status,
+  search: store.filters.search,
+}));
+
+function isCurrent(p: WorkspaceListItem): boolean {
+  return p.workspaceId === app.workspaceId;
+}
+
+function toggleProject(p: WorkspaceListItem): void {
+  if (isCurrent(p)) currentOpen.value = !currentOpen.value;
+  else projects.toggle(p.workspaceId, projectFilter.value);
+}
+
+function openInProject(p: WorkspaceListItem, row: SessionRow): void {
+  void app.switchWorkspace(p.workspaceId, row.sessionId);
+}
+
+async function newTaskIn(p: WorkspaceListItem): Promise<void> {
+  if (isCurrent(p)) {
+    await app.newTask();
+    return;
+  }
+  if (await app.switchWorkspace(p.workspaceId)) await app.newTask();
+}
+
 onMounted(() => {
+  void projects.refresh();
   if (app.workspaceId) void store.refresh(app.workspaceId);
+});
+
+// 换了工作目录：项目列表重排（lastOpenedAt 变了）、当前会话列表重查。
+watch(
+  () => app.workspaceId,
+  (id) => {
+    void projects.refresh();
+    if (id) void store.refresh(id);
+  }
+);
+
+// 状态页 / 搜索词变化：已展开的其它项目跟着重查。搜索是逐字触发的，这里
+// 同样尾沿防抖，别每敲一个字就对每个展开的项目查一次库。
+let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+watch(projectFilter, (f) => {
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null;
+    void projects.reloadExpanded(app.workspaceId, f);
+  }, 220);
+});
+onBeforeUnmount(() => {
+  if (reloadTimer) clearTimeout(reloadTimer);
 });
 
 function menuFor(row: SessionRow): { label: string; key: string }[] {
@@ -148,6 +216,36 @@ async function commitRename(row: SessionRow): Promise<void> {
     </div>
 
     <div class="session-list">
+      <template v-for="p in orderedProjects" :key="p.workspaceId">
+        <!-- 项目头：目录名 + 完整路径悬停提示；点击展开 / 折叠 -->
+        <div
+          class="project-row"
+          :class="{ current: isCurrent(p), open: isCurrent(p) ? currentOpen : projects.isExpanded(p.workspaceId) }"
+          :title="p.displayPath"
+          role="button"
+          tabindex="0"
+          @click="toggleProject(p)"
+          @keydown.enter.prevent="toggleProject(p)"
+        >
+          <svg class="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+            <path d="M4 2.5 7.5 6 4 9.5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span class="project-name">{{ p.name }}</span>
+          <span v-if="isCurrent(p)" class="project-badge">当前</span>
+          <button
+            type="button"
+            class="project-add"
+            :title="`在「${p.name}」新建任务`"
+            :aria-label="`在 ${p.name} 新建任务`"
+            :disabled="isCurrent(p) && !app.started"
+            @click.stop="newTaskIn(p)"
+          >
+            ＋
+          </button>
+        </div>
+
+        <!-- 当前项目：完整的会话列表（带整理菜单） -->
+        <template v-if="isCurrent(p) && currentOpen">
       <div v-if="store.loading && store.rows.length === 0" class="session-empty">
         <n-spin size="small" />
       </div>
@@ -162,7 +260,7 @@ async function commitRename(row: SessionRow): Promise<void> {
         <div
           v-for="s in store.rows"
           :key="s.sessionId"
-          class="session-item"
+          class="session-item nested"
           :class="{
             active: currentSessionId === s.sessionId,
             opening: app.switchingSessionId === s.sessionId,
@@ -177,7 +275,7 @@ async function commitRename(row: SessionRow): Promise<void> {
               反复点，把等待叠加成好几倍。
             -->
             <n-spin v-if="app.switchingSessionId === s.sessionId" :size="12" />
-            <span v-if="s.pinned" class="pin" title="已置顶">📌</span>
+            <span v-if="s.pinned" class="pin" title="已置顶">置顶</span>
             <n-input
               v-if="renaming === s.sessionId"
               v-model:value="renameText"
@@ -208,6 +306,45 @@ async function commitRename(row: SessionRow): Promise<void> {
           {{ store.filters.search ? "没有匹配的任务" : "还没有历史任务" }}
         </div>
       </template>
+        </template>
+
+        <!-- 其它项目：惰性拉取的只读行，点开 = 切换目录 + 进入该会话 -->
+        <template v-else-if="!isCurrent(p) && projects.isExpanded(p.workspaceId)">
+          <div v-if="projects.rowsFor(p.workspaceId).loading" class="session-empty">
+            <n-spin size="small" />
+          </div>
+          <div v-else-if="projects.rowsFor(p.workspaceId).error" class="session-empty session-error">
+            {{ projects.rowsFor(p.workspaceId).error }}
+          </div>
+          <template v-else>
+            <div
+              v-for="s in projects.rowsFor(p.workspaceId).rows"
+              :key="s.sessionId"
+              class="session-item nested"
+              :class="{ waiting: app.switchingSessionId !== null }"
+              @click="openInProject(p, s)"
+            >
+              <div class="title">
+                <span v-if="s.pinned" class="pin" title="已置顶">置顶</span>
+                {{ sessionDisplayName(s) }}
+                <span v-if="s.running" class="dot running" title="正在后台运行"></span>
+              </div>
+              <div class="preview">{{ s.preview || "（还没有消息）" }}</div>
+              <div class="meta">{{ formatTime(s.modified) }} · {{ s.messageCount }} 条消息</div>
+            </div>
+            <div v-if="projects.rowsFor(p.workspaceId).rows.length === 0" class="session-empty compact">
+              {{ store.filters.search ? "没有匹配的任务" : "还没有历史任务" }}
+            </div>
+          </template>
+        </template>
+      </template>
+
+      <div v-if="projects.error" class="session-empty session-error">{{ projects.error }}</div>
+
+      <!-- 添加项目 = 系统目录选择框；选完即注册并切过去（与 Codex 同一行为） -->
+      <button type="button" class="project-add-row" @click="app.chooseWorkspace()">
+        ＋ 添加项目
+      </button>
     </div>
   </div>
 </template>
@@ -218,6 +355,101 @@ async function commitRename(row: SessionRow): Promise<void> {
   flex-direction: column;
   flex: 1;
   min-height: 0;
+}
+/* ---- 项目头（两级侧栏的第一级） ---- */
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 8px;
+  padding: 5px 6px;
+  border-radius: var(--radius-m);
+  color: var(--text-secondary);
+  font-size: var(--font-ui-12);
+  cursor: pointer;
+  user-select: none;
+}
+.project-row:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.project-row.current {
+  color: var(--text-primary);
+}
+.project-row .chev {
+  flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease);
+  color: var(--text-tertiary);
+}
+.project-row.open .chev {
+  transform: rotate(90deg);
+}
+.project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.project-badge {
+  flex-shrink: 0;
+  font-size: var(--font-ui-11);
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-radius: var(--radius-s);
+  padding: 0 5px;
+  line-height: 16px;
+}
+.project-add {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--font-ui-13);
+  line-height: 20px;
+  cursor: pointer;
+  opacity: 0;
+}
+.project-row:hover .project-add,
+.project-row:focus-within .project-add {
+  opacity: 1;
+}
+.project-add:hover {
+  background: var(--bg-selected);
+  color: var(--text-primary);
+}
+.project-add:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+.project-add-row {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 6px 8px 8px;
+  padding: 6px 8px;
+  border: var(--border-w) dashed var(--border-subtle);
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: var(--font-ui-12);
+  text-align: left;
+  cursor: pointer;
+}
+.project-add-row:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+/* 第二级：会话行整体右缩，与项目头形成层级 */
+.session-item.nested {
+  margin-left: 14px;
+}
+.session-empty.compact {
+  padding: 10px 0;
 }
 .session-search {
   padding: 0 12px 8px;
@@ -231,29 +463,34 @@ async function commitRename(row: SessionRow): Promise<void> {
   flex: 1;
   border: none;
   background: transparent;
-  color: #8b8f98;
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: var(--font-ui-12);
   padding: 4px 0;
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   cursor: pointer;
 }
 .session-tab.active {
-  background: rgba(99, 102, 241, 0.12);
-  color: #6366f1;
+  background: var(--accent-subtle);
+  color: var(--accent);
 }
 .session-empty {
   text-align: center;
-  color: #b0b4bc;
-  font-size: 12px;
+  color: var(--text-tertiary);
+  font-size: var(--font-ui-12);
   padding: 24px 0;
 }
 .session-error {
-  color: #d03050;
+  color: var(--status-error);
 }
 .session-item .title {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.pin {
+  font-size: var(--font-ui-11);
+  color: var(--accent);
+  flex-shrink: 0;
 }
 /*
  * 切换中的两种状态。
@@ -263,7 +500,7 @@ async function commitRename(row: SessionRow): Promise<void> {
  * 切换，最终停在哪个会话取决于返回顺序。
  */
 .session-item.opening {
-  background: rgba(99, 102, 241, 0.1);
+  background: var(--accent-subtle);
 }
 .session-item.waiting {
   opacity: 0.45;
@@ -278,10 +515,10 @@ async function commitRename(row: SessionRow): Promise<void> {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #6366f1;
+  background: var(--accent);
   display: inline-block;
 }
 .dot.running {
-  background: #18a058;
+  background: var(--status-success);
 }
 </style>

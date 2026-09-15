@@ -129,6 +129,32 @@ function doFit(tabId: string): void {
   }
 }
 
+/**
+ * xterm 的颜色从 tokens.css 的代码块 token 取（深 / 浅两套都有），而不是
+ * 写死一套深色 —— 浅色界面里嵌一块黑终端很割裂。取值走 getComputedStyle，
+ * 这样 data-theme 一切，重读一次就是新色。
+ */
+function terminalTheme(): { background: string; foreground: string; cursor: string; selectionBackground: string } {
+  const css = getComputedStyle(document.documentElement);
+  const read = (name: string, fallback: string): string => css.getPropertyValue(name).trim() || fallback;
+  return {
+    background: read("--code-bg", "#14181f"),
+    foreground: read("--code-text", "#d5dbe3"),
+    cursor: read("--text-primary", "#e6e8ec"),
+    selectionBackground: read("--bg-selected", "#262b38"),
+  };
+}
+
+// 配色切换后把已开着的终端一起换色（xterm 的 theme 是可热改的 option）
+watch(
+  () => app.settings.theme,
+  () => {
+    const theme = terminalTheme();
+    for (const entry of entries.values()) entry.term.options.theme = theme;
+  },
+  { flush: "post" }
+);
+
 function ensureTerm(tabId: string, el: HTMLElement): void {
   if (entries.has(tabId)) return;
   const ws = workspaceId.value;
@@ -138,7 +164,7 @@ function ensureTerm(tabId: string, el: HTMLElement): void {
     fontSize: 13,
     cursorBlink: true,
     scrollback: 5000,
-    theme: { background: "#1e1e1e", foreground: "#d4d4d4" },
+    theme: terminalTheme(),
   });
   const fit = new FitAddon();
   const search = new SearchAddon();
@@ -359,8 +385,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100%;
   min-height: 240px;
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: var(--code-bg);
+  color: var(--code-text);
 }
 .terminal-toolbar,
 .terminal-actions {
@@ -368,7 +394,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  border-bottom: 1px solid #333;
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .profile-select {
   width: 160px;
@@ -385,9 +411,9 @@ onBeforeUnmount(() => {
 }
 .terminal-wsl-hint {
   padding: 3px 8px;
-  font-size: 11px;
-  color: #9aa4ae;
-  border-bottom: 1px solid #333;
+  font-size: var(--font-ui-11);
+  color: var(--text-secondary);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .terminal-tabs {
   display: flex;
@@ -400,33 +426,33 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
-  border-radius: 6px 6px 0 0;
-  background: #2a2a2a;
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+  background: var(--bg-surface-raised);
   cursor: pointer;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--font-ui-12);
 }
 .terminal-tab.active {
-  background: #1e1e1e;
-  border: 1px solid #333;
+  background: var(--code-bg);
+  border: var(--border-w) solid var(--border-subtle);
   border-bottom: none;
 }
 .terminal-tab.exited .tab-title {
-  color: #888;
+  color: var(--text-tertiary);
 }
 .tab-exit {
   font-size: 10px;
-  color: #c0714f;
+  color: var(--status-warning);
 }
 .tab-close {
-  color: #888;
+  color: var(--text-tertiary);
 }
 .tab-close:hover {
-  color: #fff;
+  color: var(--text-primary);
 }
 .terminal-empty {
-  color: #888;
-  font-size: 12px;
+  color: var(--text-tertiary);
+  font-size: var(--font-ui-12);
   padding: 4px 8px;
 }
 .terminal-views {
@@ -441,8 +467,8 @@ onBeforeUnmount(() => {
 }
 .terminal-error {
   padding: 4px 8px;
-  color: #e88;
-  font-size: 12px;
+  color: var(--status-error);
+  font-size: var(--font-ui-12);
   white-space: pre-wrap;
 }
 </style>

@@ -496,6 +496,7 @@ export const useAppStore = defineStore("app", () => {
     onboardingStep: 0,
     notificationsEnabled: true,
     voiceEnabled: false,
+    theme: "dark",
   });
   const startError = ref("");
   /** getAvailableModels 失败时的原因；启动本身仍成功，空态展示给用户。 */
@@ -649,20 +650,6 @@ export const useAppStore = defineStore("app", () => {
    * 成功的发送，或用户换了模型。
    */
   const modelBlockedImages = ref<ImageCapabilityVerdict | null>(null);
-
-  /**
-   * 打开历史会话时发现「会话记录的模型 ≠ 当前默认」时的询问（PROV-101）。
-   *
-   * **只提示，不动作**。自动切走会丢掉「这条会话当时用的是什么」这个事实；
-   * 自动不切又会让「我明明改了默认模型」变成一个说不清的现象。两个动作
-   * （保持 / 切换）都由用户点。
-   */
-  const modelMismatchPrompt = ref<{
-    sessionModelId: string;
-    sessionProvider: string;
-    targetModelId: string;
-    targetProvider: string;
-  } | null>(null);
 
   // ---------- 运行时状态（按 sessionId 归一化） ----------
   const currentSessionId = ref(PENDING_SCOPE_KEY);
@@ -1306,12 +1293,11 @@ export const useAppStore = defineStore("app", () => {
     started.value = false;
     streaming.value = false;
     if (payload?.reason === "expected-stop") return;
-    notify(
-      "error",
-      payload?.error
-        ? `智能体进程意外退出：${payload.error}`
-        : "智能体进程意外退出，请重新开始"
-    );
+    // 有消息时 AppShell 用 startError 画全窗唯一断连横幅；消息本身不清理。
+    startError.value = payload?.error
+      ? `智能体进程意外退出：${payload.error}`
+      : "智能体进程意外退出，请重新开始";
+    notify("error", startError.value);
   }
 
   /**
@@ -1565,6 +1551,8 @@ export const useAppStore = defineStore("app", () => {
     streaming.value = false;
     // 字节上界由收尾处的 refreshSessions → adoptSessionBytes 从索引里补齐。
     currentSessionBytes.value = 0;
+    // 失败时还要靠已有消息画断连横幅，不能先把列表倒空再回不去。
+    const preservedItems = items.value.slice();
     resetSessionScopedState();
     try {
       const result = await window.piBuddy.pi.runtime.start({
@@ -1603,33 +1591,8 @@ export const useAppStore = defineStore("app", () => {
           await window.piBuddy.pi.setThinkingLevel(saved.thinkingLevel as ThinkingLevel);
         }
       } else {
-        // 恢复历史会话：**一次 setModel 都不发**。会话文件里记着的模型是一个
-        // 事实，覆盖它等于用户每打开一个旧会话都被悄悄换成另一个模型。
-        //
-        // 只在会话模型与「若无会话层则会生效的那一层」不同时置提示，由
-        // TopBar 问用户「这个会话原来用的是 X，是否切换？」，两个动作都由
-        // 用户点。这一段里不允许出现 setModel 调用。
-        const sessionModel = result.state.model;
-        const wsDefault = saved.workspaceDefaults?.[workspaceId.value];
-        const target =
-          wsDefault ??
-          (saved.provider && saved.modelId
-            ? { provider: saved.provider, modelId: saved.modelId }
-            : null);
-        if (
-          sessionModel &&
-          target &&
-          (sessionModel.provider !== target.provider || sessionModel.id !== target.modelId)
-        ) {
-          modelMismatchPrompt.value = {
-            sessionModelId: sessionModel.id,
-            sessionProvider: sessionModel.provider,
-            targetModelId: target.modelId,
-            targetProvider: target.provider,
-          };
-        } else {
-          modelMismatchPrompt.value = null;
-        }
+        // 恢复历史会话：沿用会话文件里的模型，不问「是否切换」，
+        // 也不发 setModel。全局 / workspace 默认只作用于新会话。
       }
       await refreshState();
       await refreshThinkingLevels();
@@ -1640,6 +1603,9 @@ export const useAppStore = defineStore("app", () => {
       void refreshSessions().then(() => restoreDraft());
     } catch (err) {
       startError.value = err instanceof Error ? err.message : String(err);
+      if (preservedItems.length > 0 && items.value.length === 0) {
+        items.value = preservedItems;
+      }
     }
   }
 
@@ -1766,6 +1732,55 @@ export const useAppStore = defineStore("app", () => {
     adoptWorkspace(chosen);
     settings.value = await window.piBuddy.settings.get();
     await start();
+  }
+
+  /**
+   * 切到侧栏项目列表里的一个**已注册**项目（不弹目录选择框），可顺带直接
+   * 打开该项目下的某个会话 —— 这就是 Codex 式「点别的项目里的会话 = 换目录 +
+   * 开会话」一步到位的落点。
+   *
+   * 与 chooseWorkspace 的差别：目标已知，因此「未保存编辑怎么办」可以**先于**
+   * 落盘去问；用户取消时设置文件一个字节都没改。
+   */
+  async function switchWorkspace(target: string, sessionId?: string): Promise<boolean> {
+    if (!target) return false;
+    if (target === workspaceId.value) {
+      if (sessionId) await openSession({ sessionId });
+      return true;
+    }
+    if (streaming.value) {
+      notify("warning", "请先停止当前任务，再切换项目");
+      return false;
+    }
+    if (!(await useWorkspaceStore().confirmLeave())) return false;
+    const chosen = await window.piBuddy.dialog.selectWorkspace(target);
+    if (!chosen) {
+      notify("error", "这个项目的文件夹已不存在或无法访问");
+      return false;
+    }
+    adoptWorkspace(chosen);
+    settings.value = await window.piBuddy.settings.get();
+    await start(sessionId);
+    return true;
+  }
+
+  /**
+   * 原地重启 pi 运行时，尽量续接当前会话。
+   *
+   * pi 只在启动时读 `~/.pi/agent/models.json`（运行中不监听文件），所以改完
+   * 模型能力标注之后必须重启一次它才看得见。刚新建、还没落盘的会话在索引里
+   * 查不到（SESSION_UNKNOWN）—— 那种情况下退回到开一个新会话：磁盘上本来
+   * 就没有东西可丢。
+   */
+  async function reloadRuntime(): Promise<boolean> {
+    if (!workspaceId.value) return false;
+    if (streaming.value) return false;
+    const sid = currentSessionId.value || undefined;
+    await start(sid);
+    if (!started.value && sid && /SESSION_UNKNOWN/.test(startError.value)) {
+      await start();
+    }
+    return started.value;
   }
 
   async function abortRun(): Promise<void> {
@@ -2166,22 +2181,8 @@ export const useAppStore = defineStore("app", () => {
     // 换了模型 = 上一次的图片拦截判定作废。不清的话，用户切到支持图片的
     // 模型之后附件条目仍然是灰的、发送键仍然是禁用的 —— 一个点了没反应的界面。
     modelBlockedImages.value = null;
-    modelMismatchPrompt.value = null;
     await refreshState();
     await refreshThinkingLevels();
-  }
-
-  /** 「保持这个会话原来的模型」——只关掉提示条，不发任何 RPC。 */
-  function keepSessionModel(): void {
-    modelMismatchPrompt.value = null;
-  }
-
-  /** 「切换到默认模型」——这是用户的显式选择，此时才允许发 set_model。 */
-  async function switchToPromptedModel(): Promise<void> {
-    const prompt = modelMismatchPrompt.value;
-    if (!prompt) return;
-    modelMismatchPrompt.value = null;
-    await setModel(prompt.targetProvider, prompt.targetModelId, false);
   }
 
   async function setThinkingLevel(level: ThinkingLevel): Promise<void> {
@@ -2306,6 +2307,8 @@ export const useAppStore = defineStore("app", () => {
     init,
     start,
     chooseWorkspace,
+    switchWorkspace,
+    reloadRuntime,
     send,
     abortRun,
     newTask,
@@ -2314,9 +2317,6 @@ export const useAppStore = defineStore("app", () => {
     reloadMessages,
     setModel,
     modelBlockedImages,
-    modelMismatchPrompt,
-    keepSessionModel,
-    switchToPromptedModel,
     setPiRuntime,
     switchToBundledRuntime,
     setThinkingLevel,

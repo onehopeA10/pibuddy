@@ -119,7 +119,7 @@ watch(workspaceId, (id) => {
   <section class="git-panel">
     <header>
       <strong>Git</strong>
-      <n-tag v-if="git.isRepo && git.branch" size="small" type="info">🌿 {{ git.branch }}</n-tag>
+      <n-tag v-if="git.isRepo && git.branch" size="small" type="info">{{ git.branch }}</n-tag>
       <n-tag v-else-if="git.detached" size="small" type="warning">detached HEAD</n-tag>
       <span class="spacer" />
       <n-button size="tiny" :loading="git.busy" @click="workspaceId && git.refresh(workspaceId)">
@@ -346,7 +346,7 @@ watch(workspaceId, (id) => {
 
 <style scoped>
 .git-panel {
-  border-top: 1px solid var(--n-border-color, #eee);
+  border-top: var(--border-w) solid var(--border-subtle);
   padding: 8px;
   max-height: 360px;
   overflow: auto;
@@ -360,9 +360,9 @@ header .spacer {
   flex: 1;
 }
 .notice {
-  background: #fff4e5;
-  border: 1px solid #ffb74d;
-  color: #7a4a00;
+  background: var(--warning-bg);
+  border: var(--border-w) solid var(--status-warning);
+  color: var(--text-primary);
   padding: 6px 8px;
   border-radius: 4px;
   font-size: 12px;
@@ -371,7 +371,7 @@ header .spacer {
   align-items: center;
 }
 .error {
-  color: #c62828;
+  color: var(--status-error);
   font-size: 12px;
 }
 .empty {
@@ -393,7 +393,7 @@ header .spacer {
   padding: 0;
 }
 .item {
-  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .row {
   display: flex;
@@ -419,7 +419,7 @@ header .spacer {
 }
 .degraded {
   font-size: 12px;
-  color: #b06000;
+  color: var(--status-warning);
 }
 .commit {
   display: flex;
@@ -443,10 +443,10 @@ pre {
   word-break: break-all;
 }
 pre.del {
-  background: rgba(198, 40, 40, 0.12);
+  background: var(--danger-bg);
 }
 pre.add {
-  background: rgba(47, 125, 49, 0.12);
+  background: color-mix(in srgb, var(--status-success) 16%, transparent);
 }
 .hunk-row {
   display: flex;
@@ -472,6 +472,6 @@ pre.add {
   margin: 4px 0 0;
 }
 .danger .group-head {
-  color: #c62828;
+  color: var(--status-error);
 }
 </style>

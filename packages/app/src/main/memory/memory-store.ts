@@ -284,11 +284,12 @@ export class MemoryStore {
     this.db.exec(DDL_KNOWLEDGE_FTS);
     // v3 治理表：同样 IF NOT EXISTS，不动 memories / FTS / embeddings 一个字节。
     this.db.exec(DDL_WORKING_ITEMS);
-    this.db.exec(DDL_WORKING_SESSION_IDX);
-    this.db.exec(DDL_WORKING_SOURCE_IDX);
     this.db.exec(DDL_MEMORY_CANDIDATES);
     this.db.exec(DDL_MEMORY_CONFLICTS);
     this.db.exec(DDL_MEMORY_ROUTE_EVENTS);
+    // v4 索引依赖 working_items.workspace_id。v3 库的表没有这一列，
+    // CREATE TABLE IF NOT EXISTS 不会改已有表；若先建索引会抛 no such column，
+    // migrate() 永远跑不到。必须先补列再建模。
     this.migrate();
   }
 
@@ -308,16 +309,21 @@ export class MemoryStore {
   private migrate(): void {
     const row = this.db.prepare("PRAGMA user_version").get() as { user_version?: number } | undefined;
     const current = Number(row?.user_version ?? 0);
-    if (current === MEMORY_DATA_SCHEMA_VERSION) return;
-    // 用旧版打开新版库：不动它，别把用户在新版里整理好的记忆搞坏。
     if (current > MEMORY_DATA_SCHEMA_VERSION) return;
-    if (current < 4) this.migrateWorkingWorkspace();
-    this.db.exec(`PRAGMA user_version = ${MEMORY_DATA_SCHEMA_VERSION}`);
+    // 代际已是 4 也要看列：构造中途抛错过的库可能列还没有、代际却已被推高。
+    if (current < 4 || this.workingItemsMissingWorkspace()) this.migrateWorkingWorkspace();
+    if (current < MEMORY_DATA_SCHEMA_VERSION) {
+      this.db.exec(`PRAGMA user_version = ${MEMORY_DATA_SCHEMA_VERSION}`);
+    }
+  }
+
+  private workingItemsMissingWorkspace(): boolean {
+    const cols = this.db.prepare("PRAGMA table_info(working_items)").all() as { name: string }[];
+    return !cols.some((col) => col.name === "workspace_id");
   }
 
   private migrateWorkingWorkspace(): void {
-    const cols = this.db.prepare("PRAGMA table_info(working_items)").all() as { name: string }[];
-    if (!cols.some((col) => col.name === "workspace_id")) {
+    if (this.workingItemsMissingWorkspace()) {
       this.db.exec(`ALTER TABLE working_items ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`);
     }
     this.db.exec("DROP INDEX IF EXISTS idx_working_session");

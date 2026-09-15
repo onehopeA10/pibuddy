@@ -79,9 +79,9 @@ async function doExport(): Promise<void> {
 </script>
 
 <template>
-  <div style="margin-top: 12px; border-top: 1px solid #eceef2; padding-top: 12px">
-    <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px">诊断</div>
-    <div style="font-size: 12.5px; color: #8a8f98; margin-bottom: 8px">
+  <div style="margin-top: 12px; border-top: 1px solid var(--border-subtle); padding-top: 12px">
+    <div style="font-size: var(--font-ui-13); font-weight: 600; margin-bottom: 4px">诊断</div>
+    <div style="font-size: var(--font-ui-12); color: var(--text-tertiary); margin-bottom: 8px">
       遇到问题时，可以导出一份诊断包发给我们。导出前你会先看到将要包含哪些文件。
       日志里的密钥、对话正文与你的用户目录路径都会被替换掉。
     </div>
@@ -105,14 +105,14 @@ async function doExport(): Promise<void> {
 
     <n-spin v-if="loading" size="small" />
 
-    <div v-if="preview" style="font-size: 12.5px">
-      <div style="margin-bottom: 4px; color: #4b5563">
+    <div v-if="preview" style="font-size: var(--font-ui-12)">
+      <div style="margin-bottom: 4px; color: var(--text-secondary)">
         共 {{ preview.entries.length }} 个文件，约 {{ humanSize(preview.totalBytes) }}
       </div>
 
       <div style="margin-bottom: 6px">
-        <div style="color: #16a34a; margin-bottom: 2px">已脱敏</div>
-        <ul style="margin: 0; padding-left: 20px; color: #6b7280">
+        <div style="color: var(--status-success); margin-bottom: 2px">已脱敏</div>
+        <ul style="margin: 0; padding-left: 20px; color: var(--text-tertiary)">
           <li v-for="e in redactedEntries" :key="e.path">
             {{ e.path }} · {{ humanSize(e.sizeBytes) }} —— {{ e.description }}
           </li>
@@ -120,8 +120,8 @@ async function doExport(): Promise<void> {
       </div>
 
       <div v-if="rawEntries.length" style="margin-bottom: 6px">
-        <div style="color: #dc2626; margin-bottom: 2px">未脱敏（你已明确同意包含）</div>
-        <ul style="margin: 0; padding-left: 20px; color: #6b7280">
+        <div style="color: var(--status-error); margin-bottom: 2px">未脱敏（你已明确同意包含）</div>
+        <ul style="margin: 0; padding-left: 20px; color: var(--text-tertiary)">
           <li v-for="e in rawEntries" :key="e.path">
             {{ e.path }} · {{ humanSize(e.sizeBytes) }} —— {{ e.description }}
           </li>
@@ -130,7 +130,7 @@ async function doExport(): Promise<void> {
     </div>
 
     <div style="margin-top: 10px">
-      <div style="font-size: 12.5px; color: #4b5563; margin-bottom: 4px">
+      <div style="font-size: var(--font-ui-12); color: var(--text-secondary); margin-bottom: 4px">
         <!-- 这里曾经写成 Markdown 的 **粗体**，而模板不做 Markdown 解析，
              用户看到的就是两个星号 —— 恰好出现在最需要被看清的那句话上。 -->
         崩溃转储：是进程内存的快照，可能包含你刚打的任何内容，<strong>无法脱敏</strong>。

@@ -177,6 +177,12 @@ export class PiRpcClient extends EventEmitter {
     return this.proc !== null && this.proc.exitCode === null;
   }
 
+  /** 子进程 pid（未启动 / 已退出 / spawn 失败时为 undefined）。供上层采样 RSS。 */
+  get pid(): number | undefined {
+    if (!this.proc || this.proc.exitCode !== null) return undefined;
+    return this.proc.pid;
+  }
+
   get phase(): RuntimePhase {
     return this.phaseValue;
   }

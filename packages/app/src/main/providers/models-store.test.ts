@@ -297,3 +297,65 @@ describe("discoverModels", () => {
     await expect(models.discoverModels("nope")).rejects.toThrow(/PROVIDER_NOT_FOUND/);
   });
 });
+
+describe("setCustomModelInput：给中转模型标注输入模态（文 / 图 / 图文）", () => {
+  it("缺省 input 的模型标成图文 → input 为 [text, image]；其它条目与字段原样保留", async () => {
+    const { models } = await freshModules();
+    seedModelsFile(models);
+
+    models.setCustomModelInput("ollama", "local-a", ["image", "text"]);
+
+    const ollama = models.listCustomProviders().ollama;
+    expect(ollama.models).toEqual([{ id: "local-a", input: ["text", "image"] }, { id: "local-b" }]);
+    // 同一 provider 上用户手写的兼容字段、别的 provider、未知顶层字段都还在
+    expect(ollama.compat).toEqual({ supportsDeveloperRole: false });
+    expect(models.listCustomProviders().relay.models?.[0].input).toEqual(["text", "image"]);
+    expect((models.readModelsFile() as { someFutureKey?: unknown }).someFutureKey).toEqual({
+      keepMe: true,
+    });
+  });
+
+  it("改成「文」只摘掉 image，其它模态保留；改成「图」则只剩 image", async () => {
+    const { models } = await freshModules();
+    seedModelsFile(models);
+    const file = models.readModelsFile();
+    file.providers!.relay.models![0].input = ["text", "image", "audio"];
+    fs.writeFileSync(models.modelsFilePath(), JSON.stringify(file));
+
+    models.setCustomModelInput("relay", "relay-model", ["text"]);
+    expect(models.listCustomProviders().relay.models?.[0].input).toEqual(["text", "audio"]);
+
+    models.setCustomModelInput("relay", "relay-model", ["image"]);
+    expect(models.listCustomProviders().relay.models?.[0].input).toEqual(["image", "audio"]);
+  });
+
+  it("空模态被拒，不写文件", async () => {
+    const { models } = await freshModules();
+    seedModelsFile(models);
+    const before = sha256(models.modelsFilePath());
+    expect(() => models.setCustomModelInput("relay", "relay-model", [])).toThrow(/MODEL_INPUT_EMPTY/);
+    expect(sha256(models.modelsFilePath())).toBe(before);
+  });
+
+  it("写盘前留备份", async () => {
+    const { models, auth } = await freshModules();
+    seedModelsFile(models);
+    const before = sha256(models.modelsFilePath());
+
+    models.setCustomModelInput("relay", "relay-model", ["text"]);
+
+    const backups = fs.readdirSync(auth.backupDir()).filter((f) => f.startsWith("models."));
+    expect(backups.length).toBe(1);
+    expect(sha256(path.join(auth.backupDir(), backups[0]))).toBe(before);
+  });
+
+  it("provider / model 不存在时分别抛 PROVIDER_NOT_FOUND / MODEL_NOT_FOUND，不写文件", async () => {
+    const { models } = await freshModules();
+    seedModelsFile(models);
+    const before = sha256(models.modelsFilePath());
+
+    expect(() => models.setCustomModelInput("nope", "x", ["text"])).toThrow(/PROVIDER_NOT_FOUND/);
+    expect(() => models.setCustomModelInput("relay", "ghost", ["text"])).toThrow(/MODEL_NOT_FOUND/);
+    expect(sha256(models.modelsFilePath())).toBe(before);
+  });
+});

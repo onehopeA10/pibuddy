@@ -142,7 +142,7 @@ onMounted(() => {
 <template>
   <aside class="session-tree-panel">
     <header class="head">
-      <span class="title">🌳 会话树</span>
+      <span class="title">会话树</span>
       <span v-if="tree.graph" class="count">
         {{ tree.graph.nodes.length }} / {{ tree.graph.totalNodes }} 节点
         <span v-if="tree.graph.truncated" class="truncated" title="大树已按性能上限截断，活动分支完整">
@@ -218,8 +218,8 @@ onMounted(() => {
   flex-direction: column;
   width: 340px;
   height: 100%;
-  border-left: 1px solid var(--border-color, #e2e8f0);
-  background: var(--panel-bg, #fff);
+  border-left: var(--border-w) solid var(--border-subtle);
+  background: var(--bg-surface);
   overflow: hidden;
 }
 .head {
@@ -227,7 +227,7 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .title {
   font-weight: 600;
@@ -235,11 +235,11 @@ onMounted(() => {
 }
 .count {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-secondary);
   margin-right: auto;
 }
 .truncated {
-  color: #d97706;
+  color: var(--status-warning);
 }
 .msg {
   margin: 0;
@@ -247,12 +247,12 @@ onMounted(() => {
   font-size: 12px;
 }
 .msg.error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--status-error);
+  background: var(--danger-bg);
 }
 .msg.notice {
-  color: #166534;
-  background: #f0fdf4;
+  color: var(--status-success);
+  background: var(--bg-surface);
 }
 .canvas {
   flex: 1;
@@ -260,20 +260,20 @@ onMounted(() => {
   padding: 4px;
 }
 .empty {
-  color: #94a3b8;
+  color: var(--text-tertiary);
   font-size: 12px;
   padding: 16px;
 }
 .edge {
-  stroke: #cbd5e1;
+  stroke: var(--border-strong);
   stroke-width: 1.5;
 }
 .edge.active {
-  stroke: #16a34a;
+  stroke: var(--status-success);
   stroke-width: 2.5;
 }
 .detail {
-  border-top: 1px solid var(--border-color, #e2e8f0);
+  border-top: var(--border-w) solid var(--border-subtle);
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
@@ -283,7 +283,7 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-secondary);
 }
 .kind {
   text-transform: uppercase;
@@ -292,13 +292,13 @@ onMounted(() => {
 .preview {
   margin: 0;
   font-size: 12px;
-  color: #334155;
+  color: var(--text-primary);
   max-height: 72px;
   overflow: auto;
   white-space: pre-wrap;
 }
 .hint {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-tertiary);
 }
 </style>

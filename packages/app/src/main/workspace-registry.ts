@@ -34,6 +34,8 @@ export interface WorkspaceRecord {
   root: string;
   /** 首次注册时间（Unix ms），仅用于诊断 */
   registeredAt: number;
+  /** 最近一次作为当前工作目录打开的时间（Unix ms）；0 = 从未（项目列表排序用） */
+  lastOpenedAt: number;
 }
 
 /** 落盘文件名。跨重启的稳定性靠它保证。 */
@@ -74,6 +76,7 @@ function load(): Map<string, WorkspaceRecord> {
             workspaceId: id,
             root,
             registeredAt: typeof rec.registeredAt === "number" ? rec.registeredAt : 0,
+            lastOpenedAt: typeof rec.lastOpenedAt === "number" ? rec.lastOpenedAt : 0,
           });
         } catch {
           // root 已不存在、不可访问或不是合法工作区：忽略该条，绝不保留旧绑定。
@@ -89,7 +92,9 @@ function load(): Map<string, WorkspaceRecord> {
 
 function persist(map: Map<string, WorkspaceRecord>): void {
   const out: Record<string, Omit<WorkspaceRecord, "workspaceId">> = {};
-  for (const [id, rec] of map) out[id] = { root: rec.root, registeredAt: rec.registeredAt };
+  for (const [id, rec] of map) {
+    out[id] = { root: rec.root, registeredAt: rec.registeredAt, lastOpenedAt: rec.lastOpenedAt };
+  }
   writeJsonAtomic(storePath(), out);
 }
 
@@ -133,10 +138,35 @@ export function registerWorkspace(absPath: string): WorkspaceRecord {
   const existing = map.get(workspaceId);
   if (existing && existing.root === root) return existing;
 
-  const record: WorkspaceRecord = { workspaceId, root, registeredAt: Date.now() };
+  const record: WorkspaceRecord = { workspaceId, root, registeredAt: Date.now(), lastOpenedAt: 0 };
   map.set(workspaceId, record);
   persist(map);
   return record;
+}
+
+/**
+ * 记一次「作为当前工作目录打开」。
+ *
+ * 与 registerWorkspace 分开：注册的来源很多（git worktree、测试夹具、附件
+ * 收容……），只有用户真的切过去才算「打开」，项目列表按这个时间排序。
+ */
+export function touchWorkspace(workspaceId: string): void {
+  const map = load();
+  const record = map.get(workspaceId);
+  if (!record) return;
+  record.lastOpenedAt = Date.now();
+  persist(map);
+}
+
+/**
+ * 全部已注册的工作目录，最近打开的在前、从未打开的按注册时间倒序。
+ *
+ * load() 已把目录不存在的条目过滤掉，因此这里列出的都是此刻还在的目录。
+ */
+export function listWorkspaces(): WorkspaceRecord[] {
+  return [...load().values()].sort(
+    (a, b) => b.lastOpenedAt - a.lastOpenedAt || b.registeredAt - a.registeredAt
+  );
 }
 
 /**

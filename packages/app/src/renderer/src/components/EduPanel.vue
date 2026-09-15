@@ -226,7 +226,7 @@ const subjectLabel = (subject: string): string =>
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border: 1px solid var(--divider-color, #e0e0e6);
+  border: var(--border-w) solid var(--border-subtle);
   border-radius: 6px;
   padding: 10px;
 }
@@ -254,7 +254,7 @@ const subjectLabel = (subject: string): string =>
   margin: 0;
 }
 .ep-error {
-  color: var(--error-color, #d03050);
+  color: var(--status-error);
   font-size: 12px;
   margin: 0;
 }
@@ -262,7 +262,7 @@ const subjectLabel = (subject: string): string =>
   min-height: 0;
 }
 .ep-mistake {
-  border-top: 1px solid var(--divider-color, #e0e0e6);
+  border-top: var(--border-w) solid var(--border-subtle);
   padding: 6px 0;
   display: flex;
   flex-direction: column;
@@ -292,10 +292,10 @@ const subjectLabel = (subject: string): string =>
   font-size: 12px;
 }
 .ep-wrong {
-  color: var(--error-color, #d03050);
+  color: var(--status-error);
 }
 .ep-right {
-  color: var(--success-color, #18a058);
+  color: var(--status-success);
 }
 .ep-note {
   font-size: 12px;

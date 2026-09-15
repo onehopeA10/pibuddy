@@ -58,11 +58,12 @@ const outputPreview = computed(() => {
     <button
       type="button"
       class="tool-chip"
+      :class="{ running, done: run?.status === 'done', error: run?.status === 'error' || missing }"
       :aria-expanded="expanded"
       aria-label="展开或收起工具详情"
       @click="expanded = !expanded"
     >
-      <span>{{ label.icon }}</span>
+      <span v-if="label.icon">{{ label.icon }}</span>
       <span>{{ label.title }}</span>
       <span v-if="label.detail" class="detail">{{ label.detail }}</span>
       <span v-if="missing" class="state-missing">工具记录已不可用</span>
@@ -71,13 +72,13 @@ const outputPreview = computed(() => {
       <span v-else class="state-error">✗ 失败</span>
     </button>
     <div v-if="expanded" class="tool-expand" role="region">
-      <div style="color: #8a8f98">做了什么：</div>
+      <div class="tool-label">做了什么：</div>
       <pre>{{ argsPreview }}</pre>
-      <div v-if="missing" style="color: #8a8f98; margin-top: 8px">
+      <div v-if="missing" class="tool-label" style="margin-top: 8px">
         这次运行的结果没有留在本次会话里，无法展示。
       </div>
       <template v-else-if="run.output">
-        <div style="color: #8a8f98; margin-top: 8px">结果：</div>
+        <div class="tool-label" style="margin-top: 8px">结果：</div>
         <pre>{{ outputPreview }}</pre>
       </template>
       <img
@@ -99,7 +100,10 @@ const outputPreview = computed(() => {
   text-align: left;
 }
 .state-missing {
-  color: #9ca3af;
-  font-size: 12px;
+  color: var(--text-tertiary);
+  font-size: var(--font-ui-12);
+}
+.tool-label {
+  color: var(--text-secondary);
 }
 </style>

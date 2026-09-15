@@ -206,7 +206,7 @@ const blockReason = computed(() => {
         <p>选一个文件夹，我只会在这个文件夹里帮你干活，其他地方不动。</p>
         <n-space align="center">
           <n-button type="primary" :loading="busy" @click="chooseFolder">
-            📁 选择工作文件夹
+            选择工作文件夹
           </n-button>
           <n-tag v-if="app.workspace" size="small" type="success" :bordered="false">
             {{ app.workspace }}
@@ -361,7 +361,7 @@ const blockReason = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--pibuddy-bg, #f5f6f8);
+  background: var(--bg-app);
   z-index: 2000;
   padding: 24px;
   overflow: auto;
@@ -369,10 +369,10 @@ const blockReason = computed(() => {
 .wizard-card {
   width: 100%;
   max-width: 620px;
-  background: #fff;
-  border-radius: 12px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-l);
   padding: 28px 32px 20px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-pop);
 }
 .wizard-title {
   margin: 0;
@@ -381,16 +381,16 @@ const blockReason = computed(() => {
 .wizard-sub {
   margin: 4px 0 0;
   font-size: 13px;
-  color: #8a8f98;
+  color: var(--text-secondary);
 }
 .body {
   min-height: 180px;
-  font-size: 14px;
+  font-size: var(--font-ui-14);
   line-height: 1.7;
 }
 .body .muted {
-  color: #8a8f98;
-  font-size: 13px;
+  color: var(--text-secondary);
+  font-size: var(--font-ui-13);
 }
 .logo {
   font-size: 48px;
@@ -400,16 +400,16 @@ const blockReason = computed(() => {
 .test-result {
   margin: 12px 0 0;
   font-size: 12.5px;
-  color: #d03050;
+  color: var(--status-error);
   white-space: pre-wrap;
 }
 .test-result.ok {
-  color: #18a058;
+  color: var(--status-success);
 }
 .block-reason {
   margin: 12px 0 0;
   font-size: 12.5px;
-  color: #f0a020;
+  color: var(--status-warning);
 }
 .wizard-actions {
   display: flex;
@@ -417,7 +417,7 @@ const blockReason = computed(() => {
   gap: 8px;
   margin-top: 24px;
   padding-top: 16px;
-  border-top: 1px solid rgba(128, 128, 128, 0.15);
+  border-top: var(--border-w) solid var(--border-subtle);
 }
 
 /* 尊重系统的「减少动态效果」设置：前庭功能障碍的用户会因为过渡动画不适 */

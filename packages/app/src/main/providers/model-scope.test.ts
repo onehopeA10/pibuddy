@@ -44,7 +44,7 @@ describe("优先级恒为 session > workspace > global", () => {
     const r = resolveModel({ sessionModel: S });
     expect(r.model).toEqual(S);
     expect(r.source).toBe("session");
-    // 没有 fallback 时问「是否切换」是没有意义的
+    // 没有 fallback 时也不构成对照差异
     expect(r.mismatch).toBe(false);
     expect(r.wouldBe).toBeNull();
   });

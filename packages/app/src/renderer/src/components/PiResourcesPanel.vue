@@ -25,8 +25,6 @@ import { computed, ref, watch } from "vue";
 import {
   NAlert,
   NButton,
-  NDrawer,
-  NDrawerContent,
   NEmpty,
   NInput,
   NSelect,
@@ -42,6 +40,9 @@ import { useAppStore } from "../stores/app";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useCapabilitiesStore } from "../stores/capabilities";
 import McpPanel from "./McpPanel.vue";
+import PanelFrame from "./PanelFrame.vue";
+
+defineProps<{ embedded?: boolean }>();
 
 const store = useAppStore();
 const piRes = usePiResourcesStore();
@@ -128,8 +129,14 @@ function confirmRemove(resource: PiResource): void {
 </script>
 
 <template>
-  <n-drawer v-model:show="piRes.panelOpen" :width="560" placement="right">
-    <n-drawer-content title="Pi 资源" closable>
+  <PanelFrame
+    :embedded="embedded"
+    :show="piRes.panelOpen"
+    title="扩展与技能包"
+    width="560"
+    mode="drawer"
+    @update:show="piRes.panelOpen = $event"
+  >
       <n-space vertical size="large">
         <!-- 项目信任提示 -->
         <n-alert v-if="trustBlocked" type="warning" title="这个项目还没有被信任">
@@ -169,7 +176,7 @@ function confirmRemove(resource: PiResource): void {
 
         <n-space>
           <n-button size="small" :loading="piRes.loading" @click="piRes.refresh(store.workspaceId)">
-            🔄 刷新
+            刷新
           </n-button>
         </n-space>
 
@@ -236,7 +243,7 @@ function confirmRemove(resource: PiResource): void {
                   aria-label="打开所在目录"
                   @click="piRes.openDir(store.workspaceId, r.id)"
                 >
-                  📁
+                  打开目录
                 </n-button>
                 <n-button
                   v-if="r.spec"
@@ -259,8 +266,7 @@ function confirmRemove(resource: PiResource): void {
           <McpPanel />
         </section>
       </n-space>
-    </n-drawer-content>
-  </n-drawer>
+  </PanelFrame>
 </template>
 
 <style scoped>
@@ -274,7 +280,7 @@ function confirmRemove(resource: PiResource): void {
   opacity: 0.7;
 }
 .mcp-section {
-  border-top: 1px solid rgba(128, 128, 128, 0.24);
+  border-top: var(--border-w) solid var(--border-subtle);
   padding-top: 8px;
 }
 .row {
@@ -282,7 +288,7 @@ function confirmRemove(resource: PiResource): void {
   gap: 12px;
   align-items: flex-start;
   padding: 8px 0;
-  border-top: 1px solid rgba(128, 128, 128, 0.16);
+  border-top: var(--border-w) solid var(--border-subtle);
 }
 .row-main {
   flex: 1;
@@ -306,7 +312,7 @@ function confirmRemove(resource: PiResource): void {
 .diag {
   margin-top: 2px;
   font-size: 11px;
-  color: #d08700;
+  color: var(--status-warning);
 }
 .row-actions {
   display: flex;

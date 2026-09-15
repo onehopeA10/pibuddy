@@ -47,7 +47,8 @@ export const workspaceFilesCapability = defineCapability({
       id: "common.workspace-files.tree",
       title: "文件树",
       module: "renderer/src/components/FileTreePanel.vue",
-      host: "renderer/src/components/AppShell.vue",
+      // 文件树挂在侧栏的「会话 / 文件」分页里（Sidebar.vue），AppShell 只做门控
+      host: "renderer/src/components/Sidebar.vue",
     },
     {
       slot: "drawer.tab",

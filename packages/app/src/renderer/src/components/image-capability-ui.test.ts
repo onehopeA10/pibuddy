@@ -33,6 +33,9 @@ vi.mock("naive-ui", () => ({
     template: `<textarea v-bind="$attrs" :value="value" />`,
   },
   NSpin: { template: `<span class="spin" />` },
+  NSelect: { inheritAttrs: false, template: `<div class="n-select" v-bind="$attrs" />` },
+  NTag: { inheritAttrs: false, template: `<span v-bind="$attrs"><slot /></span>` },
+  NTooltip: { template: `<span><slot /><slot name="trigger" /></span>` },
   useMessage: () => ({ info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() }),
 }));
 

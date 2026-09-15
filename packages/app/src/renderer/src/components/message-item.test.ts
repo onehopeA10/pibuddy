@@ -50,8 +50,54 @@ describe("MessageItem · Markdown 缓存时机", () => {
   });
 });
 
-describe("MessageItem · 展开态住在 store 里", () => {
+describe("MessageItem · 相邻思考块合并", () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
+    for (const k of Object.keys(openThinking)) delete openThinking[k];
+  });
+
+  it("连续的 thinking 块只渲染一个「思考过程」，内容拼接完整", async () => {
+    const fragmented = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "第一步" },
+        { type: "thinking", thinking: "，第二步" },
+        { type: "text", text: "回答" },
+        { type: "thinking", thinking: "再想想" },
+        { type: "thinking", thinking: "一下" },
+      ],
+    } as unknown as AssistantMessage;
+    const wrapper = mount(MessageItem, {
+      props: { message: fragmented, messageKey: 9 },
+      global: { stubs: { NAlert: true, ToolActivity: true } },
+    });
+    // 5 个原始块 → 2 个思考块（文本块把两段思考隔开了）
+    const toggles = wrapper.findAll(".thinking-toggle");
+    expect(toggles).toHaveLength(2);
+    // 展开第一个，内容是两段拼起来的
+    await toggles[0]!.trigger("click");
+    expect(wrapper.find(".thinking-content").text()).toBe("第一步，第二步");
+  });
+
+  it("相邻 text 块合并后只进一次 Markdown", () => {
+    const fragmented = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "前半" },
+        { type: "text", text: "后半" },
+      ],
+    } as unknown as AssistantMessage;
+    renderMarkdown.mockClear();
+    mount(MessageItem, {
+      props: { message: fragmented, streaming: false, messageKey: 10 },
+      global: { stubs: { NAlert: true, ToolActivity: true } },
+    });
+    expect(renderMarkdown).toHaveBeenCalledTimes(1);
+    expect(renderMarkdown).toHaveBeenCalledWith("前半后半");
+  });
+});
+
+describe("MessageItem · 展开态住在 store 里", () => {  beforeEach(() => {
     setActivePinia(createPinia());
     for (const k of Object.keys(openThinking)) delete openThinking[k];
   });

@@ -11,6 +11,7 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import type {
+  ModelInputModality,
   ProviderCustomRequest,
   ProviderTestResult,
   ProviderView,
@@ -132,6 +133,27 @@ export const useProvidersStore = defineStore("providers", () => {
     }
   }
 
+  /**
+   * 标注自定义端点某个模型接受的输入（文 / 图 / 图文）。
+   *
+   * 写回的是 models.json 里那条模型的 `input`，pi 下次启动 / 重新拉模型表时
+   * 读到的就是它 —— 图片能力的判据始终只有 `Model.input`，这里不另存一份。
+   */
+  async function setModelInput(
+    providerId: string,
+    modelId: string,
+    input: ModelInputModality[]
+  ): Promise<boolean> {
+    lastError.value = "";
+    try {
+      adopt(await window.piBuddy.providers.setModelInput(providerId, modelId, input));
+      return true;
+    } catch (err) {
+      lastError.value = err instanceof Error ? err.message : String(err);
+      return false;
+    }
+  }
+
   async function refreshUsage(filter: UsageQuery = usageFilter.value): Promise<void> {
     usageFilter.value = filter;
     try {
@@ -199,6 +221,7 @@ export const useProvidersStore = defineStore("providers", () => {
     addCustom,
     test,
     discoverModels,
+    setModelInput,
     refreshUsage,
     exportUsage,
   };

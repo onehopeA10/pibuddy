@@ -12,12 +12,11 @@
  * 「这条会话当时用的是什么」永远赢，因为那是一个**事实**，而另外两层只是
  * 偏好。
  *
- * ## mismatch 不是错误
+ * ## mismatch 只是事实，不再弹询问
  *
- * 当 session 层与 workspace/global 不一致时，本模块返回 `mismatch: true`，
- * 由界面去问用户「这个会话原来用的是 X，是否切换？」。**不在这里替用户
- * 决定**：自动切走会丢掉事实，自动不切又会让「我明明改了默认模型」变成
- * 一个说不清的现象。
+ * 当 session 层与 workspace/global 不一致时，本模块仍返回 `mismatch: true`
+ * 供调用方对照。界面**不再询问「是否切换」**：打开历史会话一律沿用会话
+ * 记下的模型；全局 / workspace 默认只作用于新会话。
  */
 import type { ModelRef, ModelScope } from "@pibuddy/contract";
 
@@ -38,10 +37,10 @@ export interface ResolveModelResult {
   /**
    * session 层与「若无 session 层则会生效的那一层」是否不同。
    *
-   * 只有恢复历史会话时才可能为 true。为 true 时界面必须**问**，不得静默处理。
+   * 只有恢复历史会话时才可能为 true。界面不再据此弹询问，只沿用 session。
    */
   mismatch: boolean;
-  /** mismatch 为 true 时，用户若选「切换」应当切到的那个模型 */
+  /** 若无 session 层则会生效的那个模型（对照用，不再驱动切换询问） */
   wouldBe: ModelRef | null;
 }
 

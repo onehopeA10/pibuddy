@@ -28,6 +28,8 @@ import { applyPendingRestoreOnStartup } from "./backup/backup-ipc.js";
 import { disposeMcpResources } from "./mcp/mcp-ipc.js";
 import { disposePackageCommands } from "./pi-resources/package-install.js";
 import { shutdownTasksResources } from "./tasks/tasks-ipc.js";
+import { loadSettings } from "./settings.js";
+import { themeChrome, TITLE_BAR_HEIGHT } from "./theme-chrome.js";
 
 let applicationShutdown: Promise<void> | null = null;
 
@@ -60,6 +62,9 @@ function shutdownApplication(): Promise<void> {
 }
 
 function createWindow(): void {
+  // 窗口外壳颜色跟随设置里的配色（深 / 浅）；之后用户在设置里切换时由
+  // misc-ipc 的 settings:set 调 applyThemeChrome 原地刷新。
+  const chrome = themeChrome(loadSettings().theme);
   const win = new BrowserWindow({
     width: 1360,
     height: 880,
@@ -67,7 +72,20 @@ function createWindow(): void {
     minHeight: 640,
     title: "PiBuddy · AI 办公小助手",
     autoHideMenuBar: true,
-    backgroundColor: "#f7f7f8",
+    backgroundColor: chrome.backgroundColor,
+    // 窗口 / 任务栏图标。dev 下从 build/ 读（electron-builder 的 buildResources
+    // 目录），打包后由 electron-builder 内嵌进 exe，这里的路径仅影响 dev。
+    icon: path.join(import.meta.dirname, "../../build/icon.png"),
+    // 隐藏系统标题栏：原生那条颜色由系统定，与应用主体割裂。
+    // 渲染侧用 .app-header 自己画顶栏（同时是拖拽区），窗口的最小化 /
+    // 最大化 / 关闭按钮由 Electron 以 overlay 形式画在右上角，颜色对齐
+    // tokens.css 的 --bg-app / --text-primary（见 theme-chrome.ts）。
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: chrome.overlayColor,
+      symbolColor: chrome.symbolColor,
+      height: TITLE_BAR_HEIGHT,
+    },
     webPreferences: {
       // .cjs 不是笔误：沙箱化 preload 只支持 CommonJS，见 electron.vite.config.ts
       preload: path.join(import.meta.dirname, "../preload/index.cjs"),

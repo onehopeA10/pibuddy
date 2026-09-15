@@ -161,45 +161,45 @@ async function copyDiagnostics(): Promise<void> {
 
 <style scoped>
 .update-panel {
-  border-top: 1px solid #eceef2;
+  border-top: var(--border-w) solid var(--border-subtle);
   padding-top: 12px;
   margin-top: 4px;
 }
 .update-panel h3 {
   margin: 0 0 10px;
-  font-size: 13px;
-  color: #4b5563;
+  font-size: var(--font-ui-13);
+  color: var(--text-secondary);
 }
 .row {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: var(--font-ui-13);
 }
 .k {
   width: 102px;
   flex: none;
-  color: #8a8f98;
+  color: var(--text-tertiary);
 }
 .v {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #1f2937;
+  color: var(--text-primary);
 }
 .hint {
-  font-size: 12px;
-  color: #b0b4bc;
+  font-size: var(--font-ui-12);
+  color: var(--text-tertiary);
 }
 .notes {
   max-height: 120px;
   overflow: auto;
   white-space: pre-wrap;
-  font-size: 12px;
-  color: #4b5563;
-  background: #f7f8fa;
-  border-radius: 6px;
+  font-size: var(--font-ui-12);
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  border-radius: var(--radius-m);
   padding: 8px 10px;
   margin-bottom: 10px;
 }

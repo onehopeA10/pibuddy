@@ -36,6 +36,7 @@ import {
 
 import { log } from "../log.js";
 import { buildPiSpawn, verifyRuntimeHandshake } from "../pi-launcher.js";
+import { kernelExtensionArgs } from "../pi/kernel-extensions.js";
 import { resolveSessionDir } from "../sessions/session-dir.js";
 import { sessionIndex } from "../sessions/session-index.js";
 import { loadSettings } from "../settings.js";
@@ -53,6 +54,8 @@ import type {
  */
 export interface PoolRuntimeClient {
   readonly runtimeId: string;
+  /** 子进程 pid（可选：假 client 不提供时池不采样它的内存）。 */
+  readonly pid?: number | undefined;
   start(): void;
   stop(): Promise<void> | void;
   getState(): Promise<{ sessionId?: string }>;
@@ -92,12 +95,15 @@ const realClientFactory: PoolRuntimeClientFactory = (spec) => {
     trustArgs: [],
   });
   verifyRuntimeHandshake(spawn.runtime, log());
+  // 与前台同一份内核级 extension：后台池里的 grok 同样要拿到工具使用提示。
+  const extraArgs = kernelExtensionArgs(log());
   return new PiRpcClient({
     spawn,
     cwd: spec.cwd,
     sessionDir: spec.sessionDir,
     generation: spec.generation,
     ...(spec.sessionPath ? { session: spec.sessionPath } : {}),
+    ...(extraArgs.length ? { extraArgs } : {}),
   }) as unknown as PoolRuntimeClient;
 };
 
@@ -116,8 +122,11 @@ interface LaunchIntent {
 
 /** 池内核侧的回调（由 pool.ts 装配时接上，避免 host ↔ pool 的构造期循环）。 */
 export interface PoolHostSink {
-  /** runtime 就绪：回填 runtimeId / generation（不改前台聚焦）。 */
-  onReady(sessionId: string, info: { runtimeId: string; generation: number }): void;
+  /** runtime 就绪：回填 runtimeId / generation / pid（不改前台聚焦）。 */
+  onReady(
+    sessionId: string,
+    info: { runtimeId: string; generation: number; pid?: number }
+  ): void;
   /** 一条已包信封的事件流过（派生列表态 / 成本 / 未读）。 */
   onEvent(envelope: PiEnvelope<AgentEvent>): void;
   /** 当前 runtime 退出（reason 区分主动停止与崩溃）。 */
@@ -415,7 +424,11 @@ export class PoolRuntimeHostImpl implements PoolRuntimeHost {
           }
         }
         if (this.runtimes.get(req.sessionId) !== record) return;
-        this.sink?.onReady(req.sessionId, { runtimeId: client.runtimeId, generation });
+        this.sink?.onReady(req.sessionId, {
+          runtimeId: client.runtimeId,
+          generation,
+          ...(client.pid !== undefined ? { pid: client.pid } : {}),
+        });
         this.taps.get(req.sessionId)?.onReady?.(state.sessionId ?? null);
       } catch (err) {
         if (this.runtimes.get(req.sessionId) !== record) return;

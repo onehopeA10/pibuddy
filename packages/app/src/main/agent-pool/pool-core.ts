@@ -111,6 +111,8 @@ export interface PoolObserver {
     workspaceId: string;
     runtimeId: string;
     generation: number;
+    /** 子进程 pid（有则池按拍采样 RSS 回填内存估算）。 */
+    pid?: number;
   }): void;
   /** 一条已包信封的事件流过（派生列表任务态；不改变转发本身）。 */
   onEvent(envelope: PiEnvelope<AgentEvent>): void;
@@ -128,7 +130,10 @@ interface SessionRecord {
   runState: PoolRunState;
   listState: PoolListState;
   unread: boolean;
+  /** 最近一次采样到的 RSS（MB）；未采样 / 无进程时为 0。 */
   memoryMb: number;
+  /** 当前代际子进程 pid；无进程时 null。只用于 RSS 采样，不进快照。 */
+  pid: number | null;
   costUsd: number;
   /** 崩溃时间戳（用于崩溃预算的滑动窗口）。 */
   crashTimes: number[];
@@ -210,6 +215,7 @@ export class AgentPoolCore {
         listState: "idle",
         unread: false,
         memoryMb: 0,
+        pid: null,
         costUsd: 0,
         crashTimes: [],
         lastActivityAt: 0,
@@ -253,6 +259,7 @@ export class AgentPoolCore {
       workspaceId: string | null;
       runtimeId: string;
       generation: number;
+      pid?: number;
     },
     now = 0
   ): void {
@@ -267,6 +274,7 @@ export class AgentPoolCore {
         listState: "idle",
         unread: false,
         memoryMb: 0,
+        pid: info.pid ?? null,
         costUsd: 0,
         crashTimes: [],
         // 空闲计时从**进程就绪的这一刻**起，而不是 epoch 0——否则一个刚握手、
@@ -288,6 +296,9 @@ export class AgentPoolCore {
       }
       record.runtimeId = info.runtimeId;
       record.generation = info.generation;
+      record.pid = info.pid ?? null;
+      // 换了代际 = 换了进程，上一代的 RSS 不再作数。
+      record.memoryMb = 0;
       record.queued = false;
       record.lastFrame = null;
       record.lastActivityAt = now;
@@ -389,6 +400,7 @@ export class AgentPoolCore {
     record.runState = to;
     record.queued = false;
     record.memoryMb = 0;
+    record.pid = null;
     record.lastFrame = null;
     // 停一个会话 = 它挂在 inbox 里的权限待办一并作废（进程都没了，没人再回答）。
     this.inbox = this.inbox.filter((i) => i.sessionId !== record.sessionId);
@@ -484,13 +496,15 @@ export class AgentPoolCore {
   /** host 报告某会话的 runtime 已就绪（拿到 runtimeId 与代际）。 */
   onRuntimeReady(
     sessionId: string,
-    info: { runtimeId: string; generation: number },
+    info: { runtimeId: string; generation: number; pid?: number },
     now: number
   ): void {
     const record = this.sessions.get(sessionId);
     if (!record) return;
     record.runtimeId = info.runtimeId;
     record.generation = info.generation;
+    record.pid = info.pid ?? null;
+    record.memoryMb = 0;
     record.lastActivityAt = now;
     // 新代际 = 会话事件闸门重置（上一代迟到事件不该被当成新事件）。
     record.lastFrame = null;
@@ -508,6 +522,7 @@ export class AgentPoolCore {
     record.crashTimes.push(now);
     record.listState = "failed";
     record.memoryMb = 0;
+    record.pid = null;
     record.lastFrame = null;
     this.inbox = this.inbox.filter((i) => i.sessionId !== sessionId);
     if (record.origin !== "user") {
@@ -594,6 +609,43 @@ export class AgentPoolCore {
     const record = this.sessions.get(sessionId);
     if (!record) return;
     record.memoryMb = Math.max(0, memoryMb);
+    this.emit();
+  }
+
+  /**
+   * 当前有进程在跑、且知道 pid 的会话（供接线层按拍采样 RSS）。
+   *
+   * 排队中的会话还没有进程；stopped / crashed 的 pid 已在 stopRecord 里清掉。
+   */
+  livePids(): Array<{ sessionId: string; pid: number }> {
+    const out: Array<{ sessionId: string; pid: number }> = [];
+    for (const r of this.sessions.values()) {
+      if (r.pid === null || r.queued || !isLiveRunState(r.runState)) continue;
+      out.push({ sessionId: r.sessionId, pid: r.pid });
+    }
+    return out;
+  }
+
+  /**
+   * 一拍 RSS 采样的批量回填。
+   *
+   * 与逐条 `recordMemory` 的区别：只发一次快照，且回填后重跑一次准入——
+   * 总内存跌回上界以下时，排队中的会话应当在这一拍就被放进来，而不是等
+   * 下一个别的事件顺带触发。采样缺席的会话保留上一次的值（进程可能刚好
+   * 在换代，给 0 会让上界短暂失守）。
+   */
+  recordMemoryBatch(samples: Iterable<{ sessionId: string; memoryMb: number }>): void {
+    let changed = false;
+    for (const { sessionId, memoryMb } of samples) {
+      const record = this.sessions.get(sessionId);
+      if (!record || record.pid === null) continue;
+      const next = Math.max(0, Math.round(memoryMb));
+      if (record.memoryMb === next) continue;
+      record.memoryMb = next;
+      changed = true;
+    }
+    if (!changed) return;
+    this.admitQueued();
     this.emit();
   }
 
@@ -772,6 +824,7 @@ export class AgentPoolCore {
       record.runState = "stopped";
       record.queued = false;
       record.memoryMb = 0;
+      record.pid = null;
       record.lastFrame = null;
     }
     this.inbox = [];

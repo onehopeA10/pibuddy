@@ -58,6 +58,10 @@ extraResources:
   # 只追加条目，不动 pi-runtime 的投递方式。
   - from: resources/prompt-library
     to: prompt-library
+  # 内核级 pi extension（main/pi/kernel-extensions.ts）：不物化进用户目录，
+  # 启动时经 `--extension <绝对路径>` 直接从这里加载（如按模型追加工具提示）。
+  - from: resources/kernel-extensions
+    to: kernel-extensions
 
 # extraResources 会跳过被复制目录里的 node_modules（显式 filter 也无效），
 # 依赖必须由 afterPack 手动补齐，否则打包后 pi 启动即 ERR_MODULE_NOT_FOUND。
@@ -82,6 +86,8 @@ publish:
 win:
   target:
     - nsis
+  # 任务栏 / 安装包 / 卸载列表图标（多尺寸 ico，由 scripts/make-icon.cjs 生成）
+  icon: build/icon.ico
 
 nsis:
   oneClick: false
@@ -104,6 +110,8 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   notarize: true
+  # electron-builder 会把 build/icon.png（1024²）自动转成 icon.icns
+  icon: build/icon.png
   extendInfo:
     NSMicrophoneUsageDescription: PiBuddy 需要使用麦克风来把你说的话转成文字
 
@@ -114,3 +122,5 @@ linux:
     - AppImage
     - deb
   category: Utility
+  # 桌面条目 / 启动器图标（build/icons/ 下的多尺寸 png）
+  icon: build/icons

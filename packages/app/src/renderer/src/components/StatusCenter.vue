@@ -182,12 +182,12 @@ function onItemClick(key: string): void {
 }
 .status-row:hover,
 .status-row:focus-visible {
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--bg-hover);
   outline: none;
 }
 .status-label {
   font-size: 12.5px;
-  color: #8a8f98;
+  color: var(--text-secondary);
   white-space: nowrap;
 }
 </style>

@@ -52,7 +52,8 @@ export const officeSkillsCapability = defineCapability({
       id: "common.office-skills.panel",
       title: "办公技能",
       module: "renderer/src/components/OfficeSkillsPanel.vue",
-      host: "renderer/src/components/AppShell.vue",
+      // 面板挂在资源库页的「技能」分页里，门控也在那里就地读能力快照
+      host: "renderer/src/components/LibraryPage.vue",
     },
   ],
   settingsSchema: [],

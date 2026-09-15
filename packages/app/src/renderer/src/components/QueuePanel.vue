@@ -83,12 +83,12 @@ function commitEdit(): void {
 
 <style scoped>
 .queue-panel {
-  font-size: 12.5px;
+  font-size: var(--font-ui-12);
   padding: 6px 10px;
-  border-top: 1px solid #f0f0f0;
+  border-top: var(--border-w) solid var(--border-subtle);
 }
 .queue-title {
-  color: #8a8f98;
+  color: var(--text-tertiary);
   margin: 4px 0;
 }
 .queue-item {
@@ -101,7 +101,7 @@ function commitEdit(): void {
   opacity: 0.75;
 }
 .queue-mode {
-  color: #6366f1;
+  color: var(--accent);
   flex: none;
 }
 .queue-text {
@@ -113,8 +113,8 @@ function commitEdit(): void {
 .queue-item button {
   background: none;
   border: none;
-  color: #8a8f98;
+  color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-ui-12);
 }
 </style>

@@ -50,6 +50,11 @@ export interface SupervisorTarget extends ForwarderTarget {
 
 export interface LaunchOptions extends PiRuntimeStartOptions {
   spawn: PiSpawn;
+  /**
+   * 追加在会话参数之后的启动参数（PiClientOptions.extraArgs 的透传口）。
+   * 现阶段唯一的来源是 main/pi/kernel-extensions.ts 的 `--extension <路径>`。
+   */
+  extraArgs?: string[];
 }
 
 interface RuntimeRecord {
@@ -184,6 +189,7 @@ export class PiSupervisor implements PiRuntimeSupervisor {
       session: options.sessionPath,
       sessionDir: options.sessionDir,
       generation,
+      ...(options.extraArgs?.length ? { extraArgs: options.extraArgs } : {}),
     });
     const ctx: EnvelopeContext = {
       workspaceId: options.workspaceId || options.cwd,
@@ -296,11 +302,13 @@ export class PiSupervisor implements PiRuntimeSupervisor {
     if (this.latest?.runtimeId === runtimeId) this.latest.sessionId = sessionId;
     // 真实 sessionId 到手才登记进池：此前 ctx.sessionId 还是占位（runtimeId /
     // sessionPath），用它做池的键会与后续事件的键对不上。
+    const pid = record.client.pid;
     this.poolObserver?.onAdopt({
       sessionId,
       workspaceId: record.ctx.workspaceId,
       runtimeId: record.ctx.runtimeId,
       generation: record.ctx.generation,
+      ...(pid !== undefined ? { pid } : {}),
     });
   }
 
