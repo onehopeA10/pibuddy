@@ -18,7 +18,7 @@ import { useMemoryStore } from "../stores/memory";
 import type { MemoryScope, MemoryType } from "@contract";
 import PanelFrame from "./PanelFrame.vue";
 
-defineProps<{ embedded?: boolean }>();
+const props = defineProps<{ embedded?: boolean }>();
 
 const app = useAppStore();
 const store = useMemoryStore();
@@ -135,6 +135,7 @@ watch(
     width="920px"
     @update:show="store.panelOpen = $event"
   >
+    <div class="feature-page">
     <!-- 注入开关 -->
     <div class="bar">
       <label class="toggle">
@@ -393,6 +394,7 @@ watch(
         :input-props="{ 'aria-label': '合并后的内容' }"
       />
     </n-modal>
+    </div>
   </PanelFrame>
 </template>
 
@@ -400,6 +402,7 @@ watch(
 .bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 10px;
 }
@@ -414,13 +417,14 @@ watch(
 }
 .add {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-m);
-  padding: 8px;
+  border-radius: var(--radius-l);
+  padding: var(--space-3);
   margin-bottom: 12px;
 }
 .add-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
 }
@@ -435,7 +439,7 @@ watch(
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 8px 4px;
+  padding: 10px 0;
   border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .row.excluded {
@@ -489,7 +493,7 @@ watch(
 .hits {
   margin-top: 14px;
   border-top: var(--border-w) solid var(--border-subtle);
-  padding-top: 8px;
+  padding-top: var(--space-3);
 }
 .hit-list {
   list-style: none;
@@ -513,8 +517,8 @@ watch(
 }
 .semantic {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-m);
-  padding: 8px;
+  border-radius: var(--radius-l);
+  padding: var(--space-3);
   margin-bottom: 12px;
 }
 .embed-stat {
@@ -551,7 +555,7 @@ watch(
 .knowledge {
   margin-top: 14px;
   border-top: var(--border-w) solid var(--border-subtle);
-  padding-top: 8px;
+  padding-top: var(--space-3);
 }
 .kb-add {
   display: flex;

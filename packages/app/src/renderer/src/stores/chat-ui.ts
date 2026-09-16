@@ -19,8 +19,8 @@ import { reactive } from "vue";
 export const openThinking = reactive<Record<string, boolean>>({});
 export const expandedTools = reactive<Record<string, boolean>>({});
 
-/** 思考块的稳定 key：消息 key + 块序号。 */
-export function thinkingKey(messageKey: number | string, blockIndex: number): string {
+/** 思考块的稳定 key：消息 key + 块序号（整组「思考过程」用固定的 "process"）。 */
+export function thinkingKey(messageKey: number | string, blockIndex: number | string): string {
   return `${messageKey}:${blockIndex}`;
 }
 

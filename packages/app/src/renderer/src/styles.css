@@ -252,6 +252,25 @@ body,
   font-weight: 600;
 }
 
+/* 没有侧栏的功能页：标题和正文同一条 880 栏，避免工具条贴窗口边 */
+.feature-page {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-6) var(--space-6);
+}
+.topbar.feature-col {
+  padding: 0;
+}
+.topbar.feature-col .feature-title {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 0 var(--space-6);
+}
+
 .feature-stage {
   flex: 1;
   min-height: 0;
@@ -583,27 +602,65 @@ body,
   border-radius: var(--radius-m);
 }
 
-.thinking-block {
-  margin: 6px 0;
-  border-left: 2px solid var(--border-subtle);
-  padding: 2px 0 2px 12px;
-  background: var(--bg-surface);
-  border-radius: 0 var(--radius-m) var(--radius-m) 0;
+/* 一轮回复的「过程」折叠组：思考 + 中间叙述 + 工具调用全在里面 */
+.process-group {
+  margin: 4px 0 10px;
 }
 
-.thinking-toggle {
+.process-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font: inherit;
   font-size: var(--font-ui-12);
   color: var(--text-tertiary);
   cursor: pointer;
   user-select: none;
 }
 
+.process-toggle:hover,
+.process-toggle:focus-visible {
+  color: var(--text-secondary);
+  outline: none;
+}
+
+.process-group.active .process-title {
+  color: var(--text-secondary);
+}
+
+.process-duration {
+  font-variant-numeric: tabular-nums;
+}
+
+.process-chevron {
+  font-size: var(--font-ui-11);
+  line-height: 1;
+}
+
+.process-body {
+  margin-top: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-subtle);
+}
+
+.process-body .process-text {
+  font-size: var(--font-ui-13);
+  color: var(--text-secondary);
+}
+
+.process-body .process-text.markdown p {
+  margin: 6px 0;
+}
+
 .thinking-content {
   font-size: var(--font-ui-12);
   line-height: 1.6;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   white-space: pre-wrap;
-  margin-top: 6px;
+  margin: 6px 0;
   max-height: 240px;
   overflow-y: auto;
 }
@@ -758,12 +815,18 @@ body,
   margin: 0 auto;
   background: var(--bg-input);
   border: var(--border-w) solid var(--border-strong);
-  border-radius: var(--radius-m);
-  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-xl);
+  padding: var(--space-3) var(--space-4);
 }
 
 .composer:focus-within {
   border-color: var(--accent);
+}
+
+/* 容器圆了之后，里面平角的输入区与附件条会在四角露出直边 */
+.composer .n-input,
+.composer .n-input .n-input-wrapper {
+  border-radius: var(--radius-l);
 }
 
 .attachment-row {
@@ -779,7 +842,7 @@ body,
   gap: var(--space-1);
   background: var(--bg-surface);
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-l);
   padding: 0 8px;
   height: 24px;
   font-size: var(--font-ui-12);
@@ -816,6 +879,7 @@ body,
 .composer-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: var(--space-2);
   min-height: 36px;

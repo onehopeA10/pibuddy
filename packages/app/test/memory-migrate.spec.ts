@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * 这不是「断言 migrate 被调用过」这种恒真判据，而是造一个**真正的 v1 格式库**
  * （只有 v1 的三张表、user_version=1、里面躺着一条 v1 记录），用当前代码打开它，
  * 再逐项验证：
- *   1. 代际被推到 MEMORY_DATA_SCHEMA_VERSION（现为 3）；
+ *   1. 代际被推到 MEMORY_DATA_SCHEMA_VERSION（现为 4）；
  *   2. v1 那条记录**还在**、字段原样、FTS 仍能查到、仍能被注入候选选中；
  *   3. v2 的新表（embeddings / knowledge）已建好，老记录能被重嵌拿到语义检索能力；
  *   4. v3 治理表（working_items 等）已建好，且 memories 行字节未改。

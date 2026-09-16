@@ -215,6 +215,8 @@ function resend(text: string): void {
           :message="item.message"
           :message-key="item.key"
           :streaming="item.streaming"
+          :started-at="item.startedAt"
+          :ended-at="item.endedAt"
           :artifacts="artifactsOf(item)"
           @resend="resend"
         />

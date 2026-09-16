@@ -13,6 +13,7 @@
 import { computed, reactive, ref } from "vue";
 import { defineStore } from "pinia";
 import {
+  APPROVAL_STATUS_KEY,
   UI_EXPIRED_HINT,
   type PiUiExpireAllPayload,
   type PiUiExpirePayload,
@@ -98,10 +99,13 @@ export const useExtensionUiStore = defineStore("extensionUi", () => {
       .map(([, text]) => text)
       .join(" · ")
   );
-  /** 扩展上报的常驻状态（如 AUTO/YOLO 模式），弱化显示在顶栏 */
+  /**
+   * 扩展上报的常驻状态，弱化显示在顶栏。
+   * `approval-mode` 已有输入框里的下拉，不再在顶栏重复一份英文 YOLO / APPROVAL。
+   */
   const extStatus = computed(() =>
     Object.entries(statusTexts)
-      .filter(([key, text]) => key.startsWith("ext:") && text)
+      .filter(([key, text]) => key.startsWith("ext:") && key !== `ext:${APPROVAL_STATUS_KEY}` && text)
       .map(([, text]) => text)
       .join(" · ")
   );

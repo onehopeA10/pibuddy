@@ -17,6 +17,7 @@ import type {
 } from "@sdk";
 import type {
   AppSettings,
+  ApprovalMode,
   AttachmentRef,
   DraftRecord,
   ModelErrorKind,
@@ -27,6 +28,8 @@ import type {
   PiUiExpirePayload,
 } from "@contract";
 import {
+  APPROVAL_STATUS_KEY,
+  parseApprovalStatus,
   MAX_PROMPT_ATTACHMENT_BYTES,
   MAX_PROMPT_ATTACHMENT_TOKENS,
   MAX_PROMPT_IMAGES,
@@ -865,6 +868,17 @@ export const useAppStore = defineStore("app", () => {
   const busyStatus = computed(() => extUi.busyStatus);
   /** 扩展上报的常驻状态（如 AUTO/YOLO 模式），弱化显示在顶栏 */
   const extStatus = computed(() => extUi.extStatus);
+  /**
+   * 审批模式控件是否可用：权限扩展在场（上报过 approval-mode 状态）才有意义。
+   * 扩展不在场时 reload 命令会被当成普通提示词发给模型，因此控件干脆不出现。
+   */
+  const approvalControlAvailable = computed(
+    () => extUi.statusTexts[`ext:${APPROVAL_STATUS_KEY}`] !== undefined
+  );
+  /** 当前审批模式；扩展在场但暂时读不出（比如 plan 模式下被隐藏）时为 undefined。 */
+  const approvalMode = computed<ApprovalMode | undefined>(() =>
+    parseApprovalStatus(extUi.statusTexts[`ext:${APPROVAL_STATUS_KEY}`])
+  );
 
   // ---------- 事件处理 ----------
 
@@ -2197,6 +2211,29 @@ export const useAppStore = defineStore("app", () => {
     }
   }
 
+  /**
+   * 切审批模式。成功与否都不在这里改本地状态：新模式由扩展 reload 之后重新
+   * 上报 approval-mode 状态，界面跟着状态走，不会出现「下拉显示 A、实际是 B」。
+   */
+  async function setApprovalMode(mode: ApprovalMode): Promise<boolean> {
+    if (!(await whenPiReady())) {
+      notify("warning", "当前会话还没接通，审批模式没有改");
+      return false;
+    }
+    let resp: { success: boolean; error?: string };
+    try {
+      resp = await window.piBuddy.pi.setApprovalMode(mode);
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "审批模式没有改成");
+      return false;
+    }
+    if (!resp.success) {
+      notify("error", resp.error ?? "审批模式没有改成");
+      return false;
+    }
+    return true;
+  }
+
   async function saveSettings(patch: Partial<AppSettings>): Promise<void> {
     // 不吞异常：端点地址被 SSRF 判定拒绝时，界面要拿到那句可读的原因
     settings.value = await window.piBuddy.settings.set(patch);
@@ -2288,6 +2325,9 @@ export const useAppStore = defineStore("app", () => {
     currentModel,
     busyStatus,
     extStatus,
+    approvalControlAvailable,
+    approvalMode,
+    setApprovalMode,
     setNotifier,
     notify,
     handleEvent,

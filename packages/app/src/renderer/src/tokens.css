@@ -49,6 +49,8 @@
   --radius-s: 4px;
   --radius-m: 6px;
   --radius-l: 10px;
+  /* 输入框这类大块容器用的圆角：比菜单 / 卡片再圆一档 */
+  --radius-xl: 16px;
   --border-w: 1px;
   --shadow-menu: 0 2px 8px #00000040;
   --shadow-pop: 0 8px 24px #00000059;

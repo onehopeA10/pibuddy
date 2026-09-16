@@ -31,7 +31,7 @@ export const CHANNELS = {
    */
   piUiPending: "pi:ui-pending",
 
-  // ---- 15 个产品动作窄通道 ----
+  // ---- 16 个产品动作窄通道 ----
   piPrompt: "pi:prompt",
   piSteer: "pi:steer",
   piFollowUp: "pi:follow-up",
@@ -40,6 +40,13 @@ export const CHANNELS = {
   piSwitchSession: "pi:switch-session",
   piSetModel: "pi:set-model",
   piSetThinkingLevel: "pi:set-thinking-level",
+  /**
+   * 切换审批模式（工具调用要不要先问用户）。
+   *
+   * 模式本身归 pi 侧的权限扩展管，落盘在工作目录 `.pi/settings.local.json`；
+   * 这条通道的入参只有一个枚举 —— 渲染进程既拿不到路径，也表达不了任意命令。
+   */
+  piSetApprovalMode: "pi:set-approval-mode",
   piGetState: "pi:get-state",
   piGetMessages: "pi:get-messages",
   piGetSessionStats: "pi:get-session-stats",

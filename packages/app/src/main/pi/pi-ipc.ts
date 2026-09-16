@@ -32,6 +32,7 @@ import {
   piGetEntriesRequestSchema,
   piMessageRequestSchema,
   piPromptRequestSchema,
+  piSetApprovalModeRequestSchema,
   piSetModelRequestSchema,
   piSetSessionNameRequestSchema,
   piSetThinkingLevelRequestSchema,
@@ -52,6 +53,11 @@ import { registerHandler, forgetSender } from "../ipc-guard.js";
 import { log } from "../log.js";
 import { buildPiSpawn, verifyRuntimeHandshake } from "../pi-launcher.js";
 import { kernelExtensionArgs } from "./kernel-extensions.js";
+import {
+  APPROVAL_RELOAD_COMMAND,
+  approvalModeFromStatuses,
+  writeApprovalMode,
+} from "./approval-mode.js";
 import { sessionTrustFor } from "../pi-resources/project-trust.js";
 import { describeTrust, trustArgsFor } from "../pi-resources/trust-store.js";
 import { PiSupervisor } from "../pi-supervisor.js";
@@ -613,6 +619,25 @@ export function registerPiIpc(): void {
   registerHandler(CHANNELS.piSetThinkingLevel, piSetThinkingLevelRequestSchema, (payload, event) =>
     clientFor(event.sender.id).send({ type: "set_thinking_level", level: payload.level })
   );
+
+  /**
+   * 切审批模式：写工作目录 `.pi/settings.local.json` → 让权限扩展 reload。
+   * 两步的理由与「为什么不走 pi:prompt」见 ./approval-mode.ts 文件头。
+   */
+  registerHandler(CHANNELS.piSetApprovalMode, piSetApprovalModeRequestSchema, async (payload, event) => {
+    const senderId = event.sender.id;
+    // 扩展不在场时 reload 命令会当成普通提示词进模型，还白改一个文件 —— 先拒绝。
+    if (approvalModeFromStatuses(extUi().snapshot(senderId).statuses) === null) {
+      return { success: false, error: "当前运行时没有加载权限扩展，改不了审批模式" };
+    }
+    const workspaceId = clientWorkspaces.get(senderId);
+    if (!workspaceId) return { success: false, error: "当前会话还没绑定工作目录" };
+    const root = requireWorkspaceRoot(workspaceId);
+    const filePath = writeApprovalMode(root, payload.mode);
+    const resp = await clientFor(senderId).send({ type: "prompt", message: APPROVAL_RELOAD_COMMAND });
+    log().info("pi_approval_mode_set", { mode: payload.mode, filePath, success: resp.success });
+    return resp;
+  });
 
   registerHandler(CHANNELS.piGetState, voidRequestSchema, (_p, event) =>
     clientFor(event.sender.id).send({ type: "get_state" })

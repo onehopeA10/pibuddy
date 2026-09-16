@@ -50,6 +50,7 @@ import {
   usageSessionRowSchema,
 } from "./providers.js";
 import { agentPoolContractShard, poolSnapshotSchema } from "./agent-pool.js";
+import { approvalModeSchema } from "./approval-mode.js";
 import { childAgentContractShard, childTopologySnapshotSchema } from "./child-agent.js";
 import { artifactContractShard } from "./artifacts.js";
 import { capabilitiesContractShard } from "./capability.js";
@@ -364,6 +365,11 @@ export const piSetThinkingLevelRequestSchema = z.object({
   level: z.string().min(1),
 });
 
+/** pi:set-approval-mode 的入参：只有一个枚举，模式语义见 approval-mode.ts。 */
+export const piSetApprovalModeRequestSchema = z.object({
+  mode: approvalModeSchema,
+});
+
 export const piCompactRequestSchema = z.object({
   customInstructions: z.string().optional(),
 });
@@ -601,6 +607,10 @@ export const piRuntimeContractShard = defineContractShard("pi-runtime", {
   },
   [CHANNELS.piSetThinkingLevel]: {
     request: piSetThinkingLevelRequestSchema,
+    response: rpcResponseSchema,
+  },
+  [CHANNELS.piSetApprovalMode]: {
+    request: piSetApprovalModeRequestSchema,
     response: rpcResponseSchema,
   },
   [CHANNELS.piGetState]: NO_ARGS,

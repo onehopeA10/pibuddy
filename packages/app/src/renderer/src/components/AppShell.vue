@@ -552,7 +552,7 @@ function onTool(key: string): void {
         @toggle-context="toggleContext"
         @tool="onTool"
       />
-      <header v-else class="topbar">
+      <header v-else class="topbar" :class="{ 'feature-col': activeNav === 'memory' || activeNav === 'tasks' }">
         <h1 class="feature-title">{{ FEATURE_TITLE[activeNav] }}</h1>
       </header>
 

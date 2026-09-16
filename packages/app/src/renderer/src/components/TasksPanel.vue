@@ -87,7 +87,7 @@ const showForm = ref(false);
 const showAdvanced = ref(false);
 
 const RECIPES = [
-  { name: "每天早上看待办", prompt: "每天早上9点提醒我看待办", kind: "daily" as const, time: "09:00" },
+  { name: "每天早上看待办", prompt: "每天早上 9 点提醒我看待办", kind: "daily" as const, time: "09:00" },
   { name: "每周五整理一周", prompt: "每周五下午整理这一周做过的事", kind: "weekly" as const, time: "17:00", weekdays: [5] },
 ];
 
@@ -224,6 +224,7 @@ async function submit(): Promise<void> {
     width="860px"
     @update:show="store.panelOpen = $event"
   >
+    <div class="feature-page">
     <div class="tasks-toolbar">
       <n-button size="small" type="primary" @click="showForm = !showForm">
         {{ showForm ? "收起" : "＋ 新建任务" }}
@@ -300,7 +301,7 @@ async function submit(): Promise<void> {
 
     <!-- 任务列表 -->
     <div v-if="store.items.length === 0 && !showForm" class="empty">
-      <p>还没有定时任务。直接说「每天早上9点提醒我看待办」，或点下面一张卡片。</p>
+      <p>还没有定时任务。直接说「每天早上 9 点提醒我看待办」，或点下面一张卡片。</p>
       <div class="recipes">
         <n-button
           v-for="recipe in RECIPES"
@@ -374,12 +375,14 @@ async function submit(): Promise<void> {
         </div>
       </div>
     </div>
+    </div>
   </PanelFrame>
 </template>
 
 <style scoped>
 .tasks-toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   margin-bottom: 12px;

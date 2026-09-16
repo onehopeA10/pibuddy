@@ -12,6 +12,7 @@
  */
 import { CHANNELS, PUSH_CHANNELS } from "@pibuddy/contract/channels";
 import type {
+  ApprovalMode,
   ExtUiSnapshotWire,
   ExtensionUiRespondResult,
   PiEnvelope,
@@ -71,6 +72,9 @@ export const pi = {
     invoke<RpcResponse>(CHANNELS.piSetModel, { provider, modelId }),
   setThinkingLevel: (level: ThinkingLevel) =>
     invoke<RpcResponse>(CHANNELS.piSetThinkingLevel, { level }),
+  /** 审批模式（工具调用前问不问）。只交枚举，落盘路径与 reload 命令都在主进程。 */
+  setApprovalMode: (mode: ApprovalMode) =>
+    invoke<RpcResponse>(CHANNELS.piSetApprovalMode, { mode }),
   getState: () => invoke<RpcResponse<AgentState>>(CHANNELS.piGetState),
   getMessages: () => invoke<RpcResponse<{ messages: AgentMessage[] }>>(CHANNELS.piGetMessages),
   getSessionStats: () => invoke<RpcResponse<SessionStats>>(CHANNELS.piGetSessionStats),

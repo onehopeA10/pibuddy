@@ -18,6 +18,7 @@ export {
   PiRuntimeResolveError,
   assertRuntimeHandshake,
 } from "./pi-runtime-manifest.js";
+export { kernelExtensionArgs } from "./pi/kernel-extensions.js";
 
 const PI_PACKAGE = "@earendil-works/pi-coding-agent";
 

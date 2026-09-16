@@ -18,6 +18,7 @@ import { VoiceRecorder } from "../stt";
 import QueuePanel from "./QueuePanel.vue";
 import ExtensionWidgetHost from "./ExtensionWidgetHost.vue";
 import ModelComposerControls from "./ModelComposerControls.vue";
+import ApprovalModeControl from "./ApprovalModeControl.vue";
 
 const store = useAppStore();
 const message = useMessage();
@@ -677,6 +678,7 @@ onBeforeUnmount(() => {
 
       <div class="composer-actions">
         <ModelComposerControls />
+        <ApprovalModeControl />
         <n-button quaternary size="small" :disabled="composerLocked" @click="pickFiles">
           文件
         </n-button>
@@ -777,7 +779,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-secondary);
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-l);
   padding: 2px 10px;
   font-size: 12px;
   cursor: pointer;
@@ -800,7 +802,7 @@ onBeforeUnmount(() => {
   margin: 0 0 8px;
   padding: 6px 8px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-l);
 }
 /* 受阻的图片附件：视觉上一眼可辨，同时 aria-disabled 让辅助技术也读得到 */
 .attach-chip.blocked {

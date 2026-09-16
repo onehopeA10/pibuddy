@@ -35,8 +35,7 @@ import {
 } from "@pibuddy/contract";
 
 import { log } from "../log.js";
-import { buildPiSpawn, verifyRuntimeHandshake } from "../pi-launcher.js";
-import { kernelExtensionArgs } from "../pi/kernel-extensions.js";
+import { buildPiSpawn, kernelExtensionArgs, verifyRuntimeHandshake } from "../pi-launcher.js";
 import { resolveSessionDir } from "../sessions/session-dir.js";
 import { sessionIndex } from "../sessions/session-index.js";
 import { loadSettings } from "../settings.js";
