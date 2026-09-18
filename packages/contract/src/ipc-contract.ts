@@ -38,6 +38,7 @@ import {
   providerCustomRequestSchema,
   providerIdRequestSchema,
   providerListResultSchema,
+  providerModelInputRequestSchema,
   providerSaveKeyRequestSchema,
   providerTestResultSchema,
   setScopeDefaultRequestSchema,
@@ -49,6 +50,7 @@ import {
   usageSessionRowSchema,
 } from "./providers.js";
 import { agentPoolContractShard, poolSnapshotSchema } from "./agent-pool.js";
+import { approvalModeSchema } from "./approval-mode.js";
 import { childAgentContractShard, childTopologySnapshotSchema } from "./child-agent.js";
 import { artifactContractShard } from "./artifacts.js";
 import { capabilitiesContractShard } from "./capability.js";
@@ -176,6 +178,18 @@ export const workspaceRefSchema = z.object({
   displayPath: z.string(),
 });
 export type WorkspaceRef = z.infer<typeof workspaceRefSchema>;
+
+/**
+ * 项目列表里的一项（`workspace:list`）。
+ *
+ * 在 WorkspaceRef 之上只多两个展示字段：`name` 是目录名（由主进程按平台取
+ * basename，渲染进程不自己拆路径），`lastOpenedAt` 供排序（0 = 从未打开）。
+ */
+export const workspaceListItemSchema = workspaceRefSchema.extend({
+  name: z.string(),
+  lastOpenedAt: z.number().int().nonnegative(),
+});
+export type WorkspaceListItem = z.infer<typeof workspaceListItemSchema>;
 
 /**
  * 附件 capability 的渲染侧视图（取代早先直接外发绝对路径的 PickedFile）。
@@ -349,6 +363,11 @@ export const piSetModelRequestSchema = z.object({
 
 export const piSetThinkingLevelRequestSchema = z.object({
   level: z.string().min(1),
+});
+
+/** pi:set-approval-mode 的入参：只有一个枚举，模式语义见 approval-mode.ts。 */
+export const piSetApprovalModeRequestSchema = z.object({
+  mode: approvalModeSchema,
 });
 
 export const piCompactRequestSchema = z.object({
@@ -590,6 +609,10 @@ export const piRuntimeContractShard = defineContractShard("pi-runtime", {
     request: piSetThinkingLevelRequestSchema,
     response: rpcResponseSchema,
   },
+  [CHANNELS.piSetApprovalMode]: {
+    request: piSetApprovalModeRequestSchema,
+    response: rpcResponseSchema,
+  },
   [CHANNELS.piGetState]: NO_ARGS,
   [CHANNELS.piGetMessages]: NO_ARGS,
   [CHANNELS.piGetSessionStats]: NO_ARGS,
@@ -682,6 +705,15 @@ export const attachmentsContractShard = defineContractShard("attachments", {
   // ---- workspace 与附件 ----
   [CHANNELS.workspaceCurrent]: {
     request: voidRequestSchema,
+    response: workspaceRefSchema.nullable(),
+  },
+  [CHANNELS.workspaceList]: {
+    request: voidRequestSchema,
+    response: z.array(workspaceListItemSchema),
+  },
+  [CHANNELS.workspaceSelect]: {
+    request: workspaceIdRequestSchema,
+    // 该 id 已不在注册表里（目录被删 / 移走）时返回 null，不抛错
     response: workspaceRefSchema.nullable(),
   },
   [CHANNELS.dialogChooseFolder]: {
@@ -817,6 +849,10 @@ export const providersContractShard = defineContractShard("providers", {
   },
   [CHANNELS.providersDiscoverModels]: {
     request: providerIdRequestSchema,
+    response: providerListResultSchema,
+  },
+  [CHANNELS.providersSetModelInput]: {
+    request: providerModelInputRequestSchema,
     response: providerListResultSchema,
   },
   [CHANNELS.providersSetScopeDefault]: {

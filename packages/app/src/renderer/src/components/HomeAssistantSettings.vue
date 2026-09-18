@@ -75,7 +75,7 @@ const wsStatusLabel = computed(() => {
 <template>
   <div style="margin: 16px 0 4px">
     <div style="margin: 0 0 8px; font-size: 13.5px; font-weight: 600">智能家居（Home Assistant）</div>
-    <div style="margin: 0 0 10px; font-size: 12.5px; color: #8a8f98">
+    <div style="margin: 0 0 10px; font-size: var(--font-ui-12); color: var(--text-tertiary)">
       填写局域网内 Home Assistant 的地址与长效访问令牌（用户头像 → 安全 → 长效访问令牌）。
       保存后会弹出系统确认框，逐一确认这个 host:port 的访问授权——授权只绑定这一个端点，
       不放开整个内网。
@@ -83,7 +83,7 @@ const wsStatusLabel = computed(() => {
 
     <n-space vertical size="small" style="width: 100%">
       <n-space align="center" :wrap="false">
-        <span style="width: 96px; font-size: 13px; color: #4b5563">地址</span>
+        <span style="width: 96px; font-size: var(--font-ui-13); color: var(--text-secondary)">地址</span>
         <n-input
           v-model:value="hostInput"
           placeholder="homeassistant.local 或 192.168.1.10"
@@ -99,7 +99,7 @@ const wsStatusLabel = computed(() => {
         />
       </n-space>
       <n-space align="center" :wrap="false">
-        <span style="width: 96px; font-size: 13px; color: #4b5563">访问令牌</span>
+        <span style="width: 96px; font-size: var(--font-ui-13); color: var(--text-secondary)">访问令牌</span>
         <n-input
           v-model:value="tokenInput"
           type="password"
@@ -108,7 +108,7 @@ const wsStatusLabel = computed(() => {
           style="flex: 1"
         />
       </n-space>
-      <div v-if="tokenHint" style="margin-left: 104px; font-size: 12px; color: #8a8f98">
+      <div v-if="tokenHint" style="margin-left: 104px; font-size: var(--font-ui-12); color: var(--text-tertiary)">
         {{ tokenHint }}
       </div>
 
@@ -133,7 +133,7 @@ const wsStatusLabel = computed(() => {
         <n-tag v-if="ha.config?.configured" size="small" :type="ha.config?.authorized ? 'success' : 'warning'">
           {{ ha.config?.authorized ? "已授权" : "未授权" }}
         </n-tag>
-        <span v-if="ha.status" style="font-size: 12px; color: #8a8f98">{{ wsStatusLabel }}</span>
+        <span v-if="ha.status" style="font-size: var(--font-ui-12); color: var(--text-tertiary)">{{ wsStatusLabel }}</span>
       </n-space>
 
       <n-alert

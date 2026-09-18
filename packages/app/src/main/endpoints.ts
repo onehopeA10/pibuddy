@@ -88,7 +88,10 @@ export async function registerEndpoint(input: {
   baseUrl: string;
   model?: string;
 }): Promise<EndpointRecord> {
-  const baseUrl = normalizeEndpointUrl(input.baseUrl);
+  // 自定义模型接口经常是 http 明文中转；语音转写仍只收 https。
+  const baseUrl = normalizeEndpointUrl(input.baseUrl, {
+    allowHttp: input.kind === "provider",
+  });
   await assertPublicAddress(new URL(baseUrl).hostname);
 
   const endpointId = deriveId(input.kind, baseUrl);

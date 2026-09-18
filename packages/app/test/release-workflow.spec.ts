@@ -61,6 +61,27 @@ describe("release.yml 结构", () => {
     expect(text).toContain("needs: upload-artifacts");
   });
 
+  it("正式发布在打包之前跑自动化回归，且回归不消费 secrets", () => {
+    const text = fs.readFileSync(RELEASE, "utf8");
+    expect(text).toContain("  regression:");
+    expect(jobBlock(RELEASE, "regression")).toContain("scripts/release-regression.mjs");
+    // 回归读不到任何凭据，声明 environment 只会多一次人工审批。
+    expect(jobBlock(RELEASE, "regression")).not.toMatch(/^\s{4}environment:/m);
+    const upload = jobBlock(RELEASE, "upload-artifacts");
+    expect(upload).toMatch(/needs:/);
+    expect(upload).toContain("preflight");
+    expect(upload).toContain("regression");
+  });
+
+  it("打包后启动一次解包产物，且清单发布仍是最后一步", () => {
+    expect(stepsOf(RELEASE, "upload-artifacts")).toContain("Smoke packaged app");
+    expect(jobBlock(RELEASE, "upload-artifacts")).toContain(
+      "node packages/app/scripts/smoke-packaged-app.mjs",
+    );
+    const steps = stepsOf(RELEASE, "publish-manifest");
+    expect(steps[steps.length - 1]).toBe("Publish channel manifests last");
+  });
+
   it("latest*.yml 的上传是 publish-manifest 的**最后一个** step", () => {
     const steps = stepsOf(RELEASE, "publish-manifest");
     expect(steps.length).toBeGreaterThan(1);
@@ -170,6 +191,16 @@ describe("ci.yml 覆盖打包链路", () => {
 
   it("release.yml 的构建 job 用同一个脚本校验打包目录", () => {
     expect(stepsOf(RELEASE, "upload-artifacts")).toContain("Verify packaged artifacts");
+  });
+
+  it("package job 在结构校验之后启动一次解包产物", () => {
+    const steps = stepsOf(CI, "package");
+    expect(steps).toContain("Verify packaged artifacts");
+    expect(steps).toContain("Smoke packaged app");
+    expect(steps.indexOf("Verify packaged artifacts")).toBeLessThan(
+      steps.indexOf("Smoke packaged app"),
+    );
+    expect(jobBlock(CI, "package")).toContain("node packages/app/scripts/smoke-packaged-app.mjs");
   });
 });
 

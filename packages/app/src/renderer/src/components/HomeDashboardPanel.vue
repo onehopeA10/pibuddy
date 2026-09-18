@@ -160,21 +160,21 @@ onBeforeUnmount(() => {
 
 // ---------------------------------------------------------------- 展示
 
-/** domain → 分类图标（灯/开关/传感器/温控四类 + 常见回落）。 */
-const DOMAIN_ICONS: Record<string, string> = {
-  light: "💡",
-  switch: "🔌",
-  sensor: "📈",
-  binary_sensor: "🚪",
-  climate: "🌡️",
-  fan: "🌀",
-  cover: "🪟",
-  media_player: "📺",
-  lock: "🔒",
-  vacuum: "🧹",
+/** domain → 分类名（灯/开关/传感器/温控四类 + 常见回落）。 */
+const DOMAIN_LABELS: Record<string, string> = {
+  light: "灯",
+  switch: "开关",
+  sensor: "传感器",
+  binary_sensor: "二元传感",
+  climate: "温控",
+  fan: "风扇",
+  cover: "遮盖",
+  media_player: "媒体",
+  lock: "锁",
+  vacuum: "扫地机",
 };
 function iconOf(domain: string): string {
-  return DOMAIN_ICONS[domain] ?? "⚙️";
+  return DOMAIN_LABELS[domain] ?? domain;
 }
 
 /** 状态徽标配色：亮/开/在家 = 绿；不可用 = 橙；其余中性。 */
@@ -223,14 +223,14 @@ const groups = computed(() => {
 <template>
   <aside class="home-dashboard-panel">
     <header class="head">
-      <span class="title">🏠 家居面板</span>
+      <span class="title">家居面板</span>
       <span class="count">{{ total }} 个实体</span>
       <NButton size="tiny" quaternary :loading="loading" @click="refetchSnapshot">刷新</NButton>
     </header>
 
     <!-- stale 横幅：断线 / 冷启动快照时如实显示「这份数据可能过期」。 -->
     <p v-if="stale" class="msg stale">
-      ⚠️ 与 Home Assistant 的连接中断或数据未同步，以下状态可能已过期。
+      与 Home Assistant 的连接中断或数据未同步，以下状态可能已过期。
     </p>
     <p v-if="error" class="msg error">{{ error }}</p>
     <p v-else-if="source === 'snapshot' && !stale" class="msg notice">
@@ -278,10 +278,11 @@ const groups = computed(() => {
 .home-dashboard-panel {
   display: flex;
   flex-direction: column;
-  width: 340px;
-  height: 100%;
-  border-left: 1px solid var(--border-color, #e2e8f0);
-  background: var(--panel-bg, #fff);
+  width: 100%;
+  border-top: var(--border-w) solid var(--border-subtle);
+  padding: 8px;
+  min-height: 280px;
+  max-height: 420px;
   overflow: hidden;
 }
 .head {
@@ -289,7 +290,7 @@ const groups = computed(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .title {
   font-weight: 600;
@@ -297,7 +298,7 @@ const groups = computed(() => {
 }
 .count {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-secondary);
   margin-right: auto;
 }
 .msg {
@@ -306,22 +307,21 @@ const groups = computed(() => {
   font-size: 12px;
 }
 .msg.error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--status-error);
+  background: var(--danger-bg);
 }
 .msg.stale {
-  color: #92400e;
-  background: #fffbeb;
+  color: var(--status-warning);
+  background: var(--warning-bg);
 }
 .msg.notice {
-  color: #475569;
-  background: #f8fafc;
+  color: var(--text-secondary);
 }
 .filters {
   display: flex;
   gap: 6px;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .domain-select {
   width: 140px;
@@ -334,7 +334,7 @@ const groups = computed(() => {
 }
 .empty {
   font-size: 12px;
-  color: #64748b;
+  color: var(--text-secondary);
   line-height: 1.6;
 }
 .area {
@@ -344,7 +344,7 @@ const groups = computed(() => {
   margin: 4px 0;
   font-size: 12px;
   font-weight: 600;
-  color: #334155;
+  color: var(--text-primary);
 }
 .row {
   display: flex;
@@ -361,12 +361,12 @@ const groups = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 .foot-hint {
   margin: 8px 0 0;
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-tertiary);
   line-height: 1.6;
 }
 </style>

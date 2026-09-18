@@ -47,9 +47,9 @@ const widgets = computed(() =>
   max-height: 30vh;
   overflow-y: auto;
   padding: 6px 10px;
-  border: 1px solid var(--pb-border, rgba(128, 128, 128, 0.25));
-  border-radius: 6px;
-  background: var(--pb-widget-bg, rgba(128, 128, 128, 0.06));
+  border: 1px solid var(--pb-border, var(--border-subtle));
+  border-radius: var(--radius-m);
+  background: var(--pb-widget-bg, var(--bg-hover));
   font-size: 12px;
   line-height: 1.6;
 }

@@ -149,6 +149,7 @@ describe("pi:exit 的代际与 reason 判定", () => {
       wrapEnvelope(ctx(1), 0, { code: 0, reason: "expected-stop" })
     );
     expect(s.started).toBe(false);
+    expect(s.runtimeAsleep).toBe(false);
     expect(notify.error).not.toHaveBeenCalled();
 
     s.started = true;
@@ -160,8 +161,26 @@ describe("pi:exit 的代际与 reason 判定", () => {
       })
     );
     expect(s.started).toBe(false);
+    expect(s.startError).toContain("ENOENT");
     expect(notify.error).toHaveBeenCalledWith(
       expect.stringContaining("ENOENT")
     );
+  });
+
+  it("崩溃时保留已有消息并写入 startError，供全窗断连横幅使用", () => {
+    const s = useAppStore();
+    const notify = { info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() };
+    s.setNotifier(notify);
+    s.started = true;
+    s.handleEventEnvelope(wrapEnvelope(ctx(1), 0, textEvent("本地还在")));
+
+    s.handleExitEnvelope(
+      wrapEnvelope(ctx(1), 1, { code: 1, reason: "crash", error: "runtime died" })
+    );
+
+    expect(s.started).toBe(false);
+    expect(s.startError).toContain("runtime died");
+    expect(s.items).toHaveLength(1);
+    expect(JSON.stringify(s.items[0].message)).toContain("本地还在");
   });
 });

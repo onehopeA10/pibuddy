@@ -266,4 +266,32 @@ describe("openSession local preview", () => {
     await flushMicrotasks();
     expect(prompt).toHaveBeenCalledTimes(1);
   });
+
+  it("运行中也可以切到另一个会话，旧会话的 streaming 还在", async () => {
+    (globalThis as unknown as { window: unknown }).window = {
+      piBuddy: {
+        sessions: {
+          readHistoryBefore: vi.fn(async () => historyPage("target")),
+          getDraft: vi.fn(async () => null),
+        },
+        pi: {
+          switchSession: vi.fn(async () => ({ success: true, data: {} })),
+          getState: vi.fn(async () => ({ success: true, data: { sessionId: "session-target" } })),
+          getSessionStats: vi.fn(async () => ({ success: false })),
+        },
+      },
+    };
+
+    const store = seedPreviousState();
+    store.workspaceId = "w1";
+    store.started = true;
+    store.streaming = true;
+
+    await store.openSession({ sessionId: "session-target", sizeBytes: 20 });
+
+    expect(store.currentSessionId).toBe("session-target");
+    expect(store.runtimeScope["session-old"]?.streaming).toBe(true);
+    expect(store.runtimeScope["session-old"]?.started).toBe(true);
+    expect(store.streaming).toBe(false);
+  });
 });

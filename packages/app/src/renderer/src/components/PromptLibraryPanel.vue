@@ -7,10 +7,14 @@
  * 界面上干脆不画那个按钮，而不是画出来再弹「不允许」。想改预置的内容，
  * 走「存为我的」：复制成一条用户项随便改，原预置照旧。
  */
-import { ref, watch } from "vue";
+import { inject, ref, watch } from "vue";
 import { NButton, NCheckbox, NEmpty, NInput, NModal, NSelect, NSpin, NTag, useMessage } from "naive-ui";
 import { PROMPT_CATEGORY_LABELS, type PromptCategory, type PromptEntry } from "@contract";
 import { usePromptLibraryStore } from "../stores/promptLibrary";
+import PanelFrame from "./PanelFrame.vue";
+
+defineProps<{ embedded?: boolean }>();
+const goChat = inject<() => void>("goChat", () => undefined);
 
 const store = usePromptLibraryStore();
 const message = useMessage();
@@ -90,6 +94,7 @@ async function confirmRemove(entry: PromptEntry): Promise<void> {
 function use(entry: PromptEntry): void {
   store.fillComposer(entry);
   message.success("模板已填入输入框，替换【】里的内容后发送");
+  goChat();
 }
 
 watch(
@@ -102,12 +107,12 @@ watch(
 </script>
 
 <template>
-  <n-modal
-    v-model:show="store.panelOpen"
-    preset="card"
-    title="📋 提示词库"
-    style="width: 760px; max-height: 82vh"
-    content-style="overflow: auto"
+  <PanelFrame
+    :embedded="embedded"
+    :show="store.panelOpen"
+    title="提示词库"
+    width="760px"
+    @update:show="store.panelOpen = $event"
   >
     <div class="toolbar">
       <n-input
@@ -200,7 +205,7 @@ watch(
         </div>
       </div>
     </n-modal>
-  </n-modal>
+  </PanelFrame>
 </template>
 
 <style scoped>
@@ -211,23 +216,23 @@ watch(
   margin-bottom: 12px;
 }
 .error-line {
-  color: #d03050;
-  font-size: 12.5px;
+  color: var(--status-error);
+  font-size: var(--font-ui-12);
   margin: 4px 0;
 }
 .group {
   margin-bottom: 16px;
 }
 .group-title {
-  font-size: 13.5px;
+  font-size: var(--font-ui-13);
   margin: 8px 0 6px;
-  color: #555;
+  color: var(--text-secondary);
 }
 .entry {
-  border: 1px solid rgba(128, 128, 128, 0.2);
-  border-radius: 8px;
-  padding: 8px 12px;
-  margin-bottom: 8px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  padding: 12px 14px;
+  margin-bottom: 10px;
 }
 .entry.hidden {
   opacity: 0.55;
@@ -242,8 +247,8 @@ watch(
 }
 .entry-desc {
   margin: 4px 0 6px;
-  font-size: 12.5px;
-  color: #777;
+  font-size: var(--font-ui-12);
+  color: var(--text-secondary);
 }
 .entry-actions {
   display: flex;

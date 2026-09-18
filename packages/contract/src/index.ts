@@ -12,6 +12,7 @@ export * from "./skill-policy.js";
 export * from "./permission.js";
 export * from "./permission-review.js";
 export * from "./agent-pool.js";
+export * from "./approval-mode.js";
 export * from "./child-agent.js";
 export * from "./git.js";
 export * from "./memory.js";

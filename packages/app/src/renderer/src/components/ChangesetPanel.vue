@@ -159,7 +159,7 @@ async function jumpTo(relativePath: string, line: number): Promise<void> {
 
 <style scoped>
 .changeset {
-  border-top: 1px solid var(--n-border-color, #eee);
+  border-top: var(--border-w) solid var(--border-subtle);
   padding: 8px;
   max-height: 320px;
   overflow: auto;
@@ -173,12 +173,12 @@ header .spacer {
   flex: 1;
 }
 .notice {
-  background: #fff4e5;
-  border: 1px solid #ffb74d;
-  color: #7a4a00;
+  background: var(--warning-bg);
+  border: var(--border-w) solid var(--status-warning);
+  color: var(--status-warning);
   padding: 6px 8px;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--radius-l);
+  font-size: var(--font-ui-12);
 }
 .empty {
   opacity: 0.6;
@@ -190,7 +190,7 @@ header .spacer {
   padding: 0;
 }
 .item {
-  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .row {
   display: flex;
@@ -214,17 +214,17 @@ header .spacer {
   padding: 4px 0 10px;
 }
 .degraded {
-  font-size: 12px;
-  color: #b06000;
+  font-size: var(--font-ui-12);
+  color: var(--status-warning);
 }
 .hunk {
-  border: 1px solid rgba(128, 128, 128, 0.25);
-  border-radius: 4px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-m);
   margin-bottom: 6px;
   padding: 4px;
 }
 .hunk.picked {
-  border-color: #2f7d31;
+  border-color: var(--status-success);
 }
 .hunk-head {
   display: flex;
@@ -246,10 +246,10 @@ pre {
   word-break: break-all;
 }
 pre.del {
-  background: rgba(198, 40, 40, 0.12);
+  background: var(--danger-bg);
 }
 pre.add {
-  background: rgba(47, 125, 49, 0.12);
+  background: color-mix(in srgb, var(--status-success) 16%, transparent);
 }
 .actions {
   display: flex;

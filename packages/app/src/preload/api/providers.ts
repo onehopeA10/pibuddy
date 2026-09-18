@@ -12,6 +12,7 @@
 import { CHANNELS } from "@pibuddy/contract/channels";
 import type {
   AppSettings,
+  ModelInputModality,
   ProviderCustomRequest,
   ProviderListResult,
   ProviderTestResult,
@@ -39,6 +40,9 @@ export const providers = {
     invoke<ProviderTestResult>(CHANNELS.providersTest, { providerId }),
   discoverModels: (providerId: string) =>
     invoke<ProviderListResult>(CHANNELS.providersDiscoverModels, { providerId }),
+  /** 标注自定义端点某个模型接受的输入（文 / 图 / 图文），写回 models.json 的 input。 */
+  setModelInput: (providerId: string, modelId: string, input: ModelInputModality[]) =>
+    invoke<ProviderListResult>(CHANNELS.providersSetModelInput, { providerId, modelId, input }),
   setScopeDefault: (input: SetScopeDefaultRequest) =>
     invoke<AppSettings>(CHANNELS.providersSetScopeDefault, input),
 

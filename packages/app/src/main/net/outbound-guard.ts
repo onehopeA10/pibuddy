@@ -18,8 +18,9 @@
  *
  * ## 判定链
  *
- *   normalizeEndpointUrl —— 协议必须 https、剥掉 URL 里的用户名密码、host
- *                           转小写与 punycode、数字形态 IP 归一化
+ *   normalizeEndpointUrl —— 默认只收 https；provider 探测可显式放开 http。
+ *                           剥掉 URL 里的用户名密码、host 转小写与 punycode、
+ *                           数字形态 IP 归一化
  *   assertPublicAddress  —— 数字 IP 直接判定；域名先 dns.lookup(all) 再逐个
  *                           判定（这才拦得住 DNS rebinding 的第一跳）
  *   safeFetch            —— redirect:"manual" 手动跳，**每跳重跑上面两步**；
@@ -276,7 +277,10 @@ export async function assertPublicAddress(hostname: string): Promise<void> {
  * 只做「结构」层面的判定（不查 DNS），因此可以在 UI 的即时校验里同步调用。
  * 地址层面的判定归 assertPublicAddress。
  */
-export function normalizeEndpointUrl(raw: string): string {
+export function normalizeEndpointUrl(
+  raw: string,
+  opts: { allowHttp?: boolean } = {}
+): string {
   let url: URL;
   try {
     url = new URL(raw.trim());
@@ -284,8 +288,13 @@ export function normalizeEndpointUrl(raw: string): string {
     throw new OutboundBlockedError("端点地址不是合法的 URL");
   }
 
-  if (url.protocol !== "https:") {
-    throw new OutboundBlockedError("只允许 HTTPS 端点，请把地址改成 https:// 开头");
+  const httpOk = opts.allowHttp === true && url.protocol === "http:";
+  if (url.protocol !== "https:" && !httpOk) {
+    throw new OutboundBlockedError(
+      opts.allowHttp
+        ? "只允许 http 或 https 端点"
+        : "只允许 HTTPS 端点，请把地址改成 https:// 开头"
+    );
   }
   // URL 里的用户名密码会被 fetch 转成 Authorization: Basic，等于第二条凭据
   // 通道；一律剥掉而不是报错（用户多半是从别处粘来的）。
@@ -305,6 +314,11 @@ export interface SafeFetchInit {
   method?: string;
   headers?: Record<string, string>;
   body?: RequestInit["body"];
+  /**
+   * provider 自定义接口常用 http 明文（内网中转、自建网关）。
+   * 默认 false：STT / 更新检查等路径继续只收 https。
+   */
+  allowHttp?: boolean;
 }
 
 export interface SafeFetchResult {
@@ -333,7 +347,7 @@ export async function safeFetch(
   const overallTimer = setTimeout(() => overall.abort(), OVERALL_TIMEOUT_MS);
 
   try {
-    let currentUrl = normalizeEndpointUrl(rawUrl);
+    let currentUrl = normalizeEndpointUrl(rawUrl, { allowHttp: init.allowHttp });
     await assertPublicAddress(new URL(currentUrl).hostname);
     let origin = new URL(currentUrl).origin;
     let headers = { ...(init.headers ?? {}) };
@@ -351,7 +365,7 @@ export async function safeFetch(
       // 每一跳都必须重新走完整条判定链：只在第一跳校验，等于给
       // 「先应答 302，再指向 169.254.169.254」留了一条直通车。
       const next = new URL(location, currentUrl).href;
-      currentUrl = normalizeEndpointUrl(next);
+      currentUrl = normalizeEndpointUrl(next, { allowHttp: init.allowHttp });
       await assertPublicAddress(new URL(currentUrl).hostname);
 
       const nextOrigin = new URL(currentUrl).origin;

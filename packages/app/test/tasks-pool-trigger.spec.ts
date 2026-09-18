@@ -242,7 +242,12 @@ describe("池化 Agent run 触发（ISS-002）", () => {
 
     expect(outcome.status).toBe("failed");
     expect(launches).toEqual([
-      { sessionId: "task:run-1", workspaceId: "ws1", origin: "task" },
+      {
+        sessionId: "task:run-1",
+        workspaceId: "ws1",
+        origin: "task",
+        inheritPermissions: false,
+      },
     ]);
   });
 });

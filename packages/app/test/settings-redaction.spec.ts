@@ -132,6 +132,7 @@ describe("[near-miss] schema 扩字段必须升版", () => {
     expect(loaded.workspaceDefaults).toEqual({});
     expect(loaded.notificationsEnabled).toBe(true);
     expect(loaded.voiceEnabled).toBe(false);
+    expect(loaded.closeAction).toBe("ask");
   });
 
   it("已经在用的老用户（v1 且有 workspace）不被弹回首启向导", async () => {

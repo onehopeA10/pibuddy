@@ -39,4 +39,31 @@ describe("groupVisualMessages", () => {
     expect(grouped).toHaveLength(1);
     expect(grouped[0].streaming).toBe(true);
   });
+
+  it("起点取触发的 user 消息时间，终点取组内最后一条 assistant 的时间", () => {
+    const at = (msg: AssistantMessage | UserMessage, timestamp: number) => ({ ...msg, timestamp });
+    const user: UserMessage = { role: "user", content: "问" };
+    const items: ChatItem[] = [
+      { key: 1, message: at(user, 1_000) },
+      { key: 2, message: at(assistant("查一下"), 2_000) },
+      { key: 3, message: at(assistant("再查"), 60_000) },
+      { key: 4, message: at(assistant("回答"), 153_000) },
+    ];
+    const grouped = groupVisualMessages(items, null);
+    expect(grouped).toHaveLength(2);
+    expect(grouped[1].startedAt).toBe(1_000);
+    expect(grouped[1].endedAt).toBe(153_000);
+    // user 消息自己不带起止
+    expect(grouped[0].startedAt).toBeUndefined();
+  });
+
+  it("没有 user 前文时起点退回首条 assistant；live 消息更新终点", () => {
+    const at = (msg: AssistantMessage, timestamp: number) => ({ ...msg, timestamp });
+    const grouped = groupVisualMessages(
+      [{ key: 1, message: at(assistant("查"), 5_000) }],
+      at(assistant("续"), 9_000)
+    );
+    expect(grouped[0].startedAt).toBe(5_000);
+    expect(grouped[0].endedAt).toBe(9_000);
+  });
 });

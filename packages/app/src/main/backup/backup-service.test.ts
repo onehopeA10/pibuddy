@@ -317,7 +317,7 @@ describe("损坏注入：每一层都要真的挡得住，且说得出原因", (
     const validation = await validateBackupAt(root);
     expect(validation.ok).toBe(false);
     expect(validation.reasons).toContain(
-      "库 memory 校验失败：schema 代际不符（期望 2，实际 99）"
+      "库 memory 校验失败：schema 代际不符（期望 4，实际 99）"
     );
   });
 

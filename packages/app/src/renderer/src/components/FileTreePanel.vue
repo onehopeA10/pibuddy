@@ -313,7 +313,7 @@ async function onSearchEnter(): Promise<void> {
           @contextmenu="openMenu($event, row.entry)"
         >
           <span class="icon">
-            {{ row.entry.isSymlink ? "🔗" : row.entry.isDirectory ? (ws.isExpanded(row.entry.relativePath) ? "📂" : "📁") : "📄" }}
+            {{ row.entry.isSymlink ? "@" : row.entry.isDirectory ? (ws.isExpanded(row.entry.relativePath) ? "▾" : "▸") : "" }}
           </span>
           <span class="name">{{ row.entry.name }}</span>
         </li>
@@ -349,8 +349,10 @@ async function onSearchEnter(): Promise<void> {
 
 <style scoped>
 .file-tree {
-  width: 260px;
-  border-right: 1px solid var(--n-border-color, #eee);
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  border-right: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -382,19 +384,19 @@ async function onSearchEnter(): Promise<void> {
   overflow: hidden;
 }
 .row:hover {
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--bg-hover);
 }
 .row.ignored {
   opacity: 0.45;
 }
 .truncated {
   font-size: 12px;
-  color: #b06000;
+  color: var(--status-warning);
   cursor: pointer;
   padding: 4px;
 }
 .tree-error {
-  color: #c62828;
+  color: var(--status-error);
   font-size: 12px;
 }
 .tree-hint {
@@ -422,10 +424,10 @@ async function onSearchEnter(): Promise<void> {
 .ctx {
   position: fixed;
   z-index: 3000;
-  background: var(--n-color, #fff);
-  border: 1px solid rgba(128, 128, 128, 0.3);
-  border-radius: 4px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  background: var(--bg-surface-raised);
+  border: var(--border-w) solid var(--border-strong);
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow-menu);
   display: flex;
   flex-direction: column;
   min-width: 150px;
@@ -439,24 +441,24 @@ async function onSearchEnter(): Promise<void> {
   font-size: 13px;
 }
 .ctx button:hover {
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--bg-hover);
 }
 .ctx .danger {
-  color: #c62828;
+  color: var(--status-error);
 }
 .prompt-mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 3100;
 }
 .prompt {
-  background: var(--n-color, #fff);
+  background: var(--bg-surface-raised);
   padding: 16px;
-  border-radius: 6px;
+  border-radius: var(--radius-m);
   min-width: 280px;
 }
 .prompt-actions {

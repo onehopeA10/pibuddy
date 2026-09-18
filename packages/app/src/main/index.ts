@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import path from "node:path";
 import { registerIpc, disposeClientFor } from "./ipc.js";
 import { disposeAllWorkspaceResources } from "./workspace/workspace-ipc.js";
@@ -28,8 +28,39 @@ import { applyPendingRestoreOnStartup } from "./backup/backup-ipc.js";
 import { disposeMcpResources } from "./mcp/mcp-ipc.js";
 import { disposePackageCommands } from "./pi-resources/package-install.js";
 import { shutdownTasksResources } from "./tasks/tasks-ipc.js";
+import { loadSettings, saveSettings } from "./settings.js";
+import { themeChrome, TITLE_BAR_HEIGHT } from "./theme-chrome.js";
+import { decideClose, promptCloseChoice } from "./close-behavior.js";
+import {
+  destroyAppTray,
+  hideWindowToTray,
+  revealMainWindow,
+  resolveAppIconPath,
+} from "./app-tray.js";
 
 let applicationShutdown: Promise<void> | null = null;
+let quitting = false;
+let askingClose = false;
+
+function requestQuit(): void {
+  quitting = true;
+  destroyAppTray();
+  const windows = BrowserWindow.getAllWindows();
+  if (windows.length === 0) {
+    void shutdownApplication();
+    return;
+  }
+  for (const win of windows) win.close();
+}
+
+function trayHandlers(): { onShow: () => void; onQuit: () => void } {
+  return {
+    onShow: () => {
+      revealMainWindow();
+    },
+    onQuit: () => requestQuit(),
+  };
+}
 
 function shutdownApplication(): Promise<void> {
   if (applicationShutdown) return applicationShutdown;
@@ -60,6 +91,9 @@ function shutdownApplication(): Promise<void> {
 }
 
 function createWindow(): void {
+  // 窗口外壳颜色跟随设置里的配色（深 / 浅）；之后用户在设置里切换时由
+  // misc-ipc 的 settings:set 调 applyThemeChrome 原地刷新。
+  const chrome = themeChrome(loadSettings().theme);
   const win = new BrowserWindow({
     width: 1360,
     height: 880,
@@ -67,7 +101,20 @@ function createWindow(): void {
     minHeight: 640,
     title: "PiBuddy · AI 办公小助手",
     autoHideMenuBar: true,
-    backgroundColor: "#f7f7f8",
+    backgroundColor: chrome.backgroundColor,
+    // 窗口 / 任务栏图标。dev 下从 build/ 读（electron-builder 的 buildResources
+    // 目录），打包后由 electron-builder 内嵌进 exe，这里的路径仅影响 dev。
+    icon: resolveAppIconPath(),
+    // 隐藏系统标题栏：原生那条颜色由系统定，与应用主体割裂。
+    // 渲染侧用 .app-header 自己画顶栏（同时是拖拽区），窗口的最小化 /
+    // 最大化 / 关闭按钮由 Electron 以 overlay 形式画在右上角，颜色对齐
+    // tokens.css 的 --bg-app / --text-primary（见 theme-chrome.ts）。
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: chrome.overlayColor,
+      symbolColor: chrome.symbolColor,
+      height: TITLE_BAR_HEIGHT,
+    },
     webPreferences: {
       // .cjs 不是笔误：沙箱化 preload 只支持 CommonJS，见 electron.vite.config.ts
       preload: path.join(import.meta.dirname, "../preload/index.cjs"),
@@ -83,6 +130,42 @@ function createWindow(): void {
   applyWindowPolicy(win, { logger: log() });
 
   const wcId = win.webContents.id;
+  win.on("close", (event) => {
+    const decision = decideClose({
+      quitting,
+      action: loadSettings().closeAction,
+    });
+    if (decision === "allow-quit") {
+      quitting = true;
+      destroyAppTray();
+      return;
+    }
+    event.preventDefault();
+    if (decision === "hide-tray") {
+      hideWindowToTray(win, trayHandlers());
+      return;
+    }
+    if (askingClose) return;
+    askingClose = true;
+    void promptCloseChoice(
+      {
+        showMessageBox: (owner, opts) => dialog.showMessageBox(owner as BrowserWindow, opts),
+        saveCloseAction: (action) => {
+          saveSettings({ closeAction: action });
+        },
+      },
+      win
+    )
+      .then((choice) => {
+        askingClose = false;
+        if (choice === "tray") hideWindowToTray(win, trayHandlers());
+        else if (choice === "quit") requestQuit();
+      })
+      .catch((err: unknown) => {
+        askingClose = false;
+        log().warn("close_choice_failed", { error: String(err) });
+      });
+  });
   win.on("closed", () => {
     disposeClientFor(wcId);
     // 文件树 watcher 与搜索子进程都是**看不见的**泄漏：前者的表现是几小时后
@@ -138,11 +221,7 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    const win = BrowserWindow.getAllWindows()[0];
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
-    }
+    revealMainWindow();
   });
 
   void app.whenReady().then(async () => {
@@ -163,7 +242,13 @@ if (!gotLock) {
     void syncCapabilityAssetsOnStartup();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      else revealMainWindow();
     });
+  });
+
+  app.on("before-quit", () => {
+    quitting = true;
+    destroyAppTray();
   });
 
   app.on("window-all-closed", () => {

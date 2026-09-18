@@ -12,7 +12,7 @@
  * 「当前会话的 client」来发 set_session_name / export_html，那份索引只能有
  * 一处，否则两边各持一个 map，停一个进程只会清掉其中一份。
  */
-import { app } from "electron";
+import { app, type WebContents } from "electron";
 import { stat } from "node:fs/promises";
 import type { ImageContent, PiRpcClient } from "@pibuddy/pi-sdk";
 import { attachSwitchTrace } from "./switch-session-trace.js";
@@ -32,6 +32,7 @@ import {
   piGetEntriesRequestSchema,
   piMessageRequestSchema,
   piPromptRequestSchema,
+  piSetApprovalModeRequestSchema,
   piSetModelRequestSchema,
   piSetSessionNameRequestSchema,
   piSetThinkingLevelRequestSchema,
@@ -41,7 +42,7 @@ import {
 } from "@pibuddy/contract";
 
 import * as attachments from "../attachment-registry.js";
-import { agentPoolObserver, poolRuntimeHost } from "../agent-pool/pool.js";
+import { agentPool, agentPoolObserver, poolRuntimeHost } from "../agent-pool/pool.js";
 import { isCapabilityEnabled } from "../capability/capability-state.js";
 import { MEMORY_CAPABILITY_ID } from "../capability/manifests/memory.manifest.js";
 import { applyConversationActions } from "../conversation/apply-actions.js";
@@ -51,10 +52,20 @@ import { ExtensionUiService, type ExtUiHost } from "../extension-ui/ext-ui-servi
 import { registerHandler, forgetSender } from "../ipc-guard.js";
 import { log } from "../log.js";
 import { buildPiSpawn, verifyRuntimeHandshake } from "../pi-launcher.js";
+import { kernelExtensionArgs } from "./kernel-extensions.js";
+import {
+  APPROVAL_RELOAD_COMMAND,
+  approvalModeFromStatuses,
+  writeApprovalMode,
+} from "./approval-mode.js";
 import { sessionTrustFor } from "../pi-resources/project-trust.js";
 import { describeTrust, trustArgsFor } from "../pi-resources/trust-store.js";
 import { PiSupervisor } from "../pi-supervisor.js";
-import { resolveSessionDir } from "../sessions/session-dir.js";
+import {
+  pickResumeSessionPath,
+  resolveSessionDir,
+  sessionFilePath,
+} from "../sessions/session-dir.js";
 import { sessionIndex } from "../sessions/session-index.js";
 import { loadSettings } from "../settings.js";
 import { assertContained, requireWorkspaceRoot, workspaceIdFor } from "../workspace-registry.js";
@@ -130,10 +141,32 @@ export function disposeClientFor(webContentsId: number): void {
   // 回答的框。
   const generation = supervisor().currentGeneration();
   extUi().clearGeneration(webContentsId, generation, "runtime-gone");
-  supervisor().disposeTarget(webContentsId);
+  // 窗口关了：前台和挂起的后台一起停。休眠 / 换当前会话走 disposeTarget。
+  supervisor().disposeAllForTarget(webContentsId);
   forgetSender(webContentsId);
-  // 窗口没了，之前签发的附件凭证一律作废。
+  // 窗口没了，之前签发的附件凭证全部作废。
   attachments.revokeAll();
+}
+
+function bindForegroundClient(
+  webContentsId: number,
+  client: PiRpcClient,
+  workspaceId: string
+): void {
+  clients.set(webContentsId, client);
+  clientWorkspaces.set(webContentsId, workspaceId);
+}
+
+function switchResponse(
+  command: "switch_session" | "new_session",
+  extra?: { sessionId?: string }
+): { type: "response"; command: typeof command; success: true; data: { cancelled: false; sessionId?: string } } {
+  return {
+    type: "response",
+    command,
+    success: true,
+    data: { cancelled: false, ...(extra?.sessionId ? { sessionId: extra.sessionId } : {}) },
+  };
 }
 
 /**
@@ -277,21 +310,44 @@ export function shouldRevokeAttachmentsAfterSessionChange(response: {
 /**
  * 不透明 sessionId → JSONL 绝对路径。
  *
- * 索引里查不到就先同步一次再查（首次启动、或索引刚被删掉时会走到）。
- * 仍查不到才抛 —— 静默降级成「开一个新会话」会让用户以为历史丢了。
+ * 索引里查不到就先同步一次再查。同步后仍没有：约定文件名若已在磁盘上
+ * 就用它。文件还不存在（pi 惰性落盘、或放太久被清掉）时返回 null ——
+ * 调用方应开新会话，不能把这条路径丢给 realpath（ENOENT）。
  */
-async function resolveSessionPath(sessionId: string, workspaceRoot: string): Promise<string> {
+async function resolveSessionPath(sessionId: string, workspaceRoot: string): Promise<string | null> {
+  const settings = loadSettings();
+  const sessionDir = resolveSessionDir(workspaceRoot, settings);
   const index = sessionIndex();
   // 按 (workspaceId, sessionId) 联合定位：sessionId 只在一个工作区之内唯一，
   // 全局取「最近修改的那行」会在同 id 撞车时打开另一个工作区的会话文件。
   const workspaceId = workspaceIdFor(workspaceRoot);
   let row = index.bySessionId(sessionId, workspaceId);
   if (!row) {
-    await index.syncWorkspace(workspaceRoot, loadSettings());
+    await index.syncWorkspace(workspaceRoot, settings);
     row = index.bySessionId(sessionId, workspaceId);
   }
-  if (!row) throw new Error(`SESSION_UNKNOWN: ${sessionId}`);
-  return row.sourcePath;
+  const fallback = sessionFilePath(sessionDir, sessionId);
+  let fallbackExists = false;
+  try {
+    await stat(fallback);
+    fallbackExists = true;
+  } catch {
+    fallbackExists = false;
+  }
+  return pickResumeSessionPath(row?.sourcePath ?? null, fallback, fallbackExists);
+}
+
+function isEnoent(err: unknown): boolean {
+  return Boolean(err && typeof err === "object" && "code" in err && err.code === "ENOENT");
+}
+
+async function containedIfExists(sessionDir: string, absTarget: string): Promise<string | null> {
+  try {
+    return await assertContained(sessionDir, absTarget);
+  } catch (err) {
+    if (isEnoent(err)) return null;
+    throw err;
+  }
 }
 
 async function sessionFileBytes(sessionPath: string): Promise<number> {
@@ -299,6 +355,113 @@ async function sessionFileBytes(sessionPath: string): Promise<number> {
     return (await stat(sessionPath)).size;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * 为窗口再起一个前台 runtime。
+ *
+ * `replace`：只拆当前前台（休眠 / 续接同一会话）。
+ * `park`：前台挂起继续跑，再起一个新进程（运行中切到另一个会话）。
+ */
+async function spawnForeground(
+  wc: WebContents,
+  opts: { workspaceId: string; sessionId?: string },
+  mode: "replace" | "park"
+): Promise<{
+  state: Awaited<ReturnType<PiRpcClient["getState"]>>;
+  models: Awaited<ReturnType<PiRpcClient["getAvailableModels"]>>["models"];
+  messages: Awaited<ReturnType<PiRpcClient["getMessages"]>>["messages"];
+  modelsError?: string;
+}> {
+  const root = requireWorkspaceRoot(opts.workspaceId);
+  const settings = loadSettings();
+  const sessionDir = resolveSessionDir(root, settings);
+  let sessionPath: string | undefined;
+  if (opts.sessionId) {
+    const resolved = await resolveSessionPath(opts.sessionId, root);
+    if (resolved) {
+      const contained = await containedIfExists(sessionDir, resolved);
+      if (contained) sessionPath = contained;
+      else {
+        log().warn("pi_start_session_missing", {
+          sessionId: opts.sessionId,
+          path: resolved,
+        });
+      }
+    }
+  }
+
+  const trust = await describeTrust({
+    workspaceId: opts.workspaceId,
+    workspaceRoot: root,
+    defaultProjectTrust: "ask",
+  });
+  const trustArgs = trustArgsFor({
+    hasProjectResources: trust.hasProjectResources,
+    saved: trust.saved,
+    decision: sessionTrustFor(opts.workspaceId),
+  });
+  const spawn = buildPiSpawn({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    settings,
+    logger: log(),
+    trustArgs,
+  });
+  verifyRuntimeHandshake(spawn.runtime, log());
+
+  const { client, handle } = supervisor().launch(
+    wc,
+    {
+      spawn,
+      workspaceId: opts.workspaceId,
+      cwd: root,
+      sessionPath,
+      sessionDir,
+      extraArgs: kernelExtensionArgs(log()),
+    },
+    mode
+  );
+  bindForegroundClient(wc.id, client, opts.workspaceId);
+
+  try {
+    const state = await client.getState();
+    supervisor().adoptSession(handle.runtimeId, state.sessionId);
+    if (state.sessionId) agentPool().setFocused(state.sessionId);
+    const [models, messages] = await Promise.all([
+      client.getAvailableModels().catch((err: unknown) => {
+        const modelsError = err instanceof Error ? err.message : String(err);
+        log().warn("pi_start_models_failed", { cause: modelsError });
+        return { models: [], modelsError };
+      }),
+      client.getMessages().catch((err: unknown) => {
+        log().warn("pi_start_messages_failed", {
+          cause: err instanceof Error ? err.message : String(err),
+        });
+        throw new Error(
+          `启动智能体成功，但未能读取会话消息：${err instanceof Error ? err.message : String(err)}`
+        );
+      }),
+    ]);
+    return {
+      state,
+      models: models.models,
+      messages: messages.messages,
+      ...("modelsError" in models && models.modelsError ? { modelsError: models.modelsError } : {}),
+    };
+  } catch (err) {
+    const cause = client.lastSpawnError?.message ?? (err as Error).message;
+    const tail = client.stderrSnapshot;
+    log().error("pi_runtime_start_failed", {
+      runtimeId: handle.runtimeId,
+      generation: handle.generation,
+      phase: client.phase,
+      cause,
+    });
+    supervisor().disposeTarget(wc.id);
+    if (clients.get(wc.id) === client) clients.delete(wc.id);
+    throw new Error(`启动智能体失败：${cause}${tail ? `\n${tail}` : ""}`);
   }
 }
 
@@ -328,8 +491,8 @@ export function registerPiIpc(): void {
     stop: () => {
       const active = supervisor().currentActive();
       if (!active) return;
-      // 与用户在窗口里点「停止」同一条路：作废挂起弹窗、停进程、清索引。
-      disposeClientFor(active.targetId);
+      supervisor().disposeTarget(active.targetId);
+      clients.delete(active.targetId);
     },
   });
 
@@ -337,96 +500,29 @@ export function registerPiIpc(): void {
 
   registerHandler(CHANNELS.piStart, piStartParamsSchema, async (opts, event) => {
     const wc = event.sender;
-    disposeClientFor(wc.id);
-
-    // 渲染进程只给得出不透明 id，真实路径在这里才被解出来
-    const root = requireWorkspaceRoot(opts.workspaceId);
-    const settings = loadSettings();
-    const sessionDir = resolveSessionDir(root, settings);
-
-    // 续接历史会话：渲染进程只给得出不透明 sessionId，路径在这里经索引解出来，
-    // 解完仍要过一次会话目录收容校验。
-    let sessionPath: string | undefined;
     if (opts.sessionId) {
-      sessionPath = await assertContained(sessionDir, await resolveSessionPath(opts.sessionId, root));
+      const live = supervisor().recordForSession(opts.sessionId);
+      if (live) {
+        const attached = supervisor().attachToTarget(wc, opts.sessionId);
+        if (attached) {
+          bindForegroundClient(wc.id, attached, opts.workspaceId);
+          agentPool().setFocused(opts.sessionId);
+          const state = await attached.getState();
+          const [models, messages] = await Promise.all([
+            attached.getAvailableModels().catch(() => ({ models: [] })),
+            attached.getMessages().catch(() => ({ messages: [] })),
+          ]);
+          return { state, models: models.models, messages: messages.messages };
+        }
+      }
     }
-
-    // project trust：RPC 模式下 pi 不弹提示（security.md:30），所以决定必须
-    // 由 PiBuddy 问完之后作为一次性参数带下来。已经写进 trust.json 的决定
-    // **不重复表达** —— 让 pi 自己读文件，两处表达同一件事必然有对不上的时候。
-    const trust = await describeTrust({
-      workspaceId: opts.workspaceId,
-      workspaceRoot: root,
-      defaultProjectTrust: "ask",
-    });
-    const trustArgs = trustArgsFor({
-      hasProjectResources: trust.hasProjectResources,
-      saved: trust.saved,
-      decision: sessionTrustFor(opts.workspaceId),
-    });
-
-    const spawn = buildPiSpawn({
-      packaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      settings,
-      logger: log(),
-      trustArgs,
-    });
-    verifyRuntimeHandshake(spawn.runtime, log());
-
-    const { client, handle } = supervisor().launch(wc, {
-      spawn,
-      workspaceId: opts.workspaceId,
-      cwd: root,
-      sessionPath,
-      // 主进程列目录与 pi 写目录必须同源，否则历史会话恒为空（SES-001）
-      sessionDir,
-    });
-    clients.set(wc.id, client);
-    clientWorkspaces.set(wc.id, opts.workspaceId);
-
-    try {
-      const state = await client.getState();
-      supervisor().adoptSession(handle.runtimeId, state.sessionId);
-      const [models, messages] = await Promise.all([
-        client.getAvailableModels().catch((err: unknown) => {
-          const modelsError = err instanceof Error ? err.message : String(err);
-          log().warn("pi_start_models_failed", { cause: modelsError });
-          return { models: [], modelsError };
-        }),
-        client.getMessages().catch((err: unknown) => {
-          log().warn("pi_start_messages_failed", {
-            cause: err instanceof Error ? err.message : String(err),
-          });
-          throw new Error(
-            `启动智能体成功，但未能读取会话消息：${err instanceof Error ? err.message : String(err)}`
-          );
-        }),
-      ]);
-      return {
-        state,
-        models: models.models,
-        messages: messages.messages,
-        ...("modelsError" in models && models.modelsError
-          ? { modelsError: models.modelsError }
-          : {}),
-      };
-    } catch (err) {
-      const cause = client.lastSpawnError?.message ?? (err as Error).message;
-      const tail = client.stderrSnapshot;
-      log().error("pi_runtime_start_failed", {
-        runtimeId: handle.runtimeId,
-        generation: handle.generation,
-        phase: client.phase,
-        cause,
-      });
-      disposeClientFor(wc.id);
-      throw new Error(`启动智能体失败：${cause}${tail ? `\n${tail}` : ""}`);
-    }
+    return spawnForeground(wc, opts, "replace");
   });
 
   registerHandler(CHANNELS.piStop, voidRequestSchema, (_payload, event) => {
-    disposeClientFor(event.sender.id);
+    // 只停当前前台：后台挂起的会话继续跑。窗口关闭才 disposeClientFor。
+    supervisor().disposeTarget(event.sender.id);
+    clients.delete(event.sender.id);
   });
 
   /**
@@ -535,14 +631,64 @@ export function registerPiIpc(): void {
     return clientFor(event.sender.id).followUp(payload.message, inlineImages);
   });
 
-  registerHandler(CHANNELS.piAbort, voidRequestSchema, (_p, event) => {
+  registerHandler(CHANNELS.piAbort, voidRequestSchema, async (_p, event) => {
     bumpPromptEpoch(event.sender.id);
-    return clientFor(event.sender.id).abort();
+    // 不能走 clientFor()：phase=stopping 时 assertUsable 会抛「运行时不可用」，
+    // 用户点「停止」反而被拒，界面的 streaming 也就永远收不掉。
+    const client = tryClientFor(event.sender.id);
+    if (
+      !client ||
+      !client.running ||
+      client.phase === "stopping" ||
+      client.phase === "stopped"
+    ) {
+      return { type: "response", command: "abort", success: true };
+    }
+    try {
+      return await client.abort();
+    } catch {
+      return { type: "response", command: "abort", success: true };
+    }
   });
 
   registerHandler(CHANNELS.piNewSession, voidRequestSchema, async (_p, event) => {
     bumpPromptEpoch(event.sender.id);
-    const client = clientFor(event.sender.id);
+    // 不能走 clientFor()：phase≠running 时 assertUsable 会抛到渲染进程，
+    // newTask 以前又没有 catch，按钮就像没点一样。
+    const client = tryClientFor(event.sender.id);
+    if (!client || !client.running) {
+      return {
+        type: "response" as const,
+        command: "new_session",
+        success: false,
+        error: "智能体运行时不可用，请先唤醒会话",
+      };
+    }
+    try {
+      client.assertUsable();
+    } catch (err) {
+      return {
+        type: "response" as const,
+        command: "new_session",
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+    log().info("pi_new_session", { runtimeId: client.runtimeId, phase: client.phase });
+    const workspaceId = clientWorkspaces.get(event.sender.id);
+    if (supervisor().isForegroundBusy(event.sender.id) && workspaceId) {
+      const launched = await spawnForeground(
+        event.sender,
+        { workspaceId },
+        "park"
+      );
+      return switchResponse("new_session", { sessionId: launched.state.sessionId });
+    }
+    try {
+      await client.abort();
+    } catch {
+      // 没有在跑的回合，或 abort 已超时：下面仍尝试换会话。
+    }
     const resp = await client.newSession();
     if (resp.success && (resp.data as { cancelled?: boolean } | undefined)?.cancelled !== true) {
       const nextId =
@@ -558,15 +704,42 @@ export function registerPiIpc(): void {
 
   registerHandler(CHANNELS.piSwitchSession, piSwitchSessionRequestSchema, async (payload, event) => {
     bumpPromptEpoch(event.sender.id);
+    const wc = event.sender;
+    const live = supervisor().recordForSession(payload.sessionId);
+    const foreground = supervisor().currentActive();
+    if (live && foreground?.sessionId !== payload.sessionId) {
+      const attached = supervisor().attachToTarget(wc, payload.sessionId);
+      if (attached) {
+        bindForegroundClient(wc.id, attached, payload.workspaceId);
+        agentPool().setFocused(payload.sessionId);
+        log().info("pi_switch_session_attached", { sessionId: payload.sessionId });
+        return switchResponse("switch_session", { sessionId: payload.sessionId });
+      }
+    }
+    if (
+      supervisor().isForegroundBusy(wc.id) &&
+      foreground?.sessionId &&
+      foreground.sessionId !== payload.sessionId
+    ) {
+      await spawnForeground(
+        wc,
+        { workspaceId: payload.workspaceId, sessionId: payload.sessionId },
+        "park"
+      );
+      log().info("pi_switch_session_spawned", { sessionId: payload.sessionId });
+      return switchResponse("switch_session", { sessionId: payload.sessionId });
+    }
+
     const root = requireWorkspaceRoot(payload.workspaceId);
     const settings = loadSettings();
     // 只允许切到该 workspace 会话目录里的文件，禁止回退 settings.workspace
     const sessionDir = resolveSessionDir(root, settings);
     const resolveStartedAt = Date.now();
-    const real = await assertContained(
-      sessionDir,
-      await resolveSessionPath(payload.sessionId, root)
-    );
+    const resolved = await resolveSessionPath(payload.sessionId, root);
+    const real = resolved ? await containedIfExists(sessionDir, resolved) : null;
+    if (!real) {
+      throw new Error("这条会话的文件已经不在了，请再开一条新对话");
+    }
     const resolveMs = Date.now() - resolveStartedAt;
     const fileBytes = await sessionFileBytes(real);
     const client = clientFor(event.sender.id);
@@ -594,6 +767,7 @@ export function registerPiIpc(): void {
     if (resp.success && (resp.data as { cancelled?: boolean } | undefined)?.cancelled !== true) {
       clientWorkspaces.set(event.sender.id, payload.workspaceId);
       supervisor().adoptSession(client.runtimeId, payload.sessionId);
+      agentPool().setFocused(payload.sessionId);
     }
     if (shouldRevokeAttachmentsAfterSessionChange(resp)) attachments.revokeAll();
     return resp;
@@ -610,6 +784,25 @@ export function registerPiIpc(): void {
   registerHandler(CHANNELS.piSetThinkingLevel, piSetThinkingLevelRequestSchema, (payload, event) =>
     clientFor(event.sender.id).send({ type: "set_thinking_level", level: payload.level })
   );
+
+  /**
+   * 切审批模式：写工作目录 `.pi/settings.local.json` → 让权限扩展 reload。
+   * 两步的理由与「为什么不走 pi:prompt」见 ./approval-mode.ts 文件头。
+   */
+  registerHandler(CHANNELS.piSetApprovalMode, piSetApprovalModeRequestSchema, async (payload, event) => {
+    const senderId = event.sender.id;
+    // 扩展不在场时 reload 命令会当成普通提示词进模型，还白改一个文件 —— 先拒绝。
+    if (approvalModeFromStatuses(extUi().snapshot(senderId).statuses) === null) {
+      return { success: false, error: "当前运行时没有加载权限扩展，改不了审批模式" };
+    }
+    const workspaceId = clientWorkspaces.get(senderId);
+    if (!workspaceId) return { success: false, error: "当前会话还没绑定工作目录" };
+    const root = requireWorkspaceRoot(workspaceId);
+    const filePath = writeApprovalMode(root, payload.mode);
+    const resp = await clientFor(senderId).send({ type: "prompt", message: APPROVAL_RELOAD_COMMAND });
+    log().info("pi_approval_mode_set", { mode: payload.mode, filePath, success: resp.success });
+    return resp;
+  });
 
   registerHandler(CHANNELS.piGetState, voidRequestSchema, (_p, event) =>
     clientFor(event.sender.id).send({ type: "get_state" })

@@ -12,6 +12,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:regression": "node scripts/release-regression.mjs",
+    "test:regression:full": "node scripts/release-regression.mjs --with-package",
     "check-dead-code": "node scripts/check-dead-code.mjs"
   },
   "devDependencies": {

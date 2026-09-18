@@ -146,7 +146,7 @@ export const SQLITE_STORES: readonly SqliteStoreDescriptor[] = [
     id: "memory",
     file: "memory.db",
     title: "长期记忆与知识库（含向量）",
-    schemaVersion: 2,
+    schemaVersion: 4,
     versionSource: USER_VERSION,
     requiredTables: [
       "memories",
@@ -155,6 +155,10 @@ export const SQLITE_STORES: readonly SqliteStoreDescriptor[] = [
       "embeddings",
       "knowledge",
       "knowledge_fts",
+      "working_items",
+      "memory_candidates",
+      "memory_conflicts",
+      "memory_route_events",
     ],
   },
   {

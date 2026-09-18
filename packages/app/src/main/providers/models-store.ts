@@ -13,9 +13,10 @@
  *
  * 渲染进程提交的地址在**落盘之前**经 registerEndpoint
  * （normalizeEndpointUrl + assertPublicAddress）校验并换成不透明 endpointId；
- * 被拒的地址一个字节都不会写进 models.json。没有这一步的话，Provider 中心
- * 的「自定义端点」输入框就是一条把请求（连同 Authorization 头）定向到
- * `169.254.169.254` 的通用旁路。
+ * provider 允许公网 http / https，内网和云元数据仍拦。被拒的地址一个字节
+ * 都不会写进 models.json。没有这一步的话，Provider 中心的「自定义端点」
+ * 输入框就是一条把请求（连同 Authorization 头）定向到 `169.254.169.254`
+ * 的通用旁路。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -137,17 +138,61 @@ export async function upsertCustomProvider(
   const file = readModelsFile();
   const providers = { ...(file.providers ?? {}) };
   const previous = providers[input.id];
+  const previousById = new Map((previous?.models ?? []).map((m) => [m.id, m] as const));
+  // 编辑时模型列表留空 = 不改已有条目（避免一次保存把 input / 别名抹掉）。
+  // 新加端点且没填模型，才允许先落一条空列表，随后用「发现模型」补。
+  const modelIds =
+    input.models.length > 0 ? input.models : (previous?.models ?? []).map((m) => m.id);
   const entry: CustomProvider = {
     ...(previous ?? {}),
     baseUrl: endpoint.baseUrl,
     api: CUSTOM_PROVIDER_API,
     apiKey: previous?.apiKey ?? CUSTOM_PROVIDER_PLACEHOLDER_KEY,
     name: input.name,
-    models: input.models.map((id) => ({ id })),
+    models: modelIds.map((id) => previousById.get(id) ?? { id }),
   };
   providers[input.id] = entry;
   writeModelsFile({ ...file, providers });
   return entry;
+}
+
+/**
+ * 标注自定义端点某个模型接受的输入模态（文 / 图 / 图文）：写回该条目的 `input`。
+ *
+ * 中转 / 自建端点的 `/models` 只回 id，pi 对缺省的 `input` 补成 `["text"]`，
+ * 一个明明能看图的模型就被判成「不支持图片」。能力判据仍然只有 `input`
+ * （不引入模型名单），这里只是让用户把真实能力写进去。
+ *
+ * 只动 `text` / `image` 两项：其它模态（audio 之类）用户手写的照样保留。
+ * provider / model 不存在时抛错而不是静默 —— 静默的表现是「改了，图还是
+ * 发不出去」。
+ */
+export function setCustomModelInput(
+  providerId: string,
+  modelId: string,
+  modalities: ("text" | "image")[]
+): void {
+  if (modalities.length === 0) throw new Error("MODEL_INPUT_EMPTY: 至少保留一种输入");
+  const file = readModelsFile();
+  const providers = { ...(file.providers ?? {}) };
+  const entry = providers[providerId];
+  if (!entry || typeof entry !== "object" || typeof entry.baseUrl !== "string") {
+    throw new Error("PROVIDER_NOT_FOUND: 这个自定义端点已经不在了，请重新添加");
+  }
+  const models = entry.models ?? [];
+  const index = models.findIndex((m) => m.id === modelId);
+  if (index < 0) {
+    throw new Error(`MODEL_NOT_FOUND: 端点「${providerId}」下没有模型「${modelId}」`);
+  }
+  const current = models[index];
+  const kept = (current.input ?? ["text"]).filter((k) => k !== "image" && k !== "text");
+  const ordered = (["text", "image"] as const).filter((k) => modalities.includes(k));
+  const input = [...ordered, ...kept];
+  const nextModels = models.slice();
+  nextModels[index] = { ...current, input };
+  providers[providerId] = { ...entry, models: nextModels };
+  writeModelsFile({ ...file, providers });
+  providerLogger().info("provider_model_input_set", { providerId, modelId, input });
 }
 
 /** 删除一个自定义 provider。不存在时是 no-op（不抛）。 */
@@ -177,6 +222,7 @@ export async function discoverModels(
   const resp = await safeFetch(`${base}/models`, {
     method: "GET",
     headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    allowHttp: true,
   });
   if (!resp.ok) {
     throw new Error(`DISCOVER_FAILED: 端点返回 HTTP ${resp.status}`);

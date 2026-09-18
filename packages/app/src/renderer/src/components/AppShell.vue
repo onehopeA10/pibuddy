@@ -1,8 +1,15 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, h, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { useDialog, useMessage, NButton, NSpin } from "naive-ui";
 import { useAppStore } from "../stores/app";
+import {
+  readContextPanelMode,
+  writeContextPanelMode,
+  type ContextPanelMode,
+} from "../context-panel-state";
 import Sidebar from "./Sidebar.vue";
+import NavRail, { type RailId } from "./NavRail.vue";
+import TaskContextPanel from "./TaskContextPanel.vue";
 import TopBar from "./TopBar.vue";
 import ChatView from "./ChatView.vue";
 import InputBar from "./InputBar.vue";
@@ -14,10 +21,10 @@ import SafeModeBanner from "./SafeModeBanner.vue";
 import InstallBlockerDialog from "./InstallBlockerDialog.vue";
 import ProjectTrustDialog from "./ProjectTrustDialog.vue";
 import OnboardingWizard from "./OnboardingWizard.vue";
-import FileTreePanel from "./FileTreePanel.vue";
 import FileEditorPane from "./FileEditorPane.vue";
 import ChangesetPanel from "./ChangesetPanel.vue";
 import PreviewPane from "./PreviewPane.vue";
+import ToolPane from "./ToolPane.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useMcpStore } from "../stores/mcp";
@@ -43,26 +50,42 @@ import {
  * 不开面板不加载（manifest.runtime.entry 指向的就是这个文件，bundleBudgetKb
  * 是它的预算上界）。
  */
-const HomeDashboardPanel = defineAsyncComponent(() => import("./HomeDashboardPanel.vue"));
-const PiResourcesPanel = defineAsyncComponent(() => import("./PiResourcesPanel.vue"));
-const ProviderCenter = defineAsyncComponent(() => import("./ProviderCenter.vue"));
-const UsagePanel = defineAsyncComponent(() => import("./UsagePanel.vue"));
-const ArtifactLibrary = defineAsyncComponent(() => import("./ArtifactLibrary.vue"));
-const MemoryPanel = defineAsyncComponent(() => import("./MemoryPanel.vue"));
-const SessionTreePanel = defineAsyncComponent(() => import("./SessionTreePanel.vue"));
-const GitPanel = defineAsyncComponent(() => import("./GitPanel.vue"));
-const TerminalPanel = defineAsyncComponent(() => import("./TerminalPanel.vue"));
-const TasksPanel = defineAsyncComponent(() => import("./TasksPanel.vue"));
-const ChildAgentPanel = defineAsyncComponent(() => import("./ChildAgentPanel.vue"));
-const ConnectorPanel = defineAsyncComponent(() => import("./ConnectorPanel.vue"));
-const ConnectorChannelsPanel = defineAsyncComponent(() => import("./ConnectorChannelsPanel.vue"));
-const RemotePanel = defineAsyncComponent(() => import("./RemotePanel.vue"));
-const WorkflowPanel = defineAsyncComponent(() => import("./WorkflowPanel.vue"));
-const PromptLibraryPanel = defineAsyncComponent(() => import("./PromptLibraryPanel.vue"));
-const OfficeSkillsPanel = defineAsyncComponent(() => import("./OfficeSkillsPanel.vue"));
-const HomeAdvisorPanel = defineAsyncComponent(() => import("./HomeAdvisorPanel.vue"));
-const RulesPanel = defineAsyncComponent(() => import("./RulesPanel.vue"));
-const EduPanel = defineAsyncComponent(() => import("./EduPanel.vue"));
+const FeatureLoading = {
+  name: "FeatureLoading",
+  setup() {
+    return () => h("div", { class: "feature-loading" }, [h(NSpin, { size: "medium" })]);
+  },
+};
+
+function lazyPage(loader: () => Promise<unknown>) {
+  return defineAsyncComponent({
+    loader: loader as () => Promise<{ default: import("vue").Component }>,
+    loadingComponent: FeatureLoading,
+    delay: 0,
+  });
+}
+
+const HomeDashboardPanel = lazyPage(() => import("./HomeDashboardPanel.vue"));
+const PiResourcesPanel = lazyPage(() => import("./PiResourcesPanel.vue"));
+const ProviderCenter = lazyPage(() => import("./ProviderCenter.vue"));
+const UsagePanel = lazyPage(() => import("./UsagePanel.vue"));
+const ArtifactLibrary = lazyPage(() => import("./ArtifactLibrary.vue"));
+const MemoryPanel = lazyPage(() => import("./MemoryPanel.vue"));
+const SessionTreePanel = lazyPage(() => import("./SessionTreePanel.vue"));
+const GitPanel = lazyPage(() => import("./GitPanel.vue"));
+const TerminalPanel = lazyPage(() => import("./TerminalPanel.vue"));
+const TasksPanel = lazyPage(() => import("./TasksPanel.vue"));
+const ChildAgentPanel = lazyPage(() => import("./ChildAgentPanel.vue"));
+const ConnectorPanel = lazyPage(() => import("./ConnectorPanel.vue"));
+const ConnectorChannelsPanel = lazyPage(() => import("./ConnectorChannelsPanel.vue"));
+const RemotePanel = lazyPage(() => import("./RemotePanel.vue"));
+const WorkflowPanel = lazyPage(() => import("./WorkflowPanel.vue"));
+const PromptLibraryPanel = lazyPage(() => import("./PromptLibraryPanel.vue"));
+const LibraryPage = lazyPage(() => import("./LibraryPage.vue"));
+const AccountPage = lazyPage(() => import("./AccountPage.vue"));
+const HomeAdvisorPanel = lazyPage(() => import("./HomeAdvisorPanel.vue"));
+const RulesPanel = lazyPage(() => import("./RulesPanel.vue"));
+const EduPanel = lazyPage(() => import("./EduPanel.vue"));
 
 const store = useAppStore();
 const updateStore = useUpdateStore();
@@ -111,10 +134,21 @@ function askDirty(tabs: EditorTab[]): Promise<DirtyDecision> {
 }
 
 setDirtyPrompt(askDirty);
+function onWindowActivated(): void {
+  void store.onWindowActivated();
+}
+
 onBeforeUnmount(() => {
+  window.removeEventListener("resize", onResize);
+  window.removeEventListener("focus", onWindowActivated);
+  document.removeEventListener("visibilitychange", onVisibility);
   setDirtyPrompt(null);
   store.dispose();
 });
+
+function onVisibility(): void {
+  if (document.visibilityState === "visible") onWindowActivated();
+}
 
 /**
  * 向导是否还没走完。
@@ -151,7 +185,6 @@ const dragging = ref(0);
  * 默认都关着：绝大多数会话里用户只是想说句话，一进来就被文件树和变更
  * 面板挤掉一半聊天区不是帮忙。两个开关都放在顶栏右侧，随手可开。
  */
-const filesOpen = ref(false);
 const changesOpen = ref(false);
 // 会话树面板的开合。独立的 ref，不复用 filesOpen / changesOpen —— 它是自己
 // 一个能力域（common.session-tree），与文件树 / 改动面板互不牵连。
@@ -194,6 +227,110 @@ const eduOpen = ref(false);
 // 它是自己一个能力域（实体状态总览 + 消费者信令），与家居建议面板互不牵连。
 // 面板的挂载/卸载就是基座实体缓存消费者的登记/释放（诚实遗留 #7 的落点）。
 const homeDashboardOpen = ref(false);
+const activeNav = ref<RailId>("chat");
+const sidebarPane = ref<"sessions" | "files">("sessions");
+// 任务上下文面板：恢复用户上次的选择（关闭 / 展开 / 收成侧条）。从未选过时
+// 两个 ref 都为 false，并由下面的 streaming watcher 在第一次跑任务时自动展开
+// 一次作引导；用户点过任何一个按钮后就只认用户的选择，不再自动弹出。
+const savedContextMode = readContextPanelMode();
+const contextPanelOpen = ref(savedContextMode !== null && savedContextMode !== "closed");
+const contextPanelCollapsed = ref(savedContextMode === "collapsed");
+const contextModeChosen = ref(savedContextMode !== null);
+
+function setContextMode(mode: ContextPanelMode): void {
+  contextPanelOpen.value = mode !== "closed";
+  contextPanelCollapsed.value = mode === "collapsed";
+  contextModeChosen.value = true;
+  writeContextPanelMode(mode);
+}
+const sessionDrawerOpen = ref(false);
+const windowWidth = ref(typeof window === "undefined" ? 1360 : window.innerWidth);
+const SESSION_SIDEBAR_KEY = "pibuddy.sessionSidebarCollapsed";
+const sessionSidebarCollapsed = ref(readSessionSidebarCollapsed());
+
+function readSessionSidebarCollapsed(): boolean {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem(SESSION_SIDEBAR_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeSessionSidebarCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(SESSION_SIDEBAR_KEY, collapsed ? "1" : "0");
+  } catch {
+    // 布局偏好写失败只影响下次恢复
+  }
+}
+
+function toggleSessionSidebar(): void {
+  if (windowWidth.value > 960 && activeNav.value === "chat") {
+    sessionSidebarCollapsed.value = !sessionSidebarCollapsed.value;
+    writeSessionSidebarCollapsed(sessionSidebarCollapsed.value);
+    return;
+  }
+  sessionDrawerOpen.value = !sessionDrawerOpen.value;
+}
+
+const FEATURE_TITLE: Record<RailId, string> = {
+  chat: "对话",
+  tasks: "定时任务",
+  library: "资源库",
+  memory: "长期记忆",
+  channels: "渠道",
+  workflows: "工作流",
+  terminal: "终端",
+  account: "模型",
+  settings: "设置",
+};
+
+function goChat(): void {
+  closeFeaturePanels();
+  activeNav.value = "chat";
+}
+
+provide("goChat", goChat);
+
+function onResize(): void {
+  windowWidth.value = window.innerWidth;
+}
+
+const sessionWide = computed(
+  () => activeNav.value === "chat" && windowWidth.value > 960
+);
+const sessionInline = computed(() => sessionWide.value && !sessionSidebarCollapsed.value);
+const contextInline = computed(
+  () => contextPanelOpen.value && windowWidth.value > 1200 && activeNav.value === "chat"
+);
+
+// 只在用户从未对面板做过选择时，第一次跑任务自动展开一次作引导。
+// 用户关掉过 / 收起过的面板，任务再开始也保持原样。
+watch(
+  () => store.streaming,
+  (running) => {
+    if (!running || activeNav.value !== "chat") return;
+    if (contextModeChosen.value) return;
+    contextPanelOpen.value = true;
+  }
+);
+
+function toggleContext(): void {
+  if (contextPanelOpen.value && !contextPanelCollapsed.value) {
+    setContextMode("collapsed");
+  } else {
+    setContextMode("expanded");
+  }
+}
+
+function closeContext(): void {
+  setContextMode("closed");
+}
+
+function onContextCollapse(): void {
+  // 收起条上再点一次 = 展开
+  setContextMode(contextPanelCollapsed.value ? "expanded" : "collapsed");
+}
 
 /**
  * UI 门控（ADR-0002 feature gate 的渲染侧一半）。
@@ -269,6 +406,9 @@ const eduEnabled = computed(() => capabilities.isEnabled("edu.kids"));
 const homeDashboardEnabled = computed(() => capabilities.isEnabled("home.dashboard"));
 
 onMounted(() => {
+  window.addEventListener("resize", onResize);
+  window.addEventListener("focus", onWindowActivated);
+  document.addEventListener("visibilitychange", onVisibility);
   void store.init();
   // 先取快照再订阅：窗口 reload 之后进度必须从 main 的快照原样恢复，
   // 而不是回到 idle。
@@ -310,6 +450,76 @@ function onDragLeave(): void {
 function onDrop(): void {
   dragging.value = 0;
 }
+
+function closeFeaturePanels(): void {
+  tasks.panelOpen = false;
+  memory.panelOpen = false;
+  promptLibrary.panelOpen = false;
+  piRes.panelOpen = false;
+  officeSkillsOpen.value = false;
+  channelsOpen.value = false;
+  connectorOpen.value = false;
+  workflowOpen.value = false;
+  terminalOpen.value = false;
+  providers.panelOpen = false;
+  providers.usagePanelOpen = false;
+  store.settingsOpen = false;
+}
+
+function selectNav(id: RailId): void {
+  closeFeaturePanels();
+  if (id === "chat") {
+    if (activeNav.value === "chat") {
+      toggleSessionSidebar();
+    } else {
+      activeNav.value = "chat";
+    }
+    return;
+  }
+  activeNav.value = id;
+  sessionDrawerOpen.value = false;
+  if (id === "tasks") tasks.panelOpen = true;
+  else if (id === "library") {
+    if (promptLibraryEnabled.value) promptLibrary.panelOpen = true;
+    if (officeSkillsEnabled.value) officeSkillsOpen.value = true;
+    piRes.panelOpen = true;
+  } else if (id === "memory") memory.panelOpen = true;
+  else if (id === "channels") {
+    if (channelsEnabled.value) channelsOpen.value = true;
+    if (connectorEnabled.value) connectorOpen.value = true;
+  } else if (id === "workflows") workflowOpen.value = true;
+  else if (id === "terminal") terminalOpen.value = true;
+  else if (id === "account") {
+    providers.panelOpen = true;
+    providers.usagePanelOpen = true;
+  } else if (id === "settings") store.settingsOpen = true;
+}
+
+const extraTools = computed(() => [
+  { key: "changes", label: "改动", enabled: reviewEnabled.value, active: changesOpen.value },
+  { key: "artifacts", label: "产物", enabled: artifactsEnabled.value, active: artifacts.panelOpen },
+  { key: "session-tree", label: "会话树", enabled: sessionTreeEnabled.value, active: sessionTreeOpen.value },
+  { key: "child-agent", label: "子 Agent", enabled: childAgentEnabled.value, active: childAgentOpen.value },
+  { key: "git", label: "Git", enabled: gitEnabled.value, active: gitOpen.value },
+  { key: "remote", label: "远程访问", enabled: remoteEnabled.value, active: remoteOpen.value },
+  { key: "home-advisor", label: "家居建议", enabled: homeAdvisorEnabled.value, active: homeAdvisorOpen.value },
+  { key: "home-dashboard", label: "家居面板", enabled: homeDashboardEnabled.value, active: homeDashboardOpen.value },
+  { key: "automation", label: "自动化", enabled: homeAutomationEnabled.value, active: rulesOpen.value },
+  { key: "edu", label: "学习", enabled: eduEnabled.value, active: eduOpen.value },
+]);
+
+function onTool(key: string): void {
+  if (key === "changes") changesOpen.value = !changesOpen.value;
+  else if (key === "artifacts") artifacts.panelOpen = !artifacts.panelOpen;
+  else if (key === "session-tree") sessionTreeOpen.value = !sessionTreeOpen.value;
+  else if (key === "child-agent") childAgentOpen.value = !childAgentOpen.value;
+  else if (key === "git") gitOpen.value = !gitOpen.value;
+  else if (key === "remote") remoteOpen.value = !remoteOpen.value;
+  else if (key === "home-advisor") homeAdvisorOpen.value = !homeAdvisorOpen.value;
+  else if (key === "home-dashboard") homeDashboardOpen.value = !homeDashboardOpen.value;
+  else if (key === "automation") rulesOpen.value = !rulesOpen.value;
+  else if (key === "edu") eduOpen.value = !eduOpen.value;
+}
 </script>
 
 <template>
@@ -326,11 +536,10 @@ function onDrop(): void {
   <OnboardingWizard v-else-if="onboardingPending" />
 
   <div v-else-if="!store.workspace" class="onboarding">
-    <div class="logo">📁</div>
     <h1>还没有工作文件夹</h1>
     <p>我需要一个文件夹才能帮你干活。选好之后，我只会在这个文件夹里操作。</p>
     <n-button type="primary" size="large" @click="store.chooseWorkspace()">
-      📁 选择工作文件夹
+      选择工作文件夹
     </n-button>
   </div>
 
@@ -348,26 +557,96 @@ function onDrop(): void {
          overlay 浮层。默认内容即当前形态，不传插槽时渲染结果与改造前一致。 -->
     <!-- safe mode 横幅排在更新横幅**之前**：进了安全模式的用户最需要看到的
          是「什么被关了、我现在能做什么」，而不是又一条更新提示。 -->
+    <!-- 顶栏：自绘标题栏 + 主导航（原左侧图标轨横排上移），兼作窗口拖拽区 -->
+    <NavRail
+      :active="activeNav"
+      :session-collapsed="sessionSidebarCollapsed"
+      :enabled="{
+        tasks: tasksEnabled,
+        library: promptLibraryEnabled || officeSkillsEnabled,
+        memory: memoryEnabled,
+        channels: channelsEnabled || connectorEnabled,
+        workflows: workflowEnabled,
+        terminal: terminalEnabled,
+      }"
+      @select="selectNav"
+    />
     <slot name="banner"><SafeModeBanner /><UpdateBanner /></slot>
 
+    <div class="app-body">
     <slot name="sidebar">
-      <Sidebar />
-      <FileTreePanel v-if="filesOpen && filesEnabled" />
+      <Sidebar
+        v-if="sessionInline"
+        :files-enabled="filesEnabled"
+        :pane="sidebarPane"
+        @update:pane="sidebarPane = $event"
+      />
     </slot>
+    <div v-if="sessionDrawerOpen && !sessionInline" class="session-drawer-scrim" @click="sessionDrawerOpen = false" />
+    <div v-if="sessionDrawerOpen && !sessionInline" class="session-drawer">
+      <Sidebar
+        :files-enabled="filesEnabled"
+        :pane="sidebarPane"
+        @update:pane="sidebarPane = $event"
+      />
+    </div>
     <div class="main-col">
-      <TopBar />
+      <TopBar
+        v-if="activeNav === 'chat'"
+        :show-session-toggle="!sessionInline"
+        :session-open="sessionInline"
+        :context-open="contextPanelOpen"
+        :tools="extraTools"
+        @toggle-sessions="toggleSessionSidebar"
+        @toggle-context="toggleContext"
+        @tool="onTool"
+      />
+      <header v-else class="topbar" :class="{ 'feature-col': activeNav === 'memory' || activeNav === 'tasks' }">
+        <h1 class="feature-title">{{ FEATURE_TITLE[activeNav] }}</h1>
+      </header>
 
       <!-- WSL workspace 提示（R5.1）：pi 仍跑在 Windows 侧，经 \\wsl.localhost
            UNC 读写这个目录（不做 pi-in-WSL）；WSL 共享（9P）不支持变更通知，
            文件树不会自动刷新。 -->
       <div v-if="isWslWorkspace" class="wsl-workspace-banner">
-        🐧 当前工作文件夹在 WSL 内：pi 仍在 Windows 侧运行，经网络路径读写这个目录；
+        当前工作文件夹在 WSL 内：pi 仍在 Windows 侧运行，经网络路径读写这个目录；
         文件树不会自动刷新（WSL 共享不支持变更通知），终端可选择进入对应发行版。
       </div>
 
-      <template v-if="store.startError">
+      <div v-if="store.startError && store.items.length" class="disconnect-banner" role="alert">
+        <span>连接已断开，消息已保存在本地。</span>
+        <span class="spacer" />
+        <n-button size="tiny" secondary @click="store.start(store.currentSessionId || undefined)">重新连接</n-button>
+      </div>
+      <div v-else-if="store.runtimeWaking && activeNav === 'chat'" class="exec-strip" role="status">
+        <span class="pulse-dot" />
+        <span>正在唤醒助手…</span>
+      </div>
+      <div v-else-if="store.runtimeAsleep && activeNav === 'chat'" class="exec-strip" role="status">
+        <span>助手已休眠，回到窗口或发送时会自动唤醒</span>
+      </div>
+      <div v-else-if="store.streaming && activeNav === 'chat'" class="exec-strip" role="status">
+        <span class="pulse-dot" />
+        <span>{{ store.busyStatus || "正在执行…" }}</span>
+      </div>
+
+      <div v-if="activeNav !== 'chat'" class="feature-stage">
+        <LibraryPage v-if="activeNav === 'library'" />
+        <TasksPanel v-else-if="activeNav === 'tasks'" embedded />
+        <MemoryPanel v-else-if="activeNav === 'memory'" embedded />
+        <div v-else-if="activeNav === 'channels'" class="feature-stack">
+          <ConnectorChannelsPanel v-if="channelsEnabled" />
+          <ConnectorPanel v-if="connectorEnabled" />
+        </div>
+        <WorkflowPanel v-else-if="activeNav === 'workflows'" />
+        <TerminalPanel v-else-if="activeNav === 'terminal'" />
+        <AccountPage v-else-if="activeNav === 'account'" />
+        <SettingsModal v-else-if="activeNav === 'settings'" embedded />
+      </div>
+
+      <template v-else-if="store.startError && !store.items.length">
         <div class="onboarding">
-          <h1>😥 启动失败</h1>
+          <h1>启动失败</h1>
           <p style="white-space: pre-wrap; max-width: 640px">{{ store.startError }}</p>
           <n-button type="primary" @click="store.start()">重试</n-button>
           <n-button
@@ -379,244 +658,92 @@ function onDrop(): void {
           <n-button quaternary @click="store.chooseWorkspace()">换个文件夹</n-button>
         </div>
       </template>
-      <!--
-        no-model 空状态（UX-101）：一个可用模型都没有时，聊天区是发不出去
-        任何东西的。收敛前这种情况表现为「输入框能打字，一按发送报一句
-        看不懂的错」；现在直接给出唯一有意义的那个动作。
-      -->
       <template v-else-if="store.started && store.models.length === 0">
         <div class="onboarding">
           <h1>还没有可用的模型</h1>
           <p v-if="store.modelsError">未能列出模型：{{ store.modelsError }}</p>
-          <p v-else>需要先配置一个 AI 服务商的账号，才能开始对话。</p>
-          <n-button type="primary" @click="providers.panelOpen = true">去配置账号</n-button>
+          <p v-else>需要先配置一个模型，才能开始对话。</p>
+          <n-button type="primary" @click="selectNav('account')">去配置模型</n-button>
           <n-button quaternary @click="store.start()">重新检查</n-button>
         </div>
       </template>
       <template v-else>
         <slot name="main">
-          <div class="workspace-toggles">
-            <n-button
-              v-if="filesEnabled"
-              size="tiny"
-              :type="filesOpen ? 'primary' : 'default'"
-              quaternary
-              @click="filesOpen = !filesOpen"
-            >
-              📁 文件
-            </n-button>
-            <n-button
-              v-if="reviewEnabled"
-              size="tiny"
-              :type="changesOpen ? 'primary' : 'default'"
-              quaternary
-              @click="changesOpen = !changesOpen"
-            >
-              🔀 改动
-            </n-button>
-            <n-button
-              v-if="artifactsEnabled"
-              size="tiny"
-              :type="artifacts.panelOpen ? 'primary' : 'default'"
-              quaternary
-              @click="artifacts.panelOpen = !artifacts.panelOpen"
-            >
-              📦 产物
-            </n-button>
-            <n-button
-              v-if="memoryEnabled"
-              size="tiny"
-              :type="memory.panelOpen ? 'primary' : 'default'"
-              quaternary
-              @click="memory.panelOpen = !memory.panelOpen"
-            >
-              🧠 记忆
-            </n-button>
-            <n-button
-              v-if="sessionTreeEnabled"
-              size="tiny"
-              :type="sessionTreeOpen ? 'primary' : 'default'"
-              quaternary
-              @click="sessionTreeOpen = !sessionTreeOpen"
-            >
-              🌳 会话树
-            </n-button>
-            <n-button
-              v-if="childAgentEnabled"
-              size="tiny"
-              :type="childAgentOpen ? 'primary' : 'default'"
-              quaternary
-              @click="childAgentOpen = !childAgentOpen"
-            >
-              🤖 子 Agent
-            </n-button>
-            <n-button
-              v-if="gitEnabled"
-              size="tiny"
-              :type="gitOpen ? 'primary' : 'default'"
-              quaternary
-              @click="gitOpen = !gitOpen"
-            >
-              🌿 Git
-            </n-button>
-            <n-button
-              v-if="terminalEnabled"
-              size="tiny"
-              :type="terminalOpen ? 'primary' : 'default'"
-              quaternary
-              @click="terminalOpen = !terminalOpen"
-            >
-              💻 终端
-            </n-button>
-            <n-button
-              v-if="tasksEnabled"
-              size="tiny"
-              :type="tasks.panelOpen ? 'primary' : 'default'"
-              quaternary
-              @click="tasks.panelOpen = !tasks.panelOpen"
-            >
-              ⏰ 定时
-            </n-button>
-            <n-button
-              v-if="connectorEnabled"
-              size="tiny"
-              :type="connectorOpen ? 'primary' : 'default'"
-              quaternary
-              @click="connectorOpen = !connectorOpen"
-            >
-              🔌 连接器
-            </n-button>
-            <n-button
-              v-if="channelsEnabled"
-              size="tiny"
-              :type="channelsOpen ? 'primary' : 'default'"
-              quaternary
-              @click="channelsOpen = !channelsOpen"
-            >
-              💬 渠道
-            </n-button>
-            <n-button
-              v-if="workflowEnabled"
-              size="tiny"
-              :type="workflowOpen ? 'primary' : 'default'"
-              quaternary
-              @click="workflowOpen = !workflowOpen"
-            >
-              🧩 工作流
-            </n-button>
-            <n-button
-              v-if="remoteEnabled"
-              size="tiny"
-              :type="remoteOpen ? 'primary' : 'default'"
-              quaternary
-              @click="remoteOpen = !remoteOpen"
-            >
-              📡 远程
-            </n-button>
-            <n-button
-              v-if="promptLibraryEnabled"
-              size="tiny"
-              :type="promptLibrary.panelOpen ? 'primary' : 'default'"
-              quaternary
-              @click="promptLibrary.panelOpen = !promptLibrary.panelOpen"
-            >
-              📋 提示词
-            </n-button>
-            <n-button
-              v-if="officeSkillsEnabled"
-              size="tiny"
-              :type="officeSkillsOpen ? 'primary' : 'default'"
-              quaternary
-              @click="officeSkillsOpen = !officeSkillsOpen"
-            >
-              🗂️ 技能
-            </n-button>
-            <n-button
-              v-if="homeAdvisorEnabled"
-              size="tiny"
-              :type="homeAdvisorOpen ? 'primary' : 'default'"
-              quaternary
-              @click="homeAdvisorOpen = !homeAdvisorOpen"
-            >
-              🏠 家居建议
-            </n-button>
-            <n-button
-              v-if="homeDashboardEnabled"
-              size="tiny"
-              :type="homeDashboardOpen ? 'primary' : 'default'"
-              quaternary
-              @click="homeDashboardOpen = !homeDashboardOpen"
-            >
-              📊 家居面板
-            </n-button>
-            <n-button
-              v-if="homeAutomationEnabled"
-              size="tiny"
-              :type="rulesOpen ? 'primary' : 'default'"
-              quaternary
-              @click="rulesOpen = !rulesOpen"
-            >
-              ⚙️ 自动化
-            </n-button>
-            <n-button
-              v-if="eduEnabled"
-              size="tiny"
-              :type="eduOpen ? 'primary' : 'default'"
-              quaternary
-              @click="eduOpen = !eduOpen"
-            >
-              🎒 学习
-            </n-button>
-          </div>
+          <div class="chat-stage">
           <ChatView />
-          <FileEditorPane v-if="filesOpen && filesEnabled" />
-          <!-- 预览区跟着文件面板一起开合：不开文件树的时候它没有输入来源。
-               能力门控是**两个**：文件树给它输入，预览能力给它转换与沙箱窗口，
-               缺任何一个这块都没有意义（ADR-0002 D5 记的那个「一个 filesOpen
-               同时控制两个能力域」的问题，在这里先按两个判据拆开表达）。 -->
+          <FileEditorPane v-if="sidebarPane === 'files' && filesEnabled" />
           <PreviewPane
-            v-if="previewEnabled && (filesOpen || Boolean(artifacts.previewRelativePath) || Boolean(artifacts.previewArtifactId))"
+            v-if="previewEnabled && (sidebarPane === 'files' || Boolean(artifacts.previewRelativePath) || Boolean(artifacts.previewArtifactId))"
             :workspace-id="store.workspaceId ?? undefined"
             :relative-path="artifacts.previewRelativePath || undefined"
             :artifact-id="artifacts.previewArtifactId || undefined"
           />
-          <ChangesetPanel v-if="changesOpen && reviewEnabled" />
-          <SessionTreePanel v-if="sessionTreeOpen && sessionTreeEnabled" />
-          <GitPanel v-if="gitOpen && gitEnabled" />
-          <TerminalPanel v-if="terminalOpen && terminalEnabled" />
-          <ChildAgentPanel v-if="childAgentOpen && childAgentEnabled" />
-          <ConnectorPanel v-if="connectorOpen && connectorEnabled" />
-          <ConnectorChannelsPanel v-if="channelsOpen && channelsEnabled" />
-          <RemotePanel v-if="remoteOpen && remoteEnabled" />
-          <WorkflowPanel v-if="workflowOpen && workflowEnabled" />
-          <OfficeSkillsPanel v-if="officeSkillsOpen && officeSkillsEnabled" />
-          <HomeAdvisorPanel v-if="homeAdvisorOpen && homeAdvisorEnabled" />
-          <!-- 懒加载组件（首个 lazy 包）：v-if 为假时连 chunk 都不请求；挂载即
-               subscribe（登记基座缓存消费者），卸载即 unsubscribe（释放）。 -->
-          <HomeDashboardPanel v-if="homeDashboardOpen && homeDashboardEnabled" />
-          <RulesPanel v-if="rulesOpen && homeAutomationEnabled" />
-          <EduPanel v-if="eduOpen && eduEnabled" />
-          <!-- 紧贴输入框上方：这条提示要回答的是「我下一句话还能不能发出去」，
-               放在对话流里会随着历史一起被滚走。 -->
+          <ToolPane v-if="changesOpen && reviewEnabled" @close="changesOpen = false">
+            <ChangesetPanel />
+          </ToolPane>
+          <ToolPane v-if="sessionTreeOpen && sessionTreeEnabled" @close="sessionTreeOpen = false">
+            <SessionTreePanel />
+          </ToolPane>
+          <ToolPane v-if="gitOpen && gitEnabled" @close="gitOpen = false">
+            <GitPanel />
+          </ToolPane>
+          <ToolPane v-if="childAgentOpen && childAgentEnabled" @close="childAgentOpen = false">
+            <ChildAgentPanel />
+          </ToolPane>
+          <ToolPane v-if="remoteOpen && remoteEnabled && activeNav === 'chat'" @close="remoteOpen = false">
+            <RemotePanel />
+          </ToolPane>
+          <ToolPane v-if="homeAdvisorOpen && homeAdvisorEnabled" @close="homeAdvisorOpen = false">
+            <HomeAdvisorPanel />
+          </ToolPane>
+          <ToolPane v-if="homeDashboardOpen && homeDashboardEnabled" @close="homeDashboardOpen = false">
+            <HomeDashboardPanel />
+          </ToolPane>
+          <ToolPane v-if="rulesOpen && homeAutomationEnabled" @close="rulesOpen = false">
+            <RulesPanel />
+          </ToolPane>
+          <ToolPane v-if="eduOpen && eduEnabled" @close="eduOpen = false">
+            <EduPanel />
+          </ToolPane>
           <ModelErrorHint />
+          </div>
           <InputBar />
         </slot>
       </template>
     </div>
 
+    <TaskContextPanel
+      v-if="contextInline"
+      :collapsed="contextPanelCollapsed"
+      @close="closeContext"
+      @collapse="onContextCollapse"
+    />
+    <div
+      v-else-if="contextPanelOpen && activeNav === 'chat' && !contextPanelCollapsed"
+      class="context-drawer-scrim"
+      @click="closeContext"
+    />
+    <TaskContextPanel
+      v-if="!contextInline && contextPanelOpen && activeNav === 'chat'"
+      class="context-drawer"
+      :collapsed="contextPanelCollapsed"
+      @close="closeContext"
+      @collapse="onContextCollapse"
+    />
+    </div>
     <div v-if="dragging > 0" class="drop-mask">把图片或文件拖到这里交给我</div>
     <slot name="overlay">
       <ExtensionUiHost />
-      <SettingsModal />
+      <SettingsModal v-if="activeNav !== 'settings'" />
       <InstallBlockerDialog />
-      <PiResourcesPanel />
+      <PiResourcesPanel v-if="activeNav !== 'library'" />
       <ProjectTrustDialog />
-      <ProviderCenter />
-      <UsagePanel />
+      <ProviderCenter v-if="activeNav !== 'account'" />
+      <UsagePanel v-if="activeNav !== 'account'" />
       <ArtifactLibrary v-if="artifactsEnabled" />
-      <MemoryPanel v-if="memoryEnabled" />
-      <TasksPanel v-if="tasksEnabled" />
-      <PromptLibraryPanel v-if="promptLibraryEnabled" />
+      <MemoryPanel v-if="memoryEnabled && activeNav !== 'memory'" />
+      <TasksPanel v-if="tasksEnabled && activeNav !== 'tasks'" />
+      <PromptLibraryPanel v-if="promptLibraryEnabled && activeNav !== 'library'" />
     </slot>
   </div>
 </template>

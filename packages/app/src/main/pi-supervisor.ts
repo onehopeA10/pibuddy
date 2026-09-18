@@ -50,6 +50,11 @@ export interface SupervisorTarget extends ForwarderTarget {
 
 export interface LaunchOptions extends PiRuntimeStartOptions {
   spawn: PiSpawn;
+  /**
+   * 追加在会话参数之后的启动参数（PiClientOptions.extraArgs 的透传口）。
+   * 现阶段唯一的来源是 main/pi/kernel-extensions.ts 的 `--extension <路径>`。
+   */
+  extraArgs?: string[];
 }
 
 interface RuntimeRecord {
@@ -60,6 +65,8 @@ interface RuntimeRecord {
   sequence: number;
   forwarder: Forwarder;
   target: SupervisorTarget;
+  /** 当前回合是否还在跑。切走会话时靠它决定挂起还是复用进程。 */
+  busy: boolean;
 }
 
 export interface SupervisorLogger {
@@ -83,9 +90,11 @@ export type { PoolObserver } from "./agent-pool/pool-core.js";
 const NOOP_LOGGER: SupervisorLogger = { info: () => {}, warn: () => {} };
 
 export class PiSupervisor implements PiRuntimeSupervisor {
-  /** 按 webContents id 索引：一个窗口同时只允许一个活跃 runtime。 */
+  /** 窗口当前看着的那个 runtime。同一窗口可以另有挂起的后台 runtime。 */
   private byTarget = new Map<number, RuntimeRecord>();
   private byRuntimeId = new Map<string, RuntimeRecord>();
+  /** 握手后的真实 sessionId → runtime。切回去直接接上，不再 switch_session。 */
+  private bySessionId = new Map<string, RuntimeRecord>();
   /** 代际计数器：只增不减，进程生命周期内永不复用。 */
   private generationCounter = 0;
   private latest: PiRuntimeHandle | null = null;
@@ -165,17 +174,77 @@ export class PiSupervisor implements PiRuntimeSupervisor {
     };
   }
 
+  /** 前台这一轮还在跑：切走时必须挂起进程，不能 switch_session。 */
+  isForegroundBusy(targetId: number): boolean {
+    return this.byTarget.get(targetId)?.busy === true;
+  }
+
+  recordForSession(sessionId: string): { client: PiRpcClient; sessionId: string } | null {
+    if (!sessionId) return null;
+    const record = this.bySessionId.get(sessionId);
+    if (!record) return null;
+    return { client: record.client, sessionId: record.ctx.sessionId };
+  }
+
+  /**
+   * 把窗口前台 runtime 摘下来，进程不停。
+   *
+   * 用户切到别的会话时走这里：旧回合继续跑，事件仍转发，只是不再吃
+   * prompt / abort 这些前台动作。
+   */
+  parkTarget(targetId: number): { sessionId: string; client: PiRpcClient } | null {
+    const record = this.byTarget.get(targetId);
+    if (!record) return null;
+    this.byTarget.delete(targetId);
+    if (this.latest?.runtimeId === record.ctx.runtimeId) this.latest = null;
+    this.logger.info("pi_runtime_parked", {
+      runtimeId: record.ctx.runtimeId,
+      sessionId: record.ctx.sessionId,
+      busy: record.busy,
+    });
+    return { sessionId: record.ctx.sessionId, client: record.client };
+  }
+
+  /**
+   * 把已经在跑的会话重新接到窗口前台。找不到就返回 null，调用方再决定新起。
+   */
+  attachToTarget(target: SupervisorTarget, sessionId: string): PiRpcClient | null {
+    const record = this.bySessionId.get(sessionId);
+    if (!record) return null;
+    if (this.byTarget.get(target.id) === record) return record.client;
+    this.parkTarget(target.id);
+    record.target = target;
+    this.byTarget.set(target.id, record);
+    this.latest = {
+      runtimeId: record.ctx.runtimeId,
+      generation: record.ctx.generation,
+      workspaceId: record.ctx.workspaceId,
+      sessionId: record.ctx.sessionId,
+    };
+    this.logger.info("pi_runtime_attached", {
+      runtimeId: record.ctx.runtimeId,
+      sessionId: record.ctx.sessionId,
+      busy: record.busy,
+    });
+    return record.client;
+  }
+
   /**
    * 同步启动一个新 runtime。
    *
    * 之所以必须同步返回 client：调用方要在**任何 await 之前**把它登记进自己的
    * 索引，否则 spawn 失败时会留下一个永远查不到、也永远清不掉的死 client。
    */
-  launch(target: SupervisorTarget, options: LaunchOptions): {
+  launch(
+    target: SupervisorTarget,
+    options: LaunchOptions,
+    mode: "replace" | "park" = "replace"
+  ): {
     client: PiRpcClient;
     handle: PiRuntimeHandle;
   } {
-    this.disposeTarget(target.id);
+    if (mode === "park") this.parkTarget(target.id);
+    else this.disposeTarget(target.id);
 
     const generation = ++this.generationCounter;
     const client = new PiRpcClient({
@@ -184,6 +253,7 @@ export class PiSupervisor implements PiRuntimeSupervisor {
       session: options.sessionPath,
       sessionDir: options.sessionDir,
       generation,
+      ...(options.extraArgs?.length ? { extraArgs: options.extraArgs } : {}),
     });
     const ctx: EnvelopeContext = {
       workspaceId: options.workspaceId || options.cwd,
@@ -193,15 +263,20 @@ export class PiSupervisor implements PiRuntimeSupervisor {
       generation,
     };
     const forwarder = createForwarder(target, client);
-    const record: RuntimeRecord = { client, ctx, sequence: 0, forwarder, target };
+    const record: RuntimeRecord = { client, ctx, sequence: 0, forwarder, target, busy: false };
 
     client.on("event", (e: AgentEvent) => {
       if (!this.isCurrent(record)) return;
       // 「现在能不能安全地重启」的判据只认 pi 的这两个协议事件（UPD-004）。
       // 放在 isCurrent 之后：上一代 runtime 的迟到 agent_start 不该把
       // 更新安装拦在门外。
-      if (e.type === "agent_start") agentActivity.markBusy(client.runtimeId);
-      else if (e.type === "agent_settled") agentActivity.markSettled(client.runtimeId);
+      if (e.type === "agent_start") {
+        record.busy = true;
+        agentActivity.markBusy(client.runtimeId);
+      } else if (e.type === "agent_settled") {
+        record.busy = false;
+        agentActivity.markSettled(client.runtimeId);
+      }
       // 文件类工具的执行登记成待审阅变更（FS-102）。放在转发**之前**：
       // before 快照必须在工具动手之前抓到，而 tool_execution_start 到达这里
       // 与到达渲染进程之间没有别的同步点。observeToolEvent 自己吞掉全部异常，
@@ -224,7 +299,9 @@ export class PiSupervisor implements PiRuntimeSupervisor {
       if (report) sendPush(target, PUSH_CHANNELS.piModelError, this.nextEnvelope(record, report));
     });
     client.on("ui_request", (r: ExtensionUiRequest) => {
-      if (!this.isCurrent(record) || target.isDestroyed()) return;
+      if (!this.isCurrent(record) || record.target.isDestroyed()) return;
+      // 挂起在后台的会话不抢前台弹窗，否则用户会以为是当前会话在问。
+      if (this.byTarget.get(record.target.id) !== record) return;
       // 先登记再转发：渲染进程收到弹窗的下一刻就可能作答，此时挂起表里
       // 必须已经有这一条，否则合法回答会被判成 expired。
       this.uiHook?.(target.id, record.ctx.generation, r);
@@ -292,15 +369,22 @@ export class PiSupervisor implements PiRuntimeSupervisor {
     if (!sessionId) return;
     const record = this.byRuntimeId.get(runtimeId);
     if (!record) return;
+    const prevId = record.ctx.sessionId;
+    if (prevId && prevId !== sessionId && this.bySessionId.get(prevId) === record) {
+      this.bySessionId.delete(prevId);
+    }
     record.ctx.sessionId = sessionId;
+    this.bySessionId.set(sessionId, record);
     if (this.latest?.runtimeId === runtimeId) this.latest.sessionId = sessionId;
     // 真实 sessionId 到手才登记进池：此前 ctx.sessionId 还是占位（runtimeId /
     // sessionPath），用它做池的键会与后续事件的键对不上。
+    const pid = record.client.pid;
     this.poolObserver?.onAdopt({
       sessionId,
       workspaceId: record.ctx.workspaceId,
       runtimeId: record.ctx.runtimeId,
       generation: record.ctx.generation,
+      ...(pid !== undefined ? { pid } : {}),
     });
   }
 
@@ -317,7 +401,7 @@ export class PiSupervisor implements PiRuntimeSupervisor {
     await record.client.stop();
   }
 
-  /** 按 webContents 停掉当前 runtime（窗口关闭 / 重启 runtime 时调用）。 */
+  /** 按 webContents 停掉当前前台 runtime（休眠 / 重启当前会话）。挂起的后台不停。 */
   disposeTarget(targetId: number): void {
     const record = this.byTarget.get(targetId);
     if (!record) return;
@@ -325,10 +409,20 @@ export class PiSupervisor implements PiRuntimeSupervisor {
     void record.client.stop();
   }
 
+  /** 窗口关闭：前台和挂起的后台一起停。 */
+  disposeAllForTarget(targetId: number): void {
+    const records = [...this.byRuntimeId.values()].filter((r) => r.target.id === targetId);
+    for (const record of records) {
+      this.forget(record);
+      void record.client.stop();
+    }
+  }
+
   async dispose(): Promise<void> {
     const records = [...this.byRuntimeId.values()];
     this.byRuntimeId.clear();
     this.byTarget.clear();
+    this.bySessionId.clear();
     for (const record of records) record.forwarder.dispose();
     await Promise.all(records.map((r) => r.client.stop().catch(() => undefined)));
   }
@@ -351,6 +445,9 @@ export class PiSupervisor implements PiRuntimeSupervisor {
       this.byTarget.delete(record.target.id);
     }
     this.byRuntimeId.delete(record.ctx.runtimeId);
+    if (this.bySessionId.get(record.ctx.sessionId) === record) {
+      this.bySessionId.delete(record.ctx.sessionId);
+    }
     // runtime 没了就一定不忙了。漏掉这一行的话，一次崩溃会把 busy 永久钉住，
     // 用户从此再也装不上更新，而界面上没有任何线索。
     agentActivity.forget(record.ctx.runtimeId);

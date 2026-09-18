@@ -160,7 +160,7 @@ function resend(text: string): void {
       冒充新会话），必须明确告诉用户「这是加载失败」而不是「这个会话是空的」。
     -->
     <div v-if="store.sessionLoadError" class="session-load-error">
-      <span>😕 会话内容没能加载出来：{{ store.sessionLoadError }}</span>
+      <span>会话内容没能加载出来：{{ store.sessionLoadError }}</span>
       <n-button size="tiny" type="primary" secondary @click="store.reloadMessages()">
         重试
       </n-button>
@@ -176,7 +176,7 @@ function resend(text: string): void {
     </div>
     <div v-else class="chat-inner">
       <div v-if="win.loadError.value" class="history-load-error">
-        <span>😕 更早的消息没能加载出来：{{ win.loadError.value }}</span>
+        <span>更早的消息没能加载出来：{{ win.loadError.value }}</span>
         <n-button
           size="tiny"
           type="primary"
@@ -215,6 +215,8 @@ function resend(text: string): void {
           :message="item.message"
           :message-key="item.key"
           :streaming="item.streaming"
+          :started-at="item.startedAt"
+          :ended-at="item.endedAt"
           :artifacts="artifactsOf(item)"
           @resend="resend"
         />
@@ -229,7 +231,7 @@ function resend(text: string): void {
       aria-label="跳到底部"
       @click="jumpToBottom"
     >
-      ↓ 跳到底部
+      回到底部
     </n-button>
   </div>
 </template>
@@ -240,23 +242,24 @@ function resend(text: string): void {
   align-items: center;
   gap: 8px;
   margin: 12px 0;
-  color: #ef4444;
-  font-size: 12px;
+  color: var(--status-error);
+  font-size: var(--font-ui-12);
 }
 .unread-divider::before,
 .unread-divider::after {
   content: "";
   flex: 1;
   height: 1px;
-  background: #fecaca;
+  background: var(--status-error);
+  opacity: 0.35;
 }
 .session-opening {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 40vh;
-  color: #64748b;
-  font-size: 13px;
+  color: var(--text-secondary);
+  font-size: var(--font-ui-13);
 }
 .history-load-error {
   display: flex;
@@ -264,12 +267,13 @@ function resend(text: string): void {
   gap: 8px;
   justify-content: center;
   margin-bottom: 16px;
-  font-size: 12.5px;
-  color: #b45309;
+  font-size: var(--font-ui-13);
+  color: var(--status-warning);
 }
 .jump-bottom {
   position: sticky;
   bottom: 12px;
   left: 50%;
+  background: var(--bg-surface-raised) !important;
 }
 </style>

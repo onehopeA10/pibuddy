@@ -67,6 +67,9 @@ job 里 `${{ secrets.X }}` 是空串，而不是一个明确的报错 —— 表
 | `upload-artifacts` | 构建时直接消费 Windows / macOS 签名与公证凭据 |
 | `publish-manifest` | 发布前二次核验凭据，并执行不可撤回的发布动作 |
 
+`regression` job **不**声明 `environment: release`：它只跑 `pnpm test:regression`，
+不读任何 secret。给它挂 environment 只会多一次人工审批，测试本身拿不到凭据。
+
 若在 environment 上配置了 **required reviewers**，审批会在这三个阶段各请求
 一次（`upload-artifacts` 的三个平台同属一个阶段，一次批完）。这不是缺陷：
 第一次批的是「允许开始构建」，最后一次批的是「允许把清单推给全网客户端」。
@@ -179,7 +182,7 @@ job 里 `${{ secrets.X }}` 是空串，而不是一个明确的报错 —— 表
 1. 从出问题的 tag 切分支：`git switch -c hotfix/v<x.y.z+1> v<x.y.z>`。
 2. 只改导致问题的那一处。hotfix 分支上**不合并**任何其它 PR ——
    "顺便带上"是 hotfix 变成第二次事故的最常见原因。
-3. 本地跑：`pnpm typecheck && pnpm test && pnpm build`。
+3. 本地跑：`pnpm test:regression`（要连打包冒烟再加 `pnpm test:regression:full`）。
 4. bump patch 版本，打 tag，push。`Release` workflow 会自动跑。
 5. **分阶段放量**：先把清单发到 `beta` 渠道，找 5~10 台机器验证
    N→N+1 真的走通了，再切 `stable`。
@@ -199,3 +202,30 @@ job 里 `${{ secrets.X }}` 是空串，而不是一个明确的报错 —— 表
 | 日期 | 项 | 操作人 | 备注 |
 |---|---|---|---|
 | （待填） | | | |
+
+---
+
+## 9. 发布前人工清单
+
+`pnpm test:regression` / Release 的 `regression` job 覆盖机器能判的部分
+（类型、闸门、单测、解包启动）。下面四项**不能**假装自动化了，每次正式
+发布前由人在真机上勾：
+
+| # | 项 | 怎样算过 | 为什么机器做不了 |
+|---|---|---|---|
+| 1 | 签名安装包 | 干净 Windows 上双击 NSIS，SmartScreen 不永久拦截；干净 macOS 上 dmg 能打开且 Gatekeeper 放行 | 凭据与信誉在证书侧，CI runner 不是用户桌面 |
+| 2 | 真模型一轮对话 | 配好真实 key 后：发一句、权限弹窗能批、中断后「继续」、记忆页能看到本轮注入 | CI 没有真实供应商账号，也不该把 key 写进日志 |
+| 3 | N→N+1 自动更新 | 干净机装着 N，feed 切到 N+1 后检查更新能下完并重启到新版本 | 需要两份已签名安装包 + 对外 feed，不是 `--dir` 能代替的 |
+| 4 | 渠道与通知 | 至少一条真实渠道（飞书 / Slack / Telegram）能把回复送出去 | 依赖外部 webhook 与租户配置 |
+
+本地发布前最小命令：
+
+```
+pnpm test:regression
+```
+
+打安装包并启动解包产物（十几分钟，对得上 CI `package` job）：
+
+```
+pnpm test:regression:full
+```

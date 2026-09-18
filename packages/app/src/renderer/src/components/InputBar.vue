@@ -17,10 +17,12 @@ import { imageCapableModels, supportsImage } from "../stores/model-capability";
 import { VoiceRecorder } from "../stt";
 import QueuePanel from "./QueuePanel.vue";
 import ExtensionWidgetHost from "./ExtensionWidgetHost.vue";
+import ModelComposerControls from "./ModelComposerControls.vue";
+import ApprovalModeControl from "./ApprovalModeControl.vue";
 
 const store = useAppStore();
 const message = useMessage();
-const composerLocked = computed(() => !store.started || store.switchingSessionId !== null);
+const composerLocked = computed(() => !store.canCompose || store.switchingSessionId !== null);
 
 /**
  * 图片与文件附件**归 store 的 composer 所有**，这里只是同名代理。
@@ -578,7 +580,7 @@ onBeforeUnmount(() => {
           <span class="close" @click="images.splice(i, 1)">✕</span>
         </span>
         <span v-for="(f, i) in files" :key="`file-${i}`" class="attach-chip">
-          <span>{{ f.kind === "video" ? "🎬" : "📎" }}</span>
+          <span>{{ f.kind === "video" ? "视频" : "文件" }}</span>
           <!-- 有相对路径就显示相对路径：同名文件靠它区分，而绝对路径
                从主进程起就没有出口 -->
           <span class="name" :title="f.relativePath ?? f.name">{{ f.relativePath ?? f.name }}</span>
@@ -675,8 +677,10 @@ onBeforeUnmount(() => {
       />
 
       <div class="composer-actions">
+        <ModelComposerControls />
+        <ApprovalModeControl />
         <n-button quaternary size="small" :disabled="composerLocked" @click="pickFiles">
-          📎 文件
+          文件
         </n-button>
         <n-button
           quaternary
@@ -686,19 +690,21 @@ onBeforeUnmount(() => {
           @click="toggleVoice"
         >
           <template v-if="transcribing"><n-spin :size="14" style="margin-right: 4px" />识别中…</template>
-          <template v-else-if="recording">🔴 说完了，点我</template>
-          <template v-else>🎤 语音</template>
+          <template v-else-if="recording">说完了，点我</template>
+          <template v-else>语音</template>
         </n-button>
         <span class="composer-hint" v-if="recording">正在听你说…</span>
         <div style="flex: 1" />
         <n-button
-          v-if="store.streaming"
+          v-if="store.streaming || store.aborting"
           size="small"
           type="error"
           secondary
+          :loading="store.aborting"
+          :disabled="store.aborting"
           @click="store.abortRun()"
         >
-          ⏹ 停止
+          {{ store.aborting ? "正在停止" : "停止" }}
         </n-button>
         <!--
           助手在跑的时候，「现在就打断」和「等它做完这一轮」是两件事，
@@ -754,7 +760,7 @@ onBeforeUnmount(() => {
           "
           @click="submit()"
         >
-          发送 ↩
+          发送
         </n-button>
       </div>
     </div>
@@ -772,23 +778,23 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 .work-chip {
-  border: 1px solid rgba(99, 102, 241, 0.28);
+  border: 1px solid var(--border-subtle);
   background: transparent;
-  color: #4b5563;
+  color: var(--text-secondary);
   border-radius: 999px;
-  padding: 2px 10px;
+  padding: 3px 12px;
   font-size: 12px;
   cursor: pointer;
 }
 .work-chip.on {
-  background: #6366f1;
-  color: #fff;
-  border-color: #6366f1;
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+  border-color: var(--accent);
 }
 .work-hint,
 .plan-bar {
   font-size: 12px;
-  color: #8a8f98;
+  color: var(--text-secondary);
 }
 .plan-bar {
   display: flex;
@@ -797,13 +803,13 @@ onBeforeUnmount(() => {
   gap: 8px;
   margin: 0 0 8px;
   padding: 6px 8px;
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-l);
 }
 /* 受阻的图片附件：视觉上一眼可辨，同时 aria-disabled 让辅助技术也读得到 */
 .attach-chip.blocked {
   opacity: 0.55;
-  outline: 1px dashed rgba(208, 48, 80, 0.6);
+  outline: 1px dashed var(--status-error);
 }
 .image-blocked {
   display: flex;
@@ -812,10 +818,10 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   margin: 4px 0 8px;
   font-size: 12.5px;
-  color: #d03050;
+  color: var(--status-error);
 }
 .image-blocked .muted {
-  color: #8a8f98;
+  color: var(--text-secondary);
 }
 .model-switcher {
   list-style: none;
@@ -824,19 +830,19 @@ onBeforeUnmount(() => {
   width: 100%;
   max-height: 200px;
   overflow: auto;
-  border: 1px solid rgba(128, 128, 128, 0.25);
-  border-radius: 6px;
-  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-m);
+  background: var(--bg-surface-raised);
 }
 .model-switcher li {
   padding: 5px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-s);
   cursor: pointer;
-  color: #333;
+  color: var(--text-primary);
 }
 .model-switcher li:hover,
 .model-switcher li:focus-visible {
-  background: rgba(24, 160, 88, 0.12);
+  background: var(--bg-hover);
   outline: none;
 }
 

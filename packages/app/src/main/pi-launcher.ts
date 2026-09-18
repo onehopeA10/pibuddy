@@ -18,8 +18,27 @@ export {
   PiRuntimeResolveError,
   assertRuntimeHandshake,
 } from "./pi-runtime-manifest.js";
+export { kernelExtensionArgs } from "./pi/kernel-extensions.js";
 
 const PI_PACKAGE = "@earendil-works/pi-coding-agent";
+
+/**
+ * 内置 pi 子进程的 V8 老生代堆上限（MB）。
+ *
+ * 不传的话 Node 按机器物理内存推默认值（64 位机器上通常 2–4 GB），长会话里
+ * 消息与工具输出常驻堆一路涨到 GC 才勉强压一压。转换 worker 早就给了 512，
+ * pi 一直没给。1024 取用户给的 768–1024 区间上限：够跑几百轮对话与大文件
+ * 工具输出，又能把一个失控的 runtime 兜在 1 GB 左右而不是拖垮整机。
+ *
+ * 只对 **bundled**（Electron 作 Node 跑 cli.js）生效：external 模式的命令
+ * 可能是 `pi.cmd` / 任意包装脚本，V8 参数放在它前面不一定被理解。
+ */
+export const PI_HEAP_LIMIT_MB = 1024;
+
+/** 放在 cli.js 之前的 Node/V8 启动参数（bundled 形态）。 */
+export function bundledNodeFlags(): string[] {
+  return [`--max-old-space-size=${PI_HEAP_LIMIT_MB}`];
+}
 
 /**
  * 传给 pi 子进程的环境变量白名单。
@@ -217,7 +236,7 @@ function resolveBundledPackaged(resourcesPath: string): ResolvedPiRuntime {
   return {
     source: "bundled",
     command: process.execPath,
-    prefixArgs: [entry],
+    prefixArgs: [...bundledNodeFlags(), entry],
     bundledVersion: manifest.version,
     protocolVersion: manifest.protocolVersion,
     runtimeRoot,
@@ -293,7 +312,7 @@ export function resolvePiRuntime(ctx: PiLauncherContext = {}): ResolvedPiRuntime
   if (!fs.existsSync(entry)) {
     throw new PiRuntimeResolveError(`开发形态定位到的 pi 入口不存在：${entry}`);
   }
-  return { source: "bundled", command: process.execPath, prefixArgs: [entry] };
+  return { source: "bundled", command: process.execPath, prefixArgs: [...bundledNodeFlags(), entry] };
 }
 
 /**

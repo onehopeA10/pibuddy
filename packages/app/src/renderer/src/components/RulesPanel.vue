@@ -56,7 +56,7 @@ function remove(rule: AutomationRule): void {
 <template>
   <aside class="rules-panel">
     <header class="head">
-      <span class="title">⚙️ 自动化规则</span>
+      <span class="title">自动化规则</span>
       <span class="count">{{ store.rules.length }} 条</span>
       <NButton size="tiny" quaternary :loading="store.loading" @click="reload">刷新</NButton>
     </header>
@@ -121,10 +121,11 @@ function remove(rule: AutomationRule): void {
 .rules-panel {
   display: flex;
   flex-direction: column;
-  width: 320px;
-  height: 100%;
-  border-left: 1px solid var(--border-color, #e2e8f0);
-  background: var(--panel-bg, #fff);
+  width: 100%;
+  border-top: var(--border-w) solid var(--border-subtle);
+  padding: 8px;
+  min-height: 240px;
+  max-height: 420px;
   overflow: hidden;
 }
 .head {
@@ -132,7 +133,7 @@ function remove(rule: AutomationRule): void {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .title {
   font-weight: 600;
@@ -140,7 +141,7 @@ function remove(rule: AutomationRule): void {
 }
 .count {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-secondary);
   margin-right: auto;
 }
 .msg {
@@ -149,12 +150,11 @@ function remove(rule: AutomationRule): void {
   font-size: 12px;
 }
 .msg.error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--status-error);
+  background: var(--danger-bg);
 }
 .msg.hint {
-  color: #64748b;
-  background: #f8fafc;
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 .body {
@@ -166,9 +166,9 @@ function remove(rule: AutomationRule): void {
   gap: 10px;
 }
 .card {
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  padding: 14px 16px;
 }
 .card-head {
   display: flex;
@@ -183,17 +183,17 @@ function remove(rule: AutomationRule): void {
 .line {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #334155;
+  color: var(--text-primary);
   line-height: 1.5;
 }
 .action-tag {
   margin-right: 4px;
 }
 .error-line {
-  color: #b91c1c;
+  color: var(--status-error);
 }
 .fired-line {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 .card-foot {
   margin-top: 6px;

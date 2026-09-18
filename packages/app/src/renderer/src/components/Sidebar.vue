@@ -2,29 +2,54 @@
 import { NButton } from "naive-ui";
 import { useAppStore } from "../stores/app";
 import SessionListPanel from "./SessionListPanel.vue";
+import FileTreePanel from "./FileTreePanel.vue";
 import { formatCost, formatTokenCount } from "../friendly";
+
+defineProps<{
+  filesEnabled?: boolean;
+  pane?: "sessions" | "files";
+}>();
+const emit = defineEmits<{
+  "update:pane": [value: "sessions" | "files"];
+}>();
 
 const store = useAppStore();
 </script>
 
 <template>
   <aside class="sidebar">
-    <div class="brand">
-      <div class="logo">π</div>
-      <div>
-        PiBuddy
-        <small>AI 办公小助手</small>
-      </div>
+    <div v-if="filesEnabled" class="sidebar-tabs">
+      <button
+        type="button"
+        class="sidebar-tab"
+        :class="{ on: pane !== 'files' }"
+        @click="emit('update:pane', 'sessions')"
+      >
+        会话
+      </button>
+      <button
+        type="button"
+        class="sidebar-tab"
+        :class="{ on: pane === 'files' }"
+        @click="emit('update:pane', 'files')"
+      >
+        文件
+      </button>
     </div>
-
     <div class="new-task">
-      <n-button type="primary" block :disabled="!store.started" @click="store.newTask()">
-        ＋ 开始新任务
+      <n-button
+        type="primary"
+        block
+        :disabled="!store.workspaceId"
+        :loading="store.creatingTask"
+        @click="store.newTask()"
+      >
+        新建任务
       </n-button>
     </div>
 
-    <!-- 列表、搜索、整理动作全在 SessionListPanel 里；侧边栏只负责布局 -->
-    <SessionListPanel />
+    <FileTreePanel v-if="filesEnabled && pane === 'files'" />
+    <SessionListPanel v-else />
 
     <div class="footer">
       <span v-if="store.stats">
@@ -35,7 +60,7 @@ const store = useAppStore();
         <template v-else>{{ formatCost(store.stats.cost) }}</template>
       </span>
       <span v-else></span>
-      <n-button quaternary size="small" @click="store.settingsOpen = true">⚙️ 设置</n-button>
+      <span />
     </div>
   </aside>
 </template>

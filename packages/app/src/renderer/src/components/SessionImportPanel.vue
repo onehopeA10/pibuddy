@@ -102,14 +102,14 @@ async function run(): Promise<void> {
 .import {
   margin: 12px 0 16px;
   padding-top: 8px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: var(--border-w) solid var(--border-subtle);
 }
 .lead {
-  font-size: 12.5px;
+  font-size: var(--font-ui-12);
 }
 .notice {
-  font-size: 12.5px;
-  color: #4b5563;
+  font-size: var(--font-ui-12);
+  color: var(--text-secondary);
   margin: 4px 0;
 }
 .list {
@@ -124,11 +124,11 @@ async function run(): Promise<void> {
   flex-direction: column;
   gap: 2px;
   padding: 6px 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .meta {
-  font-size: 12px;
-  color: #8a8f98;
+  font-size: var(--font-ui-12);
+  color: var(--text-tertiary);
   padding-left: 22px;
 }
 </style>

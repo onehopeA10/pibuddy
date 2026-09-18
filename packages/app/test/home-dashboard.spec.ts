@@ -559,7 +559,11 @@ describe("C. 懒加载闸门首个非空生效（capability.ts D2 连带约束�
       path.resolve(import.meta.dirname, "../src/renderer/src/components/AppShell.vue"),
       "utf8"
     );
-    expect(appShell).toContain('defineAsyncComponent(() => import("./HomeDashboardPanel.vue"))');
+    // lazyPage 是 AppShell 里对 defineAsyncComponent 的本地包装（统一 loading 态），
+    // 动态 import 仍在其参数里 —— 打包器拆 chunk 看的是 import()，不是包装名。
+    expect(appShell).toMatch(
+      /(?:defineAsyncComponent|lazyPage)\(\(\) => import\("\.\/HomeDashboardPanel\.vue"\)\)/
+    );
     expect(/^import\s+HomeDashboardPanel\s+from/m.test(appShell)).toBe(false);
   });
 });

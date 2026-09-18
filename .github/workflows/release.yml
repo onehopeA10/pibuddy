@@ -87,10 +87,45 @@ jobs:
           fi
           echo "::warning::channel=${RELEASE_CHANNEL} -> producing UNSIGNED artifacts. They must never be published to the stable feed."
 
+  # ------------------------------------------------- 自动化回归（机器能判的全部）
+  # 签名闸门过了不等于产品还能用。此前正式 tag 只打包、不跑 pnpm test，
+  # 主分支绿过的用例在打 tag 到发布之间的空窗里等于没人再看一眼。
+  # 本 job 不消费 secrets，因此不声明 environment: release —— 否则多一次
+  # 人工审批，而测试根本读不到任何凭据。
+  regression:
+    name: regression (typecheck + gates + tests)
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # pnpm/action-setup v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10
+
+      # actions/setup-node v4
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Full automated regression
+        run: node scripts/release-regression.mjs
+
   # ------------------------------------------------- 三平台构建 + 不可变产物
   upload-artifacts:
     name: upload-artifacts (${{ matrix.platform }})
-    needs: preflight
+    needs:
+      - preflight
+      - regression
     # 构建 job 直接消费 WIN_CSC_LINK / CSC_LINK / 三个 Apple 凭据，
     # 因此同样必须落在 `release` environment 上。
     environment: release
@@ -164,6 +199,14 @@ jobs:
       # 只是装完之后 pi 起不来或预览整体不可用。CI 的 package job 跑的是同一个脚本。
       - name: Verify packaged artifacts
         run: node packages/app/scripts/verify-packaged-app.mjs
+
+      # Linux runner 没有 DISPLAY；冒烟脚本在无 DISPLAY 时会自己套 xvfb-run。
+      - name: Install xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Smoke packaged app
+        run: node packages/app/scripts/smoke-packaged-app.mjs
 
       - name: Verify release artifacts
         run: node packages/app/scripts/verify-release-artifacts.mjs ${{ matrix.platform }} --channel ${{ env.RELEASE_CHANNEL }}

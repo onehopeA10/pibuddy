@@ -88,7 +88,7 @@ function runAction(): void {
 .hint-raw summary {
   cursor: pointer;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--text-tertiary);
 }
 .hint-raw pre {
   margin: 6px 0 0;

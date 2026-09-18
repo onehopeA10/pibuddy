@@ -178,6 +178,7 @@ describe("extension veto（data.cancelled）", () => {
     const warn = vi.fn();
     store.setNotifier({ info: vi.fn(), success: vi.fn(), warning: warn, error: vi.fn() });
     fillSessionScopedState(store);
+    store.started = true;
     store.draftAttachments = [{ token: "keep", name: "keep.txt", size: 1, kind: "other" }];
     commandHandler = (cmd) =>
       cmd.type === "new_session"
@@ -191,6 +192,38 @@ describe("extension veto（data.cancelled）", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     // 否决后不该继续拉状态
     expect(commandLog).toEqual(["new_session"]);
+  });
+
+  it("上一轮还在输出时挂起当前会话再 new_session，不 abort", async () => {
+    const store = useAppStore();
+    store.setNotifier({ info: vi.fn(), success: vi.fn(), warning: vi.fn(), error: vi.fn() });
+    fillSessionScopedState(store);
+    store.started = true;
+    store.streaming = true;
+
+    await store.newTask();
+
+    expect(commandLog[0]).toBe("new_session");
+    expect(store.items).toEqual([]);
+  });
+
+  it("new_session 抛错时弹出提示，不把界面清成空白", async () => {
+    const store = useAppStore();
+    const error = vi.fn();
+    store.setNotifier({ info: vi.fn(), success: vi.fn(), warning: vi.fn(), error });
+    fillSessionScopedState(store);
+    store.started = true;
+    const piBuddy = (globalThis as unknown as { window: { piBuddy: { pi: { newSession: unknown } } } })
+      .window.piBuddy;
+    piBuddy.pi.newSession = vi.fn(async () => {
+      throw new Error("new_session 超时");
+    });
+
+    await store.newTask();
+
+    expect(store.items.length).toBe(1);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(String(error.mock.calls[0]?.[0])).toContain("超时");
   });
 
   it("switch_session 被否决时消息不变且给出警告", async () => {

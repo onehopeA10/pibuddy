@@ -56,7 +56,7 @@ function openDiagnostics(): void {
     <ul style="margin: 0 0 8px; padding-left: 20px">
       <li v-for="item in state.disabled" :key="item">{{ item }}</li>
     </ul>
-    <p v-if="state.previousVersion" style="margin: 0 0 8px; font-size: 12.5px; color: #8a8f98">
+    <p v-if="state.previousVersion" style="margin: 0 0 8px; font-size: var(--font-ui-12); color: var(--text-tertiary)">
       上一个正常启动过的版本是 {{ state.previousVersion }}。PiBuddy
       不会自动把你降回去 —— 需要的话请自行下载安装。
     </p>

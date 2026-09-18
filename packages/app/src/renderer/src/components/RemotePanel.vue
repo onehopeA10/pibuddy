@@ -47,7 +47,7 @@ async function copyPairing(): Promise<void> {
 <template>
   <div class="remote-panel">
     <header class="rp-head">
-      <span class="rp-title">📡 远程访问</span>
+      <span class="rp-title">远程访问</span>
       <span class="rp-sub">默认只绑 127.0.0.1（对外零暴露）。LAN 需主动开启。</span>
     </header>
 
@@ -163,7 +163,7 @@ async function copyPairing(): Promise<void> {
 }
 .rp-sub {
   font-size: 12px;
-  color: var(--n-text-color-3, #888);
+  color: var(--text-tertiary);
 }
 .rp-row {
   display: flex;
@@ -178,14 +178,14 @@ async function copyPairing(): Promise<void> {
   font-size: 12px;
 }
 .rp-error {
-  color: #c92a2a;
+  color: var(--status-error);
   font-size: 12px;
 }
 .rp-pairing {
   margin-top: 6px;
-  padding: 8px;
-  border: 1px dashed #d1d5db;
-  border-radius: 8px;
+  padding: 12px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-l);
 }
 .rp-url {
   display: block;
@@ -198,9 +198,9 @@ async function copyPairing(): Promise<void> {
   font-size: 13px;
 }
 .rp-device {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 8px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  padding: 12px 14px;
   margin-bottom: 8px;
 }
 .rp-device-head {
@@ -235,7 +235,7 @@ async function copyPairing(): Promise<void> {
   padding: 2px 0;
 }
 .rp-audit-ev {
-  color: var(--n-primary-color, #3b5bdb);
+  color: var(--accent);
   min-width: 120px;
 }
 </style>

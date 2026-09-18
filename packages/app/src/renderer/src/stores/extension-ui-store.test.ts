@@ -251,6 +251,14 @@ describe("九个 method 的渲染侧路由", () => {
     expect(s.extStatus).toBe("YOLO");
   });
 
+  it("approval-mode 不上顶栏，避免和输入框下拉重复一份英文", () => {
+    const s = useExtensionUiStore();
+    s.setStatus("approval-mode", "YOLO");
+    s.setStatus("other", "AUTO");
+    expect(s.statusTexts["ext:approval-mode"]).toBe("YOLO");
+    expect(s.extStatus).toBe("AUTO");
+  });
+
   it("四个 dialog 方法都进队列，notify 不进队列", () => {
     const app = useAppStore();
     const s = useExtensionUiStore();

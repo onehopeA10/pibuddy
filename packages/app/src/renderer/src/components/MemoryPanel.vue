@@ -16,6 +16,9 @@ import { NButton, NCheckbox, NInput, NModal, NSelect, NSpin, NSwitch, NTag } fro
 import { useAppStore } from "../stores/app";
 import { useMemoryStore } from "../stores/memory";
 import type { MemoryScope, MemoryType } from "@contract";
+import PanelFrame from "./PanelFrame.vue";
+
+const props = defineProps<{ embedded?: boolean }>();
 
 const app = useAppStore();
 const store = useMemoryStore();
@@ -125,13 +128,14 @@ watch(
 </script>
 
 <template>
-  <n-modal
-    v-model:show="store.panelOpen"
-    preset="card"
-    style="width: 920px; max-width: 94vw"
+  <PanelFrame
+    :embedded="embedded"
+    :show="store.panelOpen"
     title="长期记忆"
-    aria-label="长期记忆"
+    width="920px"
+    @update:show="store.panelOpen = $event"
   >
+    <div class="feature-page">
     <!-- 注入开关 -->
     <div class="bar">
       <label class="toggle">
@@ -390,13 +394,15 @@ watch(
         :input-props="{ 'aria-label': '合并后的内容' }"
       />
     </n-modal>
-  </n-modal>
+    </div>
+  </PanelFrame>
 </template>
 
 <style scoped>
 .bar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 10px;
 }
@@ -410,14 +416,15 @@ watch(
   flex: 1;
 }
 .add {
-  border: 1px solid #eef0f3;
-  border-radius: 8px;
-  padding: 8px;
-  margin-bottom: 12px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  padding: 14px 16px;
+  margin-bottom: 14px;
 }
 .add-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
 }
@@ -425,15 +432,17 @@ watch(
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 42vh;
+  max-height: none;
   overflow: auto;
 }
 .row {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 8px 4px;
-  border-bottom: 1px solid #f1f3f5;
+  padding: 12px 14px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 8px;
 }
 .row.excluded {
   opacity: 0.55;
@@ -449,8 +458,8 @@ watch(
   flex-wrap: wrap;
 }
 .conf {
-  color: #9ca3af;
-  font-size: 12px;
+  color: var(--text-tertiary);
+  font-size: var(--font-ui-12);
 }
 .content {
   margin-top: 4px;
@@ -464,12 +473,12 @@ watch(
 }
 .evidence {
   margin-top: 6px;
-  border-left: 3px solid #d0d7de;
+  border-left: 3px solid var(--border-strong);
   padding-left: 8px;
 }
 .ev-src {
-  color: #6b7280;
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: var(--font-ui-12);
 }
 .ev-text {
   max-height: 160px;
@@ -485,8 +494,8 @@ watch(
 }
 .hits {
   margin-top: 14px;
-  border-top: 1px solid #eef0f3;
-  padding-top: 8px;
+  border-top: var(--border-w) solid var(--border-subtle);
+  padding-top: var(--space-3);
 }
 .hit-list {
   list-style: none;
@@ -502,17 +511,17 @@ watch(
   padding: 3px 0;
 }
 .hit-preview {
-  color: #4b5563;
-  font-size: 12.5px;
+  color: var(--text-secondary);
+  font-size: var(--font-ui-12);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .semantic {
-  border: 1px solid #eef0f3;
-  border-radius: 8px;
-  padding: 8px;
-  margin-bottom: 12px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  padding: 14px 16px;
+  margin-bottom: 14px;
 }
 .embed-stat {
   font-size: 12px;
@@ -529,8 +538,10 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid #f4f6f8;
+  padding: 8px 10px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 6px;
 }
 .sem-content {
   flex: 1;
@@ -541,14 +552,14 @@ watch(
   font-size: 13px;
 }
 .sem-score {
-  color: #2563eb;
-  font-size: 12px;
+  color: var(--accent);
+  font-size: var(--font-ui-12);
   font-variant-numeric: tabular-nums;
 }
 .knowledge {
   margin-top: 14px;
-  border-top: 1px solid #eef0f3;
-  padding-top: 8px;
+  border-top: var(--border-w) solid var(--border-subtle);
+  padding-top: var(--space-3);
 }
 .kb-add {
   display: flex;
@@ -560,8 +571,10 @@ watch(
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid #f1f3f5;
+  padding: 10px 12px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 8px;
 }
 .kb-main {
   flex: 1;
@@ -573,23 +586,23 @@ watch(
 }
 .kb-content {
   margin-top: 2px;
-  font-size: 12.5px;
-  color: #374151;
+  font-size: var(--font-ui-12);
+  color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
 }
 .kb-cite {
   margin-top: 3px;
-  font-size: 11.5px;
-  color: #9ca3af;
+  font-size: var(--font-ui-11);
+  color: var(--text-tertiary);
 }
 .muted {
-  color: #9ca3af;
-  font-size: 13px;
+  color: var(--text-tertiary);
+  font-size: var(--font-ui-13);
 }
 .err {
-  color: #dc2626;
-  font-size: 12.5px;
+  color: var(--status-error);
+  font-size: var(--font-ui-12);
 }
 .center {
   display: flex;

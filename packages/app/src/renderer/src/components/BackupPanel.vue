@@ -92,9 +92,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div style="margin-top: 12px; border-top: 1px solid #eceef2; padding-top: 12px">
-    <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px">备份与恢复</div>
-    <div style="font-size: 12.5px; color: #8a8f98; margin-bottom: 8px">
+  <div style="margin-top: 12px; border-top: 1px solid var(--border-subtle); padding-top: 12px">
+    <div style="font-size: var(--font-ui-13); font-weight: 600; margin-bottom: 4px">备份与恢复</div>
+    <div style="font-size: var(--font-ui-12); color: var(--text-tertiary); margin-bottom: 8px">
       把本机的 {{ status?.storeIds.length ?? 0 }} 个数据库（会话索引、记忆、任务、工作流、
       用量统计等）连同工作区注册表复制到你选的文件夹。
       <strong>不是同一瞬间的整体快照</strong>：各个数据库是依次备份的，每个自己完整，<!-- copy-allow: 「瞬间」在否定句里用于否认原子性，是诚实披露不是承诺 -->
@@ -115,13 +115,13 @@ onMounted(() => {
       </n-button>
     </n-space>
 
-    <div v-if="status?.lastBackup" style="font-size: 12.5px; color: #4b5563; margin-bottom: 6px">
+    <div v-if="status?.lastBackup" style="font-size: var(--font-ui-12); color: var(--text-secondary); margin-bottom: 6px">
       上次备份：{{ humanTime(status.lastBackup.at) }} ·
       {{ status.lastBackup.fileCount }} 个文件 ·
       {{ humanSize(status.lastBackup.totalBytes) }}
-      <div style="color: #8a8f98; word-break: break-all">{{ status.lastBackup.path }}</div>
+      <div style="color: var(--text-tertiary); word-break: break-all">{{ status.lastBackup.path }}</div>
     </div>
-    <div v-else style="font-size: 12.5px; color: #8a8f98; margin-bottom: 6px">还没有备份过。</div>
+    <div v-else style="font-size: var(--font-ui-12); color: var(--text-tertiary); margin-bottom: 6px">还没有备份过。</div>
 
     <n-alert
       v-if="status?.pendingRestore"
@@ -139,8 +139,8 @@ onMounted(() => {
       <p style="white-space: pre-wrap; margin: 0">{{ error }}</p>
     </n-alert>
 
-    <div v-if="validation" style="font-size: 12.5px">
-      <div :style="{ color: validation.ok ? '#16a34a' : '#dc2626', marginBottom: '2px' }">
+    <div v-if="validation" style="font-size: var(--font-ui-12)">
+      <div :style="{ color: validation.ok ? 'var(--status-success)' : 'var(--status-error)', marginBottom: '2px' }">
         上次校验（{{ humanTime(validation.checkedAt) }}）：{{ validation.ok ? "通过" : "未通过" }}
         <span v-if="validation.ok">
           · {{ validation.stores.length }} 个库 · {{ validation.fileCount }} 个文件 ·
@@ -149,11 +149,11 @@ onMounted(() => {
       </div>
       <ul
         v-if="validation.reasons.length"
-        style="margin: 0 0 6px; padding-left: 20px; color: #dc2626"
+        style="margin: 0 0 6px; padding-left: 20px; color: var(--status-error)"
       >
         <li v-for="(reason, i) in validation.reasons" :key="i">{{ reason }}</li>
       </ul>
-      <div v-if="validation.artifacts" style="color: #6b7280">
+      <div v-if="validation.artifacts" style="color: var(--text-tertiary)">
         产物对账（仅供参考，不影响备份是否可用）：已核对
         {{ validation.artifacts.checked }} 条 · 文件已不在
         {{ validation.artifacts.missing }} 条 · 大小对不上

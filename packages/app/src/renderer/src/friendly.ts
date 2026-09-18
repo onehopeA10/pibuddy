@@ -14,24 +14,24 @@ export function describeTool(name: string, args: Record<string, unknown>): ToolL
   const path = str(args.path) || str(args.file_path) || str(args.filePath);
   switch (name) {
     case "read":
-      return { icon: "📄", title: "查看文件", detail: path };
+      return { icon: "", title: "查看文件", detail: path };
     case "write":
-      return { icon: "✏️", title: "写入文件", detail: path };
+      return { icon: "", title: "写入文件", detail: path };
     case "edit":
     case "multi-edit":
-      return { icon: "🛠️", title: "修改文件", detail: path };
+      return { icon: "", title: "修改文件", detail: path };
     case "bash":
-      return { icon: "⚡", title: "执行操作", detail: str(args.command).slice(0, 120) };
+      return { icon: "", title: "执行操作", detail: str(args.command).slice(0, 120) };
     case "grep":
     case "rg":
-      return { icon: "🔍", title: "搜索内容", detail: str(args.pattern) };
+      return { icon: "", title: "搜索内容", detail: str(args.pattern) };
     case "glob":
     case "find":
     case "ls":
     case "list":
-      return { icon: "🗂️", title: "浏览文件", detail: path || str(args.pattern) };
+      return { icon: "", title: "浏览文件", detail: path || str(args.pattern) };
     default:
-      return { icon: "🧩", title: `使用工具 ${name}`, detail: "" };
+      return { icon: "", title: `使用工具 ${name}`, detail: "" };
   }
 }
 

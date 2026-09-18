@@ -22,12 +22,12 @@ const emit = defineEmits<{ (e: "select", id: string): void }>();
 
 /** 不同类型给不同颜色：一眼区分 user / assistant / 压缩 / 模型变化。 */
 const FILL: Record<SessionTreeNode["kind"], string> = {
-  user: "#2563eb",
-  assistant: "#16a34a",
-  compaction: "#9333ea",
-  "model-change": "#d97706",
-  session: "#64748b",
-  other: "#94a3b8",
+  user: "var(--status-info)",
+  assistant: "var(--status-success)",
+  compaction: "var(--accent)",
+  "model-change": "var(--status-warning)",
+  session: "var(--text-tertiary)",
+  other: "var(--text-secondary)",
 };
 
 const fill = computed(() => FILL[props.node.kind]);
@@ -56,7 +56,7 @@ const label = computed(() => {
       class="dot"
       :r="radius"
       :fill="fill"
-      :stroke="selected ? '#0f172a' : node.current ? fill : '#ffffff'"
+      :stroke="selected ? 'var(--bg-app)' : node.current ? fill : 'var(--text-on-accent)'"
       :stroke-width="selected ? 3 : 2"
     />
     <!-- 可分叉的 user 消息加一个小三角提示 -->
@@ -77,23 +77,23 @@ const label = computed(() => {
 }
 .branch-ring {
   fill: none;
-  stroke: #cbd5e1;
+  stroke: var(--border-strong);
   stroke-width: 1.5;
   stroke-dasharray: 3 2;
 }
 .label {
-  font-size: 12px;
-  fill: #334155;
+  font-size: var(--font-ui-12);
+  fill: var(--text-secondary);
   pointer-events: none;
   user-select: none;
 }
 .tree-node.selected .label {
-  fill: #0f172a;
+  fill: var(--text-primary);
   font-weight: 600;
 }
 .fork-mark {
-  font-size: 11px;
-  fill: #2563eb;
+  font-size: var(--font-ui-11);
+  fill: var(--status-info);
   pointer-events: none;
 }
 </style>

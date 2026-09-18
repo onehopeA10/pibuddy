@@ -215,7 +215,7 @@ watch(
         </n-text>
         <n-space size="small">
           <n-button size="small" :loading="mcp.loading" @click="mcp.refresh(app.workspaceId)">
-            🔄 刷新
+            刷新
           </n-button>
           <n-button size="small" @click="showPaste = !showPaste">粘贴导入</n-button>
           <n-button
@@ -433,8 +433,10 @@ watch(
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  padding: 8px 0;
-  border-top: 1px solid rgba(128, 128, 128, 0.16);
+  padding: 12px 14px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 8px;
 }
 .row-main {
   flex: 1;
@@ -470,13 +472,13 @@ watch(
 .diag {
   margin-top: 2px;
   font-size: 11px;
-  color: #d08700;
+  color: var(--status-warning);
 }
 .result {
   margin-top: 6px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: rgba(128, 128, 128, 0.08);
+  padding: 8px 12px;
+  border-radius: var(--radius-l);
+  background: var(--bg-hover);
   font-size: 12px;
 }
 .server-info {

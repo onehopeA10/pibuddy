@@ -124,8 +124,8 @@ function resultTag(errorCode: string | undefined): "success" | "warning" | "erro
 .connector-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  gap: 14px;
+  padding: 4px 0 8px;
   min-width: 280px;
   overflow-y: auto;
 }
@@ -141,10 +141,16 @@ function resultTag(errorCode: string | undefined): "success" | "warning" | "erro
 .cp-create {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
 }
+.cp-create :deep(.n-input),
+.cp-create :deep(.n-select) {
+  width: 100%;
+  max-width: 560px;
+}
 .cp-error {
-  color: var(--error-color, #d03050);
+  color: var(--status-error);
   font-size: 12px;
   margin: 0;
 }
@@ -154,12 +160,12 @@ function resultTag(errorCode: string | undefined): "success" | "warning" | "erro
   gap: 10px;
 }
 .cp-item {
-  border: 1px solid var(--divider-color, #e0e0e6);
-  border-radius: 6px;
-  padding: 8px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .cp-item-head {
   display: flex;

@@ -125,4 +125,44 @@ describe("库登记表", () => {
       expect(store.requiredTables.length).toBeGreaterThan(0);
     }
   });
+
+  /**
+   * 登记表里的数字是字面量副本（备份域不能反向 import 各 store）。
+   * 任一 store 推代际而这里没跟上，备份会把刚写出来的库判成「代际不符」。
+   */
+  it("登记表代际与各 store 常量一致", async () => {
+    const { MEMORY_DATA_SCHEMA_VERSION } = await import("@pibuddy/contract");
+    const { ARTIFACT_SCHEMA_VERSION } = await import("../artifacts/artifact-store.js");
+    const { CHANGESET_SCHEMA_VERSION } = await import("../changeset/changeset-store.js");
+    const { CONNECTOR_STORE_SCHEMA_VERSION } = await import("../connector/connector-store.js");
+    const { HOME_STORE_SCHEMA_VERSION } = await import("../home/ha-store.js");
+    const { AUTOMATION_STORE_SCHEMA_VERSION } = await import(
+      "../home-automation/automation-store.js"
+    );
+    const { REMOTE_REGISTRY_SCHEMA_VERSION } = await import("../remote/device-registry.js");
+    const { SESSION_INDEX_SCHEMA_VERSION } = await import("../sessions/session-index.js");
+    const { TASKS_STORE_SCHEMA_VERSION } = await import("../tasks/task-store.js");
+    const { USAGE_SCHEMA_VERSION } = await import("../usage/usage-store.js");
+    const { WORKFLOW_STORE_SCHEMA_VERSION } = await import("../workflow/workflow-store.js");
+    const { WORKSPACE_STORE_SCHEMA_VERSION } = await import("../workspace/workspace-store.js");
+
+    const expected: Record<string, number> = {
+      artifacts: ARTIFACT_SCHEMA_VERSION,
+      changesets: CHANGESET_SCHEMA_VERSION,
+      connectors: CONNECTOR_STORE_SCHEMA_VERSION,
+      "home-assistant": HOME_STORE_SCHEMA_VERSION,
+      "home-automation": AUTOMATION_STORE_SCHEMA_VERSION,
+      memory: MEMORY_DATA_SCHEMA_VERSION,
+      remote: REMOTE_REGISTRY_SCHEMA_VERSION,
+      "session-index": SESSION_INDEX_SCHEMA_VERSION,
+      tasks: TASKS_STORE_SCHEMA_VERSION,
+      usage: USAGE_SCHEMA_VERSION,
+      workflows: WORKFLOW_STORE_SCHEMA_VERSION,
+      workspaces: WORKSPACE_STORE_SCHEMA_VERSION,
+    };
+    expect(Object.keys(expected).sort()).toEqual(SQLITE_STORES.map((s) => s.id).sort());
+    for (const store of SQLITE_STORES) {
+      expect(store.schemaVersion, store.id).toBe(expected[store.id]);
+    }
+  });
 });

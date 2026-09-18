@@ -191,7 +191,7 @@ async function save(overwrite = false): Promise<void> {
   flex-direction: column;
   min-height: 0;
   flex: 1;
-  border-top: 1px solid var(--n-border-color, #eee);
+  border-top: var(--border-w) solid var(--border-subtle);
 }
 .tabs {
   display: flex;
@@ -210,7 +210,7 @@ async function save(overwrite = false): Promise<void> {
   max-width: 260px;
 }
 .tab.active {
-  background: rgba(128, 128, 128, 0.16);
+  background: var(--bg-hover);
 }
 .tab-name {
   overflow: hidden;
@@ -218,7 +218,7 @@ async function save(overwrite = false): Promise<void> {
   white-space: nowrap;
 }
 .dot {
-  color: #e08600;
+  color: var(--status-warning);
 }
 .close {
   opacity: 0.5;
@@ -235,17 +235,17 @@ async function save(overwrite = false): Promise<void> {
   flex: 1;
 }
 .meta .warn {
-  color: #c62828;
+  color: var(--status-error);
   opacity: 1;
 }
 .conflict {
-  background: #fff4e5;
-  border: 1px solid #ffb74d;
-  border-radius: 4px;
+  background: var(--warning-bg);
+  border: var(--border-w) solid var(--status-warning);
+  border-radius: var(--radius-s);
   margin: 6px 8px;
   padding: 8px;
-  font-size: 12px;
-  color: #7a4a00;
+  font-size: var(--font-ui-12);
+  color: var(--status-warning);
 }
 .conflict-actions {
   display: flex;
@@ -255,7 +255,7 @@ async function save(overwrite = false): Promise<void> {
 .conflict-diff {
   max-height: 180px;
   overflow: auto;
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--code-bg);
   padding: 6px;
   margin-top: 8px;
   white-space: pre-wrap;

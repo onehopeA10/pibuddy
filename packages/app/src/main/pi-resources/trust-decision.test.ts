@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { TRUST_NOT_PERMISSION_NOTE } from "@pibuddy/contract";
 
-import { buildPiSpawn } from "../pi-launcher.js";
+import { PI_HEAP_LIMIT_MB, buildPiSpawn } from "../pi-launcher.js";
 import { describeTrust, lookupTrust, trustArgsFor, writeTrustDecision } from "./trust-store.js";
 
 let home = "";
@@ -107,8 +107,9 @@ describe("[CT-11] 追加 trust 参数不得动摇运行时定位", () => {
     expect(spawn.command).toBe(process.execPath);
     expect(spawn.shell).toBe(false);
     expect(spawn.runtime.source).toBe("bundled");
-    // prefixArgs 里是 pi 的 cli.js；trust 参数在 args 里，两者不混
-    expect(spawn.prefixArgs?.[0]).toMatch(/cli\.js$/);
+    // prefixArgs 里是 Node 堆上限 + pi 的 cli.js；trust 参数在 args 里，两者不混
+    expect(spawn.prefixArgs?.at(-1)).toMatch(/cli\.js$/);
+    expect(spawn.prefixArgs).toContain(`--max-old-space-size=${PI_HEAP_LIMIT_MB}`);
     expect(spawn.args).toEqual(["-na"]);
   });
 

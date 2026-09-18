@@ -140,7 +140,7 @@ async function rejectChange(): Promise<void> {
       <n-tag size="small">读取产物中…</n-tag>
     </template>
     <template v-else-if="trashed">
-      📄 {{ label }}
+      {{ label }}
       <n-tag size="small">v{{ props.version }}</n-tag>
       <n-button size="tiny" quaternary aria-label="恢复这个产物" @click="restore">
         已移入回收站，点击恢复
@@ -153,7 +153,7 @@ async function rejectChange(): Promise<void> {
         :aria-label="`打开产物 ${label} 的第 ${props.version} 版`"
         @click="open"
       >
-        📄 {{ label }}
+        {{ label }}
       </n-button>
       <n-tag size="small">v{{ props.version }}</n-tag>
       <n-tag v-if="record?.status === 'generating'" size="small" type="info">生成中</n-tag>

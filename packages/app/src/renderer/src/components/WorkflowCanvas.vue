@@ -382,7 +382,7 @@ const CONDITION_MODES = [
 }
 .palette {
   padding: 6px 8px;
-  border-bottom: 1px solid var(--n-border-color, #eee);
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .flow-wrap {
   flex: 1;
@@ -390,7 +390,7 @@ const CONDITION_MODES = [
   position: relative;
 }
 .inspector {
-  border-top: 1px solid var(--n-border-color, #eee);
+  border-top: var(--border-w) solid var(--border-subtle);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -401,16 +401,16 @@ const CONDITION_MODES = [
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
-  color: var(--n-text-color-3, #888);
+  color: var(--text-tertiary);
 }
 .hint {
   font-size: 11px;
-  color: var(--n-text-color-3, #999);
+  color: var(--text-tertiary);
   margin: 0;
 }
 /* 运行态着色 */
-:deep(.wf-running) { box-shadow: 0 0 0 2px #2080f0; }
-:deep(.wf-succeeded) { box-shadow: 0 0 0 2px #18a058; }
-:deep(.wf-failed) { box-shadow: 0 0 0 2px #d03050; }
+:deep(.wf-running) { box-shadow: 0 0 0 2px var(--status-running); }
+:deep(.wf-succeeded) { box-shadow: 0 0 0 2px var(--status-success); }
+:deep(.wf-failed) { box-shadow: 0 0 0 2px var(--status-error); }
 :deep(.wf-skipped) { opacity: 0.5; }
 </style>

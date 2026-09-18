@@ -54,3 +54,33 @@ export function resolveSessionDir(cwd: string, settings: AppSettings): string {
 
   return path.join(os.homedir(), ".pi", "agent", "sessions", segment);
 }
+
+/**
+ * 会话 id 只能当文件名用。带路径分隔符的值不能拼进 sessionDir，
+ * 否则「打开会话」会变成任意文件读写。
+ */
+export function isSafeSessionFileId(sessionId: string): boolean {
+  return /^[\w.-]{1,128}$/.test(sessionId);
+}
+
+/** 索引还没跟上时，按约定文件名去找同一条会话（文件必须已经存在才能续）。 */
+export function sessionFilePath(sessionDir: string, sessionId: string): string {
+  if (!isSafeSessionFileId(sessionId)) {
+    throw new Error(`SESSION_UNKNOWN: ${sessionId}`);
+  }
+  return path.join(sessionDir, `${sessionId}.jsonl`);
+}
+
+/**
+ * 续跑用哪条 jsonl。索引优先；否则只有约定文件真的在磁盘上才用它。
+ * 文件还没落盘（pi 惰性写）或已被删掉时返回 null，调用方应改开新会话，
+ * 不能把一条不存在的路径丢给 realpath。
+ */
+export function pickResumeSessionPath(
+  indexedPath: string | null,
+  fallbackPath: string,
+  fallbackExists: boolean
+): string | null {
+  if (indexedPath) return indexedPath;
+  return fallbackExists ? fallbackPath : null;
+}

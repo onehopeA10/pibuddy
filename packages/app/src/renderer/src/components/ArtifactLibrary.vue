@@ -65,6 +65,7 @@ async function commitRename(): Promise<void> {
   <n-modal
     v-model:show="store.panelOpen"
     preset="card"
+    closable
     style="width: 900px; max-width: 94vw"
     title="产物"
     aria-label="产物库"
@@ -91,7 +92,7 @@ async function commitRename(): Promise<void> {
         quaternary
         @click="store.showTrash = !store.showTrash"
       >
-        🗑 回收站
+        回收站
       </n-button>
       <span class="spacer" />
       <n-button
@@ -206,7 +207,7 @@ async function commitRename(): Promise<void> {
   align-items: center;
   gap: 10px;
   padding: 6px 4px;
-  border-bottom: 1px solid #f1f3f5;
+  border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .meta {
   flex: 1;
@@ -218,8 +219,8 @@ async function commitRename(): Promise<void> {
   gap: 6px;
 }
 .sub {
-  color: #9ca3af;
-  font-size: 12px;
+  color: var(--text-tertiary);
+  font-size: var(--font-ui-12);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -230,11 +231,11 @@ async function commitRename(): Promise<void> {
   flex-wrap: wrap;
 }
 .muted {
-  color: #9ca3af;
-  font-size: 13px;
+  color: var(--text-tertiary);
+  font-size: var(--font-ui-13);
 }
 .err {
-  color: #dc2626;
+  color: var(--status-error);
   font-size: 12.5px;
 }
 .center {
@@ -244,7 +245,7 @@ async function commitRename(): Promise<void> {
 }
 .compare {
   margin-top: 12px;
-  border-top: 1px solid #eef0f3;
+  border-top: var(--border-w) solid var(--border-subtle);
   padding-top: 8px;
 }
 .diff {

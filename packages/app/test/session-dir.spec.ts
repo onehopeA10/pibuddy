@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AppSettings } from "@pibuddy/contract";
 import {
   encodeSessionDirSegment,
+  isSafeSessionFileId,
+  pickResumeSessionPath,
   resolveSessionDir,
+  sessionFilePath,
 } from "../src/main/sessions/session-dir.js";
 
 /**
@@ -84,5 +87,31 @@ describe("resolveSessionDir 四级优先链", () => {
         encodeSessionDirSegment(path.resolve("/work"))
       )
     );
+  });
+});
+
+describe("sessionFilePath：索引未跟上也按约定文件名续开", () => {
+  it("合法 id 拼在会话目录下", () => {
+    expect(isSafeSessionFileId("01a0afd0-3e54-730a-8d19-058f0403e10b")).toBe(true);
+    expect(sessionFilePath("/sessions", "01a0afd0-3e54-730a-8d19-058f0403e10b")).toBe(
+      path.join("/sessions", "01a0afd0-3e54-730a-8d19-058f0403e10b.jsonl")
+    );
+  });
+
+  it("带路径的 id 被拒，避免读出会话目录", () => {
+    expect(isSafeSessionFileId("../secret")).toBe(false);
+    expect(() => sessionFilePath("/sessions", "../secret")).toThrow(/SESSION_UNKNOWN/);
+  });
+
+  it("文件还不存在时不要拼一条给 realpath 的空路径", () => {
+    expect(
+      pickResumeSessionPath(null, "/sessions/a.jsonl", false)
+    ).toBeNull();
+    expect(
+      pickResumeSessionPath(null, "/sessions/a.jsonl", true)
+    ).toBe("/sessions/a.jsonl");
+    expect(
+      pickResumeSessionPath("/indexed/a.jsonl", "/sessions/a.jsonl", false)
+    ).toBe("/indexed/a.jsonl");
   });
 });

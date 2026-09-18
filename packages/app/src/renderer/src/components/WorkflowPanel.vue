@@ -241,10 +241,9 @@ async function doImport(): Promise<void> {
   display: flex;
   flex-direction: column;
   height: 100%;
-  min-width: 420px;
-  border-left: 1px solid var(--n-border-color, #eee);
-  padding: 8px;
-  gap: 8px;
+  min-width: 0;
+  padding: var(--space-5) var(--space-6);
+  gap: var(--space-4);
   overflow: hidden;
 }
 .wf-header,
@@ -263,16 +262,16 @@ async function doImport(): Promise<void> {
 .wf-canvas-host {
   flex: 1;
   min-height: 300px;
-  border: 1px solid var(--n-border-color, #eee);
-  border-radius: 6px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
   overflow: hidden;
 }
 .wf-empty {
   margin: auto;
 }
 .wf-error {
-  color: #d03050;
-  font-size: 12px;
+  color: var(--status-error);
+  font-size: var(--font-ui-12);
   margin: 0;
 }
 </style>

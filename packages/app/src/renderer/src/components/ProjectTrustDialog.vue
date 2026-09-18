@@ -129,8 +129,8 @@ async function decide(decision: "allow" | "deny"): Promise<void> {
 .note {
   margin: 0 0 16px;
   padding: 10px 12px;
-  border-radius: 6px;
-  background: rgba(240, 160, 32, 0.12);
+  border-radius: var(--radius-l);
+  background: var(--warning-bg);
   font-size: 13px;
   line-height: 1.7;
 }

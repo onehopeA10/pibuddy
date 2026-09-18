@@ -9,9 +9,12 @@
  * 文件夹名，一份「用 Excel 打开就执行命令」的导出文件是典型的静默风险。
  */
 import { computed, ref, watch } from "vue";
-import { NButton, NDatePicker, NEmpty, NModal, NSpace, NStatistic } from "naive-ui";
+import { NButton, NDatePicker, NEmpty, NSpace, NStatistic } from "naive-ui";
 import { useProvidersStore } from "../stores/providers";
 import { useAppStore } from "../stores/app";
+import PanelFrame from "./PanelFrame.vue";
+
+defineProps<{ embedded?: boolean }>();
 
 const providers = useProvidersStore();
 const app = useAppStore();
@@ -57,13 +60,12 @@ const summaryRows = computed(() => [
 </script>
 
 <template>
-  <n-modal
-    v-model:show="providers.usagePanelOpen"
-    preset="card"
-    style="max-width: 860px"
+  <PanelFrame
+    :embedded="embedded"
+    :show="providers.usagePanelOpen"
     title="用量与花费"
-    role="dialog"
-    aria-labelledby="usage-panel-title"
+    width="860px"
+    @update:show="providers.usagePanelOpen = $event"
   >
     <p id="usage-panel-title" class="intro">
       按天统计每个模型用掉的 token 与花费。仅本地统计：数据只保存在你自己的电脑上，不上报。
@@ -182,16 +184,16 @@ const summaryRows = computed(() => [
       </table>
     </template>
 
-    <n-space justify="end" style="margin-top: 12px">
+    <n-space v-if="!embedded" justify="end" style="margin-top: 12px">
       <n-button @click="providers.usagePanelOpen = false">关闭</n-button>
     </n-space>
-  </n-modal>
+  </PanelFrame>
 </template>
 
 <style scoped>
 .intro {
-  font-size: 12.5px;
-  color: #8a8f98;
+  font-size: var(--font-ui-12);
+  color: var(--text-secondary);
   margin: 0 0 12px;
 }
 .usage-table {
@@ -201,8 +203,8 @@ const summaryRows = computed(() => [
 }
 .usage-table th,
 .usage-table td {
-  padding: 6px 8px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.18);
+  padding: 10px 12px;
+  border-bottom: var(--border-w) solid var(--border-subtle);
   text-align: right;
 }
 .usage-table th:nth-child(-n + 3),
@@ -210,7 +212,7 @@ const summaryRows = computed(() => [
   text-align: left;
 }
 .usage-table thead th {
-  color: #8a8f98;
+  color: var(--text-secondary);
   font-weight: 500;
 }
 .summary-table {

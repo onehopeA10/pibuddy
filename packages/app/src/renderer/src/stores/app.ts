@@ -17,6 +17,7 @@ import type {
 } from "@sdk";
 import type {
   AppSettings,
+  ApprovalMode,
   AttachmentRef,
   DraftRecord,
   ModelErrorKind,
@@ -27,6 +28,8 @@ import type {
   PiUiExpirePayload,
 } from "@contract";
 import {
+  APPROVAL_STATUS_KEY,
+  parseApprovalStatus,
   MAX_PROMPT_ATTACHMENT_BYTES,
   MAX_PROMPT_ATTACHMENT_TOKENS,
   MAX_PROMPT_IMAGES,
@@ -50,6 +53,16 @@ import {
   type ImageCapabilityVerdict,
 } from "./model-capability";
 import { registerSessionScopedReset, resetSessionScopedState } from "./session-scope";
+import {
+  CONVERSATION_IDLE_SLEEP_MS,
+  WAKE_COOLDOWN_MS,
+  isRuntimeGoneError,
+  shouldRetryWake,
+  shouldSleepRuntime,
+  shouldWakeOnActivate,
+  shouldWakeRuntime,
+  sleepRetryDelayMs,
+} from "./runtime-idle";
 import type { WorkMode } from "../../../lib/work-mode";
 import { useChatArtifactsStore } from "./chat-artifacts";
 import { recordUnknownEvent, useExtensionUiStore } from "./extensionUi";
@@ -79,15 +92,26 @@ export interface ToolRun {
 /**
  * 按 sessionId 归一化的运行时 / 生命周期状态。
  *
- * M0 只归一化这四项：它们是 M1 代际治理（RUN-002）的落点。items / toolRuns /
- * queue / statusTexts 刻意保持全局 —— 一次性全改会触碰 ToolActivity.vue 的
- * 卡片渲染闭环（查不到 run 就永久转圈），不值得。
+ * started / streaming / runtimeId / generation 是前台闸门。
+ * 运行中切走会话后，后台回合的 streaming 仍记在这个格子里，列表才能亮「运行中」。
  */
 export interface RuntimeScope {
   started: boolean;
   streaming: boolean;
   runtimeId: string;
   generation: number;
+}
+
+/** 切走会话时把聊天区整格挂起，切回来接着看，不丢正在流的字。 */
+interface SessionTranscript {
+  items: ChatItem[];
+  liveAssistant: AssistantMessage | null;
+  toolRuns: Record<string, ToolRun>;
+  queue: { steering: string[]; followUp: string[] };
+  keySeq: number;
+  streamBuffer: string;
+  streamContentIndex: number;
+  streamKind: "text" | "thinking";
 }
 
 /** 会话 ID 在 start 返回之前是未知的，此期间的状态先记在这个占位 key 上。 */
@@ -376,21 +400,36 @@ export async function send(opts: SendOptions = {}): Promise<boolean> {
       store.notify("warning", "这条还没发出去，内容已放回输入框");
       return false;
     }
-    let resp: { success: boolean; error?: string };
-    try {
-      resp = await window.piBuddy.pi.prompt({
+    const promptOnce = () =>
+      window.piBuddy.pi.prompt({
         message,
         ...(images.length ? { images } : {}),
         ...(attachmentTokens.length ? { attachmentTokens } : {}),
         ...(wasStreaming ? STREAMING_BEHAVIOR[opts.mode!] : {}),
         ...(store.workMode === "plan" ? { workMode: "plan" as const } : {}),
       });
+    let resp: { success: boolean; error?: string };
+    try {
+      resp = await promptOnce();
     } catch (err) {
-      store.discardUserEcho(echo);
-      removeLocalUserMessage(store, localKey);
-      if (!store.editorText.trim()) store.editorText = message;
-      store.notify("error", err instanceof Error ? err.message : "发送失败");
-      return false;
+      // 界面还以为在跑，进程其实已经没了：先拉活再发一次，不要让用户重启应用。
+      if (isRuntimeGoneError(err) && (await store.wakeRuntime("send", { force: true }))) {
+        try {
+          resp = await promptOnce();
+        } catch (retryErr) {
+          store.discardUserEcho(echo);
+          removeLocalUserMessage(store, localKey);
+          if (!store.editorText.trim()) store.editorText = message;
+          store.notify("error", retryErr instanceof Error ? retryErr.message : "发送失败");
+          return false;
+        }
+      } else {
+        store.discardUserEcho(echo);
+        removeLocalUserMessage(store, localKey);
+        if (!store.editorText.trim()) store.editorText = message;
+        store.notify("error", err instanceof Error ? err.message : "发送失败");
+        return false;
+      }
     }
     if (!resp.success) {
       store.discardUserEcho(echo);
@@ -496,6 +535,8 @@ export const useAppStore = defineStore("app", () => {
     onboardingStep: 0,
     notificationsEnabled: true,
     voiceEnabled: false,
+    theme: "dark",
+    closeAction: "ask",
   });
   const startError = ref("");
   /** getAvailableModels 失败时的原因；启动本身仍成功，空态展示给用户。 */
@@ -566,6 +607,9 @@ export const useAppStore = defineStore("app", () => {
             piLoadedSessionId.value = attempted;
             skipSettledRefreshAfterSwitch = true;
             adoptCapabilitiesForSession(attempted);
+            if (!runtimeScope[attempted]) runtimeScope[attempted] = emptyScope();
+            runtimeScope[attempted].started = true;
+            if (currentSessionId.value === attempted) started.value = true;
           }
         } catch (err) {
           notify("error", err instanceof Error ? err.message : "打开会话失败");
@@ -624,8 +668,144 @@ export const useAppStore = defineStore("app", () => {
     };
   }
 
-  /** 输入框不锁；真发送时再等 Pi 切到当前会话。失败返回 false，不假装就绪。 */
-  function whenPiReady(): Promise<boolean> {
+  /**
+   * 前台 pi 空闲休眠。进程级（一窗一个），不进 session scope。
+   *
+   * 闹钟是单次 setTimeout：对话一来就重排，合盖后不会留下轮询。
+   */
+  const runtimeAsleep = ref(false);
+  const runtimeWaking = ref(false);
+  const idleSleepMs = ref(CONVERSATION_IDLE_SLEEP_MS);
+  let lastConversationAt = Date.now();
+  let sleepTimer: ReturnType<typeof setTimeout> | null = null;
+  let sleepGen = 0;
+  let wakeInflight: Promise<boolean> | null = null;
+  let lastFailedWakeAt = 0;
+
+  function idleSnapshot() {
+    return {
+      now: Date.now(),
+      lastConversationAt,
+      idleSleepMs: idleSleepMs.value,
+      started: started.value,
+      streaming: streaming.value,
+      aborting: aborting.value,
+      asleep: runtimeAsleep.value,
+      waking: runtimeWaking.value,
+      pendingUi: extUi.uiRequests.length > 0,
+    };
+  }
+
+  function clearSleepTimer(): void {
+    if (sleepTimer) {
+      clearTimeout(sleepTimer);
+      sleepTimer = null;
+    }
+  }
+
+  function scheduleSleepAlarm(): void {
+    clearSleepTimer();
+    const delay = sleepRetryDelayMs(idleSnapshot());
+    if (delay === null) return;
+    sleepTimer = setTimeout(() => {
+      sleepTimer = null;
+      void sleepRuntime();
+    }, delay);
+    if (typeof sleepTimer === "object" && sleepTimer && "unref" in sleepTimer) {
+      sleepTimer.unref();
+    }
+  }
+
+  function markConversation(at = Date.now()): void {
+    lastConversationAt = at;
+    scheduleSleepAlarm();
+  }
+
+  async function sleepRuntime(): Promise<void> {
+    const snap = idleSnapshot();
+    if (!shouldSleepRuntime(snap)) {
+      scheduleSleepAlarm();
+      return;
+    }
+    const token = ++sleepGen;
+    runtimeAsleep.value = true;
+    try {
+      await window.piBuddy.pi.runtime.stop();
+    } catch {
+      // 进程可能已经不在了，休眠态照样成立。
+    }
+    if (token !== sleepGen) return;
+    started.value = false;
+    startError.value = "";
+    streaming.value = false;
+    clearSleepTimer();
+  }
+
+  async function wakeRuntime(
+    reason: "send" | "focus" | "health",
+    opts?: { force?: boolean }
+  ): Promise<boolean> {
+    if (!opts?.force && started.value && !startError.value && !runtimeAsleep.value) return true;
+    if (wakeInflight) return wakeInflight;
+    if (
+      !shouldRetryWake({
+        reason,
+        now: Date.now(),
+        lastFailedWakeAt,
+        cooldownMs: WAKE_COOLDOWN_MS,
+      })
+    ) {
+      return false;
+    }
+    sleepGen += 1;
+    runtimeWaking.value = true;
+    runtimeAsleep.value = false;
+    const run = (async () => {
+      try {
+        await start(currentSessionId.value || undefined);
+        const ok = started.value;
+        lastFailedWakeAt = ok ? 0 : Date.now();
+        if (ok) markConversation();
+        return ok;
+      } finally {
+        runtimeWaking.value = false;
+        if (wakeInflight === run) wakeInflight = null;
+      }
+    })();
+    wakeInflight = run;
+    return run;
+  }
+
+  /**
+   * 窗口重新出现在前台：休眠 / 断连直接拉活；看起来还在跑则探一次脉。
+   */
+  async function onWindowActivated(): Promise<void> {
+    if (
+      shouldWakeOnActivate({
+        asleep: runtimeAsleep.value,
+        started: started.value,
+        startError: startError.value,
+        hasSession: Boolean(currentSessionId.value),
+      })
+    ) {
+      await wakeRuntime("focus");
+      return;
+    }
+    if (runtimeWaking.value || !started.value) return;
+    try {
+      const resp = await window.piBuddy.pi.getState();
+      if (!resp.success) await wakeRuntime("health", { force: true });
+    } catch (err) {
+      if (isRuntimeGoneError(err)) await wakeRuntime("health", { force: true });
+    }
+  }
+
+  /** 输入框不锁；休眠或断连时先拉活，再等 Pi 切到当前会话。 */
+  async function whenPiReady(): Promise<boolean> {
+    if (shouldWakeRuntime({ asleep: runtimeAsleep.value, startError: startError.value })) {
+      const ok = await wakeRuntime("send");
+      if (!ok) return false;
+    }
     return ensurePiOnCurrentSession();
   }
 
@@ -649,20 +829,6 @@ export const useAppStore = defineStore("app", () => {
    * 成功的发送，或用户换了模型。
    */
   const modelBlockedImages = ref<ImageCapabilityVerdict | null>(null);
-
-  /**
-   * 打开历史会话时发现「会话记录的模型 ≠ 当前默认」时的询问（PROV-101）。
-   *
-   * **只提示，不动作**。自动切走会丢掉「这条会话当时用的是什么」这个事实；
-   * 自动不切又会让「我明明改了默认模型」变成一个说不清的现象。两个动作
-   * （保持 / 切换）都由用户点。
-   */
-  const modelMismatchPrompt = ref<{
-    sessionModelId: string;
-    sessionProvider: string;
-    targetModelId: string;
-    targetProvider: string;
-  } | null>(null);
 
   // ---------- 运行时状态（按 sessionId 归一化） ----------
   const currentSessionId = ref(PENDING_SCOPE_KEY);
@@ -724,26 +890,21 @@ export const useAppStore = defineStore("app", () => {
   );
 
   /**
-   * 会话 ID 变化时把当前 scope 的运行状态搬到新 key 上。
+   * 切到另一个会话的运行时格子。
    *
-   * 不搬的话 started 会在 refreshState 之后瞬间读到一个全新的空 scope、
-   * 回落为 false，输入框被禁用且不报任何错。M0 同时只有一个 pi 进程，
-   * switch_session 不换进程，因此原样搬运就是正确语义。
+   * 占位 key → 真 id 仍整格搬（开机还没拿到 sessionId 时用户已经在打字）。
+   * A → B 不再搬运 started/streaming：两个会话可以同时跑，各记各的。
    */
   function adoptSession(sessionId: string | undefined): void {
     const id = sessionId || PENDING_SCOPE_KEY;
     const prevKey = currentSessionId.value;
     if (id === prevKey) return;
-    const prev = scope();
-    runtimeScope[id] = { ...prev };
-    // 占位 key → 真 id：会话 id 在 start 返回之前是未知的，此前用户在输入框里
-    // 打的字记在占位格上。真 id 一到就整格搬过去，否则那段内容会留在一个再也
-    // 读不到的桶里（界面上表现为「刚打的字自己没了」）。
-    //
-    // **只搬这一种转移**。A → B 是换会话，把 A 的输入区搬到 B 就是串写本身。
     if (prevKey === PENDING_SCOPE_KEY && id !== PENDING_SCOPE_KEY) {
+      runtimeScope[id] = { ...scope() };
       composers[id] = composers[PENDING_SCOPE_KEY] ?? emptyComposer();
       composers[PENDING_SCOPE_KEY] = emptyComposer();
+    } else if (!runtimeScope[id]) {
+      runtimeScope[id] = emptyScope();
     }
     currentSessionId.value = id;
   }
@@ -771,6 +932,55 @@ export const useAppStore = defineStore("app", () => {
   const liveAssistant = shallowRef<AssistantMessage | null>(null);
   const toolRuns = reactive<Record<string, ToolRun>>({});
   const queue = ref<{ steering: string[]; followUp: string[] }>({ steering: [], followUp: [] });
+  const transcripts = new Map<string, SessionTranscript>();
+
+  function stashCurrentTranscript(): void {
+    const id = currentSessionId.value;
+    if (!id) return;
+    transcripts.set(id, {
+      items: items.value.slice(),
+      liveAssistant: liveAssistant.value,
+      toolRuns: { ...toolRuns },
+      queue: { steering: [...queue.value.steering], followUp: [...queue.value.followUp] },
+      keySeq,
+      streamBuffer,
+      streamContentIndex,
+      streamKind,
+    });
+  }
+
+  function restoreTranscript(id: string): boolean {
+    const t = transcripts.get(id);
+    if (!t) return false;
+    items.value = t.items.slice();
+    liveAssistant.value = t.liveAssistant;
+    for (const key of Object.keys(toolRuns)) delete toolRuns[key];
+    Object.assign(toolRuns, t.toolRuns);
+    queue.value = { steering: [...t.queue.steering], followUp: [...t.queue.followUp] };
+    keySeq = t.keySeq;
+    streamBuffer = t.streamBuffer;
+    streamContentIndex = t.streamContentIndex;
+    streamKind = t.streamKind;
+    return true;
+  }
+
+  function ensureTranscript(id: string): SessionTranscript {
+    let t = transcripts.get(id);
+    if (!t) {
+      t = {
+        items: [],
+        liveAssistant: null,
+        toolRuns: {},
+        queue: { steering: [], followUp: [] },
+        keySeq: 0,
+        streamBuffer: "",
+        streamContentIndex: 0,
+        streamKind: "text",
+      };
+      transcripts.set(id, t);
+    }
+    return t;
+  }
 
   /**
    * 本地**未提交**队列。
@@ -816,6 +1026,14 @@ export const useAppStore = defineStore("app", () => {
   const settingsOpen = ref(false);
   /** 每次有会影响聊天区高度的更新时 +1，供 ChatView 轻量监听滚动（避免 deep watch） */
   const activityTick = ref(0);
+  /** 用户点了停止、还在等 pi 收尾。期间按钮改成「正在停止」，避免连点。 */
+  const aborting = ref(false);
+  /** 正在创建新会话：按钮转圈，避免连点看起来像没反应。 */
+  const creatingTask = ref(false);
+  /** 输入框在休眠 / 唤醒中仍可打字；真发送时再拉活。 */
+  const canCompose = computed(
+    () => started.value || runtimeAsleep.value || runtimeWaking.value
+  );
 
   // 本 store 持有的会话级状态：换会话时必须一起清干净。
   // TASK-012 把 uiRequests / statusTexts 迁到 extensionUi store 后，由那个
@@ -831,6 +1049,7 @@ export const useAppStore = defineStore("app", () => {
     // statusTexts / uiRequests 的清空由 extensionUi store 自己注册的那一条
     // 回调负责（CT-25）：状态归谁所有，清空就归谁写。
     liveAssistant.value = null;
+    aborting.value = false;
     chatArtifacts.reset();
     // 流式缓冲与挂起的 rAF 也是会话级状态：不清就会把上一会话的尾字符
     // 渗进新会话的首条消息（三大门禁全绿，只有肉眼能发现）。
@@ -878,6 +1097,17 @@ export const useAppStore = defineStore("app", () => {
   const busyStatus = computed(() => extUi.busyStatus);
   /** 扩展上报的常驻状态（如 AUTO/YOLO 模式），弱化显示在顶栏 */
   const extStatus = computed(() => extUi.extStatus);
+  /**
+   * 审批模式控件是否可用：权限扩展在场（上报过 approval-mode 状态）才有意义。
+   * 扩展不在场时 reload 命令会被当成普通提示词发给模型，因此控件干脆不出现。
+   */
+  const approvalControlAvailable = computed(
+    () => extUi.statusTexts[`ext:${APPROVAL_STATUS_KEY}`] !== undefined
+  );
+  /** 当前审批模式；扩展在场但暂时读不出（比如 plan 模式下被隐藏）时为 undefined。 */
+  const approvalMode = computed<ApprovalMode | undefined>(() =>
+    parseApprovalStatus(extUi.statusTexts[`ext:${APPROVAL_STATUS_KEY}`])
+  );
 
   // ---------- 事件处理 ----------
 
@@ -969,12 +1199,14 @@ export const useAppStore = defineStore("app", () => {
     switch (e.type) {
       case "agent_start":
         streaming.value = true;
+        markConversation();
         // 新一轮开始 = 上一轮那条「该怎么办」的横幅已经过时。留着它的话，
         // 用户会以为刚发出去的这句话也失败了。
         clearModelError();
         break;
       case "agent_settled":
         streaming.value = false;
+        markConversation();
         liveAssistant.value = null;
         scheduleRefreshSessions();
         if (skipSettledRefreshAfterSwitch) {
@@ -1233,6 +1465,18 @@ export const useAppStore = defineStore("app", () => {
     modelError.value = null;
   }
 
+  /** 每个会话自己的代际 / 序号线。两个会话同时跑时不能共用一条全局闸门。 */
+  const gateBySession = new Map<string, { generation: number; lastSeqByChannel: Record<string, number> }>();
+
+  function sessionGate(sessionId: string): { generation: number; lastSeqByChannel: Record<string, number> } {
+    let gate = gateBySession.get(sessionId);
+    if (!gate) {
+      gate = { generation: 0, lastSeqByChannel: {} };
+      gateBySession.set(sessionId, gate);
+    }
+    return gate;
+  }
+
   function acceptEnvelope(raw: unknown, channel: string): PiEnvelope<unknown> | null {
     const parsed = parseEnvelope(raw);
     if (!parsed.ok) {
@@ -1240,20 +1484,30 @@ export const useAppStore = defineStore("app", () => {
       return null;
     }
     const env = parsed.envelope;
-    if (env.generation < currentGeneration.value) {
+    const sid = env.sessionId || currentSessionId.value;
+    const gate = sessionGate(sid);
+    const isCurrent = !currentSessionId.value || sid === currentSessionId.value;
+    if (env.generation < gate.generation) {
       droppedEnvelopes.value++;
       return null;
     }
-    if (env.generation > currentGeneration.value) {
-      currentGeneration.value = env.generation;
-      currentRuntimeId.value = env.runtimeId;
-      for (const key of Object.keys(lastSeqByChannel)) delete lastSeqByChannel[key];
-    } else if (env.sequence <= (lastSeqByChannel[channel] ?? -1)) {
+    if (env.generation > gate.generation) {
+      gate.generation = env.generation;
+      gate.lastSeqByChannel = {};
+      if (isCurrent) {
+        currentGeneration.value = env.generation;
+        currentRuntimeId.value = env.runtimeId;
+        for (const key of Object.keys(lastSeqByChannel)) delete lastSeqByChannel[key];
+      }
+    } else if (env.sequence <= (gate.lastSeqByChannel[channel] ?? -1)) {
       droppedEnvelopes.value++;
       return null;
     }
-    lastSeqByChannel[channel] = env.sequence;
-    if (!currentRuntimeId.value) currentRuntimeId.value = env.runtimeId;
+    gate.lastSeqByChannel[channel] = env.sequence;
+    if (isCurrent) {
+      lastSeqByChannel[channel] = env.sequence;
+      if (!currentRuntimeId.value) currentRuntimeId.value = env.runtimeId;
+    }
     return env;
   }
 
@@ -1261,12 +1515,82 @@ export const useAppStore = defineStore("app", () => {
   function handleEventEnvelope(raw: unknown): void {
     const env = acceptEnvelope(raw, "pi:event");
     if (!env) return;
+    const sid = env.sessionId;
+    if (sid && currentSessionId.value && sid !== currentSessionId.value) {
+      applyBackgroundEvent(sid, env.payload as AgentEvent);
+      return;
+    }
     handleEvent(env.payload as AgentEvent);
+  }
+
+  function applyBackgroundEvent(sessionId: string, e: AgentEvent): void {
+    if (!runtimeScope[sessionId]) runtimeScope[sessionId] = emptyScope();
+    const sc = runtimeScope[sessionId];
+    const t = ensureTranscript(sessionId);
+    switch (e.type) {
+      case "agent_start":
+        sc.streaming = true;
+        sc.started = true;
+        break;
+      case "agent_settled":
+        sc.streaming = false;
+        t.liveAssistant = null;
+        break;
+      case "message_start": {
+        const msg = (e as { message: AgentMessage }).message;
+        if (msg.role === "assistant") t.liveAssistant = msg as AssistantMessage;
+        break;
+      }
+      case "message_update": {
+        const ev = e as Extract<AgentEvent, { type: "message_update" }>;
+        if (ev.message?.role === "assistant") t.liveAssistant = ev.message as AssistantMessage;
+        break;
+      }
+      case "message_end": {
+        const msg = (e as { message: AgentMessage }).message;
+        t.liveAssistant = null;
+        t.items = [...t.items, { key: ++t.keySeq, message: msg }];
+        break;
+      }
+      case "tool_execution_start": {
+        const ev = e as Extract<AgentEvent, { type: "tool_execution_start" }>;
+        t.toolRuns[ev.toolCallId] = {
+          toolCallId: ev.toolCallId,
+          toolName: ev.toolName,
+          args: ev.args ?? {},
+          status: "running",
+          output: "",
+          images: [],
+        };
+        break;
+      }
+      case "tool_execution_update": {
+        const ev = e as Extract<AgentEvent, { type: "tool_execution_update" }>;
+        const run = t.toolRuns[ev.toolCallId];
+        if (run) run.output = textOf(ev.partialResult?.content);
+        break;
+      }
+      case "tool_execution_end": {
+        const ev = e as Extract<AgentEvent, { type: "tool_execution_end" }>;
+        t.toolRuns[ev.toolCallId] = {
+          toolCallId: ev.toolCallId,
+          toolName: ev.toolName,
+          args: t.toolRuns[ev.toolCallId]?.args ?? {},
+          status: ev.isError ? "error" : "done",
+          output: textOf(ev.result?.content),
+          images: imagesOf(ev.result?.content),
+        };
+        break;
+      }
+      default:
+        break;
+    }
   }
 
   function handleUiRequestEnvelope(raw: unknown): void {
     const env = acceptEnvelope(raw, "pi:ui-request");
     if (!env) return;
+    if (env.sessionId && currentSessionId.value && env.sessionId !== currentSessionId.value) return;
     handleUiRequest(env.payload as ExtensionUiRequest);
   }
 
@@ -1302,16 +1626,25 @@ export const useAppStore = defineStore("app", () => {
     const env = acceptEnvelope(raw, "pi:exit");
     if (!env) return;
     const payload = env.payload as PiExitPayload;
+    if (env.sessionId && currentSessionId.value && env.sessionId !== currentSessionId.value) {
+      const sc = runtimeScope[env.sessionId];
+      if (sc) {
+        sc.started = false;
+        sc.streaming = false;
+      }
+      return;
+    }
     if (!started.value) return;
     started.value = false;
     streaming.value = false;
+    clearSleepTimer();
     if (payload?.reason === "expected-stop") return;
-    notify(
-      "error",
-      payload?.error
-        ? `智能体进程意外退出：${payload.error}`
-        : "智能体进程意外退出，请重新开始"
-    );
+    if (runtimeAsleep.value) return;
+    // 有消息时 AppShell 用 startError 画全窗唯一断连横幅；消息本身不清理。
+    startError.value = payload?.error
+      ? `智能体进程意外退出：${payload.error}`
+      : "智能体进程意外退出，请重新开始";
+    notify("error", startError.value);
   }
 
   /**
@@ -1433,6 +1766,7 @@ export const useAppStore = defineStore("app", () => {
       clearTimeout(refreshSessionsTimer);
       refreshSessionsTimer = null;
     }
+    clearSleepTimer();
     subscribed = false;
   }
 
@@ -1561,10 +1895,13 @@ export const useAppStore = defineStore("app", () => {
     startError.value = "";
     modelsError.value = "";
     sessionLoadError.value = "";
+    runtimeAsleep.value = false;
     started.value = false;
     streaming.value = false;
     // 字节上界由收尾处的 refreshSessions → adoptSessionBytes 从索引里补齐。
     currentSessionBytes.value = 0;
+    // 失败时还要靠已有消息画断连横幅，不能先把列表倒空再回不去。
+    const preservedItems = items.value.slice();
     resetSessionScopedState();
     try {
       const result = await window.piBuddy.pi.runtime.start({
@@ -1603,33 +1940,8 @@ export const useAppStore = defineStore("app", () => {
           await window.piBuddy.pi.setThinkingLevel(saved.thinkingLevel as ThinkingLevel);
         }
       } else {
-        // 恢复历史会话：**一次 setModel 都不发**。会话文件里记着的模型是一个
-        // 事实，覆盖它等于用户每打开一个旧会话都被悄悄换成另一个模型。
-        //
-        // 只在会话模型与「若无会话层则会生效的那一层」不同时置提示，由
-        // TopBar 问用户「这个会话原来用的是 X，是否切换？」，两个动作都由
-        // 用户点。这一段里不允许出现 setModel 调用。
-        const sessionModel = result.state.model;
-        const wsDefault = saved.workspaceDefaults?.[workspaceId.value];
-        const target =
-          wsDefault ??
-          (saved.provider && saved.modelId
-            ? { provider: saved.provider, modelId: saved.modelId }
-            : null);
-        if (
-          sessionModel &&
-          target &&
-          (sessionModel.provider !== target.provider || sessionModel.id !== target.modelId)
-        ) {
-          modelMismatchPrompt.value = {
-            sessionModelId: sessionModel.id,
-            sessionProvider: sessionModel.provider,
-            targetModelId: target.modelId,
-            targetProvider: target.provider,
-          };
-        } else {
-          modelMismatchPrompt.value = null;
-        }
+        // 恢复历史会话：沿用会话文件里的模型，不问「是否切换」，
+        // 也不发 setModel。全局 / workspace 默认只作用于新会话。
       }
       await refreshState();
       await refreshThinkingLevels();
@@ -1638,9 +1950,25 @@ export const useAppStore = defineStore("app", () => {
       // sessions:get-draft 反查 sessionId 会以 SESSION_UNKNOWN 失败 ——
       // 渲染侧吞掉了异常，用户看不到，但主进程每次启动都记一条 ipc_rejected。
       void refreshSessions().then(() => restoreDraft());
+      markConversation();
     } catch (err) {
-      startError.value = err instanceof Error ? err.message : String(err);
+      const msg = ipcErrorMessage(err);
+      // 空闲很久再拉活：索引里还没有这条会话（pi 惰性落盘）。不要把
+      // SESSION_UNKNOWN 甩到界面上，改成开一个新进程续跑。
+      if (sessionId && /SESSION_UNKNOWN|ENOENT|文件已经不在了/.test(msg)) {
+        await start();
+        return;
+      }
+      startError.value = msg;
+      if (preservedItems.length > 0 && items.value.length === 0) {
+        items.value = preservedItems;
+      }
     }
+  }
+
+  function ipcErrorMessage(err: unknown): string {
+    const raw = err instanceof Error ? err.message : String(err);
+    return raw.replace(/^Error invoking remote method '[^']+':\s*(?:\w+Error:\s*)?/, "");
   }
 
   async function refreshState(): Promise<void> {
@@ -1768,32 +2096,127 @@ export const useAppStore = defineStore("app", () => {
     await start();
   }
 
+  /**
+   * 切到侧栏项目列表里的一个**已注册**项目（不弹目录选择框），可顺带直接
+   * 打开该项目下的某个会话 —— 这就是 Codex 式「点别的项目里的会话 = 换目录 +
+   * 开会话」一步到位的落点。
+   *
+   * 与 chooseWorkspace 的差别：目标已知，因此「未保存编辑怎么办」可以**先于**
+   * 落盘去问；用户取消时设置文件一个字节都没改。
+   */
+  async function switchWorkspace(target: string, sessionId?: string): Promise<boolean> {
+    if (!target) return false;
+    if (target === workspaceId.value) {
+      if (sessionId) await openSession({ sessionId });
+      return true;
+    }
+    if (streaming.value) {
+      notify("warning", "请先停止当前任务，再切换项目");
+      return false;
+    }
+    if (!(await useWorkspaceStore().confirmLeave())) return false;
+    const chosen = await window.piBuddy.dialog.selectWorkspace(target);
+    if (!chosen) {
+      notify("error", "这个项目的文件夹已不存在或无法访问");
+      return false;
+    }
+    adoptWorkspace(chosen);
+    settings.value = await window.piBuddy.settings.get();
+    await start(sessionId);
+    return true;
+  }
+
+  /**
+   * 原地重启 pi 运行时，尽量续接当前会话。
+   *
+   * pi 只在启动时读 `~/.pi/agent/models.json`（运行中不监听文件），所以改完
+   * 模型能力标注之后必须重启一次它才看得见。刚新建、还没落盘的会话在索引里
+   * 查不到（SESSION_UNKNOWN）—— 那种情况下退回到开一个新会话：磁盘上本来
+   * 就没有东西可丢。
+   */
+  async function reloadRuntime(): Promise<boolean> {
+    if (!workspaceId.value) return false;
+    if (streaming.value) return false;
+    const sid = currentSessionId.value || undefined;
+    await start(sid);
+    if (!started.value && sid && /SESSION_UNKNOWN/.test(startError.value)) {
+      await start();
+    }
+    return started.value;
+  }
+
   async function abortRun(): Promise<void> {
+    if (aborting.value) return;
+    aborting.value = true;
     bumpSendGeneration();
-    await window.piBuddy.pi.abort();
+    try {
+      await window.piBuddy.pi.abort();
+    } catch {
+      // 主进程已把 stopping / 超时收成 success；万一还是抛了，下面照样收口。
+    }
+    const until = Date.now() + 2500;
+    while (streaming.value && Date.now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (streaming.value) {
+      streaming.value = false;
+      liveAssistant.value = null;
+      resetStream();
+    }
+    aborting.value = false;
   }
 
   async function newTask(): Promise<void> {
-    const resp = await window.piBuddy.pi.newSession();
-    if (!resp.success) {
-      notify("error", resp.error ?? "无法开始新任务");
-      return;
+    if (creatingTask.value) return;
+    creatingTask.value = true;
+    try {
+      stashCurrentTranscript();
+      if (!started.value || runtimeAsleep.value || startError.value) {
+        const ok = await wakeRuntime("send");
+        if (!ok) {
+          notify("error", startError.value || "助手还没醒来，请稍后再试");
+          return;
+        }
+      }
+      const request = () => window.piBuddy.pi.newSession();
+      let resp: Awaited<ReturnType<typeof request>>;
+      try {
+        resp = await request();
+      } catch (err) {
+        if (isRuntimeGoneError(err) && (await wakeRuntime("send", { force: true }))) {
+          try {
+            resp = await request();
+          } catch (retryErr) {
+            notify("error", retryErr instanceof Error ? retryErr.message : "无法开始新任务");
+            return;
+          }
+        } else {
+          notify("error", err instanceof Error ? err.message : "无法开始新任务");
+          return;
+        }
+      }
+      if (!resp.success) {
+        notify("error", resp.error ?? "无法开始新任务");
+        return;
+      }
+      // 扩展可以否决新建（rpc.md：success:true 且 data.cancelled:true）。
+      // 只看 success 的话界面会清成一片假空白，而 pi 那边根本没换会话。
+      if (resp.data?.cancelled === true) {
+        notify("warning", "扩展取消了「开始新任务」，当前会话保持不变");
+        return;
+      }
+      clearEphemeralComposerAttachments();
+      sessionLoadError.value = "";
+      resetSessionScopedState();
+      stats.value = null;
+      // 新会话磁盘上还没有文件，更谈不上「更早的消息」。
+      currentSessionBytes.value = 0;
+      await refreshState();
+      piLoadedSessionId.value = currentSessionId.value;
+      void refreshSessions();
+    } finally {
+      creatingTask.value = false;
     }
-    // 扩展可以否决新建（rpc.md：success:true 且 data.cancelled:true）。
-    // 只看 success 的话界面会清成一片假空白，而 pi 那边根本没换会话。
-    if (resp.data?.cancelled === true) {
-      notify("warning", "扩展取消了「开始新任务」，当前会话保持不变");
-      return;
-    }
-    clearEphemeralComposerAttachments();
-    sessionLoadError.value = "";
-    resetSessionScopedState();
-    stats.value = null;
-    // 新会话磁盘上还没有文件，更谈不上「更早的消息」。
-    currentSessionBytes.value = 0;
-    await refreshState();
-    piLoadedSessionId.value = currentSessionId.value;
-    void refreshSessions();
   }
 
   /**
@@ -1867,15 +2290,12 @@ export const useAppStore = defineStore("app", () => {
     /** 会话文件字节数，用于本地抢先渲染；列表行里本来就有 */
     sizeBytes?: number;
   }): Promise<void> {
-    if (streaming.value) {
-      notify("warning", "请先停止当前任务，再切换历史会话");
-      return;
-    }
     if (target.sessionId === currentSessionId.value && switchingSessionId.value === null) {
       return;
     }
     if (switchingSessionId.value === target.sessionId) return;
 
+    stashCurrentTranscript();
     const rollback = captureSessionPreviewRollback();
     const previewEpoch = ++sessionPreviewEpoch;
     const switchGen = ++sessionSwitchGeneration;
@@ -1885,7 +2305,10 @@ export const useAppStore = defineStore("app", () => {
     // 先于 currentSessionId 变化写入：ChatView 在 currentSessionId 一变就
     // 用它 reset 翻页游标，晚一步写就等于用 0 去 reset（= 直接判定已到文件头）。
     currentSessionBytes.value = sizeBytes;
-    const previewPromise = previewSessionLocally(target.sessionId, sizeBytes, previewEpoch);
+    const hasParked = transcripts.has(target.sessionId);
+    const previewPromise = hasParked
+      ? Promise.resolve(true)
+      : previewSessionLocally(target.sessionId, sizeBytes, previewEpoch);
     sessionPreviewPromise = previewPromise;
     // 预览只是读本地 JSONL；Pi 重建可以同时开工，别等预览结束才开始付 5 秒。
     void ensurePiOnCurrentSession(target.sessionId);
@@ -1898,7 +2321,9 @@ export const useAppStore = defineStore("app", () => {
       };
       clearEphemeralComposerAttachments();
       resetSessionScopedState({ skip: ["extensionUi"] });
-      if (previewOk && keepPreview.items.length > 0) {
+      if (hasParked) {
+        restoreTranscript(target.sessionId);
+      } else if (previewOk && keepPreview.items.length > 0) {
         items.value = keepPreview.items;
         Object.assign(toolRuns, keepPreview.toolRuns);
       }
@@ -2166,22 +2591,8 @@ export const useAppStore = defineStore("app", () => {
     // 换了模型 = 上一次的图片拦截判定作废。不清的话，用户切到支持图片的
     // 模型之后附件条目仍然是灰的、发送键仍然是禁用的 —— 一个点了没反应的界面。
     modelBlockedImages.value = null;
-    modelMismatchPrompt.value = null;
     await refreshState();
     await refreshThinkingLevels();
-  }
-
-  /** 「保持这个会话原来的模型」——只关掉提示条，不发任何 RPC。 */
-  function keepSessionModel(): void {
-    modelMismatchPrompt.value = null;
-  }
-
-  /** 「切换到默认模型」——这是用户的显式选择，此时才允许发 set_model。 */
-  async function switchToPromptedModel(): Promise<void> {
-    const prompt = modelMismatchPrompt.value;
-    if (!prompt) return;
-    modelMismatchPrompt.value = null;
-    await setModel(prompt.targetProvider, prompt.targetModelId, false);
   }
 
   async function setThinkingLevel(level: ThinkingLevel): Promise<void> {
@@ -2194,6 +2605,29 @@ export const useAppStore = defineStore("app", () => {
       settings.value = await window.piBuddy.settings.set({ thinkingLevel: level });
       await refreshState();
     }
+  }
+
+  /**
+   * 切审批模式。成功与否都不在这里改本地状态：新模式由扩展 reload 之后重新
+   * 上报 approval-mode 状态，界面跟着状态走，不会出现「下拉显示 A、实际是 B」。
+   */
+  async function setApprovalMode(mode: ApprovalMode): Promise<boolean> {
+    if (!(await whenPiReady())) {
+      notify("warning", "当前会话还没接通，审批模式没有改");
+      return false;
+    }
+    let resp: { success: boolean; error?: string };
+    try {
+      resp = await window.piBuddy.pi.setApprovalMode(mode);
+    } catch (err) {
+      notify("error", err instanceof Error ? err.message : "审批模式没有改成");
+      return false;
+    }
+    if (!resp.success) {
+      notify("error", resp.error ?? "审批模式没有改成");
+      return false;
+    }
+    return true;
   }
 
   async function saveSettings(patch: Partial<AppSettings>): Promise<void> {
@@ -2242,6 +2676,14 @@ export const useAppStore = defineStore("app", () => {
     booting,
     settings,
     started,
+    canCompose,
+    runtimeAsleep,
+    runtimeWaking,
+    idleSleepMs,
+    markConversation,
+    sleepRuntime,
+    wakeRuntime,
+    onWindowActivated,
     startError,
     modelsError,
     sessionLoadError,
@@ -2269,6 +2711,8 @@ export const useAppStore = defineStore("app", () => {
     liveAssistant,
     toolRuns,
     streaming,
+    aborting,
+    creatingTask,
     queue,
     localQueue,
     draftAttachments,
@@ -2287,6 +2731,9 @@ export const useAppStore = defineStore("app", () => {
     currentModel,
     busyStatus,
     extStatus,
+    approvalControlAvailable,
+    approvalMode,
+    setApprovalMode,
     setNotifier,
     notify,
     handleEvent,
@@ -2306,6 +2753,8 @@ export const useAppStore = defineStore("app", () => {
     init,
     start,
     chooseWorkspace,
+    switchWorkspace,
+    reloadRuntime,
     send,
     abortRun,
     newTask,
@@ -2314,9 +2763,6 @@ export const useAppStore = defineStore("app", () => {
     reloadMessages,
     setModel,
     modelBlockedImages,
-    modelMismatchPrompt,
-    keepSessionModel,
-    switchToPromptedModel,
     setPiRuntime,
     switchToBundledRuntime,
     setThinkingLevel,

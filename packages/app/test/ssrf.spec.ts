@@ -124,6 +124,13 @@ describe("normalizeEndpointUrl", () => {
       "stt.example.com"
     );
   });
+
+  it("默认仍拒绝 http；provider 探测显式放开后才放行", () => {
+    expect(() => normalizeEndpointUrl("http://api.example.com/v1")).toThrow(/HTTPS/);
+    expect(normalizeEndpointUrl("http://api.example.com/v1", { allowHttp: true })).toBe(
+      "http://api.example.com/v1"
+    );
+  });
 });
 
 // ---------------------------------------------------------------- safeFetch

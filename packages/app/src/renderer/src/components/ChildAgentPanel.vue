@@ -221,7 +221,7 @@ async function onMerge(nodeId: string, accept: boolean): Promise<void> {
 
         <div v-if="node.pendingMerge" class="merge">
           <div>
-            🔀 待裁决合并：{{ node.pendingMerge.patchTitle }}
+            待裁决合并：{{ node.pendingMerge.patchTitle }}
             <NTag v-if="node.pendingMerge.hasConflict" type="error" size="tiny" :bordered="false">
               有冲突
             </NTag>
@@ -334,8 +334,8 @@ async function onMerge(nodeId: string, accept: boolean): Promise<void> {
 }
 .chip {
   padding: 0 6px;
-  border-radius: 6px;
-  background: rgba(99, 102, 241, 0.1);
+  border-radius: 999px;
+  background: var(--accent-subtle);
   margin-right: 4px;
 }
 .ev {
@@ -350,15 +350,15 @@ async function onMerge(nodeId: string, accept: boolean): Promise<void> {
 }
 .blocked {
   margin-top: 4px;
-  color: #d97706;
+  color: var(--status-warning);
   font-size: 13px;
 }
 .question,
 .merge {
   margin-top: 6px;
   padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.03);
+  border-radius: var(--radius-l);
+  background: var(--bg-hover);
 }
 .q-prompt {
   margin-bottom: 4px;

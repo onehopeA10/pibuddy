@@ -31,7 +31,7 @@ export const CHANNELS = {
    */
   piUiPending: "pi:ui-pending",
 
-  // ---- 15 个产品动作窄通道 ----
+  // ---- 16 个产品动作窄通道 ----
   piPrompt: "pi:prompt",
   piSteer: "pi:steer",
   piFollowUp: "pi:follow-up",
@@ -40,6 +40,13 @@ export const CHANNELS = {
   piSwitchSession: "pi:switch-session",
   piSetModel: "pi:set-model",
   piSetThinkingLevel: "pi:set-thinking-level",
+  /**
+   * 切换审批模式（工具调用要不要先问用户）。
+   *
+   * 模式本身归 pi 侧的权限扩展管，落盘在工作目录 `.pi/settings.local.json`；
+   * 这条通道的入参只有一个枚举 —— 渲染进程既拿不到路径，也表达不了任意命令。
+   */
+  piSetApprovalMode: "pi:set-approval-mode",
   piGetState: "pi:get-state",
   piGetMessages: "pi:get-messages",
   piGetSessionStats: "pi:get-session-stats",
@@ -115,6 +122,10 @@ export const CHANNELS = {
 
   // ---- workspace 与附件 capability ----
   workspaceCurrent: "workspace:current",
+  /** 全部已注册的工作目录（项目列表；Codex 式「项目 → 会话」两级侧栏用）。 */
+  workspaceList: "workspace:list",
+  /** 切到一个**已注册**的工作目录（不弹系统对话框；入参只有不透明 id）。 */
+  workspaceSelect: "workspace:select",
   dialogChooseFolder: "dialog:choose-folder",
   dialogChooseFiles: "dialog:choose-files",
   fileStageDropped: "file:stage-dropped",
@@ -228,6 +239,8 @@ export const CHANNELS = {
   providersAddCustom: "providers:add-custom",
   providersTest: "providers:test",
   providersDiscoverModels: "providers:discover-models",
+  /** 标注自定义端点某个模型的输入模态（能否收图片），写回 models.json 的 input */
+  providersSetModelInput: "providers:set-model-input",
   /** 写全局或 workspace 层的默认模型；session 层归会话文件自己所有 */
   providersSetScopeDefault: "providers:set-scope-default",
   /** 按日 / workspace / provider / model 汇总的用量 */
