@@ -93,12 +93,12 @@ body,
 }
 
 .app-header .brand {
-  font-size: var(--font-ui-13);
-  font-weight: 600;
-  color: var(--text-secondary);
-  letter-spacing: 0.02em;
+  height: 22px;
+  width: auto;
+  display: block;
   margin-right: var(--space-3);
-  white-space: nowrap;
+  object-fit: contain;
+  -webkit-app-region: no-drag;
 }
 
 .app-header .rail-top,
@@ -248,8 +248,9 @@ body,
 
 .feature-title {
   margin: 0;
-  font-size: var(--font-ui-14);
+  font-size: var(--font-ui-16);
   font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 /* 没有侧栏的功能页：标题和正文同一条 880 栏，避免工具条贴窗口边 */
@@ -258,7 +259,7 @@ body,
   width: 100%;
   max-width: 880px;
   margin: 0 auto;
-  padding: var(--space-4) var(--space-6) var(--space-6);
+  padding: var(--space-5) var(--space-6) var(--space-8);
 }
 .topbar.feature-col {
   padding: 0;
@@ -295,9 +296,19 @@ body,
 .feature-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-4) var(--space-5);
+  gap: var(--space-5);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-6) var(--space-8);
   min-height: 0;
+}
+
+.feature-stage .n-card,
+.feature-page .n-card,
+.feature-stack .n-card {
+  border-radius: var(--radius-l);
 }
 
 .session-list {
@@ -307,11 +318,11 @@ body,
 }
 
 .session-item {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-m);
+  padding: 8px 10px;
+  border-radius: var(--radius-l);
   cursor: pointer;
-  margin-bottom: 2px;
-  min-height: 56px;
+  margin-bottom: 1px;
+  min-height: 44px;
 }
 
 .session-item:hover {
@@ -400,7 +411,7 @@ body,
   height: var(--topbar-height);
   padding: 0 var(--space-4);
   background: var(--bg-app);
-  border-bottom: var(--border-w) solid var(--border-subtle);
+  border-bottom: var(--border-w) solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
   flex-shrink: 0;
 }
 
@@ -457,7 +468,7 @@ body,
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-4) 0 var(--space-3);
+  padding: var(--space-6) 0 var(--space-4);
   position: relative;
 }
 
@@ -480,7 +491,7 @@ body,
 
 .msg-row {
   display: flex;
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-5);
 }
 
 .msg-row.user {
@@ -493,8 +504,8 @@ body,
   max-width: 70%;
   background: var(--bg-user-bubble);
   color: var(--text-primary);
-  border-radius: var(--radius-m);
-  padding: var(--space-2) var(--space-3);
+  border-radius: 18px 18px 6px 18px;
+  padding: 10px 15px;
   font-size: var(--font-ui-14);
   line-height: 1.65;
   white-space: pre-wrap;
@@ -517,18 +528,15 @@ body,
 }
 
 .msg-avatar {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   flex-shrink: 0;
-  border-radius: var(--radius-s);
-  background: var(--bg-surface);
+  border-radius: 50%;
+  background: #fff;
   border: var(--border-w) solid var(--border-subtle);
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--font-ui-12);
-  font-weight: 600;
+  object-fit: contain;
+  padding: 3px;
+  box-sizing: border-box;
   margin-top: 2px;
 }
 
@@ -558,8 +566,8 @@ body,
 .markdown pre {
   background: var(--code-bg);
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-m);
-  padding: var(--space-3);
+  border-radius: var(--radius-l);
+  padding: 14px 16px;
   overflow-x: auto;
   font-size: var(--font-ui-13);
   color: var(--code-text);
@@ -672,10 +680,10 @@ body,
   background: var(--bg-surface);
   border: var(--border-w) solid var(--border-subtle);
   border-left: 2px solid var(--border-subtle);
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-l);
   padding: 0 12px;
-  min-height: 36px;
-  margin: 5px 0;
+  min-height: 34px;
+  margin: 6px 0;
   font-size: var(--font-ui-13);
   cursor: pointer;
   max-width: 100%;
@@ -698,8 +706,17 @@ body,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
   max-width: 420px;
   font-size: var(--font-ui-12);
+}
+
+.tool-chip .state-done,
+.tool-chip .state-error,
+.tool-chip .state-missing {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .tool-chip .state-done {
@@ -713,7 +730,7 @@ body,
 .tool-expand {
   background: var(--bg-surface);
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-l);
   margin: 4px 0 8px;
   padding: 10px 12px;
   font-size: var(--font-ui-12);
@@ -773,8 +790,8 @@ body,
 .task-card {
   background: var(--bg-surface);
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-s);
-  padding: 4px 10px;
+  border-radius: 999px;
+  padding: 6px 12px;
   cursor: pointer;
   min-height: 28px;
   display: inline-flex;
@@ -804,7 +821,7 @@ body,
 /* ---------- 输入区 ---------- */
 
 .composer-wrap {
-  padding: var(--space-2) var(--space-6) var(--space-4);
+  padding: 8px var(--space-6) 18px;
   flex: 0 0 auto;
   flex-shrink: 0;
 }
@@ -814,13 +831,18 @@ body,
   min-height: var(--composer-min);
   margin: 0 auto;
   background: var(--bg-input);
-  border: var(--border-w) solid var(--border-strong);
-  border-radius: var(--radius-xl);
-  padding: var(--space-3) var(--space-4);
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-2xl);
+  padding: 14px 16px 12px;
+  box-shadow: var(--shadow-composer);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 
 .composer:focus-within {
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border-subtle));
+  box-shadow: var(--shadow-composer), 0 0 0 3px var(--accent-subtle);
 }
 
 /* 容器圆了之后，里面平角的输入区与附件条会在四角露出直边 */
@@ -881,8 +903,12 @@ body,
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: var(--space-2);
+  margin-top: var(--space-3);
   min-height: 36px;
+}
+
+.composer-actions .n-button {
+  border-radius: 999px;
 }
 
 .composer-hint {
@@ -942,16 +968,11 @@ body,
 }
 
 .onboarding .logo {
-  width: 48px;
-  height: 48px;
+  width: 72px;
+  height: auto;
   border-radius: var(--radius-m);
-  background: var(--accent);
-  color: var(--text-on-accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
+  object-fit: contain;
+  background: #fff;
   margin-bottom: 6px;
 }
 

@@ -34,6 +34,7 @@ const emit = defineEmits<{ "update:show": [value: boolean] }>();
     v-else
     :show="show"
     preset="card"
+    closable
     :title="title"
     :style="{ width, maxWidth: '94vw' }"
     @update:show="emit('update:show', $event)"

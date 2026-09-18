@@ -13,9 +13,8 @@ import {
   NSwitch,
   useMessage,
 } from "naive-ui";
-import type { AppTheme } from "@contract";
+import type { AppCloseAction, AppTheme } from "@contract";
 import { useAppStore } from "../stores/app";
-import { useProvidersStore } from "../stores/providers";
 import { useCapabilitiesStore } from "../stores/capabilities";
 import UpdateSettingsPanel from "./UpdateSettingsPanel.vue";
 import DiagnosticsPanel from "./DiagnosticsPanel.vue";
@@ -27,7 +26,6 @@ import PanelFrame from "./PanelFrame.vue";
 
 type SettingsSection =
   | "general"
-  | "models"
   | "memory"
   | "remote"
   | "capabilities"
@@ -37,7 +35,6 @@ type SettingsSection =
 const props = defineProps<{ embedded?: boolean }>();
 
 const store = useAppStore();
-const providers = useProvidersStore();
 const capabilities = useCapabilitiesStore();
 const message = useMessage();
 const section = ref<SettingsSection>("general");
@@ -48,7 +45,6 @@ const remoteEnabled = computed(() => capabilities.isEnabled("connector.remote"))
 const sections = computed(() => {
   const items: { id: SettingsSection; label: string }[] = [
     { id: "general", label: "通用" },
-    { id: "models", label: "模型" },
     { id: "memory", label: "记忆" },
   ];
   if (remoteEnabled.value) items.push({ id: "remote", label: "远程访问" });
@@ -63,16 +59,6 @@ const sections = computed(() => {
 const profileOptions = computed(() =>
   capabilities.profiles.map((p) => ({ label: p.displayName, value: p.id }))
 );
-
-function openProviders(): void {
-  store.settingsOpen = false;
-  providers.panelOpen = true;
-}
-
-function openUsage(): void {
-  store.settingsOpen = false;
-  providers.usagePanelOpen = true;
-}
 
 const sttBaseUrl = ref("");
 const sttApiKeyInput = ref("");
@@ -199,12 +185,61 @@ async function backToBundled(): Promise<void> {
               </n-radio-group>
             </n-form-item>
 
+            <n-form-item label="关闭窗口">
+              <n-radio-group
+                :value="store.settings.closeAction ?? 'ask'"
+                data-testid="close-action-picker"
+                @update:value="(v: AppCloseAction) => void store.saveSettings({ closeAction: v })"
+              >
+                <n-space>
+                  <n-radio value="ask">每次询问</n-radio>
+                  <n-radio value="tray">缩小到托盘</n-radio>
+                  <n-radio value="quit">退出</n-radio>
+                </n-space>
+              </n-radio-group>
+            </n-form-item>
+            <p class="hint">点右上角关闭时可选退出，或缩小到托盘让后台继续跑。</p>
+
             <n-form-item label="工作文件夹">
               <n-space align="center">
                 <span class="path-text">{{ store.workspace || "未选择" }}</span>
                 <n-button size="small" @click="store.chooseWorkspace()">更换</n-button>
               </n-space>
             </n-form-item>
+
+            <p class="hint">
+              默认使用应用自带的 Pi 运行时。只有明确知道自己在做什么时才改成「外部命令」。
+            </p>
+            <n-form-item label="Pi 运行时">
+              <n-radio-group
+                :value="store.settings.piRuntimeMode ?? 'bundled'"
+                :disabled="runtimeBusy"
+                data-testid="pi-runtime-picker"
+                @update:value="(v: 'bundled' | 'external') => changeRuntime(v)"
+              >
+                <n-space>
+                  <n-radio value="bundled">内置（推荐）</n-radio>
+                  <n-radio value="external">外部命令…</n-radio>
+                </n-space>
+              </n-radio-group>
+            </n-form-item>
+            <n-form-item v-if="store.settings.piRuntimeMode === 'external'" label="当前命令">
+              <n-space vertical size="small" style="width: 100%">
+                <span class="path-text">{{ store.settings.piExternalCommand || "未选择" }}</span>
+                <n-button size="small" :disabled="runtimeBusy" @click="changeRuntime('external')">
+                  重新选择…
+                </n-button>
+              </n-space>
+            </n-form-item>
+            <n-alert
+              v-if="store.startError && store.settings.piRuntimeMode === 'external'"
+              type="error"
+              title="外部 Pi 运行时启动失败"
+              style="margin-bottom: 12px"
+            >
+              <p class="alert-copy">{{ store.startError }}</p>
+              <n-button size="small" type="primary" @click="backToBundled">切回内置</n-button>
+            </n-alert>
 
             <p class="hint">
               语音识别（可选）：填写任意 OpenAI 兼容的转写接口，配置后即可用麦克风说话输入。
@@ -226,48 +261,6 @@ async function backToBundled(): Promise<void> {
               <n-input v-model:value="sttModel" placeholder="whisper-1" />
             </n-form-item>
           </n-form>
-        </section>
-
-        <section v-show="section === 'models'">
-          <p class="hint">
-            默认使用应用自带的 Pi 运行时。只有明确知道自己在做什么时才改成「外部命令」。
-          </p>
-          <n-form label-placement="left" label-width="110">
-            <n-form-item label="Pi 运行时">
-              <n-radio-group
-                :value="store.settings.piRuntimeMode ?? 'bundled'"
-                :disabled="runtimeBusy"
-                @update:value="(v: 'bundled' | 'external') => changeRuntime(v)"
-              >
-                <n-space>
-                  <n-radio value="bundled">内置（推荐）</n-radio>
-                  <n-radio value="external">外部命令…</n-radio>
-                </n-space>
-              </n-radio-group>
-            </n-form-item>
-            <n-form-item v-if="store.settings.piRuntimeMode === 'external'" label="当前命令">
-              <n-space vertical size="small" style="width: 100%">
-                <span class="path-text">{{ store.settings.piExternalCommand || "未选择" }}</span>
-                <n-button size="small" :disabled="runtimeBusy" @click="changeRuntime('external')">
-                  重新选择…
-                </n-button>
-              </n-space>
-            </n-form-item>
-          </n-form>
-          <n-alert
-            v-if="store.startError && store.settings.piRuntimeMode === 'external'"
-            type="error"
-            title="外部 Pi 运行时启动失败"
-            style="margin-bottom: 12px"
-          >
-            <p class="alert-copy">{{ store.startError }}</p>
-            <n-button size="small" type="primary" @click="backToBundled">切回内置</n-button>
-          </n-alert>
-          <n-space v-if="!embedded">
-            <n-button @click="openProviders">账号与模型</n-button>
-            <n-button @click="openUsage">用量与花费（仅本地统计）</n-button>
-          </n-space>
-          <p v-else class="hint">账号与用量请使用左侧「账号」入口。</p>
         </section>
 
         <section v-show="section === 'memory'">
@@ -336,7 +329,8 @@ async function backToBundled(): Promise<void> {
 .settings-layout {
   display: flex;
   min-height: 420px;
-  gap: 0;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
 }
 .settings-nav {
   width: 180px;
@@ -351,8 +345,8 @@ async function backToBundled(): Promise<void> {
   border: 0;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: var(--radius-m);
-  padding: 8px 10px;
+  border-radius: var(--radius-l);
+  padding: 9px 12px;
   font-size: var(--font-ui-13);
   cursor: pointer;
 }
@@ -361,8 +355,8 @@ async function backToBundled(): Promise<void> {
   color: var(--text-primary);
 }
 .settings-nav-item.active {
-  background: var(--bg-selected);
-  color: var(--text-primary);
+  background: var(--accent-subtle);
+  color: var(--accent);
 }
 .settings-body {
   flex: 1;
@@ -401,8 +395,10 @@ async function backToBundled(): Promise<void> {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-2) 0;
-  border-bottom: var(--border-w) solid var(--border-subtle);
+  padding: 12px 14px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 8px;
 }
 .cap-meta {
   display: flex;

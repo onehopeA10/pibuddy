@@ -199,7 +199,7 @@ async function copyDiagnostics(): Promise<void> {
   font-size: var(--font-ui-12);
   color: var(--text-secondary);
   background: var(--bg-input);
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-l);
   padding: 8px 10px;
   margin-bottom: 10px;
 }

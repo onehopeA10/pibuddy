@@ -533,7 +533,8 @@ export class PiRpcClient extends EventEmitter {
   }
 
   abort(): Promise<RpcResponse> {
-    return this.send({ type: "abort" });
+    // 与 stop() 第一级同一时限：对端卡住时再等默认 30s，停止按钮自己就停住了。
+    return this.send({ type: "abort" }, { timeoutMs: STOP_ABORT_MS });
   }
 
   newSession(): Promise<RpcResponse> {

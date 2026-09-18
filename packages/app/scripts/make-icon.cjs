@@ -17,7 +17,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const SRC = process.argv[2] || "C:/Users/yehh/.cursor/projects/d-selftool-pi-ui/assets/pibuddy-icon.png";
+const SRC =
+  process.argv[2] || path.resolve(__dirname, "../../../images/logo.png");
 const BUILD_DIR = path.join(__dirname, "..", "build");
 
 // 手工拼 ICO：ICONDIR + 每个尺寸一个 ICONDIRENTRY + PNG 数据段。

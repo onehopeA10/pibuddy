@@ -149,6 +149,7 @@ describe("pi:exit 的代际与 reason 判定", () => {
       wrapEnvelope(ctx(1), 0, { code: 0, reason: "expected-stop" })
     );
     expect(s.started).toBe(false);
+    expect(s.runtimeAsleep).toBe(false);
     expect(notify.error).not.toHaveBeenCalled();
 
     s.started = true;

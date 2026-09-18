@@ -48,7 +48,11 @@ watch(
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 0 var(--space-5) var(--space-5);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--space-3) var(--space-6) var(--space-8);
 }
 .library-tabs {
   flex: 1;

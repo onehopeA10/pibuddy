@@ -433,8 +433,10 @@ watch(
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  padding: 8px 0;
-  border-top: var(--border-w) solid var(--border-subtle);
+  padding: 12px 14px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 8px;
 }
 .row-main {
   flex: 1;
@@ -474,8 +476,8 @@ watch(
 }
 .result {
   margin-top: 6px;
-  padding: 6px 8px;
-  border-radius: 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius-l);
   background: var(--bg-hover);
   font-size: 12px;
 }

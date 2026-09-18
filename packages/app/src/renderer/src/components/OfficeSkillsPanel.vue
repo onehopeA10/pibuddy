@@ -135,8 +135,8 @@ onMounted(() => void reload());
 }
 .card {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-m);
-  padding: 10px 12px;
+  border-radius: var(--radius-l);
+  padding: 14px 16px;
 }
 .card-head {
   display: flex;

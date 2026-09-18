@@ -385,6 +385,10 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100%;
   min-height: 240px;
+  margin: var(--space-4) var(--space-6) var(--space-6);
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  overflow: hidden;
   background: var(--code-bg);
   color: var(--code-text);
 }
@@ -393,7 +397,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 8px 12px;
   border-bottom: var(--border-w) solid var(--border-subtle);
 }
 .profile-select {
@@ -417,16 +421,16 @@ onBeforeUnmount(() => {
 }
 .terminal-tabs {
   display: flex;
-  gap: 2px;
-  padding: 4px 8px 0;
+  gap: 6px;
+  padding: 8px 12px 0;
   overflow-x: auto;
 }
 .terminal-tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
-  border-radius: var(--radius-m) var(--radius-m) 0 0;
+  padding: 5px 12px;
+  border-radius: var(--radius-l) var(--radius-l) 0 0;
   background: var(--bg-surface-raised);
   cursor: pointer;
   white-space: nowrap;

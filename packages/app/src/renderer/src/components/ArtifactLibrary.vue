@@ -65,6 +65,7 @@ async function commitRename(): Promise<void> {
   <n-modal
     v-model:show="store.panelOpen"
     preset="card"
+    closable
     style="width: 900px; max-width: 94vw"
     title="产物"
     aria-label="产物库"

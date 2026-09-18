@@ -37,7 +37,13 @@ const store = useAppStore();
       </button>
     </div>
     <div class="new-task">
-      <n-button type="primary" block :disabled="!store.started" @click="store.newTask()">
+      <n-button
+        type="primary"
+        block
+        :disabled="!store.workspaceId"
+        :loading="store.creatingTask"
+        @click="store.newTask()"
+      >
         新建任务
       </n-button>
     </div>

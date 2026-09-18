@@ -123,5 +123,6 @@ describe("CT-09 设置里不再有任何密钥字段", () => {
     // 但地址与模型仍然可写（否则用户改不了端点）
     expect(writable).toContain("sttBaseUrl");
     expect(writable).toContain("sttModel");
+    expect(writable).toContain("closeAction");
   });
 });

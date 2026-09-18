@@ -230,9 +230,9 @@ watch(
 }
 .entry {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-m);
-  padding: 8px 12px;
-  margin-bottom: 8px;
+  border-radius: var(--radius-l);
+  padding: 12px 14px;
+  margin-bottom: 10px;
 }
 .entry.hidden {
   opacity: 0.55;

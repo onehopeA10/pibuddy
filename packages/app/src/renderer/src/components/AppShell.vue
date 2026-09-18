@@ -24,6 +24,7 @@ import OnboardingWizard from "./OnboardingWizard.vue";
 import FileEditorPane from "./FileEditorPane.vue";
 import ChangesetPanel from "./ChangesetPanel.vue";
 import PreviewPane from "./PreviewPane.vue";
+import ToolPane from "./ToolPane.vue";
 import { useUpdateStore } from "../stores/update";
 import { usePiResourcesStore } from "../stores/piResources";
 import { useMcpStore } from "../stores/mcp";
@@ -133,11 +134,21 @@ function askDirty(tabs: EditorTab[]): Promise<DirtyDecision> {
 }
 
 setDirtyPrompt(askDirty);
+function onWindowActivated(): void {
+  void store.onWindowActivated();
+}
+
 onBeforeUnmount(() => {
   window.removeEventListener("resize", onResize);
+  window.removeEventListener("focus", onWindowActivated);
+  document.removeEventListener("visibilitychange", onVisibility);
   setDirtyPrompt(null);
   store.dispose();
 });
+
+function onVisibility(): void {
+  if (document.visibilityState === "visible") onWindowActivated();
+}
 
 /**
  * 向导是否还没走完。
@@ -234,6 +245,33 @@ function setContextMode(mode: ContextPanelMode): void {
 }
 const sessionDrawerOpen = ref(false);
 const windowWidth = ref(typeof window === "undefined" ? 1360 : window.innerWidth);
+const SESSION_SIDEBAR_KEY = "pibuddy.sessionSidebarCollapsed";
+const sessionSidebarCollapsed = ref(readSessionSidebarCollapsed());
+
+function readSessionSidebarCollapsed(): boolean {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem(SESSION_SIDEBAR_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeSessionSidebarCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(SESSION_SIDEBAR_KEY, collapsed ? "1" : "0");
+  } catch {
+    // 布局偏好写失败只影响下次恢复
+  }
+}
+
+function toggleSessionSidebar(): void {
+  if (windowWidth.value > 960 && activeNav.value === "chat") {
+    sessionSidebarCollapsed.value = !sessionSidebarCollapsed.value;
+    writeSessionSidebarCollapsed(sessionSidebarCollapsed.value);
+    return;
+  }
+  sessionDrawerOpen.value = !sessionDrawerOpen.value;
+}
 
 const FEATURE_TITLE: Record<RailId, string> = {
   chat: "对话",
@@ -243,7 +281,7 @@ const FEATURE_TITLE: Record<RailId, string> = {
   channels: "渠道",
   workflows: "工作流",
   terminal: "终端",
-  account: "账号",
+  account: "模型",
   settings: "设置",
 };
 
@@ -258,9 +296,10 @@ function onResize(): void {
   windowWidth.value = window.innerWidth;
 }
 
-const sessionInline = computed(
+const sessionWide = computed(
   () => activeNav.value === "chat" && windowWidth.value > 960
 );
+const sessionInline = computed(() => sessionWide.value && !sessionSidebarCollapsed.value);
 const contextInline = computed(
   () => contextPanelOpen.value && windowWidth.value > 1200 && activeNav.value === "chat"
 );
@@ -368,6 +407,8 @@ const homeDashboardEnabled = computed(() => capabilities.isEnabled("home.dashboa
 
 onMounted(() => {
   window.addEventListener("resize", onResize);
+  window.addEventListener("focus", onWindowActivated);
+  document.addEventListener("visibilitychange", onVisibility);
   void store.init();
   // 先取快照再订阅：窗口 reload 之后进度必须从 main 的快照原样恢复，
   // 而不是回到 idle。
@@ -427,9 +468,16 @@ function closeFeaturePanels(): void {
 
 function selectNav(id: RailId): void {
   closeFeaturePanels();
+  if (id === "chat") {
+    if (activeNav.value === "chat") {
+      toggleSessionSidebar();
+    } else {
+      activeNav.value = "chat";
+    }
+    return;
+  }
   activeNav.value = id;
   sessionDrawerOpen.value = false;
-  if (id === "chat") return;
   if (id === "tasks") tasks.panelOpen = true;
   else if (id === "library") {
     if (promptLibraryEnabled.value) promptLibrary.panelOpen = true;
@@ -512,6 +560,7 @@ function onTool(key: string): void {
     <!-- 顶栏：自绘标题栏 + 主导航（原左侧图标轨横排上移），兼作窗口拖拽区 -->
     <NavRail
       :active="activeNav"
+      :session-collapsed="sessionSidebarCollapsed"
       :enabled="{
         tasks: tasksEnabled,
         library: promptLibraryEnabled || officeSkillsEnabled,
@@ -545,10 +594,10 @@ function onTool(key: string): void {
       <TopBar
         v-if="activeNav === 'chat'"
         :show-session-toggle="!sessionInline"
-        :session-open="sessionDrawerOpen"
+        :session-open="sessionInline"
         :context-open="contextPanelOpen"
         :tools="extraTools"
-        @toggle-sessions="sessionDrawerOpen = !sessionDrawerOpen"
+        @toggle-sessions="toggleSessionSidebar"
         @toggle-context="toggleContext"
         @tool="onTool"
       />
@@ -568,6 +617,13 @@ function onTool(key: string): void {
         <span>连接已断开，消息已保存在本地。</span>
         <span class="spacer" />
         <n-button size="tiny" secondary @click="store.start(store.currentSessionId || undefined)">重新连接</n-button>
+      </div>
+      <div v-else-if="store.runtimeWaking && activeNav === 'chat'" class="exec-strip" role="status">
+        <span class="pulse-dot" />
+        <span>正在唤醒助手…</span>
+      </div>
+      <div v-else-if="store.runtimeAsleep && activeNav === 'chat'" class="exec-strip" role="status">
+        <span>助手已休眠，回到窗口或发送时会自动唤醒</span>
       </div>
       <div v-else-if="store.streaming && activeNav === 'chat'" class="exec-strip" role="status">
         <span class="pulse-dot" />
@@ -606,8 +662,8 @@ function onTool(key: string): void {
         <div class="onboarding">
           <h1>还没有可用的模型</h1>
           <p v-if="store.modelsError">未能列出模型：{{ store.modelsError }}</p>
-          <p v-else>需要先配置一个 AI 服务商的账号，才能开始对话。</p>
-          <n-button type="primary" @click="selectNav('account')">去配置账号</n-button>
+          <p v-else>需要先配置一个模型，才能开始对话。</p>
+          <n-button type="primary" @click="selectNav('account')">去配置模型</n-button>
           <n-button quaternary @click="store.start()">重新检查</n-button>
         </div>
       </template>
@@ -622,15 +678,33 @@ function onTool(key: string): void {
             :relative-path="artifacts.previewRelativePath || undefined"
             :artifact-id="artifacts.previewArtifactId || undefined"
           />
-          <ChangesetPanel v-if="changesOpen && reviewEnabled" />
-          <SessionTreePanel v-if="sessionTreeOpen && sessionTreeEnabled" />
-          <GitPanel v-if="gitOpen && gitEnabled" />
-          <ChildAgentPanel v-if="childAgentOpen && childAgentEnabled" />
-          <RemotePanel v-if="remoteOpen && remoteEnabled && activeNav === 'chat'" />
-          <HomeAdvisorPanel v-if="homeAdvisorOpen && homeAdvisorEnabled" />
-          <HomeDashboardPanel v-if="homeDashboardOpen && homeDashboardEnabled" />
-          <RulesPanel v-if="rulesOpen && homeAutomationEnabled" />
-          <EduPanel v-if="eduOpen && eduEnabled" />
+          <ToolPane v-if="changesOpen && reviewEnabled" @close="changesOpen = false">
+            <ChangesetPanel />
+          </ToolPane>
+          <ToolPane v-if="sessionTreeOpen && sessionTreeEnabled" @close="sessionTreeOpen = false">
+            <SessionTreePanel />
+          </ToolPane>
+          <ToolPane v-if="gitOpen && gitEnabled" @close="gitOpen = false">
+            <GitPanel />
+          </ToolPane>
+          <ToolPane v-if="childAgentOpen && childAgentEnabled" @close="childAgentOpen = false">
+            <ChildAgentPanel />
+          </ToolPane>
+          <ToolPane v-if="remoteOpen && remoteEnabled && activeNav === 'chat'" @close="remoteOpen = false">
+            <RemotePanel />
+          </ToolPane>
+          <ToolPane v-if="homeAdvisorOpen && homeAdvisorEnabled" @close="homeAdvisorOpen = false">
+            <HomeAdvisorPanel />
+          </ToolPane>
+          <ToolPane v-if="homeDashboardOpen && homeDashboardEnabled" @close="homeDashboardOpen = false">
+            <HomeDashboardPanel />
+          </ToolPane>
+          <ToolPane v-if="rulesOpen && homeAutomationEnabled" @close="rulesOpen = false">
+            <RulesPanel />
+          </ToolPane>
+          <ToolPane v-if="eduOpen && eduEnabled" @close="eduOpen = false">
+            <EduPanel />
+          </ToolPane>
           <ModelErrorHint />
           </div>
           <InputBar />

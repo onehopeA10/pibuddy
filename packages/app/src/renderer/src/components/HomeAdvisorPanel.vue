@@ -74,10 +74,11 @@ onMounted(() => void reload());
 .home-advisor-panel {
   display: flex;
   flex-direction: column;
-  width: 320px;
-  height: 100%;
-  border-left: var(--border-w) solid var(--border-subtle);
-  background: var(--bg-surface);
+  width: 100%;
+  border-top: var(--border-w) solid var(--border-subtle);
+  padding: 8px;
+  min-height: 240px;
+  max-height: 420px;
   overflow: hidden;
 }
 .head {
@@ -119,8 +120,8 @@ onMounted(() => void reload());
 }
 .card {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: var(--radius-l);
+  padding: 14px 16px;
 }
 .card-head {
   display: flex;

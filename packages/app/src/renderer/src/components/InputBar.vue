@@ -22,7 +22,7 @@ import ApprovalModeControl from "./ApprovalModeControl.vue";
 
 const store = useAppStore();
 const message = useMessage();
-const composerLocked = computed(() => !store.started || store.switchingSessionId !== null);
+const composerLocked = computed(() => !store.canCompose || store.switchingSessionId !== null);
 
 /**
  * 图片与文件附件**归 store 的 composer 所有**，这里只是同名代理。
@@ -696,13 +696,15 @@ onBeforeUnmount(() => {
         <span class="composer-hint" v-if="recording">正在听你说…</span>
         <div style="flex: 1" />
         <n-button
-          v-if="store.streaming"
+          v-if="store.streaming || store.aborting"
           size="small"
           type="error"
           secondary
+          :loading="store.aborting"
+          :disabled="store.aborting"
           @click="store.abortRun()"
         >
-          停止
+          {{ store.aborting ? "正在停止" : "停止" }}
         </n-button>
         <!--
           助手在跑的时候，「现在就打断」和「等它做完这一轮」是两件事，
@@ -779,8 +781,8 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-secondary);
-  border-radius: var(--radius-l);
-  padding: 2px 10px;
+  border-radius: 999px;
+  padding: 3px 12px;
   font-size: 12px;
   cursor: pointer;
 }

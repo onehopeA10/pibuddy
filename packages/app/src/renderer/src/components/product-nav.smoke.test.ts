@@ -79,7 +79,7 @@ const FEATURES: { label: string; title: string }[] = [
   { label: "渠道", title: "渠道" },
   { label: "工作流", title: "工作流" },
   { label: "终端", title: "终端" },
-  { label: "账号", title: "账号" },
+  { label: "模型", title: "模型" },
   { label: "设置", title: "设置" },
 ];
 
@@ -226,5 +226,24 @@ describe("产品主导航", () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".feature-title").exists()).toBe(false);
     expect(wrapper.find('[data-page="ChatView"]').exists()).toBe(true);
+  });
+
+  it("对话页再点「对话」收起会话栏，再点展开", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1400 });
+    installBridge({ onboarded: true, workspace: true });
+    const wrapper = await mountShell();
+    expect(wrapper.find('[data-page="Sidebar"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="对话"]').attributes("aria-expanded")).toBe("true");
+
+    await wrapper.find('button[aria-label="对话"]').trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-page="Sidebar"]').exists()).toBe(false);
+    expect(wrapper.find('[data-page="ChatView"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="对话"]').attributes("aria-expanded")).toBe("false");
+
+    await wrapper.find('button[aria-label="对话"]').trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-page="Sidebar"]').exists()).toBe(true);
+    expect(wrapper.find('button[aria-label="对话"]').attributes("aria-expanded")).toBe("true");
   });
 });

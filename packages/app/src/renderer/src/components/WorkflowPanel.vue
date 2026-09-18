@@ -242,8 +242,8 @@ async function doImport(): Promise<void> {
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  padding: var(--space-4) var(--space-5);
-  gap: var(--space-3);
+  padding: var(--space-5) var(--space-6);
+  gap: var(--space-4);
   overflow: hidden;
 }
 .wf-header,
@@ -263,7 +263,7 @@ async function doImport(): Promise<void> {
   flex: 1;
   min-height: 300px;
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-l);
   overflow: hidden;
 }
 .wf-empty {

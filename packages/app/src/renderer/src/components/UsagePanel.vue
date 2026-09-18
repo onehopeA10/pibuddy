@@ -203,7 +203,7 @@ const summaryRows = computed(() => [
 }
 .usage-table th,
 .usage-table td {
-  padding: 6px 8px;
+  padding: 10px 12px;
   border-bottom: var(--border-w) solid var(--border-subtle);
   text-align: right;
 }

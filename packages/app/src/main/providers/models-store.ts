@@ -13,9 +13,10 @@
  *
  * 渲染进程提交的地址在**落盘之前**经 registerEndpoint
  * （normalizeEndpointUrl + assertPublicAddress）校验并换成不透明 endpointId；
- * 被拒的地址一个字节都不会写进 models.json。没有这一步的话，Provider 中心
- * 的「自定义端点」输入框就是一条把请求（连同 Authorization 头）定向到
- * `169.254.169.254` 的通用旁路。
+ * provider 允许公网 http / https，内网和云元数据仍拦。被拒的地址一个字节
+ * 都不会写进 models.json。没有这一步的话，Provider 中心的「自定义端点」
+ * 输入框就是一条把请求（连同 Authorization 头）定向到 `169.254.169.254`
+ * 的通用旁路。
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -137,13 +138,18 @@ export async function upsertCustomProvider(
   const file = readModelsFile();
   const providers = { ...(file.providers ?? {}) };
   const previous = providers[input.id];
+  const previousById = new Map((previous?.models ?? []).map((m) => [m.id, m] as const));
+  // 编辑时模型列表留空 = 不改已有条目（避免一次保存把 input / 别名抹掉）。
+  // 新加端点且没填模型，才允许先落一条空列表，随后用「发现模型」补。
+  const modelIds =
+    input.models.length > 0 ? input.models : (previous?.models ?? []).map((m) => m.id);
   const entry: CustomProvider = {
     ...(previous ?? {}),
     baseUrl: endpoint.baseUrl,
     api: CUSTOM_PROVIDER_API,
     apiKey: previous?.apiKey ?? CUSTOM_PROVIDER_PLACEHOLDER_KEY,
     name: input.name,
-    models: input.models.map((id) => ({ id })),
+    models: modelIds.map((id) => previousById.get(id) ?? { id }),
   };
   providers[input.id] = entry;
   writeModelsFile({ ...file, providers });
@@ -216,6 +222,7 @@ export async function discoverModels(
   const resp = await safeFetch(`${base}/models`, {
     method: "GET",
     headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    allowHttp: true,
   });
   if (!resp.ok) {
     throw new Error(`DISCOVER_FAILED: 端点返回 HTTP ${resp.status}`);

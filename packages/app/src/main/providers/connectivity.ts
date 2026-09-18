@@ -171,6 +171,8 @@ export async function testProvider(providerId: string): Promise<ProviderTestResu
         "x-api-key": key,
         "anthropic-version": "2023-06-01",
       },
+      // 自定义接口可能是 http 明文；官方目录里的地址本身就是 https。
+      allowHttp: true,
     });
     const latencyMs = Date.now() - started;
     if (resp.ok) {

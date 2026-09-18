@@ -278,10 +278,11 @@ const groups = computed(() => {
 .home-dashboard-panel {
   display: flex;
   flex-direction: column;
-  width: 340px;
-  height: 100%;
-  border-left: var(--border-w) solid var(--border-subtle);
-  background: var(--bg-surface);
+  width: 100%;
+  border-top: var(--border-w) solid var(--border-subtle);
+  padding: 8px;
+  min-height: 280px;
+  max-height: 420px;
   overflow: hidden;
 }
 .head {
@@ -315,7 +316,6 @@ const groups = computed(() => {
 }
 .msg.notice {
   color: var(--text-secondary);
-  background: var(--bg-surface);
 }
 .filters {
   display: flex;

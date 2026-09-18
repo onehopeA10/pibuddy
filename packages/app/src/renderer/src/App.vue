@@ -33,11 +33,14 @@ const isLight = computed(() => store.settings.theme === "light");
 // （深色对应 :root，浅色对应 :root[data-theme="light"]）。
 const sharedOverrides: GlobalThemeOverrides = {
   common: {
-    borderRadius: "6px",
-    scrollbarWidth: "6px",
-    scrollbarHeight: "6px",
-    scrollbarBorderRadius: "4px",
+    borderRadius: "10px",
+    scrollbarWidth: "8px",
+    scrollbarHeight: "8px",
+    scrollbarBorderRadius: "8px",
   },
+  Card: { borderRadius: "12px" },
+  Dialog: { borderRadius: "16px" },
+  Alert: { borderRadius: "12px" },
 };
 
 const darkOverrides: GlobalThemeOverrides = {

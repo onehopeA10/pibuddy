@@ -418,8 +418,8 @@ watch(
 .add {
   border: var(--border-w) solid var(--border-subtle);
   border-radius: var(--radius-l);
-  padding: var(--space-3);
-  margin-bottom: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
 }
 .add-row {
   display: flex;
@@ -439,8 +439,10 @@ watch(
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 0;
-  border-bottom: var(--border-w) solid var(--border-subtle);
+  padding: 12px 14px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 8px;
 }
 .row.excluded {
   opacity: 0.55;
@@ -518,8 +520,8 @@ watch(
 .semantic {
   border: var(--border-w) solid var(--border-subtle);
   border-radius: var(--radius-l);
-  padding: var(--space-3);
-  margin-bottom: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
 }
 .embed-stat {
   font-size: 12px;
@@ -536,8 +538,10 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 0;
-  border-bottom: var(--border-w) solid var(--border-subtle);
+  padding: 8px 10px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 6px;
 }
 .sem-content {
   flex: 1;
@@ -567,8 +571,10 @@ watch(
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 6px 0;
-  border-bottom: var(--border-w) solid var(--border-subtle);
+  padding: 10px 12px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 8px;
 }
 .kb-main {
   flex: 1;

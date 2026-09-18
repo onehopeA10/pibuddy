@@ -391,8 +391,8 @@ async function submit(): Promise<void> {
   background: var(--warning-bg);
   border: var(--border-w) solid var(--status-warning);
   color: var(--text-primary);
-  padding: 6px 8px;
-  border-radius: 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius-l);
   font-size: 12px;
   display: flex;
   gap: 8px;
@@ -409,9 +409,9 @@ async function submit(): Promise<void> {
 }
 .form {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-m);
-  padding: 12px;
-  margin-bottom: 12px;
+  border-radius: var(--radius-l);
+  padding: 14px 16px;
+  margin-bottom: 14px;
 }
 .form .row {
   display: flex;
@@ -422,8 +422,8 @@ async function submit(): Promise<void> {
 }
 .task-card {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: var(--radius-m);
-  padding: 10px 12px;
+  border-radius: var(--radius-l);
+  padding: 14px 16px;
   margin-bottom: 10px;
 }
 .task-head {

@@ -183,9 +183,9 @@ async function copyPairing(): Promise<void> {
 }
 .rp-pairing {
   margin-top: 6px;
-  padding: 8px;
+  padding: 12px 14px;
   border: 1px dashed var(--border-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-l);
 }
 .rp-url {
   display: block;
@@ -199,8 +199,8 @@ async function copyPairing(): Promise<void> {
 }
 .rp-device {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 8px;
+  border-radius: var(--radius-l);
+  padding: 12px 14px;
   margin-bottom: 8px;
 }
 .rp-device-head {

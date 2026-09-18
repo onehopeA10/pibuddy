@@ -192,6 +192,28 @@ describe("[合并写入] 用户手写的条目一个都不丢", () => {
     expect(entry.apiKey).toBe("ollama");
     expect(entry.compat).toEqual({ supportsDeveloperRole: false });
     expect(entry.baseUrl).toBe("https://ollama.example.com/v1");
+    // 编辑时没改模型列表，原条目必须还在
+    expect(entry.models?.map((m) => m.id)).toEqual(["local-a", "local-b"]);
+  });
+
+  it("覆盖时按 id 合并模型，手写的 input 不丢", async () => {
+    const { models } = await freshModules();
+    seedModelsFile(models);
+
+    await models.upsertCustomProvider(
+      customRequest({
+        id: "relay",
+        name: "中转",
+        baseUrl: "https://relay.example.com/v1",
+        models: ["relay-model", "new-one"],
+      })
+    );
+
+    const entry = models.listCustomProviders().relay;
+    expect(entry.models).toEqual([
+      { id: "relay-model", name: "Relay", input: ["text", "image"] },
+      { id: "new-one" },
+    ]);
   });
 
   it("删除不存在的 provider 是 no-op，不动文件也不备份", async () => {
@@ -216,13 +238,23 @@ describe("[合并写入] 用户手写的条目一个都不丢", () => {
 });
 
 describe("[落盘前校验] 地址不合格时一个字节都不写", () => {
-  it("非 https 的地址被拒，且 models.json 完全没变", async () => {
+  it("公网 http 地址可以登记（中转 / 自建网关常用明文）", async () => {
+    const { models } = await freshModules();
+    await models.upsertCustomProvider(
+      customRequest({ baseUrl: "http://api.example.com/v1" })
+    );
+    expect(models.listCustomProviders()["my-endpoint"].baseUrl).toBe(
+      "http://api.example.com/v1"
+    );
+  });
+
+  it("非 http(s) 协议被拒，且 models.json 完全没变", async () => {
     const { models } = await freshModules();
     seedModelsFile(models);
     const before = sha256(models.modelsFilePath());
 
     await expect(
-      models.upsertCustomProvider(customRequest({ baseUrl: "http://api.example.com/v1" }))
+      models.upsertCustomProvider(customRequest({ baseUrl: "file:///etc/passwd" }))
     ).rejects.toThrow(/OUTBOUND_BLOCKED/);
 
     expect(sha256(models.modelsFilePath())).toBe(before);
@@ -295,6 +327,26 @@ describe("discoverModels", () => {
   it("provider 不存在时抛 PROVIDER_NOT_FOUND", async () => {
     const { models } = await freshModules();
     await expect(models.discoverModels("nope")).rejects.toThrow(/PROVIDER_NOT_FOUND/);
+  });
+
+  it("公网 http 端点可以走发现", async () => {
+    const { models, guard } = await freshModules();
+    await models.upsertCustomProvider(
+      customRequest({ id: "plain", name: "plain", baseUrl: "http://api.example.com/v1" })
+    );
+    guard.__setOutboundDeps({
+      lookup: async () => [{ address: "203.0.113.7", family: 4 }],
+      fetch: vi.fn(async () => ({
+        status: 200,
+        ok: true,
+        headers: new Headers({ "content-type": "application/json" }),
+        body: null,
+        text: async () => JSON.stringify({ data: [{ id: "plain-model" }] }),
+      })) as never,
+    });
+
+    const found = await models.discoverModels("plain", "sk-plain");
+    expect(found.map((m) => m.id)).toEqual(["plain-model"]);
   });
 });
 

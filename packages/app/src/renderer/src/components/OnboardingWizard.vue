@@ -29,6 +29,7 @@ import {
   NTag,
 } from "naive-ui";
 import { useAppStore } from "../stores/app";
+import { appLogo } from "../brand";
 import { useProvidersStore } from "../stores/providers";
 import { usePiResourcesStore } from "../stores/piResources";
 
@@ -190,7 +191,7 @@ const blockReason = computed(() => {
 
       <!-- 0 欢迎 -->
       <section v-if="step === 0" class="body">
-        <div class="logo">π</div>
+        <img class="logo" :src="appLogo" alt="PiBuddy" />
         <p>
           我是你的 AI 办公小助手：整理文件、分析表格、写文档、处理图片和视频，
           都可以直接用一句话交给我。
@@ -393,9 +394,11 @@ const blockReason = computed(() => {
   font-size: var(--font-ui-13);
 }
 .logo {
-  font-size: 48px;
-  text-align: center;
-  margin-bottom: 8px;
+  display: block;
+  width: 96px;
+  height: auto;
+  margin: 0 auto 12px;
+  object-fit: contain;
 }
 .test-result {
   margin: 12px 0 0;

@@ -216,10 +216,11 @@ onMounted(() => {
 .session-tree-panel {
   display: flex;
   flex-direction: column;
-  width: 340px;
-  height: 100%;
-  border-left: var(--border-w) solid var(--border-subtle);
-  background: var(--bg-surface);
+  width: 100%;
+  border-top: var(--border-w) solid var(--border-subtle);
+  padding: 8px;
+  min-height: 360px;
+  max-height: 420px;
   overflow: hidden;
 }
 .head {
@@ -252,10 +253,10 @@ onMounted(() => {
 }
 .msg.notice {
   color: var(--status-success);
-  background: var(--bg-surface);
 }
 .canvas {
   flex: 1;
+  min-height: 180px;
   overflow: auto;
   padding: 4px;
 }

@@ -124,8 +124,8 @@ function resultTag(errorCode: string | undefined): "success" | "warning" | "erro
 .connector-panel {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  gap: 14px;
+  padding: 4px 0 8px;
   min-width: 280px;
   overflow-y: auto;
 }
@@ -161,11 +161,11 @@ function resultTag(errorCode: string | undefined): "success" | "warning" | "erro
 }
 .cp-item {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 8px;
+  border-radius: var(--radius-l);
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .cp-item-head {
   display: flex;

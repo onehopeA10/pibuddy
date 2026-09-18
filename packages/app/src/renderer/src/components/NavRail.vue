@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { NTooltip } from "naive-ui";
 import { useAppStore } from "../stores/app";
+import { appLogo } from "../brand";
 
 export type RailId =
   | "chat"
@@ -14,14 +15,20 @@ export type RailId =
   | "account"
   | "settings";
 
-defineProps<{
+const props = defineProps<{
   active: RailId;
   enabled: Partial<Record<RailId, boolean>>;
+  sessionCollapsed?: boolean;
 }>();
 
 const emit = defineEmits<{
   select: [id: RailId];
 }>();
+
+const chatTip = computed(() => {
+  if (props.active !== "chat") return "会话与对话";
+  return props.sessionCollapsed ? "打开会话列表" : "收起会话列表";
+});
 
 const primary: { id: RailId; label: string; tip: string }[] = [
   { id: "chat", label: "对话", tip: "会话与对话" },
@@ -34,7 +41,7 @@ const primary: { id: RailId; label: string; tip: string }[] = [
 ];
 
 const footer: { id: RailId; label: string; tip: string }[] = [
-  { id: "account", label: "账号", tip: "账号、模型与用量" },
+  { id: "account", label: "模型", tip: "模型与用量" },
   { id: "settings", label: "设置", tip: "应用设置" },
 ];
 
@@ -62,7 +69,7 @@ function toggleTheme(): void {
   -->
   <nav class="app-header" aria-label="主导航">
     <div class="header-inner">
-    <span class="brand" aria-hidden="true">PiBuddy</span>
+    <img class="brand" :src="appLogo" alt="PiBuddy" />
     <div class="rail-top">
       <n-tooltip v-for="item in primary" :key="item.id" placement="bottom" :delay="400">
         <template #trigger>
@@ -72,6 +79,7 @@ function toggleTheme(): void {
             class="rail-item"
             :class="{ active: active === item.id }"
             :aria-current="active === item.id ? 'page' : undefined"
+            :aria-expanded="item.id === 'chat' && active === 'chat' ? !sessionCollapsed : undefined"
             :aria-label="item.label"
             @click="emit('select', item.id)"
           >
@@ -129,7 +137,7 @@ function toggleTheme(): void {
             <span class="label">{{ item.label }}</span>
           </button>
         </template>
-        {{ item.tip }}
+        {{ item.id === "chat" ? chatTip : item.tip }}
       </n-tooltip>
     </div>
     <div class="rail-spacer" />
@@ -195,7 +203,7 @@ function toggleTheme(): void {
             <svg class="rail-icon" width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
               <path
                 v-if="item.id === 'account'"
-                d="M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-5 6.5c.6-2.2 2.6-3.5 5-3.5s4.4 1.3 5 3.5"
+                d="M4 5.5h12v3.2H4V5.5Zm0 5.8h12V14.5H4v-3.2Zm1.2-4.3h2.2v1.2H5.2V7Zm0 5.8h2.2v1.2H5.2v-1.2Z"
                 stroke="currentColor"
                 stroke-width="1.5"
                 stroke-linejoin="round"

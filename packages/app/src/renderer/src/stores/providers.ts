@@ -49,6 +49,12 @@ export const useProvidersStore = defineStore("providers", () => {
   /** 至少配好了一个可用凭据 —— 首启向导据它判断「能不能发第一条消息」。 */
   const hasAnyConfigured = computed(() => providers.value.some((p) => p.configured));
 
+  /** Electron 会把主进程抛错包成 `Error invoking remote method '…': Code: 原文`。 */
+  function ipcErrorMessage(err: unknown): string {
+    const raw = err instanceof Error ? err.message : String(err);
+    return raw.replace(/^Error invoking remote method '[^']+':\s*(?:\w+Error:\s*)?/, "");
+  }
+
   function adopt(result: { providers: ProviderView[]; permissionEnforced: boolean }): void {
     providers.value = result.providers;
     permissionEnforced.value = result.permissionEnforced;
@@ -62,7 +68,7 @@ export const useProvidersStore = defineStore("providers", () => {
     } catch (err) {
       // 不静默：拉不到列表时界面必须说明原因，而不是显示一个空列表
       // 冒充「你还没配过任何账号」。
-      lastError.value = err instanceof Error ? err.message : String(err);
+      lastError.value = ipcErrorMessage(err);
     } finally {
       loading.value = false;
     }
@@ -75,7 +81,7 @@ export const useProvidersStore = defineStore("providers", () => {
       adopt(await window.piBuddy.providers.saveKey(providerId, key));
       return true;
     } catch (err) {
-      lastError.value = err instanceof Error ? err.message : String(err);
+      lastError.value = ipcErrorMessage(err);
       return false;
     }
   }
@@ -85,7 +91,7 @@ export const useProvidersStore = defineStore("providers", () => {
     try {
       adopt(await window.piBuddy.providers.remove(providerId));
     } catch (err) {
-      lastError.value = err instanceof Error ? err.message : String(err);
+      lastError.value = ipcErrorMessage(err);
     }
   }
 
@@ -96,7 +102,7 @@ export const useProvidersStore = defineStore("providers", () => {
       adopt(await window.piBuddy.providers.addCustom(input));
       return true;
     } catch (err) {
-      lastError.value = err instanceof Error ? err.message : String(err);
+      lastError.value = ipcErrorMessage(err);
       return false;
     }
   }
@@ -115,7 +121,7 @@ export const useProvidersStore = defineStore("providers", () => {
         ok: false,
         latencyMs: 0,
         errorCode: "unknown",
-        redactedMessage: err instanceof Error ? err.message : String(err),
+        redactedMessage: ipcErrorMessage(err),
       };
     }
     tests.value = { ...tests.value, [providerId]: { pending: false, result } };
@@ -128,7 +134,7 @@ export const useProvidersStore = defineStore("providers", () => {
       adopt(await window.piBuddy.providers.discoverModels(providerId));
       return true;
     } catch (err) {
-      lastError.value = err instanceof Error ? err.message : String(err);
+      lastError.value = ipcErrorMessage(err);
       return false;
     }
   }
@@ -149,7 +155,7 @@ export const useProvidersStore = defineStore("providers", () => {
       adopt(await window.piBuddy.providers.setModelInput(providerId, modelId, input));
       return true;
     } catch (err) {
-      lastError.value = err instanceof Error ? err.message : String(err);
+      lastError.value = ipcErrorMessage(err);
       return false;
     }
   }
@@ -168,7 +174,7 @@ export const useProvidersStore = defineStore("providers", () => {
         window.piBuddy.providers.usage.query(allFilter),
       ]);
     } catch (err) {
-      lastError.value = err instanceof Error ? err.message : String(err);
+      lastError.value = ipcErrorMessage(err);
     }
   }
 

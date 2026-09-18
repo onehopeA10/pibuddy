@@ -118,11 +118,18 @@ export const appSettingsSchema = z.object({
    * 三个窗口按钮那一块会与自绘顶栏颜色割裂）。
    */
   theme: z.enum(["dark", "light"]).default("dark"),
+  /**
+   * 点窗口关闭时怎么走。
+   * - ask：每次弹出「缩小到托盘 / 退出」
+   * - tray：直接收到托盘，后台继续跑
+   * - quit：直接退出应用
+   */
+  closeAction: z.enum(["ask", "tray", "quit"]).default("ask"),
 });
 
-export type AppTheme = AppSettings["theme"];
-
 export type AppSettings = z.infer<typeof appSettingsSchema>;
+export type AppTheme = AppSettings["theme"];
+export type AppCloseAction = AppSettings["closeAction"];
 
 /**
  * 允许下发给渲染进程的设置键（CT-09 的唯一口径）。
@@ -152,6 +159,7 @@ export const APP_SETTINGS_PUBLIC_KEYS = [
   "notificationsEnabled",
   "voiceEnabled",
   "theme",
+  "closeAction",
 ] as const;
 
 /**

@@ -149,15 +149,19 @@ describe("产品页挂载", () => {
     await flushPromises();
     const nav = wrapper.find('[aria-label="设置分类"]');
     expect(nav.exists()).toBe(true);
-    for (const label of ["通用", "模型", "记忆", "能力", "数据", "关于"]) {
+    for (const label of ["通用", "记忆", "能力", "数据", "关于"]) {
       expect(nav.text()).toContain(label);
     }
+    expect(nav.text()).not.toContain("模型");
     expect(wrapper.find('[data-testid="theme-picker"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="close-action-picker"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="pi-runtime-picker"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("缩小到托盘");
     expect(wrapper.text()).toContain("深色");
     expect(wrapper.text()).toContain("浅色");
   });
 
-  it("账号页同时挂上账号与用量两个面", async () => {
+  it("模型页同时挂上模型与用量两个面", async () => {
     const wrapper = mountPage(AccountPage);
     await flushPromises();
     expect(wrapper.find(".account-page").exists()).toBe(true);

@@ -32,6 +32,10 @@ const TABS: { key: SessionStatus; label: string }[] = [
 const renaming = ref("");
 const renameText = ref("");
 
+function sessionRunning(s: SessionRow): boolean {
+  return s.running || Boolean(app.runtimeScope[s.sessionId]?.streaming);
+}
+
 const activeStatus = computed(() => store.filters.status);
 const searchText = computed({
   get: () => store.filters.search,
@@ -237,7 +241,7 @@ async function commitRename(row: SessionRow): Promise<void> {
             class="project-add"
             :title="`在「${p.name}」新建任务`"
             :aria-label="`在 ${p.name} 新建任务`"
-            :disabled="isCurrent(p) && !app.started"
+            :disabled="app.creatingTask"
             @click.stop="newTaskIn(p)"
           >
             ＋
@@ -287,7 +291,7 @@ async function commitRename(row: SessionRow): Promise<void> {
             />
             <template v-else>{{ sessionDisplayName(s) }}</template>
             <span v-if="s.unread" class="dot" title="有新消息"></span>
-            <span v-if="s.running" class="dot running" title="正在后台运行"></span>
+            <span v-if="sessionRunning(s)" class="dot running" title="正在运行"></span>
           </div>
           <div class="preview">{{ s.preview || "（还没有消息）" }}</div>
           <div class="meta">
@@ -327,7 +331,7 @@ async function commitRename(row: SessionRow): Promise<void> {
               <div class="title">
                 <span v-if="s.pinned" class="pin" title="已置顶">置顶</span>
                 {{ sessionDisplayName(s) }}
-                <span v-if="s.running" class="dot running" title="正在后台运行"></span>
+                <span v-if="sessionRunning(s)" class="dot running" title="正在运行"></span>
               </div>
               <div class="preview">{{ s.preview || "（还没有消息）" }}</div>
               <div class="meta">{{ formatTime(s.modified) }} · {{ s.messageCount }} 条消息</div>
@@ -465,8 +469,8 @@ async function commitRename(row: SessionRow): Promise<void> {
   background: transparent;
   color: var(--text-secondary);
   font-size: var(--font-ui-12);
-  padding: 4px 0;
-  border-radius: var(--radius-m);
+  padding: 5px 0;
+  border-radius: 999px;
   cursor: pointer;
 }
 .session-tab.active {

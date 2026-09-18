@@ -177,7 +177,7 @@ header .spacer {
   border: var(--border-w) solid var(--status-warning);
   color: var(--status-warning);
   padding: 6px 8px;
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-l);
   font-size: var(--font-ui-12);
 }
 .empty {
@@ -219,7 +219,7 @@ header .spacer {
 }
 .hunk {
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: 4px;
+  border-radius: var(--radius-m);
   margin-bottom: 6px;
   padding: 4px;
 }

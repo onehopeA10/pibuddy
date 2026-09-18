@@ -16,6 +16,7 @@ import { openThinking, thinkingKey } from "../stores/chat-ui";
 import ToolActivity from "./ToolActivity.vue";
 import { stripPlanInstruction } from "../../../lib/work-mode";
 import ArtifactLink from "./ArtifactLink.vue";
+import { appLogo } from "../brand";
 
 const props = defineProps<{
   message: AgentMessage;
@@ -102,8 +103,18 @@ const processEndIdx = computed(() => {
 const processBlocks = computed(() => blocks.value.slice(0, processEndIdx.value + 1));
 const answerBlocks = computed(() => blocks.value.slice(processEndIdx.value + 1));
 const hasProcess = computed(() => processBlocks.value.length > 0);
-/** 还在过程里：仍在流式，且回答一个字都没开始。 */
-const processActive = computed(() => props.streaming === true && answerBlocks.value.length === 0);
+/**
+ * 整轮还在流就不能写「已完成」。
+ *
+ * 早先还加了「回答一个字都没开始」：模型在最后一次工具调用后面先吐一句
+ * 过渡（「我再核对…」），过程组立刻收成已完成，顶上却仍在执行。工具失败
+ * 后续写时最明显。流式期间标题跟 streaming 走，展开默认只在还没作答时打开。
+ */
+const processActive = computed(() => props.streaming === true);
+const processTitle = computed(() => {
+  if (!processActive.value) return "已完成";
+  return answerBlocks.value.length > 0 ? "生成中" : "思考中";
+});
 
 const errorMessage = computed(
   () => (props.message as AssistantMessage).errorMessage
@@ -124,7 +135,9 @@ const assistantText = computed(() => {
 
 // --- 过程组的开合：进行中默认展开，完成后默认收起；用户点过就只认用户的 ---
 const processKey = computed(() => thinkingKey(keyBase.value, "process"));
-const processOpen = computed(() => openThinking[processKey.value] ?? processActive.value);
+const processOpen = computed(
+  () => openThinking[processKey.value] ?? (processActive.value && answerBlocks.value.length === 0)
+);
 
 function toggleProcess(): void {
   openThinking[processKey.value] = !processOpen.value;
@@ -204,7 +217,7 @@ async function copyText(text: string): Promise<void> {
   <!-- 助手 -->
   <div v-else-if="role === 'assistant'" class="msg-row">
     <div class="msg-assistant">
-      <div class="msg-avatar">π</div>
+      <img class="msg-avatar" :src="appLogo" alt="" />
       <div class="msg-body">
         <!--
           过程组：最后一个 thinking / 工具调用之前的一切——思考、中间叙述、
@@ -219,7 +232,7 @@ async function copyText(text: string): Promise<void> {
             @click="toggleProcess"
           >
             <n-spin v-if="processActive" :size="12" />
-            <span class="process-title">{{ processActive ? "思考中" : "已完成" }}</span>
+            <span class="process-title">{{ processTitle }}</span>
             <span v-if="processDuration" class="process-duration">{{ processDuration }}</span>
             <span class="process-chevron" aria-hidden="true">{{ processOpen ? "⌃" : "⌄" }}</span>
           </button>

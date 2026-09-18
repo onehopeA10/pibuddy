@@ -137,6 +137,7 @@ describe("composer 四样状态都按会话存放", () => {
     // newTask → refreshState → adoptSession("s-real")，走真实路径
     const piBuddy = (globalThis as unknown as { window: { piBuddy: Record<string, unknown> } })
       .window.piBuddy;
+    store.started = true;
     piBuddy.pi = {
       newSession: vi.fn(async () => ({ success: true, data: { cancelled: false } })),
       getState: vi.fn(async () => ({ success: true, data: { sessionId: "s-real" } })),

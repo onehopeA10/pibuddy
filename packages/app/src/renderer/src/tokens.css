@@ -47,13 +47,15 @@
   --space-8: 32px;
 
   --radius-s: 4px;
-  --radius-m: 6px;
-  --radius-l: 10px;
+  --radius-m: 8px;
+  --radius-l: 12px;
   /* 输入框这类大块容器用的圆角：比菜单 / 卡片再圆一档 */
-  --radius-xl: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
   --border-w: 1px;
   --shadow-menu: 0 2px 8px #00000040;
   --shadow-pop: 0 8px 24px #00000059;
+  --shadow-composer: 0 8px 28px #00000040, 0 0 0 1px #ffffff08;
   --scrollbar-size: 8px;
   --scrollbar-thumb: var(--border-strong);
   --scrollbar-thumb-hover: var(--text-tertiary);
@@ -115,6 +117,7 @@
   --scrim: #00000059;
   --shadow-menu: 0 2px 8px #00000022;
   --shadow-pop: 0 8px 24px #00000026;
+  --shadow-composer: 0 8px 28px #1f232914, 0 1px 2px #1f23290a;
   color-scheme: light;
 }
 

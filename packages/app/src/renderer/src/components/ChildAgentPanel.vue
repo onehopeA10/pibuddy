@@ -334,7 +334,7 @@ async function onMerge(nodeId: string, accept: boolean): Promise<void> {
 }
 .chip {
   padding: 0 6px;
-  border-radius: 6px;
+  border-radius: 999px;
   background: var(--accent-subtle);
   margin-right: 4px;
 }
@@ -357,7 +357,7 @@ async function onMerge(nodeId: string, accept: boolean): Promise<void> {
 .merge {
   margin-top: 6px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-l);
   background: var(--bg-hover);
 }
 .q-prompt {

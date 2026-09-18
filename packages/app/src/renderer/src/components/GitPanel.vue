@@ -364,7 +364,7 @@ header .spacer {
   border: var(--border-w) solid var(--status-warning);
   color: var(--text-primary);
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-l);
   font-size: 12px;
   display: flex;
   gap: 8px;

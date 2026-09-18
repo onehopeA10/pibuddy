@@ -45,10 +45,20 @@ const items = computed<StatusItem[]>(() => {
     label: "助手进程",
     text: app.startError
       ? `启动失败：${app.startError.slice(0, 80)}`
-      : app.started
-        ? `运行中（${app.settings.piRuntimeMode === "external" ? "外部" : "内置"} Pi）`
-        : "未启动",
-    level: app.startError ? "error" : app.started ? "ok" : "warn",
+      : app.runtimeWaking
+        ? "正在唤醒助手…"
+        : app.runtimeAsleep
+          ? "已休眠（回到窗口或发送时唤醒）"
+          : app.started
+            ? `运行中（${app.settings.piRuntimeMode === "external" ? "外部" : "内置"} Pi）`
+            : "未启动",
+    level: app.startError
+      ? "error"
+      : app.runtimeWaking
+        ? "busy"
+        : app.started
+          ? "ok"
+          : "warn",
   });
 
   // 2. session
@@ -65,7 +75,7 @@ const items = computed<StatusItem[]>(() => {
   const configured = providers.providers.filter((p) => p.configured).length;
   out.push({
     key: "provider",
-    label: "服务商账号",
+    label: "模型",
     text: providers.providers.length === 0
       ? "暂不可用（还没读到账号列表）"
       : configured > 0
@@ -177,7 +187,7 @@ function onItemClick(key: string): void {
   justify-content: space-between;
   gap: 8px;
   padding: 6px 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-l);
   cursor: pointer;
 }
 .status-row:hover,

@@ -287,8 +287,10 @@ function confirmRemove(resource: PiResource): void {
   display: flex;
   gap: 12px;
   align-items: flex-start;
-  padding: 8px 0;
-  border-top: var(--border-w) solid var(--border-subtle);
+  padding: 12px 14px;
+  border: var(--border-w) solid var(--border-subtle);
+  border-radius: var(--radius-l);
+  margin-bottom: 8px;
 }
 .row-main {
   flex: 1;

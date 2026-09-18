@@ -207,10 +207,10 @@ const subjectLabel = (subject: string): string =>
 .edu-panel {
   display: flex;
   flex-direction: column;
+  width: 100%;
   gap: 12px;
   padding: 12px;
-  min-width: 300px;
-  max-width: 380px;
+  max-height: 420px;
   overflow-y: auto;
 }
 .ep-head {
@@ -227,8 +227,8 @@ const subjectLabel = (subject: string): string =>
   flex-direction: column;
   gap: 8px;
   border: var(--border-w) solid var(--border-subtle);
-  border-radius: 6px;
-  padding: 10px;
+  border-radius: var(--radius-l);
+  padding: 14px 16px;
 }
 .ep-section h4 {
   margin: 0;

@@ -177,6 +177,19 @@ describe("MessageItem · 过程组：思考 + 中间叙述 + 工具调用全在�
     wrapper.unmount();
   });
 
+  it("进行中已开始作答：头部是「生成中」而不是「已完成」，过程组默认收起", () => {
+    const wrapper = mount(MessageItem, {
+      props: { message: turn, messageKey: 14, streaming: true, startedAt: Date.now() - 5_000 },
+      global: { stubs },
+    });
+    const toggle = wrapper.find(".process-toggle");
+    expect(toggle.text()).toContain("生成中");
+    expect(toggle.text()).not.toContain("已完成");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(wrapper.find(".process-body").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("进行中且尚无回答：头部显示「思考中」并默认展开", () => {
     const inProgress = {
       role: "assistant",
