@@ -204,9 +204,9 @@ watch(
   { immediate: true }
 );
 
-async function saveKey(providerId: string): Promise<void> {
+async function saveKey(providerId: string): Promise<boolean> {
   const value = (keyInputs.value[providerId] ?? "").trim();
-  if (value === "") return;
+  if (value === "") return false;
   savingId.value = providerId;
   const ok = await providers.saveKey(providerId, value);
   savingId.value = "";
@@ -216,6 +216,7 @@ async function saveKey(providerId: string): Promise<void> {
     // 而不是等到他发出第一条消息才报 401。
     await providers.test(providerId);
   }
+  return ok;
 }
 
 async function saveOfficial(providerId: string): Promise<void> {

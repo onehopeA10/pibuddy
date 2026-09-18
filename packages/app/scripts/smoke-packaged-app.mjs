@@ -22,12 +22,25 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(HERE, "..");
 const CDP_WAIT_MS = 45_000;
-const BIN_NAMES = ["PiBuddy.exe", "pibuddy.exe", "PiBuddy", "pibuddy"];
+const BIN_NAMES = ["PiBuddy.exe", "pibuddy.exe", "PiBuddy", "pibuddy", "app"];
+const HELPER_BIN = /^(chrome-sandbox|chrome_crashpad_handler|lib.*|LICENSES\.chromium\.html)$/i;
 
 function parseOutDir() {
   const argv = process.argv.slice(2);
   const dirAt = argv.indexOf("--dir");
   return dirAt === -1 ? path.join(APP_ROOT, "release") : path.resolve(argv[dirAt + 1]);
+}
+
+function isAppBinary(dir, name) {
+  if (BIN_NAMES.includes(name) || /pibuddy/i.test(name)) return true;
+  if (HELPER_BIN.test(name)) return false;
+  const full = path.join(dir, name);
+  try {
+    const st = fs.statSync(full);
+    return st.isFile() && (st.mode & 0o111) !== 0 && !name.includes(".");
+  } catch {
+    return false;
+  }
 }
 
 function findExecutables(outDir) {
@@ -36,12 +49,9 @@ function findExecutables(outDir) {
   for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const base = path.join(outDir, entry.name);
-    for (const name of BIN_NAMES) {
-      const candidate = path.join(base, name);
-      if (fs.existsSync(candidate)) found.push(candidate);
+    for (const name of fs.readdirSync(base)) {
+      if (isAppBinary(base, name)) found.push(path.join(base, name));
     }
-    const walk = [base];
-    if (entry.name.endsWith(".app")) walk.push(base);
     for (const inner of fs.readdirSync(base, { withFileTypes: true })) {
       if (!inner.isDirectory()) continue;
       if (inner.name.endsWith(".app")) {
@@ -133,6 +143,13 @@ async function main() {
   if (executables.length === 0) {
     console.error(`smoke-packaged-app: 在 ${outDir} 下找不到 PiBuddy 可执行文件`);
     console.error("先跑 electron-builder --dir（CI 的 package job 就是这么做的）");
+    if (fs.existsSync(outDir)) {
+      for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const base = path.join(outDir, entry.name);
+        console.error(`  ${entry.name}/ ${fs.readdirSync(base).slice(0, 40).join(" ")}`);
+      }
+    }
     process.exit(2);
   }
 

@@ -760,7 +760,8 @@ export const useAppStore = defineStore("app", () => {
     sleepGen += 1;
     runtimeWaking.value = true;
     runtimeAsleep.value = false;
-    const run = (async () => {
+    let run!: Promise<boolean>;
+    run = (async () => {
       try {
         await start(currentSessionId.value || undefined);
         const ok = started.value;
