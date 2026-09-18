@@ -158,3 +158,85 @@ jobs:
 
       - name: Smoke packaged app
         run: node packages/app/scripts/smoke-packaged-app.mjs
+
+  # ---------------------------------------------------------------- 各系统安装包
+  # package job 用 --dir 只验证 asar / extraResources / afterPack。
+  # 本 job 打出真正能下载的安装包：Windows NSIS、macOS dmg+zip、Linux AppImage+deb。
+  # 不签名、不公证、不进 GitHub Release / 更新 feed —— 那是 release.yml 的事。
+  # 产物带 UNSIGNED，以免被当成正式版。
+  artifacts:
+    name: artifacts (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            builder_flags: --win nsis
+          - os: macos-latest
+            platform: macos
+            builder_flags: --mac dmg zip --config.mac.notarize=false
+          - os: ubuntu-latest
+            platform: linux
+            builder_flags: --linux AppImage deb
+
+    steps:
+      # actions/checkout v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # pnpm/action-setup v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10
+
+      # actions/setup-node v4
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare pi runtime
+        run: pnpm --filter @pibuddy/app run prepare:runtime
+
+      - name: Build renderer and main
+        run: pnpm --filter @pibuddy/app run build
+
+      - name: Build installers (unsigned CI)
+        shell: bash
+        env:
+          PIBUDDY_UPDATE_FEED_URL: https://example.invalid/pibuddy-ci
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          set -euo pipefail
+          pnpm --filter @pibuddy/app exec electron-builder ${{ matrix.builder_flags }} --publish never
+
+      - name: Verify packaged artifacts
+        run: node packages/app/scripts/verify-packaged-app.mjs
+
+      - name: Install xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Smoke packaged app
+        run: node packages/app/scripts/smoke-packaged-app.mjs
+
+      # actions/upload-artifact v4
+      - name: Upload unsigned installers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pibuddy-${{ matrix.platform }}-UNSIGNED
+          path: |
+            packages/app/release/*.exe
+            packages/app/release/*.dmg
+            packages/app/release/*.zip
+            packages/app/release/*.AppImage
+            packages/app/release/*.deb
+          if-no-files-found: error
+          retention-days: 14

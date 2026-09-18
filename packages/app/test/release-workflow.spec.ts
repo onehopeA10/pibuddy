@@ -204,6 +204,42 @@ describe("ci.yml 覆盖打包链路", () => {
   });
 });
 
+describe("ci.yml 上传各系统构建物", () => {
+  const text = fs.readFileSync(CI, "utf8");
+  const block = jobBlock(CI, "artifacts");
+  const steps = stepsOf(CI, "artifacts");
+
+  it("artifacts job 覆盖 Windows / macOS / Linux，并打出对应安装包", () => {
+    expect(text).toContain("  artifacts:");
+    expect(block).toContain("windows-latest");
+    expect(block).toContain("macos-latest");
+    expect(block).toContain("ubuntu-latest");
+    expect(block).toContain("--win nsis");
+    expect(block).toContain("--mac dmg zip");
+    expect(block).toContain("--linux AppImage deb");
+  });
+
+  it("CI 构建物未签名，不进正式 feed，也不发 GitHub Release", () => {
+    expect(block).toContain("UNSIGNED");
+    expect(block).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
+    expect(block).toContain("--config.mac.notarize=false");
+    expect(block).toContain("https://example.invalid/");
+    expect(block).not.toMatch(/secrets\./);
+    expect(block).not.toMatch(/environment:\s*release/);
+    expect(block).not.toContain("gh release");
+  });
+
+  it("校验通过后才上传，且 upload-artifact 以 SHA 固定", () => {
+    expect(steps).toContain("Verify packaged artifacts");
+    expect(steps).toContain("Smoke packaged app");
+    expect(steps).toContain("Upload unsigned installers");
+    expect(steps.indexOf("Smoke packaged app")).toBeLessThan(
+      steps.indexOf("Upload unsigned installers"),
+    );
+    expect(block).toContain("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
+  });
+});
+
 describe("electron-builder.yml", () => {
   const yml = fs.readFileSync(path.join(REPO, "packages", "app", "electron-builder.yml"), "utf8");
 
