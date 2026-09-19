@@ -6,10 +6,10 @@
     "dependencies": 2,
     "devDependencies": 2,
     "duplicates": 1,
-    "exports": 62,
+    "exports": 69,
     "files": 4,
-    "types": 10,
+    "types": 11,
     "unlisted": 1
   },
-  "$staged": "分阶段欠账已全部还清（tool-recovery 由 W3-8 接线、model-errors 由 tasks 重试与 connectivity 词汇拓宽接线）。现存 model-errors 名下的 6 条导出 + 1 个类型不是欠款，是 index.ts 这层 barrel 的公开面：源文件里它们都有单测直接驱动，只有 re-export 这一层被记账。其中 providerRetryMetadata 真的接不上——它要响应头，而 SafeFetchResult 只回 {status, ok, bodyText}，接它得先拓宽 net/outbound-guard.ts 的返回形状并重过 SSRF 与脱敏三条纪律。errorClassFromFailureKind 是刻意保留的反向映射，接个假消费者反而毁掉「两个方向可互相对照」这个性质。不为消灭一条记录去写恒等钳位或摘 barrel。"
+  "$staged": "2026-09-19 记账：浅色桌面 / 记忆 / 渠道合入后公开面涨到 exports 69、types 11。多出来的是 *_CHANNELS、测试钩子和 model-errors barrel，不是新欠的死代码。node-pty 改 knip.json ignoreDependencies（createRequire 懒加载，knip 看不见），dependencies 维持 2（codemirror + electron-log）。"
 }

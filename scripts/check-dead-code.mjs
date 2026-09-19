@@ -45,10 +45,12 @@
  *   外，而它们的成因将来可能变（比如根 devDeps 被清理）。留在数里、说清楚，
  *   比藏起来诚实。
  *
- * 唯一进了 knip.json ignoreDependencies 的是 packages/app 的 electron-builder：
- * 它是**经 scripts/build-config.mjs `--exec --` 转发**调起的二进制，knip 的
- * 静态扫描原理上看不见这条线，不是「暂时没接上消费者」，留在数里只会永远是
- * 一条噪音。其余几条误判都有将来自然消失的可能，所以留在数里。
+ * 进了 knip.json ignoreDependencies 的只有两条，都是静态扫描原理上看不见：
+ *   - packages/app 的 electron-builder：经 scripts/build-config.mjs `--exec --`
+ *     转发调起，不是「暂时没接上消费者」。
+ *   - packages/app 的 node-pty：pty-manager 用 createRequire 在 open() 时才
+ *     require，vite 不能静态打包原生 .node。留在数里会永远多一条噪音。
+ * 其余几条误判都有将来自然消失的可能，所以留在数里。
  *
  * 真实存量里值得单说的两条（**不是**误判，刻意不在本任务里清理）：
  *   - `codemirror`：源码只 import `@codemirror/{state,view,commands}`，伞包

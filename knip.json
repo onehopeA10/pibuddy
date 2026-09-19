@@ -51,7 +51,8 @@
         "scripts/*.{mjs,cjs,js}"
       ],
       "ignoreDependencies": [
-        "electron-builder"
+        "electron-builder",
+        "node-pty"
       ]
     }
   },
