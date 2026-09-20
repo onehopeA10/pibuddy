@@ -2,6 +2,11 @@
 
 These frames come from the current desktop client. They show what the product looks like; they do not replace a spec.
 
+<figure class="pb-screen">
+  <img src="/screens/hero-laptop.png" alt="PiBuddy product shot in a laptop frame" />
+  <figcaption>Product shot: the real UI inside a laptop frame. Source: `pibuddy-docs/tools/hero-laptop.html`. Swap the screenshot, open that page, and export again.</figcaption>
+</figure>
+
 ## Current product surfaces
 
 <figure class="pb-screen">

@@ -90,6 +90,16 @@
   gap: 14px;
   flex-wrap: wrap;
 }
+.pb-hero__shot {
+  display: block;
+  margin: 48px -8px 0;
+}
+.pb-hero__shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 16px;
+}
 .pb-btn {
   display: inline-flex;
   align-items: center;

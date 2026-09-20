@@ -25,6 +25,7 @@ const copy = computed(() =>
         versionNoteLink: 'guide',
         versionNoteAfter: ', or open the full specification index.',
         versionLang: 'EN / 中文',
+        shotAlt: 'PiBuddy on a laptop',
       }
     : {
         badge: 'PiBuddy · 桌面 Agent',
@@ -42,6 +43,7 @@ const copy = computed(() =>
         versionNoteLink: '指南',
         versionNoteAfter: '建立上下文，或直接打开完整规格索引。',
         versionLang: '中文 / EN',
+        shotAlt: '笔记本上的 PiBuddy',
       },
 )
 
@@ -136,6 +138,9 @@ const versionLine = computed(() =>
         <a class="pb-btn pb-btn--primary" :href="`${prefix}/guide/`">{{ copy.start }}</a>
         <a class="pb-btn" :href="`${prefix}/architecture/`">{{ copy.architecture }}</a>
       </div>
+      <a class="pb-hero__shot" :href="`${prefix}/screens/`">
+        <img src="/screens/hero-laptop.png" :alt="copy.shotAlt" />
+      </a>
     </section>
 
     <section class="pb-section">
