@@ -51,7 +51,8 @@ def cover_fit(src: Image.Image, width: int, height: int) -> Image.Image:
     nh = max(1, int(round(sh * scale)))
     resized = src.resize((nw, nh), Image.Resampling.LANCZOS)
     left = max(0, (nw - width) // 2)
-    top = max(0, (nh - height) // 2)
+    # 从窗口顶对齐，保住顶栏导航；底部多出来的再裁
+    top = 0
     return resized.crop((left, top, left + width, top + height))
 
 
@@ -75,7 +76,7 @@ def main() -> None:
     screen.paste(fitted)
     frame.paste(screen, (x0, y0), mask)
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    frame.convert("RGB").save(OUT, "PNG", optimize=True)
+    frame.convert("RGB").save(OUT, "PNG", compress_level=1)
     print(f"wrote {OUT} {frame.size[0]}x{frame.size[1]}")
 
 
