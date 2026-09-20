@@ -32,12 +32,19 @@ function parseOutDir() {
 }
 
 function isAppBinary(dir, name) {
-  if (BIN_NAMES.includes(name) || /pibuddy/i.test(name)) return true;
-  if (HELPER_BIN.test(name)) return false;
+  if (name.endsWith(".app")) return false;
   const full = path.join(dir, name);
   try {
     const st = fs.statSync(full);
-    return st.isFile() && (st.mode & 0o111) !== 0 && !name.includes(".");
+    if (!st.isFile()) return false;
+  } catch {
+    return false;
+  }
+  if (BIN_NAMES.includes(name) || /pibuddy/i.test(name)) return true;
+  if (HELPER_BIN.test(name)) return false;
+  try {
+    const st = fs.statSync(full);
+    return (st.mode & 0o111) !== 0 && !name.includes(".");
   } catch {
     return false;
   }

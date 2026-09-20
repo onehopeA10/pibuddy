@@ -125,6 +125,8 @@ linux:
     - AppImage
     - deb
   category: Utility
+  # fpm/deb 要求 Maintainer 带邮箱，字符串 author 不够。
+  maintainer: PiBuddy <onehopeA10@users.noreply.github.com>
   # 不要用 npm 包名 @pibuddy/app 当 deb 文件名（斜杠会变成子目录）。
   artifactName: ${productName}-${version}-${arch}.${ext}
   # 桌面条目 / 启动器图标（build/icons/ 下的多尺寸 png）

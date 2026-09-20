@@ -301,6 +301,13 @@ describe("electron-builder.yml", () => {
     ) as { homepage?: string };
     expect(pkg.homepage).toMatch(/^https:\/\/github\.com\/onehopeA10\/pibuddy\/?$/);
     expect(yml).toContain("artifactName: ${productName}-${version}-${arch}.${ext}");
+    expect(yml).toMatch(/maintainer:\s*PiBuddy\s*<[^>]+@[^>]+>/);
+    // 否则 mac 冒烟会 spawn PiBuddy.app 目录，立刻 EACCES
+    const smoke = fs.readFileSync(
+      path.join(REPO, "packages", "app", "scripts", "smoke-packaged-app.mjs"),
+      "utf8",
+    );
+    expect(smoke).toContain('if (name.endsWith(".app")) return false');
   });
 
   it("镜像不在配置里，asar 保持 true，publish 指向 generic feed", () => {
