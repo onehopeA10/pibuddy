@@ -1,5 +1,8 @@
 appId: com.pibuddy.app
 productName: PiBuddy
+# AppImage 用 executableName 当 ELF 文件名。缺省会回落到 npm 包名
+# `@pibuddy/app`，里面的 `@` 会被 electron-builder 拒绝。
+executableName: PiBuddy
 directories:
   output: release
   buildResources: build

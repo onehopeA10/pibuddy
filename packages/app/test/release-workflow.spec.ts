@@ -293,6 +293,8 @@ describe("electron-builder.yml", () => {
     expect(yml).toMatch(/-\s*nsis/);
     expect(yml).toMatch(/-\s*AppImage/);
     expect(yml).toMatch(/-\s*deb/);
+    // AppImage 拒绝包名里的 @，必须显式给出安全的可执行文件名
+    expect(yml).toMatch(/^executableName:\s*PiBuddy\s*$/m);
   });
 
   it("镜像不在配置里，asar 保持 true，publish 指向 generic feed", () => {
