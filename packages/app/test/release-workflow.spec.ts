@@ -264,6 +264,7 @@ describe("release-github.yml 未签名安装包挂到 GitHub Release", () => {
     expect(text).not.toContain("latest.yml");
     expect(text).toContain("gh release upload");
     expect(text).toContain("contents: write");
+    expect(block).toMatch(/for attempt in 1 2 3/);
   });
 
   it("校验并冒烟之后才挂到 Release", () => {

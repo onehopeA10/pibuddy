@@ -111,4 +111,17 @@ jobs:
             echo "::error::no installers to upload"
             exit 1
           fi
-          gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" --clobber "${files[@]}"
+          # 大文件偶发 HTTP 404（资产其实已经挂上），重试几次再失败关闭
+          ok=0
+          for attempt in 1 2 3; do
+            if gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" --clobber "${files[@]}"; then
+              ok=1
+              break
+            fi
+            echo "upload attempt ${attempt} failed, retrying..."
+            sleep $((attempt * 5))
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::gh release upload failed after 3 attempts"
+            exit 1
+          fi
