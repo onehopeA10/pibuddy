@@ -19,4 +19,14 @@
   <figcaption>长期记忆。可按工作区 / 全局控制注入，混合 FTS 与向量检索；用户可显式保存一条记忆，知识库条目在检索时带上来源。</figcaption>
 </figure>
 
+<figure class="pb-screen">
+  <img src="/screens/library.png" alt="资源库：提示词、技能与扩展，可搜索、收藏并填入输入框" />
+  <figcaption>资源库。顶部分「提示词 / 技能 / 扩展」；提示词按公文、邮件、数据整理等分组，可搜索、只看收藏、新建，或一键填入输入框 / 存为我的。</figcaption>
+</figure>
+
+<figure class="pb-screen">
+  <img src="/screens/terminal.png" alt="内置终端：多会话、命令提示符与清屏重启" />
+  <figcaption>终端。可切换 shell、新建会话、搜索历史标签；当前是 Windows 命令提示符，带清屏 / 重启 / 重命名 / 复制 / 粘贴。真实终端才允许 shell 语法，内部命令默认不走 shell。</figcaption>
+</figure>
+
 对应的英文页：[Screens](/en/screens/)。从外形回到系统，请继续读 [从这里开始](/guide/)。

@@ -19,4 +19,14 @@ These frames come from the current desktop client. They show what the product lo
   <figcaption>Long-term memory. Inject can be scoped to the workspace or globally. Search mixes FTS and vectors. Users save a memory explicitly; knowledge-base entries carry provenance when retrieved.</figcaption>
 </figure>
 
+<figure class="pb-screen">
+  <img src="/screens/library.png" alt="Library of prompts, skills, and extensions with search, favorites, and insert" />
+  <figcaption>Library. Tabs are prompts / skills / extensions. Prompts are grouped (official writing, mail, data cleanup); you can search, show favorites only, create one, insert it into the composer, or save it as yours.</figcaption>
+</figure>
+
+<figure class="pb-screen">
+  <img src="/screens/terminal.png" alt="Built-in terminal with multiple sessions and a Windows command prompt" />
+  <figcaption>Terminal. Switch shells, open a new session, and search tabs. This frame is a Windows command prompt with clear / restart / rename / copy / paste. Only a real user terminal may use shell syntax; internal commands stay on argv arrays.</figcaption>
+</figure>
+
 Chinese companion: [截图 / Screens](/screens/). To move from appearance to the system, continue at [Start here](/en/guide/).
