@@ -4,7 +4,7 @@
 
 <figure class="pb-screen">
   <img src="/screens/hero-laptop.png" alt="PiBuddy 放在笔记本里的产品图" />
-  <figcaption>产品图：真实界面嵌进笔记本外框。源文件在 `pibuddy-docs/tools/hero-laptop.html`，换截图后打开该页再导出即可重做。</figcaption>
+  <figcaption>产品图：真实界面嵌进照片级 MacBook 外框。换 `chat-workspace.png` 后运行 `python pibuddy-docs/tools/compose-hero.py` 即可重做。</figcaption>
 </figure>
 
 ## 当前产品界面

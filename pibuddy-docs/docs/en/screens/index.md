@@ -4,7 +4,7 @@ These frames come from the current desktop client. They show what the product lo
 
 <figure class="pb-screen">
   <img src="/screens/hero-laptop.png" alt="PiBuddy product shot in a laptop frame" />
-  <figcaption>Product shot: the real UI inside a laptop frame. Source: `pibuddy-docs/tools/hero-laptop.html`. Swap the screenshot, open that page, and export again.</figcaption>
+  <figcaption>Product shot: the real UI inside a photoreal MacBook. Swap `chat-workspace.png` and run `python pibuddy-docs/tools/compose-hero.py` to remake it.</figcaption>
 </figure>
 
 ## Current product surfaces
