@@ -186,7 +186,7 @@ describe("前台 runtime 空闲休眠 / 聚焦唤醒", () => {
     expect(store.started).toBe(true);
   });
 
-  it("休眠时点新建任务会先唤醒再换会话", async () => {
+  it("休眠时点新建任务直接新开进程，不再对已停的客户端 switch_session", async () => {
     const store = await boot();
     await vi.advanceTimersByTimeAsync(50);
     expect(store.runtimeAsleep).toBe(true);
@@ -197,9 +197,40 @@ describe("前台 runtime 空闲休眠 / 聚焦唤醒", () => {
     await store.newTask();
 
     expect(startSpy).toHaveBeenCalledTimes(1);
-    expect(newSession).toHaveBeenCalledTimes(1);
+    expect(startSpy.mock.calls[0]?.[0]).toEqual({ workspaceId: "ws-1", sessionId: undefined });
+    expect(newSession).not.toHaveBeenCalled();
     expect(store.runtimeAsleep).toBe(false);
     expect(store.started).toBe(true);
+    expect(store.creatingTask).toBe(false);
+  });
+
+  it("新建任务会作废还在飞的 switch_session，不把客户端已停止弹出来", async () => {
+    const store = await boot();
+    const error = vi.fn();
+    store.setNotifier({ info: vi.fn(), success: vi.fn(), warning: vi.fn(), error });
+    store.piLoadedSessionId = "other-sess";
+    let rejectSwitch!: (err: Error) => void;
+    const switchSession = vi.fn(
+      () =>
+        new Promise<never>((_, reject) => {
+          rejectSwitch = reject;
+        })
+    );
+    const pi = (window as unknown as { piBuddy: { pi: Record<string, unknown> } }).piBuddy.pi;
+    pi.switchSession = switchSession;
+
+    const pending = store.whenPiReady();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(switchSession).toHaveBeenCalledTimes(1);
+
+    await store.newTask();
+    rejectSwitch(
+      new Error("Error invoking remote method 'pi:switch-session': Error: 客户端已停止")
+    );
+    await pending;
+
+    expect(error).not.toHaveBeenCalled();
     expect(store.creatingTask).toBe(false);
   });
 });

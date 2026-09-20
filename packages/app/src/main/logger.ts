@@ -118,6 +118,42 @@ function newCorrelationId(): string {
 const PROCESS_RUNTIME_ID = crypto.randomUUID().slice(0, 8);
 
 /**
+ * 开发态默认把 JSONL 回显到 stdout。electron-vite / 关掉的终端会把这条
+ * 管道拆掉，下一次 write 就是 EPIPE。写盘已经吞错，回显必须同一条纪律，
+ * 否则空闲唤醒打一条 info 就能把主进程打崩。
+ */
+let stdoutEchoBroken = false;
+
+function isBrokenPipe(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === "EPIPE" || code === "ECONNRESET" || code === "ERR_STREAM_DESTROYED";
+}
+
+function ignoreBrokenPipe(stream: NodeJS.WriteStream): void {
+  if (stream.listenerCount("error") > 0) return;
+  stream.on("error", (err) => {
+    if (isBrokenPipe(err)) stdoutEchoBroken = true;
+  });
+}
+
+ignoreBrokenPipe(process.stdout);
+ignoreBrokenPipe(process.stderr);
+
+function echoLine(line: string): void {
+  if (stdoutEchoBroken) return;
+  if (!process.stdout.writable || process.stdout.destroyed) {
+    stdoutEchoBroken = true;
+    return;
+  }
+  try {
+    process.stdout.write(line);
+  } catch (err) {
+    if (isBrokenPipe(err)) stdoutEchoBroken = true;
+  }
+}
+
+/**
  * 轮转：当前文件 → .1，.1 → .2，…，.MAX_LOG_FILES 直接丢弃。
  * 从后往前逐级顺移，避免覆盖。renameSync 保留 mtime，因此被丢弃的
  * `.MAX_LOG_FILES` 恒是目录内 mtime 最旧的那一个。
@@ -210,7 +246,7 @@ export function createLogger(options: LoggerOptions | LogScope): Logger {
     } catch {
       // 日志写不进去不能反过来把应用搞挂
     }
-    if (echo) process.stdout.write(line);
+    if (echo) echoLine(line);
   }
 
   function emit(level: LogLevel, event: string, merged: Record<string, unknown>): void {

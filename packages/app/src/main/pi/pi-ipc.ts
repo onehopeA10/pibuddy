@@ -17,6 +17,10 @@ import { stat } from "node:fs/promises";
 import type { ImageContent, PiRpcClient } from "@pibuddy/pi-sdk";
 import { attachSwitchTrace } from "./switch-session-trace.js";
 import {
+  isForegroundClientUsable,
+  shouldRespawnAfterSwitchFailure,
+} from "./switch-session-recover.js";
+import {
   CHANNELS,
   MAX_PROMPT_ATTACHMENT_BYTES,
   MAX_PROMPT_IMAGES,
@@ -742,7 +746,17 @@ export function registerPiIpc(): void {
     }
     const resolveMs = Date.now() - resolveStartedAt;
     const fileBytes = await sessionFileBytes(real);
-    const client = clientFor(event.sender.id);
+    const existing = tryClientFor(event.sender.id);
+    if (!isForegroundClientUsable(existing)) {
+      await spawnForeground(
+        wc,
+        { workspaceId: payload.workspaceId, sessionId: payload.sessionId },
+        "replace"
+      );
+      log().info("pi_switch_session_respawned", { sessionId: payload.sessionId });
+      return switchResponse("switch_session", { sessionId: payload.sessionId });
+    }
+    const client = existing;
     const trace = attachSwitchTrace(client);
     const rpcStartedAt = Date.now();
     log().info("pi_switch_session_start", {
@@ -752,6 +766,20 @@ export function registerPiIpc(): void {
     let resp: Awaited<ReturnType<PiRpcClient["switchSession"]>> | undefined;
     try {
       resp = await client.switchSession(real);
+    } catch (err) {
+      if (shouldRespawnAfterSwitchFailure(err)) {
+        await spawnForeground(
+          wc,
+          { workspaceId: payload.workspaceId, sessionId: payload.sessionId },
+          "replace"
+        );
+        log().info("pi_switch_session_recovered", {
+          sessionId: payload.sessionId,
+          cause: err instanceof Error ? err.message : String(err),
+        });
+        return switchResponse("switch_session", { sessionId: payload.sessionId });
+      }
+      throw err;
     } finally {
       const observed = trace.stop();
       log().info("pi_switch_session_done", {

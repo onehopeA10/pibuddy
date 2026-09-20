@@ -563,6 +563,11 @@ export const useAppStore = defineStore("app", () => {
   let ensurePiInflight: Promise<void> | null = null;
   let piSwitchWaiters: Array<() => void> = [];
   /**
+   * 新建任务 / 重新 start 会拆掉旧客户端。还在飞的 switch_session
+   * 注定收到「客户端已停止」，按代际作废，不要再弹一条过期报错。
+   */
+  let piEnsureEpoch = 0;
+  /**
    * switch_session 回来后 Pi 可能紧跟着丢一条 agent_settled。
    * 若立刻 get_state / get_session_stats，发送会被再挡一轮重建。
    */
@@ -574,12 +579,30 @@ export const useAppStore = defineStore("app", () => {
     for (const done of pending) done();
   }
 
+  function abandonInflightPiSwitch(): void {
+    piEnsureEpoch += 1;
+    settlePiSwitchWaiters();
+  }
+
+  function applyPiSwitchSuccess(attempted: string, forcedId?: string): void {
+    const stillWanted = (forcedId ?? currentSessionId.value) === attempted;
+    if (!stillWanted) return;
+    piLoadedSessionId.value = attempted;
+    skipSettledRefreshAfterSwitch = true;
+    adoptCapabilitiesForSession(attempted);
+    if (!runtimeScope[attempted]) runtimeScope[attempted] = emptyScope();
+    runtimeScope[attempted].started = true;
+    if (currentSessionId.value === attempted) started.value = true;
+  }
+
   /**
    * 浏览会话只读本地 JSONL；点开会话时后台预热 switch_session，
    * 发送 / 换模型 / 压缩时只 join 这次 in-flight，不再从零等一整遍。
    */
   async function ensurePiOnCurrentSession(forcedId?: string): Promise<boolean> {
+    const epoch = piEnsureEpoch;
     for (;;) {
+      if (epoch !== piEnsureEpoch) return false;
       if (ensurePiInflight) {
         await ensurePiInflight;
         continue;
@@ -594,6 +617,7 @@ export const useAppStore = defineStore("app", () => {
         piSwitchingSessionId.value = attempted;
         try {
           const resp = await window.piBuddy.pi.switchSession(workspaceId.value, attempted);
+          if (epoch !== piEnsureEpoch) return;
           if (!resp.success) {
             notify("error", resp.error ?? "打开会话失败");
             return;
@@ -602,16 +626,35 @@ export const useAppStore = defineStore("app", () => {
             notify("warning", "扩展取消了会话切换，当前会话保持不变");
             return;
           }
-          const stillWanted = (forcedId ?? currentSessionId.value) === attempted;
-          if (stillWanted) {
-            piLoadedSessionId.value = attempted;
-            skipSettledRefreshAfterSwitch = true;
-            adoptCapabilitiesForSession(attempted);
-            if (!runtimeScope[attempted]) runtimeScope[attempted] = emptyScope();
-            runtimeScope[attempted].started = true;
-            if (currentSessionId.value === attempted) started.value = true;
-          }
+          applyPiSwitchSuccess(attempted, forcedId);
         } catch (err) {
+          if (epoch !== piEnsureEpoch) return;
+          if (isRuntimeGoneError(err)) {
+            const ok = await wakeRuntime("send", { force: true });
+            if (epoch !== piEnsureEpoch) return;
+            if (!ok) {
+              notify("error", err instanceof Error ? err.message : "打开会话失败");
+              return;
+            }
+            if (piLoadedSessionId.value === attempted) return;
+            try {
+              const retry = await window.piBuddy.pi.switchSession(workspaceId.value, attempted);
+              if (epoch !== piEnsureEpoch) return;
+              if (!retry.success) {
+                notify("error", retry.error ?? "打开会话失败");
+                return;
+              }
+              if (retry.data?.cancelled === true) {
+                notify("warning", "扩展取消了会话切换，当前会话保持不变");
+                return;
+              }
+              applyPiSwitchSuccess(attempted, forcedId);
+            } catch (retryErr) {
+              if (epoch !== piEnsureEpoch) return;
+              notify("error", retryErr instanceof Error ? retryErr.message : "打开会话失败");
+            }
+            return;
+          }
           notify("error", err instanceof Error ? err.message : "打开会话失败");
         } finally {
           piSwitchingSessionId.value = null;
@@ -2172,12 +2215,21 @@ export const useAppStore = defineStore("app", () => {
     creatingTask.value = true;
     try {
       stashCurrentTranscript();
+      // 唤醒 / 新开进程会 stop 旧客户端，作废还在飞的 switch_session，
+      // 否则主进程 failAll 会把「客户端已停止」弹到界面上。
+      abandonInflightPiSwitch();
       if (!started.value || runtimeAsleep.value || startError.value) {
-        const ok = await wakeRuntime("send");
-        if (!ok) {
-          notify("error", startError.value || "助手还没醒来，请稍后再试");
+        sleepGen += 1;
+        // 休眠后客户端已经停了，再对旧会话 start + newSession / switch
+        // 只会撞上已停止的 RPC。不带 sessionId 起一个新进程就是新任务。
+        await start();
+        if (!started.value) {
+          notify("error", startError.value || "无法开始新任务");
           return;
         }
+        clearEphemeralComposerAttachments();
+        stats.value = null;
+        return;
       }
       const request = () => window.piBuddy.pi.newSession();
       let resp: Awaited<ReturnType<typeof request>>;

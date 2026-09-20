@@ -86,10 +86,12 @@ export function shouldWakeOnActivate(s: {
   return !s.started && s.hasSession;
 }
 
-/** prompt / getState 撞上已死或正在拆的 runtime 时，主进程抛出的那几类句子。 */
+/** prompt / getState / switch_session 撞上已死或正在拆的 runtime 时，主进程抛出的那几类句子。 */
 export function isRuntimeGoneError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
-  return /运行时不可用|尚未启动|正在停止|phase=|SESSION_UNKNOWN|ENOENT|文件已经不在了/.test(msg);
+  return /运行时不可用|尚未启动|正在停止|phase=|SESSION_UNKNOWN|ENOENT|文件已经不在了|客户端已停止|进程已退出|进程未运行|已拒绝新命令/.test(
+    msg
+  );
 }
 
 export function shouldRetryWake(s: {

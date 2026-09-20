@@ -150,6 +150,33 @@ describe("必填上下文键", () => {
   });
 });
 
+describe("stdout 回显断管", () => {
+  it("EPIPE 只停回显，不把应用打崩，文件照常落盘", () => {
+    const dir = tmpDir();
+    const original = process.stdout.write.bind(process.stdout);
+    let writes = 0;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      writes += 1;
+      const err = new Error("EPIPE: broken pipe, write") as NodeJS.ErrnoException;
+      err.code = "EPIPE";
+      throw err;
+    }) as typeof process.stdout.write;
+
+    try {
+      const logger = createLogger({ dir, echo: true });
+      expect(() => logger.info("pi_wake", { reason: "focus" })).not.toThrow();
+      expect(() => logger.info("pi_wake", { reason: "send" })).not.toThrow();
+    } finally {
+      process.stdout.write = original;
+    }
+
+    const content = readAll(dir);
+    expect(content).toContain("pi_wake");
+    expect(content).toContain("focus");
+    expect(writes).toBe(1);
+  });
+});
+
 describe("脱敏挂在写出函数里", () => {
   it("createLogger('main').info(<密钥>) —— 连 event 名本身都不会明文落盘", () => {
     const dir = tmpDir();

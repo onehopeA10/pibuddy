@@ -96,6 +96,12 @@ describe("runtime idle 判据", () => {
     expect(isRuntimeGoneError("Error invoking remote method 'pi:start': Error: SESSION_UNKNOWN: abc")).toBe(
       true
     );
+    expect(
+      isRuntimeGoneError(
+        new Error("Error invoking remote method 'pi:switch-session': Error: 客户端已停止")
+      )
+    ).toBe(true);
+    expect(isRuntimeGoneError("进程已退出")).toBe(true);
     expect(isRuntimeGoneError("网络超时")).toBe(false);
   });
 
