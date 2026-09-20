@@ -29,11 +29,13 @@ def detect_screen(gray: np.ndarray) -> tuple[int, int, int, int]:
         raise SystemExit("未检测到屏幕行")
     y0, y1 = int(ys[0]), int(ys[-1])
 
-    # 顶部留出摄像头，四周略收进玻璃内沿
-    y0 += 15
-    y1 -= 3
-    x0 += 3
-    x1 -= 3
+    # 顶部留出摄像头，四周略收进玻璃内沿（按屏幕高度比例，适配 2x 外框）
+    top = max(16, (y1 - y0) // 36)
+    pad = max(4, (x1 - x0) // 280)
+    y0 += top
+    y1 -= pad
+    x0 += pad
+    x1 -= pad
     return x0, y0, x1, y1
 
 
@@ -56,6 +58,9 @@ def cover_fit(src: Image.Image, width: int, height: int) -> Image.Image:
 def main() -> None:
     frame = Image.open(FRAME).convert("RGBA")
     ui = Image.open(UI).convert("RGB")
+    # 外框放大到接近界面像素，避免 1280 图在视网膜屏上再被浏览器拉糊
+    scale = 2
+    frame = frame.resize((frame.size[0] * scale, frame.size[1] * scale), Image.Resampling.LANCZOS)
     gray = np.array(frame.convert("L"))
     x0, y0, x1, y1 = detect_screen(gray)
     sw, sh = x1 - x0 + 1, y1 - y0 + 1
