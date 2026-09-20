@@ -13,9 +13,9 @@ name: Release
 # 真实凭据必须由产品所有者配置，见 docs/product/RELEASE_SETUP.md。
 
 on:
-  push:
-    tags:
-      - "v*"
+  # 打 v* 不再走这条：没证书时 preflight 会整单刷红。
+  # 未签名安装包挂到 GitHub Release 由 release-github.yml 负责。
+  # 证书齐了之后在 Actions 里手动跑本 workflow，渠道选 stable。
   workflow_dispatch:
     inputs:
       channel:

@@ -1,0 +1,114 @@
+name: GitHub Release (unsigned)
+
+# 打 v* 标签后，把未签名 Win / macOS / Linux 安装包挂到该 tag 的 GitHub Release。
+# 不上传 latest*.yml，因此进不了 electron-updater 正式 feed。
+# 签名正式版仍走 release.yml（手动 dispatch + release environment）。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要挂安装包的已有 tag（例如 v0.1.3）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: github-release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: package (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            builder_flags: --win nsis
+          - os: macos-latest
+            platform: macos
+            builder_flags: --mac dmg zip --config.mac.notarize=false
+          - os: ubuntu-latest
+            platform: linux
+            builder_flags: --linux AppImage deb
+
+    steps:
+      # actions/checkout v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # pnpm/action-setup v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10
+
+      # actions/setup-node v4
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare pi runtime
+        run: pnpm --filter @pibuddy/app run prepare:runtime
+
+      - name: Build renderer and main
+        run: pnpm --filter @pibuddy/app run build
+
+      - name: Build installers (unsigned)
+        shell: bash
+        env:
+          PIBUDDY_UPDATE_FEED_URL: https://example.invalid/pibuddy-github-release
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          set -euo pipefail
+          pnpm --filter @pibuddy/app exec electron-builder ${{ matrix.builder_flags }} --publish never
+
+      - name: Verify packaged artifacts
+        run: node packages/app/scripts/verify-packaged-app.mjs
+
+      - name: Install xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
+      - name: Smoke packaged app
+        run: node packages/app/scripts/smoke-packaged-app.mjs
+
+      - name: Attach installers to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          if ! gh release view "$TAG" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "${GITHUB_REPOSITORY}" --title "$TAG" --prerelease \
+              --notes "未签名预览安装包，不走应用内自动更新。Windows 请点「更多信息 → 仍要运行」；macOS 请在系统设置里「仍要打开」。"
+          fi
+          shopt -s nullglob
+          files=(
+            packages/app/release/*.exe
+            packages/app/release/*.dmg
+            packages/app/release/*.zip
+            packages/app/release/*.AppImage
+            packages/app/release/*.deb
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no installers to upload"
+            exit 1
+          fi
+          gh release upload "$TAG" --repo "${GITHUB_REPOSITORY}" --clobber "${files[@]}"

@@ -4,7 +4,16 @@
 > 过期了怎么办」。任何人如果在这份文档里看到一串像密钥的东西，那就是事故，
 > 请立刻吊销它并提 issue。
 
-## 0. 当前验收状态（2026-08-03）
+## 0. 两条发布路径
+
+| 路径 | 怎么触发 | 产物 | 进自动更新 feed |
+|---|---|---|---|
+| **GitHub 未签名包**（默认） | 推 `v*` 标签，或手动跑 `GitHub Release (unsigned)` | Win NSIS / mac dmg+zip / Linux AppImage+deb，挂到该 Release | 否 |
+| **签名正式版** | Actions 手动跑 `Release`，渠道 `stable` | 签名安装包 + `latest*.yml` | 是，且必须凭据齐全 |
+
+没买证书时走第一行即可。用户安装时要自己过 SmartScreen / Gatekeeper。
+
+## 0.1 当前验收状态（2026-08-03）
 
 | 项 | 状态 | 说明 |
 |---|---|---|

@@ -1,6 +1,6 @@
 {
   "name": "@pibuddy/app",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "private": true,
   "description": "PiBuddy - 你的 AI 办公小助手（基于 pi 智能体）",
   "author": "PiBuddy",

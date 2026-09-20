@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 
 const REPO = path.resolve(__dirname, "..", "..", "..");
 const RELEASE = path.join(REPO, ".github", "workflows", "release.yml");
+const RELEASE_GITHUB = path.join(REPO, ".github", "workflows", "release-github.yml");
 const CI = path.join(REPO, ".github", "workflows", "ci.yml");
 const SETUP_DOC = path.join(REPO, "docs", "product", "RELEASE_SETUP.md");
 
@@ -130,8 +131,8 @@ describe("release.yml 结构", () => {
 });
 
 describe("workflow action 固定", () => {
-  it("release.yml 与 ci.yml 里所有第三方 action 都以 40 位 SHA 固定", () => {
-    for (const file of [RELEASE, CI]) {
+  it("release.yml / release-github.yml / ci.yml 里所有第三方 action 都以 40 位 SHA 固定", () => {
+    for (const file of [RELEASE, RELEASE_GITHUB, CI]) {
       const bad = lines(file)
         .map((l, i) => ({ l, i }))
         .filter(({ l }) => /^\s*-?\s*uses:/.test(l))
@@ -219,7 +220,7 @@ describe("ci.yml 上传各系统构建物", () => {
     expect(block).toContain("--linux AppImage deb");
   });
 
-  it("CI 构建物未签名，不进正式 feed，也不发 GitHub Release", () => {
+  it("CI 构建物未签名，不进正式 feed；挂 Release 是 release-github.yml 的事", () => {
     expect(block).toContain("UNSIGNED");
     expect(block).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
     expect(block).toContain("--config.mac.notarize=false");
@@ -237,6 +238,41 @@ describe("ci.yml 上传各系统构建物", () => {
       steps.indexOf("Upload unsigned installers"),
     );
     expect(block).toContain("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02");
+  });
+});
+
+describe("release-github.yml 未签名安装包挂到 GitHub Release", () => {
+  const text = fs.readFileSync(RELEASE_GITHUB, "utf8");
+  const block = jobBlock(RELEASE_GITHUB, "package");
+  const steps = stepsOf(RELEASE_GITHUB, "package");
+
+  it("覆盖 Windows / macOS / Linux，并打出对应安装包", () => {
+    expect(block).toContain("windows-latest");
+    expect(block).toContain("macos-latest");
+    expect(block).toContain("ubuntu-latest");
+    expect(block).toContain("--win nsis");
+    expect(block).toContain("--mac dmg zip");
+    expect(block).toContain("--linux AppImage deb");
+    expect(block).toContain("--config.mac.notarize=false");
+  });
+
+  it("未签名、不读 release secrets，也不上传 latest.yml", () => {
+    expect(block).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
+    expect(block).toContain("https://example.invalid/");
+    expect(text).not.toMatch(/secrets\./);
+    expect(text).not.toMatch(/environment:\s*release/);
+    expect(text).not.toContain("latest.yml");
+    expect(text).toContain("gh release upload");
+    expect(text).toContain("contents: write");
+  });
+
+  it("校验并冒烟之后才挂到 Release", () => {
+    expect(steps).toContain("Verify packaged artifacts");
+    expect(steps).toContain("Smoke packaged app");
+    expect(steps).toContain("Attach installers to GitHub Release");
+    expect(steps.indexOf("Smoke packaged app")).toBeLessThan(
+      steps.indexOf("Attach installers to GitHub Release"),
+    );
   });
 });
 
