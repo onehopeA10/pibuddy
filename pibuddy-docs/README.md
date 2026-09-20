@@ -22,9 +22,8 @@ pibuddy-docs/
    │  ├─ config.mts        # 站点配置：双语导航、侧栏、搜索
    │  └─ theme/            # 自定义主题：首页布局与视觉
    ├─ public/
-   │  ├─ favicon.svg       # 标签页图标
-   │  ├─ logo.svg          # 深色 logo
-   │  ├─ logo-light.svg    # 浅色 logo
+   │  ├─ favicon.png       # 标签页图标（与产品标同一文件）
+   │  ├─ logo.png          # 产品标，来自仓库根 images/logo.png
    │  └─ screens/          # 产品界面截图
    ├─ index.md             # 中文首页
    ├─ screens/             # 截图
