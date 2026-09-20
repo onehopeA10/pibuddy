@@ -4,14 +4,22 @@
 
 ## 信任边界
 
-```
-   低信任                     半信任                       全权
-┌──────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│ 模型输出 /     │  IPC │ renderer (Chromium)│  IPC │ main (Node 全权)  │
-│ 工具产物 /     │─────▶│ 渲染 markdown /    │─────▶│ 文件系统 / 网络 / │
-│ 外部读取文件   │      │ 拼工作区内容        │      │ 子进程            │
-└──────────────┘      └──────────────────┘      └──────────────────┘
-```
+<div class="pb-trust">
+  <div class="pb-trust__col">
+    <div class="pb-trust__label">低信任</div>
+    <div class="pb-trust__box">模型输出 / 工具产物 / 外部读取文件</div>
+  </div>
+  <div class="pb-trust__arrow">IPC →</div>
+  <div class="pb-trust__col">
+    <div class="pb-trust__label">半信任</div>
+    <div class="pb-trust__box">renderer（Chromium）<br />渲染 markdown / 拼工作区内容</div>
+  </div>
+  <div class="pb-trust__arrow">IPC →</div>
+  <div class="pb-trust__col">
+    <div class="pb-trust__label">全权</div>
+    <div class="pb-trust__box">main（Node 全权）<br />文件系统 / 网络 / 子进程</div>
+  </div>
+</div>
 
 模型输出会被渲染成 markdown、工具产物会被拼进 DOM——任何一处 XSS 若能拿到 renderer 全部 IPC 能力就是灾难。**因此所有安全判定都必须在 main 完成，renderer 侧的检查只是 UX。**
 

@@ -4,14 +4,22 @@
 
 ## Trust boundary
 
-```
-   low trust                     half trust                    full power
-┌──────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│ model output / │  IPC │ renderer (Chromium)│  IPC │ main (full Node)  │
-│ tool artifacts /│─────▶│ markdown render /  │─────▶│ filesystem / net / │
-│ external files │      │ workspace content   │      │ child processes    │
-└──────────────┘      └──────────────────┘      └──────────────────┘
-```
+<div class="pb-trust">
+  <div class="pb-trust__col">
+    <div class="pb-trust__label">low trust</div>
+    <div class="pb-trust__box">model output / tool artifacts / external files</div>
+  </div>
+  <div class="pb-trust__arrow">IPC →</div>
+  <div class="pb-trust__col">
+    <div class="pb-trust__label">half trust</div>
+    <div class="pb-trust__box">renderer (Chromium)<br />markdown render / workspace content</div>
+  </div>
+  <div class="pb-trust__arrow">IPC →</div>
+  <div class="pb-trust__col">
+    <div class="pb-trust__label">full power</div>
+    <div class="pb-trust__box">main (full Node)<br />filesystem / network / child processes</div>
+  </div>
+</div>
 
 Model output is rendered as markdown and tool artifacts are spliced into the DOM. An XSS that reaches every renderer IPC method is a disaster. **Every security decision must therefore be made in main. Renderer-side checks are UX only.**
 
