@@ -24,8 +24,38 @@ function countFiles(dir) {
   return n;
 }
 
+/**
+ * win/linux 的 resources 就在 appOutDir 下；mac 的 appOutDir 是
+ * `mac-arm64/`，真资源在 `PiBuddy.app/Contents/Resources`。
+ * 写错目录的表现是：校验脚本扫到空壳 resources/，装完的 .app 里 pi 启动即
+ * ERR_MODULE_NOT_FOUND。
+ */
+function resolveResourcesDir(context) {
+  const appOutDir = context.appOutDir;
+  if (context.electronPlatformName === "darwin") {
+    const product = context.packager?.appInfo?.productFilename;
+    const names = [];
+    if (product) names.push(`${product}.app`);
+    if (fs.existsSync(appOutDir)) {
+      for (const name of fs.readdirSync(appOutDir)) {
+        if (name.endsWith(".app")) names.push(name);
+      }
+    }
+    const app = names.find((name) =>
+      fs.existsSync(path.join(appOutDir, name, "Contents", "Resources")),
+    );
+    if (!app) {
+      throw new Error(`[after-pack] ${appOutDir} 里找不到 Contents/Resources`);
+    }
+    return path.join(appOutDir, app, "Contents", "Resources");
+  }
+  return path.join(appOutDir, "resources");
+}
+
+exports.resolveResourcesDir = resolveResourcesDir;
+
 exports.default = async function afterPack(context) {
-  const dest = path.join(context.appOutDir, "resources", "pi-runtime", "node_modules");
+  const dest = path.join(resolveResourcesDir(context), "pi-runtime", "node_modules");
 
   if (!fs.existsSync(SRC)) {
     throw new Error(

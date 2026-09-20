@@ -63,16 +63,21 @@ function findResourceDirs(outDir) {
   for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const base = path.join(outDir, entry.name);
-    const flat = path.join(base, "resources");
-    if (fs.existsSync(flat)) {
-      found.push({ label: entry.name, dir: flat });
-      continue;
-    }
-    // macOS：再往下一层找 .app bundle
+    // macOS 完整打包时 afterPack 曾误在 appOutDir 旁写出 resources/，
+    // 必须先认 .app/Contents/Resources，否则会校验到空壳目录。
+    let addedMac = false;
     for (const inner of fs.readdirSync(base, { withFileTypes: true })) {
       if (!inner.isDirectory() || !inner.name.endsWith(".app")) continue;
       const macRes = path.join(base, inner.name, "Contents", "Resources");
-      if (fs.existsSync(macRes)) found.push({ label: `${entry.name}/${inner.name}`, dir: macRes });
+      if (fs.existsSync(macRes)) {
+        found.push({ label: `${entry.name}/${inner.name}`, dir: macRes });
+        addedMac = true;
+      }
+    }
+    if (addedMac) continue;
+    const flat = path.join(base, "resources");
+    if (fs.existsSync(flat)) {
+      found.push({ label: entry.name, dir: flat });
     }
   }
   return found;
@@ -187,6 +192,8 @@ function main() {
   console.log(`\nverify-packaged-app: OK（校验 ${targets.length} 个产物目录）`);
   process.exit(0);
 }
+
+export { findResourceDirs };
 
 if (
   process.argv[1] &&
