@@ -58,6 +58,8 @@ jobs:
       # actions/configure-pages v5.0.0
       - name: Configure Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
+        with:
+          enablement: true
 
       # actions/upload-pages-artifact v4.0.0
       - name: Upload artifact
