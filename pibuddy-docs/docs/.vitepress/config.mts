@@ -22,8 +22,13 @@ const sharedNavEn = [
   { text: 'Extensions', link: '/en/extensions/', activeMatch: '/en/extensions/' },
 ]
 
+const docsBase = process.env.DOCS_BASE || '/'
+const docsHostname = process.env.DOCS_HOSTNAME || 'https://pibuddy.top'
+
 export default defineConfig({
   title: 'PiBuddy',
+  base: docsBase,
+  sitemap: { hostname: docsHostname },
   cleanUrls: true,
   lastUpdated: true,
   appearance: true,
