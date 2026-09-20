@@ -91,13 +91,12 @@
   flex-wrap: wrap;
 }
 .pb-hero__shot {
-  display: flex;
-  justify-content: center;
-  margin: 36px auto 0;
+  display: block;
+  margin: 28px -8px 0;
 }
 .pb-hero__shot img {
   display: block;
-  width: min(100%, 820px);
+  width: 100%;
   height: auto;
 }
 .pb-btn {

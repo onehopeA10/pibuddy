@@ -39,6 +39,20 @@ def detect_screen(gray: np.ndarray) -> tuple[int, int, int, int]:
     return x0, y0, x1, y1
 
 
+def crop_around_laptop(im: Image.Image, pad: int = 40) -> Image.Image:
+    arr = np.array(im.convert("RGB"))
+    chroma = arr.max(axis=2) - arr.min(axis=2)
+    laptop = (chroma < 45) | (arr.max(axis=2) < 35)
+    ys, xs = np.where(laptop)
+    if xs.size == 0:
+        return im
+    x0 = max(0, int(xs.min()) - pad)
+    y0 = max(0, int(ys.min()) - pad)
+    x1 = min(im.size[0], int(xs.max()) + 1 + pad)
+    y1 = min(im.size[1], int(ys.max()) + 1 + pad)
+    return im.crop((x0, y0, x1, y1))
+
+
 def cover_fit(src: Image.Image, width: int, height: int) -> Image.Image:
     sw, sh = src.size
     scale = max(width / sw, height / sh)
@@ -75,9 +89,10 @@ def main() -> None:
     screen = Image.new("RGBA", (sw, sh))
     screen.paste(fitted)
     frame.paste(screen, (x0, y0), mask)
+    out = crop_around_laptop(frame.convert("RGB"))
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    frame.convert("RGB").save(OUT, "PNG", compress_level=1)
-    print(f"wrote {OUT} {frame.size[0]}x{frame.size[1]}")
+    out.save(OUT, "PNG", compress_level=1)
+    print(f"wrote {OUT} {out.size[0]}x{out.size[1]}")
 
 
 if __name__ == "__main__":
