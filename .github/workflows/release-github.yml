@@ -1,6 +1,10 @@
 name: GitHub Release (unsigned)
 
-# 打 v* 标签后，把未签名 Win / macOS / Linux 安装包挂到该 tag 的 GitHub Release。
+# 分平台原生打包，不交叉编译（node-pty 等原生依赖在错架构上会直接炸）。
+#   Windows runner  →  electron-builder --win nsis zip --x64 --publish never
+#   Ubuntu runner   →  electron-builder --linux AppImage deb --x64 --publish never
+#   macOS runner    →  electron-builder --mac dmg zip（本机 arch，不公证）
+# 先编译项目，再 --publish never 只出包；publish job 再把产物挂到该 tag 的 Release。
 # 不上传 latest*.yml，因此进不了 electron-updater 正式 feed。
 # 签名正式版仍走 release.yml（手动 dispatch + release environment）。
 
@@ -32,13 +36,13 @@ jobs:
         include:
           - os: windows-latest
             platform: windows
-            builder_flags: --win nsis
+            builder_flags: --win nsis zip --x64
           - os: macos-latest
             platform: macos
             builder_flags: --mac dmg zip --config.mac.notarize=false
           - os: ubuntu-latest
             platform: linux
-            builder_flags: --linux AppImage deb
+            builder_flags: --linux AppImage deb --x64
 
     steps:
       # actions/checkout v4
@@ -76,6 +80,7 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           set -euo pipefail
+          # 工作区等价于在 packages/app 下跑 npx electron-builder … --publish never
           pnpm --filter @pibuddy/app exec electron-builder ${{ matrix.builder_flags }} --publish never
 
       - name: Verify packaged artifacts
@@ -87,6 +92,34 @@ jobs:
 
       - name: Smoke packaged app
         run: node packages/app/scripts/smoke-packaged-app.mjs
+
+      # actions/upload-artifact v4 —— 只暂存，不挂 Release
+      - name: Upload unsigned installers
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pibuddy-${{ matrix.platform }}-UNSIGNED
+          path: |
+            packages/app/release/*.exe
+            packages/app/release/*.dmg
+            packages/app/release/*.zip
+            packages/app/release/*.AppImage
+            packages/app/release/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: publish (GitHub Release)
+    needs: package
+    if: ${{ !cancelled() && contains(fromJSON('["success", "failure"]'), needs.package.result) }}
+    runs-on: ubuntu-latest
+    steps:
+      # actions/download-artifact v4
+      - name: Download unsigned installers
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: pibuddy-*-UNSIGNED
+          path: dist
+          merge-multiple: true
 
       - name: Attach installers to GitHub Release
         env:
@@ -101,11 +134,11 @@ jobs:
           fi
           shopt -s nullglob
           files=(
-            packages/app/release/*.exe
-            packages/app/release/*.dmg
-            packages/app/release/*.zip
-            packages/app/release/*.AppImage
-            packages/app/release/*.deb
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
           )
           if [ "${#files[@]}" -eq 0 ]; then
             echo "::error::no installers to upload"

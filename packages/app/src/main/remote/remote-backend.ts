@@ -79,9 +79,10 @@ export function productionBackend(): RemoteBackend {
     },
 
     sendPrompt(sessionId: string, text: string): RemoteActionResult {
-      // deliver 对无活跃 runtime 的会话静默丢弃（会话已停）——best-effort，不抛。
-      poolRuntimeHost().deliver(sessionId, text);
-      return { ok: true, reason: "ok" };
+      const delivered = poolRuntimeHost().deliver(sessionId, text);
+      return delivered
+        ? { ok: true, reason: "ok" }
+        : { ok: false, reason: "session unavailable" };
     },
 
     stopSession(sessionId: string): RemoteActionResult {

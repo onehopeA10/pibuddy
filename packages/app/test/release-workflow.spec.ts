@@ -1,6 +1,9 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { validateReleaseTarget } from "../scripts/validate-release-target.mjs";
 
 /**
  * 发布流水线的结构断言（UPD-005）。
@@ -59,7 +62,9 @@ describe("release.yml 结构", () => {
     const text = fs.readFileSync(RELEASE, "utf8");
     expect(text).toContain("  upload-artifacts:");
     expect(text).toContain("  publish-manifest:");
-    expect(text).toContain("needs: upload-artifacts");
+    const publish = jobBlock(RELEASE, "publish-manifest");
+    expect(publish).toContain("      - preflight");
+    expect(publish).toContain("      - upload-artifacts");
   });
 
   it("正式发布在打包之前跑自动化回归，且回归不消费 secrets", () => {
@@ -101,6 +106,8 @@ describe("release.yml 结构", () => {
     for (const secret of [
       "WIN_CSC_LINK",
       "WIN_CSC_KEY_PASSWORD",
+      "MAC_CSC_LINK",
+      "MAC_CSC_KEY_PASSWORD",
       "APPLE_TEAM_ID",
       "APPLE_ID",
       "APPLE_APP_SPECIFIC_PASSWORD",
@@ -127,6 +134,88 @@ describe("release.yml 结构", () => {
   it("正式发布不引用任何第三方 Electron 镜像开关", () => {
     const text = fs.readFileSync(RELEASE, "utf8");
     expect(text).not.toMatch(/PIBUDDY_USE_CN_MIRROR|NPM_CONFIG_REGISTRY|npmmirror/);
+  });
+});
+
+describe("手动发布可达性与版本来源", () => {
+  it.each([
+    ["workflow_dispatch", "stable", "true", true],
+    ["workflow_dispatch", "stable", "false", false],
+    ["workflow_dispatch", "stable", "", false],
+    ["workflow_dispatch", "beta", "true", false],
+    ["workflow_dispatch", "nightly", "true", false],
+    ["push", "stable", "true", false],
+  ])("event=%s channel=%s signed=%s → publish=%s", (event, channel, signed, allowed) => {
+    const text = fs.readFileSync(RELEASE, "utf8");
+    expect(text).toMatch(/^  workflow_dispatch:/m);
+    const condition = /^    if: (.+)$/m.exec(jobBlock(RELEASE, "publish-manifest"))?.[1];
+    expect(condition).toBeTruthy();
+    const context: Record<string, string> = {
+      "github.event_name": event,
+      "inputs.channel": channel,
+      "needs.preflight.outputs.signed": signed,
+    };
+    const terms = condition!.split(/\s*&&\s*/).map((term) => {
+      const comparison = /^([\w.]+) == '([^']*)'$/.exec(term);
+      expect(comparison, `未覆盖的发布条件：${term}`).not.toBeNull();
+      expect(Object.keys(context)).toContain(comparison![1]);
+      return context[comparison![1]] === comparison![2];
+    });
+    expect(terms.every(Boolean)).toBe(allowed);
+  });
+
+  it("所有发布阶段 checkout 指定 tag；版本验证在回归前，发布不用触发分支名", () => {
+    for (const job of ["regression", "upload-artifacts", "publish-manifest"]) {
+      expect(jobBlock(RELEASE, job)).toContain("ref: ${{ (inputs.channel == 'stable' || inputs.tag) && format('refs/tags/{0}', inputs.tag || github.ref_name) || github.ref }}");
+    }
+    const steps = stepsOf(RELEASE, "regression");
+    expect(steps).toContain("Validate release target");
+    expect(steps.indexOf("Validate release target")).toBeLessThan(steps.indexOf("Full automated regression"));
+    const publish = jobBlock(RELEASE, "publish-manifest");
+    expect(publish).not.toContain("GITHUB_REF_NAME");
+    expect(publish).toContain('gh release upload "${RELEASE_TAG}"');
+    expect(publish).toContain("--verify-tag");
+    expect(publish).toContain("--prerelease=false --latest");
+  });
+
+  it.each(["", "main", "v1.2.3-beta.1", "v1.2.4"])("stable 拒绝不匹配的版本来源 %s", (tag) => {
+    expect(() => validateReleaseTarget({ channel: "stable", tag, version: "1.2.3" })).toThrow();
+  });
+
+  it("stable 接受匹配正式版本；测试渠道可构建分支", () => {
+    expect(() => validateReleaseTarget({ channel: "stable", tag: "v1.2.3", version: "1.2.3" })).not.toThrow();
+    expect(() => validateReleaseTarget({ channel: "beta", tag: "main", version: "1.2.3-beta.1" })).not.toThrow();
+  });
+
+  it.each([
+    ["stable", "v1.2.3", "", 0, "signed=true"],
+    ["stable", "main", "", 1, ""],
+    ["stable", "v1.2.3", "MAC_CSC_LINK", 1, "signed=false"],
+    ["stable", "v1.2.3", "WIN_CSC_KEY_PASSWORD", 1, "signed=false"],
+    ["beta", "main", "MAC_CSC_LINK", 0, "signed=false"],
+  ])("实际 preflight 脚本：%s/%s 缺 %s", (channel, tag, missing, status, expectedOutput) => {
+    const block = jobBlock(RELEASE, "preflight");
+    const script = block.slice(block.indexOf("        run: |") + "        run: |".length)
+      .split("\n").map((line) => line.slice(10)).join("\n");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pibuddy-release-gate-"));
+    const output = path.join(dir, "output");
+    const credentials = Object.fromEntries([
+      "WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD", "MAC_CSC_LINK", "MAC_CSC_KEY_PASSWORD",
+      "APPLE_TEAM_ID", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "PIBUDDY_UPDATE_FEED_URL",
+    ].map((name) => [name, name === missing ? "" : "synthetic"]));
+    try {
+      const result = spawnSync("bash", ["-c", script], {
+        encoding: "utf8",
+        env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, ...credentials,
+          RELEASE_CHANNEL: channel, RELEASE_TAG: tag, GITHUB_OUTPUT: output.replace(/\\/g, "/") },
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(status);
+      const actual = fs.existsSync(output) ? fs.readFileSync(output, "utf8").trim() : "";
+      expect(actual).toBe(expectedOutput);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -215,9 +304,9 @@ describe("ci.yml 上传各系统构建物", () => {
     expect(block).toContain("windows-latest");
     expect(block).toContain("macos-latest");
     expect(block).toContain("ubuntu-latest");
-    expect(block).toContain("--win nsis");
+    expect(block).toContain("--win nsis zip --x64");
     expect(block).toContain("--mac dmg zip");
-    expect(block).toContain("--linux AppImage deb");
+    expect(block).toContain("--linux AppImage deb --x64");
   });
 
   it("CI 构建物未签名，不进正式 feed；挂 Release 是 release-github.yml 的事", () => {
@@ -243,36 +332,48 @@ describe("ci.yml 上传各系统构建物", () => {
 
 describe("release-github.yml 未签名安装包挂到 GitHub Release", () => {
   const text = fs.readFileSync(RELEASE_GITHUB, "utf8");
-  const block = jobBlock(RELEASE_GITHUB, "package");
-  const steps = stepsOf(RELEASE_GITHUB, "package");
+  const pack = jobBlock(RELEASE_GITHUB, "package");
+  const packSteps = stepsOf(RELEASE_GITHUB, "package");
+  const publish = jobBlock(RELEASE_GITHUB, "publish");
+  const publishSteps = stepsOf(RELEASE_GITHUB, "publish");
 
-  it("覆盖 Windows / macOS / Linux，并打出对应安装包", () => {
-    expect(block).toContain("windows-latest");
-    expect(block).toContain("macos-latest");
-    expect(block).toContain("ubuntu-latest");
-    expect(block).toContain("--win nsis");
-    expect(block).toContain("--mac dmg zip");
-    expect(block).toContain("--linux AppImage deb");
-    expect(block).toContain("--config.mac.notarize=false");
+  it("分平台原生打包：Win nsis+zip x64、Linux AppImage+deb x64、mac 本机 dmg+zip", () => {
+    expect(pack).toContain("windows-latest");
+    expect(pack).toContain("macos-latest");
+    expect(pack).toContain("ubuntu-latest");
+    expect(pack).toContain("--win nsis zip --x64");
+    expect(pack).toContain("--mac dmg zip");
+    expect(pack).toContain("--linux AppImage deb --x64");
+    expect(pack).toContain("--config.mac.notarize=false");
+    expect(pack).toContain("--publish never");
+  });
+
+  it("打包 job 只出包、不挂 Release；publish job 再上传", () => {
+    expect(text).toContain("needs: package");
+    expect(pack).not.toContain("gh release");
+    expect(packSteps).toContain("Upload unsigned installers");
+    expect(publishSteps).toContain("Download unsigned installers");
+    expect(publishSteps).toContain("Attach installers to GitHub Release");
+    expect(publish).toContain("actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093");
+    expect(publish).toContain("gh release upload");
+    expect(publish).toMatch(/for attempt in 1 2 3/);
   });
 
   it("未签名、不读 release secrets，也不上传 latest.yml", () => {
-    expect(block).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
-    expect(block).toContain("https://example.invalid/");
+    expect(pack).toContain('CSC_IDENTITY_AUTO_DISCOVERY: "false"');
+    expect(pack).toContain("https://example.invalid/");
     expect(text).not.toMatch(/secrets\./);
     expect(text).not.toMatch(/environment:\s*release/);
     expect(text).not.toContain("latest.yml");
-    expect(text).toContain("gh release upload");
     expect(text).toContain("contents: write");
-    expect(block).toMatch(/for attempt in 1 2 3/);
   });
 
-  it("校验并冒烟之后才挂到 Release", () => {
-    expect(steps).toContain("Verify packaged artifacts");
-    expect(steps).toContain("Smoke packaged app");
-    expect(steps).toContain("Attach installers to GitHub Release");
-    expect(steps.indexOf("Smoke packaged app")).toBeLessThan(
-      steps.indexOf("Attach installers to GitHub Release"),
+  it("校验并冒烟之后才暂存构建物", () => {
+    expect(packSteps).toContain("Verify packaged artifacts");
+    expect(packSteps).toContain("Smoke packaged app");
+    expect(packSteps).toContain("Upload unsigned installers");
+    expect(packSteps.indexOf("Smoke packaged app")).toBeLessThan(
+      packSteps.indexOf("Upload unsigned installers"),
     );
   });
 });
@@ -292,6 +393,8 @@ describe("electron-builder.yml", () => {
   it("win 保持 per-user NSIS，linux 补 deb", () => {
     expect(yml).toContain("perMachine: false");
     expect(yml).toMatch(/-\s*nsis/);
+    const win = yml.slice(yml.indexOf("\nwin:"), yml.indexOf("\nnsis:"));
+    expect(win).toMatch(/-\s*zip/);
     expect(yml).toMatch(/-\s*AppImage/);
     expect(yml).toMatch(/-\s*deb/);
     // AppImage 拒绝包名里的 @，必须显式给出安全的可执行文件名

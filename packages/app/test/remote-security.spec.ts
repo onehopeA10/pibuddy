@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import http from "node:http";
+import http, { type ClientRequest, type IncomingMessage } from "node:http";
+import type { Duplex } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
@@ -57,10 +58,19 @@ const SNAPSHOT: PoolSnapshot = {
   ],
 };
 
+let snapshotSequence = 1;
+const sessionHistory = vi.fn(async (sessionId: string, workspaceId: string) => ({
+  entries: [{ type: "message", sessionId, workspaceId }],
+  nextBeforeOffset: null,
+  stale: false,
+  skippedPartial: 0,
+}));
+const sendPrompt = vi.fn(() => ({ ok: true, reason: "ok" }));
+
 const fakeBackend: RemoteBackend = {
-  poolSnapshot: () => SNAPSHOT,
-  sessionHistory: async () => ({ entries: [], nextBeforeOffset: null, stale: false, skippedPartial: 0 }),
-  sendPrompt: () => ({ ok: true, reason: "ok" }),
+  poolSnapshot: () => ({ ...SNAPSHOT, sequence: snapshotSequence }),
+  sessionHistory,
+  sendPrompt,
   stopSession: () => ({ ok: true, reason: "ok" }),
   permissionState: () => ({ workspaceId: null, workspaceGrants: [], sessionGrants: [], audit: [] }),
   decideInbox: async () => ({ ok: true, reason: "ok" }),
@@ -133,6 +143,86 @@ function wsUpgrade(token: string | null): Promise<number> {
   });
 }
 
+interface SseHandle {
+  request: ClientRequest;
+  response: IncomingMessage;
+  chunks: string[];
+}
+
+function openSse(token: string): Promise<SseHandle> {
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      host: "127.0.0.1",
+      port,
+      method: "GET",
+      path: "/events",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    request.on("response", (response) => {
+      const chunks: string[] = [];
+      response.setEncoding("utf8");
+      response.on("data", (chunk: string) => chunks.push(chunk));
+      resolve({ request, response, chunks });
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+interface WsHandle {
+  socket: Duplex;
+  chunks: Buffer[];
+}
+
+function serverFrameOpcodes(buffer: Buffer): number[] {
+  const opcodes: number[] = [];
+  let offset = 0;
+  while (offset + 2 <= buffer.length) {
+    const opcode = buffer[offset] & 0x0f;
+    let length = buffer[offset + 1] & 0x7f;
+    let headerLength = 2;
+    if (length === 126) {
+      if (offset + 4 > buffer.length) break;
+      length = buffer.readUInt16BE(offset + 2);
+      headerLength = 4;
+    } else if (length === 127) {
+      if (offset + 10 > buffer.length) break;
+      length = Number(buffer.readBigUInt64BE(offset + 2));
+      headerLength = 10;
+    }
+    if (offset + headerLength + length > buffer.length) break;
+    opcodes.push(opcode);
+    offset += headerLength + length;
+  }
+  return opcodes;
+}
+
+function openWs(token: string): Promise<WsHandle> {
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      host: "127.0.0.1",
+      port,
+      method: "GET",
+      path: "/ws",
+      headers: {
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-version": "13",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-protocol": `pibuddy.remote, ${token}`,
+      },
+    });
+    request.on("upgrade", (_response, socket, head) => {
+      const chunks = head.length > 0 ? [head] : [];
+      socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+      resolve({ socket, chunks });
+    });
+    request.on("response", (response) => reject(new Error(`WS rejected: ${response.statusCode}`)));
+    request.on("error", reject);
+    request.end();
+  });
+}
+
 /** 走一遍配对，返回设备 token。 */
 async function pairDevice(name = "test-device"): Promise<{ token: string; deviceId: string }> {
   const p = createPairing(registry, `http://127.0.0.1:${port}`, Date.now(), null);
@@ -189,6 +279,45 @@ describe("静态壳与 /pair 是免 token 入口（应用壳不是机密）", ()
   });
 });
 
+describe("受保护数据路由", () => {
+  it("历史路由捕获并解码指定 sessionId，返回该会话的非空历史", async () => {
+    const { token } = await pairDevice("history-device");
+    const sessionId = "session/id +";
+    const workspaceId = "workspace 1";
+    sessionHistory.mockClear();
+
+    const result = await req(
+      "GET",
+      `/api/sessions/${encodeURIComponent(sessionId)}/history?ws=${encodeURIComponent(workspaceId)}&limit=30`,
+      { token }
+    );
+
+    expect(result.status).toBe(200);
+    expect(result.json.entries).toEqual([{ type: "message", sessionId, workspaceId }]);
+    expect(sessionHistory).toHaveBeenCalledWith(sessionId, workspaceId, 30);
+  });
+
+  it("历史路由拒绝无法解码的 sessionId", async () => {
+    const { token } = await pairDevice("bad-history-device");
+    const result = await req("GET", "/api/sessions/%E0%A4%A/history", { token });
+    expect(result.status).toBe(400);
+    expect(result.json.error).toBe("invalid sessionId");
+  });
+
+  it("prompt backend 未投递时返回 502 和明确失败 body", async () => {
+    const { token } = await pairDevice("failed-prompt-device");
+    sendPrompt.mockReturnValueOnce({ ok: false, reason: "session unavailable" });
+
+    const result = await req("POST", "/api/prompt", {
+      token,
+      body: { sessionId: "stopped-session", text: "hello" },
+    });
+
+    expect(result.status).toBe(502);
+    expect(result.json).toEqual({ ok: false, reason: "session unavailable" });
+  });
+});
+
 describe("配对：单次 + 短时", () => {
   it("消费一个 challenge 得到 token，且该 token 能访问受保护入口", async () => {
     const { token } = await pairDevice();
@@ -203,6 +332,46 @@ describe("配对：单次 + 短时", () => {
     expect(first.status).toBe(200);
     const second = await req("POST", "/pair", { body: { code: p.code, name: "d2" } });
     expect(second.status).toBe(401); // 用过即失效
+  });
+
+  it("轮换配对关闭旧 SSE + WS，旧 token 失效且新 token 正常", async () => {
+    const { token: oldToken, deviceId } = await pairDevice("rotate-streams");
+    const oldSse = await openSse(oldToken);
+    const oldWs = await openWs(oldToken);
+    let newSse: SseHandle | null = null;
+    let newWs: WsHandle | null = null;
+
+    try {
+      await vi.waitFor(() => expect(oldSse.chunks.join("")).toContain('"sequence":1'));
+      const pairing = createPairing(registry, `http://127.0.0.1:${port}`, Date.now(), deviceId);
+      const rotated = await req("POST", "/pair", { body: { code: pairing.code, name: "rotated" } });
+
+      expect(rotated.status).toBe(200);
+      expect(rotated.json).toMatchObject({ deviceId, rotated: true });
+      await vi.waitFor(() => {
+        expect(oldSse.response.readableEnded || oldSse.response.destroyed).toBe(true);
+        expect(serverFrameOpcodes(Buffer.concat(oldWs.chunks))).toContain(0x8);
+      });
+      expect((await req("GET", "/api/pool", { token: oldToken })).status).toBe(401);
+      expect((await req("GET", "/api/pool", { token: rotated.json.token })).status).toBe(200);
+
+      newSse = await openSse(rotated.json.token);
+      newWs = await openWs(rotated.json.token);
+      await vi.waitFor(() => expect(newSse!.chunks.join("")).toContain('"sequence":1'));
+      snapshotSequence = 2;
+      await vi.waitFor(
+        () => expect(newSse!.chunks.join("")).toContain('"sequence":2'),
+        { timeout: 3_000 }
+      );
+      expect(oldSse.chunks.join("")).not.toContain('"sequence":2');
+      expect(server.wsHub().hasDevice(deviceId)).toBe(true);
+    } finally {
+      oldSse.request.destroy();
+      oldWs.socket.destroy();
+      newSse?.request.destroy();
+      newWs?.socket.destroy();
+      snapshotSequence = 1;
+    }
   });
 
   it("过期的 challenge 被拒", async () => {
@@ -248,13 +417,37 @@ describe("配对设备默认只拿安全 scope；危险 scope 默认拒", () => 
   });
 });
 
-describe("撤销 → token 立即失效", () => {
+describe("撤销 → token 与活跃连接立即失效", () => {
   it("撤销设备后，其 token 访问任何入口 → 401", async () => {
     const { token, deviceId } = await pairDevice("to-revoke");
     expect((await req("GET", "/api/pool", { token })).status).toBe(200);
     registry.deleteDevice(deviceId);
     server.dropDevice(deviceId);
     expect((await req("GET", "/api/pool", { token })).status).toBe(401);
+  });
+
+  it("dropDevice 同时关闭该设备 SSE + WS，撤销后不再推送新快照", async () => {
+    const { token, deviceId } = await pairDevice("stream-revoke");
+    const sse = await openSse(token);
+    const ws = await openWs(token);
+    await vi.waitFor(() => expect(sse.chunks.join("")).toContain('"sequence":1'));
+    expect(sse.response.statusCode).toBe(200);
+    expect(server.wsHub().hasDevice(deviceId)).toBe(true);
+
+    snapshotSequence = 2;
+    registry.deleteDevice(deviceId);
+    server.dropDevice(deviceId);
+    await vi.waitFor(() => {
+      expect(sse.response.readableEnded || sse.response.destroyed).toBe(true);
+      expect(serverFrameOpcodes(Buffer.concat(ws.chunks))).toContain(0x8);
+    });
+    expect(server.wsHub().hasDevice(deviceId)).toBe(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    expect(sse.chunks.join("")).not.toContain('"sequence":2');
+    sse.request.destroy();
+    ws.socket.destroy();
+    snapshotSequence = 1;
   });
 });
 

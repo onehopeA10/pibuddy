@@ -103,6 +103,12 @@ describe("runtime idle 判据", () => {
     ).toBe(true);
     expect(isRuntimeGoneError("进程已退出")).toBe(true);
     expect(isRuntimeGoneError("网络超时")).toBe(false);
+    expect(
+      isRuntimeGoneError(new Error("Session file is not a valid pi session: C:\\\\x\\\\a.jsonl"))
+    ).toBe(false);
+    expect(isRuntimeGoneError(new Error("这条会话文件已经损坏，无法打开。请再开一条新对话。"))).toBe(
+      false
+    );
   });
 
   it("产品默认空闲时长是 15 分钟", () => {

@@ -63,6 +63,17 @@ export interface PiClientOptions {
 /** 默认 RPC 超时。pi 的长任务由事件流推进，单条命令不该等这么久还没回。 */
 export const DEFAULT_RPC_TIMEOUT_MS = 30_000;
 
+/**
+ * 启动握手（进程拉起后的第一条 get_state）的超时。
+ *
+ * pi 在回第一条命令之前要把 ~/.pi/agent 里的 packages / extensions 全部
+ * 加载完。实测干净目录 4s，装了 maestro-flow / cockpit 这类大包 18–25s；
+ * 旁边再有一个 pi 在跑（运行中切会话 / 新建任务的 park 路径）CPU 被分掉，
+ * 30s 必然过线 —— 表现就是「新建任务 / 切换会话没起来」。
+ * 这条命令的语义是「等 pi 准备好」，不该套普通命令的 30s。
+ */
+export const STARTUP_HANDSHAKE_TIMEOUT_MS = 120_000;
+
 /** 写队列上限：对端 stdin 长时间不排空时止损，而不是无界堆积。 */
 const MAX_WRITE_QUEUE = 1000;
 
@@ -545,8 +556,8 @@ export class PiRpcClient extends EventEmitter {
     return this.send({ type: "switch_session", sessionPath });
   }
 
-  getState(): Promise<AgentState> {
-    return this.invoke<AgentState>({ type: "get_state" });
+  getState(opts?: { timeoutMs?: number }): Promise<AgentState> {
+    return this.invoke<AgentState>({ type: "get_state" }, opts);
   }
 
   getMessages(): Promise<{ messages: AgentMessage[] }> {

@@ -328,6 +328,9 @@ export type SecretDescriptor = z.infer<typeof secretDescriptorSchema>;
  */
 export const piPromptRequestSchema = z.object({
   message: promptMessageSchema,
+  /** 发送时的目标，防止 UI 预览与实际运行时错配；旧调用方可省略。 */
+  workspaceId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
   images: z.array(imageContentSchema).max(MAX_PROMPT_IMAGES).optional(),
   attachmentTokens: z
     .array(z.string().min(1).max(MAX_ATTACHMENT_TOKEN_CHARS))

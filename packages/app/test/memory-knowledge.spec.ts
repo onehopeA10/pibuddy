@@ -18,8 +18,12 @@ vi.mock("electron", () => ({
 }));
 
 const { MemoryStore } = await import("../src/main/memory/memory-store.js");
-const { __setEmbedder, disposeEmbedder } = await import("../src/main/memory/memory-embed.js");
+const { __setEmbedder, disposeEmbedder, localEmbedder } = await import(
+  "../src/main/memory/memory-embed.js"
+);
 const { searchKnowledge, embedKnowledge } = await import("../src/main/memory/memory-search.js");
+const { cosine, hashEmbed } = await import("../src/main/memory/memory-vector.js");
+const { meaningfulLexicalOverlap } = await import("../src/main/memory/query-compiler.js");
 const { DatabaseSync } = await import("node:sqlite");
 
 const WS = "ws-kb";
@@ -102,6 +106,26 @@ describe("语义检索带引用", () => {
     expect(hit.vectorScore).toBeGreaterThan(0);
     // 命中带引用：出自哪个文件可追溯
     expect([hit.citation.sourceKind, hit.citation.sourceRef]).toEqual(["file", "docs/db.md"]);
+  });
+
+  it("local hash 高余弦也不能靠通用 project 词绕过词法准入", async () => {
+    __setEmbedder(localEmbedder());
+    const query = "project build";
+    const content = "project finance";
+    const raw = cosine(hashEmbed(query), hashEmbed(content));
+    expect(raw).toBeGreaterThan(0.25);
+    expect(meaningfulLexicalOverlap(query, content)).toBe(0);
+
+    const out = store.addKnowledge({
+      workspaceId: WS,
+      title: "Finance",
+      content,
+      sourceKind: "manual",
+    });
+    await embedKnowledge(store, out.record!.id, WS, content);
+
+    const result = await searchKnowledge(WS, query, 8, store);
+    expect(result.items).toEqual([]);
   });
 });
 

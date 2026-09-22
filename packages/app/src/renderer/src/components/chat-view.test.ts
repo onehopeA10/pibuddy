@@ -5,12 +5,19 @@
  * activityTick 是流式期间聊天区跟随滚动的**唯一**驱动。换成分段数据源时
  * 丢掉这个订阅不会报任何错，表现是助手一边输出一边把内容顶到视口外面去。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defineComponent, h, type PropType } from "vue";
 import { createPinia, setActivePinia } from "pinia";
-import { mount, flushPromises } from "@vue/test-utils";
+import { enableAutoUnmount, mount, flushPromises } from "@vue/test-utils";
 import type { AgentMessage } from "@sdk";
 import ChatView from "./ChatView.vue";
 import { useAppStore } from "../stores/app";
+
+enableAutoUnmount(afterEach);
+afterEach(() => {
+  useAppStore().dispose();
+  vi.useRealTimers();
+});
 
 function userMessage(text: string): AgentMessage {
   return { role: "user", content: text, timestamp: Date.now() } as unknown as AgentMessage;
@@ -36,6 +43,144 @@ describe("ChatView", () => {
       pi: {},
       sessions: { readHistoryBefore: vi.fn(), query: vi.fn(async () => []) },
     };
+  });
+
+  it("首屏只展示最近7条，首屏游标之后异步补载，点击后才扩展渲染", async () => {
+    vi.useFakeTimers();
+    const entries = (from: number) => Array.from({ length: 7 }, (_, i) => ({
+      type: "message", message: { role: "user", content: `message-${from + i}`, timestamp: from + i },
+    }));
+    const readHistoryBefore = vi.fn()
+      .mockResolvedValueOnce({ entries: entries(8), nextBeforeOffset: 700, stale: false, skippedPartial: 0 })
+      .mockResolvedValueOnce({ entries: entries(1), nextBeforeOffset: null, stale: false, skippedPartial: 0 });
+    window.piBuddy.sessions.readHistoryBefore = readHistoryBefore;
+    const store = useAppStore();
+    store.workspaceId = "ws";
+    const wrapper = mountView();
+    await store.openSession({ sessionId: "target", sizeBytes: 1400 });
+    await flushPromises();
+    expect(readHistoryBefore).toHaveBeenCalledTimes(1);
+    expect(wrapper.findAll("message-item-stub")).toHaveLength(7);
+    const el = wrapper.find(".chat-scroll").element as HTMLElement;
+    stubGeometry(el, { scrollHeight: 5000, clientHeight: 600 });
+    el.scrollTop = 1000;
+    await wrapper.find(".chat-scroll").trigger("scroll");
+    await vi.advanceTimersByTimeAsync(50);
+    await flushPromises();
+    expect(readHistoryBefore.mock.calls[1][0]).toEqual({
+      workspaceId: "ws", sessionId: "target", beforeOffset: 700, limit: 7,
+    });
+    expect(store.items).toHaveLength(14);
+    expect(wrapper.findAll("message-item-stub")).toHaveLength(7);
+    expect(wrapper.findAll("[data-unread-divider]")).toHaveLength(0);
+    await wrapper.find('[aria-label="查看更早的消息"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll("message-item-stub")).toHaveLength(14);
+    expect(readHistoryBefore).toHaveBeenCalledTimes(2);
+  });
+
+  it("首屏只有元数据时保留加载失败的重试入口", async () => {
+    vi.useFakeTimers();
+    const store = useAppStore();
+    store.historyBeforeOffset = 700;
+    const readHistoryBefore = vi.fn().mockRejectedValueOnce(new Error("磁盘忙"))
+      .mockResolvedValueOnce({
+        entries: [{ type: "message", message: userMessage("重试成功") }],
+        nextBeforeOffset: null, stale: false, skippedPartial: 0,
+      });
+    window.piBuddy.sessions.readHistoryBefore = readHistoryBefore;
+    const wrapper = mountView();
+    await flushPromises();
+    expect(wrapper.find("welcome-stub").exists()).toBe(false);
+    await vi.advanceTimersByTimeAsync(50);
+    await flushPromises();
+    expect(wrapper.find(".history-load-error").text()).toContain("磁盘忙");
+    await wrapper.find('[aria-label="重试加载更早的消息"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.findAll("message-item-stub")).toHaveLength(1);
+    expect(wrapper.find(".history-load-error").exists()).toBe(false);
+  });
+
+  it("连续元数据耗尽预读额度后仍能手动加载", async () => {
+    vi.useFakeTimers();
+    const store = useAppStore();
+    store.historyBeforeOffset = 1000;
+    let calls = 0;
+    window.piBuddy.sessions.readHistoryBefore = vi.fn(async () => ({
+      entries: ++calls <= 8 ? [{ type: "model_change" }] : [{ type: "message", message: userMessage("更早的消息") }],
+      nextBeforeOffset: calls <= 8 ? 1000 - calls * 10 : null,
+      stale: false, skippedPartial: 0,
+    }));
+    const wrapper = mountView();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).toBe(8);
+    expect(wrapper.find("welcome-stub").exists()).toBe(false);
+    await wrapper.find('[aria-label="查看更早的消息"]').trigger("click");
+    await flushPromises();
+    expect(calls).toBe(9);
+    expect(wrapper.findAll("message-item-stub")).toHaveLength(1);
+  });
+
+  it("首帧nextTick完成前卸载，不得重新启动预读", async () => {
+    vi.useFakeTimers();
+    useAppStore().historyBeforeOffset = 700;
+    const readHistoryBefore = vi.fn(async () => ({
+      entries: [], nextBeforeOffset: null, stale: false, skippedPartial: 0,
+    }));
+    window.piBuddy.sessions.readHistoryBefore = readHistoryBefore;
+    const wrapper = mountView();
+    wrapper.unmount();
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readHistoryBefore).not.toHaveBeenCalled();
+  });
+
+  it("首屏可见消息不足7条时，异步补载后仍贴着最新消息", async () => {
+    vi.useFakeTimers();
+    const store = useAppStore();
+    store.items = [{ key: 100, message: userMessage("最新消息") }];
+    store.historyBeforeOffset = 700;
+    window.piBuddy.sessions.readHistoryBefore = vi.fn(async () => ({
+      entries: Array.from({ length: 7 }, (_, i) => ({ type: "message", message: userMessage(`历史-${i}`) })),
+      nextBeforeOffset: null, stale: false, skippedPartial: 0,
+    }));
+    const wrapper = mountView();
+    const el = wrapper.find(".chat-scroll").element as HTMLElement;
+    Object.defineProperty(el, "scrollHeight", {
+      get: () => wrapper.findAll("message-item-stub").length * 100 + 600,
+      configurable: true,
+    });
+    await flushPromises();
+    expect(el.scrollTop).toBe(700);
+    await vi.advanceTimersByTimeAsync(50);
+    await flushPromises();
+    expect(el.scrollTop).toBe(1300);
+    expect(wrapper.findAll("[data-unread-divider]")).toHaveLength(0);
+  });
+
+  it("异步流式更新不重渲染未变化的历史回复", async () => {
+    const renderMessage = vi.fn();
+    const MessageProbe = defineComponent({
+      props: { message: { type: Object as PropType<AgentMessage>, required: true } },
+      setup(props) {
+        return () => { renderMessage(props.message); return h("div"); };
+      },
+    });
+    const store = useAppStore();
+    store.items = [
+      { key: 1, message: userMessage("第一问") },
+      { key: 2, message: { role: "assistant", content: [{ type: "text", text: "历史回答" }] } },
+      { key: 3, message: userMessage("第二问") },
+    ] as never;
+    mount(ChatView, { global: { stubs: { NButton: true, Welcome: true, MessageItem: MessageProbe } } });
+    store.liveAssistant = { role: "assistant", content: [{ type: "text", text: "生成中" }] } as never;
+    await flushPromises();
+    renderMessage.mockClear();
+    store.liveAssistant = { role: "assistant", content: [{ type: "text", text: "生成中，继续" }] } as never;
+    await flushPromises();
+    expect(renderMessage).toHaveBeenCalledTimes(1);
+    expect(renderMessage.mock.calls[0][0].content[0].text).toBe("生成中，继续");
   });
 
   it("activityTick 递增且 stickToBottom 为真时，scrollTop 被设为 scrollHeight", async () => {

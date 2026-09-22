@@ -86,8 +86,15 @@ export function shouldWakeOnActivate(s: {
   return !s.started && s.hasSession;
 }
 
+/** 坏 jsonl：pi 会直接退出。再 wake / spawn 同一条只会连续报错。 */
+export function isInvalidPiSessionError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /not a valid pi session|会话文件已经损坏/.test(msg);
+}
+
 /** prompt / getState / switch_session 撞上已死或正在拆的 runtime 时，主进程抛出的那几类句子。 */
 export function isRuntimeGoneError(err: unknown): boolean {
+  if (isInvalidPiSessionError(err)) return false;
   const msg = err instanceof Error ? err.message : String(err);
   return /运行时不可用|尚未启动|正在停止|phase=|SESSION_UNKNOWN|ENOENT|文件已经不在了|客户端已停止|进程已退出|进程未运行|已拒绝新命令/.test(
     msg

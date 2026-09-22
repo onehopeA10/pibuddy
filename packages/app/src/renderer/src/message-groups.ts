@@ -4,6 +4,8 @@ import type { ChatItem } from "./stores/app";
 export interface VisualMessageItem {
   key: number | string;
   sourceKeys: number[];
+  /** 原始消息引用供渲染缓存比较，合并后的 message 每次计算都会新建。 */
+  sourceMessages: AgentMessage[];
   message: AgentMessage;
   streaming: boolean;
   /**
@@ -49,6 +51,7 @@ export function groupVisualMessages(
     if (isAssistantMessage(item.message) && previous && isAssistantMessage(previous.message)) {
       previous.message = mergeAssistant(previous.message, item.message);
       previous.sourceKeys.push(item.key);
+      previous.sourceMessages.push(item.message);
       previous.endedAt = timestampOf(item.message) ?? previous.endedAt;
       continue;
     }
@@ -58,7 +61,8 @@ export function groupVisualMessages(
       grouped.push({
         key: item.key,
         sourceKeys: [item.key],
-        message: { ...item.message, content: [...item.message.content] },
+        sourceMessages: [item.message],
+        message: item.message,
         streaming: false,
         startedAt: lastUserAt ?? at,
         endedAt: at,
@@ -68,6 +72,7 @@ export function groupVisualMessages(
     grouped.push({
       key: item.key,
       sourceKeys: [item.key],
+      sourceMessages: [item.message],
       message: item.message,
       streaming: false,
     });
@@ -78,12 +83,14 @@ export function groupVisualMessages(
     const at = timestampOf(liveAssistant);
     if (previous && isAssistantMessage(previous.message)) {
       previous.message = mergeAssistant(previous.message, liveAssistant);
+      previous.sourceMessages.push(liveAssistant);
       previous.streaming = true;
       previous.endedAt = at ?? previous.endedAt;
     } else {
       grouped.push({
         key: "live-assistant",
         sourceKeys: [],
+        sourceMessages: [liveAssistant],
         message: liveAssistant,
         streaming: true,
         startedAt: lastUserAt ?? at,

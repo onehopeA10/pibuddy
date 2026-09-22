@@ -404,3 +404,71 @@ describe("同 id 会话按工作区限定（SES-4）", () => {
     expect(index.bySessionId("dup", "not-a-workspace")).toBe(null);
   });
 });
+
+describe("损坏的 pi 会话文件不进列表", () => {
+  function loopStateLine(): string {
+    return `${JSON.stringify({ type: "custom", customType: "loop-state", data: { loops: [] } })}\n`;
+  }
+
+  it("只有 loop-state、没有 session 头的 jsonl 不会出现在列表里", async () => {
+    const broken = path.join(
+      sessionDir,
+      "2026-09-15T03-19-15-970Z_01a0a313-7302-74f1-8c89-b7678b4554fc.jsonl"
+    );
+    await writeFile(broken, loopStateLine(), "utf8");
+    await makeSession("good");
+
+    await index.syncWorkspace(workspaceDir, settings);
+    const ws = workspaceIdFor(workspaceDir);
+    const rows = index.query({ workspaceId: ws });
+    expect(rows.map((r) => r.sessionId)).toEqual(["good"]);
+    expect(index.bySourcePath(broken)).toBe(null);
+  });
+
+  it("原先能打开的会话被改成无头文件后，从索引摘掉，磁盘文件不动", async () => {
+    const file = await makeSession("good", 1);
+    await index.syncWorkspace(workspaceDir, settings);
+    expect(index.bySourcePath(file)).not.toBe(null);
+
+    await writeFile(file, loopStateLine(), "utf8");
+    await index.syncWorkspace(workspaceDir, settings);
+
+    expect(index.bySourcePath(file)).toBe(null);
+    expect(await readFile(file, "utf8")).toContain("loop-state");
+  });
+
+  it("已经入库的零消息坏文件，mtime/size 没变也会在下次 sync 摘掉", async () => {
+    const { stat } = await import("node:fs/promises");
+    const file = path.join(sessionDir, "unnamed.jsonl");
+    await writeFile(file, loopStateLine(), "utf8");
+    const st = await stat(file);
+    const upsert = Reflect.get(index, "upsert") as (row: unknown) => void;
+    upsert.call(index, {
+      sourcePath: file,
+      workspaceRoot: workspaceDir,
+      workspaceId: workspaceIdFor(workspaceDir),
+      sessionId: "unnamed",
+      scanOffset: st.size,
+      mtimeMs: st.mtimeMs,
+      sizeBytes: st.size,
+      contentHash: "stale",
+      name: null,
+      preview: "",
+      searchBlob: "",
+      messageCount: 0,
+      tokenTotal: 0,
+      costTotal: 0,
+      modelId: null,
+      status: "active",
+      pinned: false,
+      unread: false,
+      running: false,
+      deletedAt: null,
+    });
+    expect(index.bySourcePath(file)?.sessionId).toBe("unnamed");
+
+    await index.syncWorkspace(workspaceDir, settings);
+    expect(index.bySourcePath(file)).toBe(null);
+    expect(await readFile(file, "utf8")).toContain("loop-state");
+  });
+});

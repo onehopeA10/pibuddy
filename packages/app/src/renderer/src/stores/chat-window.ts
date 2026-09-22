@@ -21,10 +21,12 @@
  */
 import { ref, type Ref } from "vue";
 import type { SessionHistoryPage } from "@contract";
-import { useAppStore } from "./app";
+import { HISTORY_PAGE_SIZE, useAppStore } from "./app";
 
-/** 每页条数。与首屏窗口大小一致，翻页时视口高度变化最平滑。 */
-export const PAGE_SIZE = 60;
+export const PAGE_SIZE = HISTORY_PAGE_SIZE;
+const PREFETCH_TARGET = 60;
+const PREFETCH_PAGES = Math.ceil((PREFETCH_TARGET - PAGE_SIZE) / PAGE_SIZE);
+const PREFETCH_DELAY_MS = 50;
 
 /** 回到底部后，未读分界线保留多久再消失（毫秒）。 */
 export const UNREAD_LINGER_MS = 1000;
@@ -54,7 +56,9 @@ export interface ChatWindow {
   /** 仅供单测：向前翻页的实际请求次数。 */
   requestCount: Ref<number>;
 
-  reset(initialBeforeOffset: number): void;
+  reset(initialBeforeOffset: number | null): void;
+  /** 首屏让出绘制机会后，小批量预读；更早的历史仍按需加载。 */
+  prefetch(): void;
   /**
    * 补一个更靠后的字节上界（会话文件在索引里刚被读到 / 刚变长）。
    *
@@ -84,12 +88,36 @@ export function useChatWindow(): ChatWindow {
   const requestCount = ref(0);
 
   let unreadTimer: ReturnType<typeof setTimeout> | null = null;
+  let prefetchTimer: ReturnType<typeof setTimeout> | null = null;
+  let prefetchRemaining = PREFETCH_PAGES;
+  let generation = 0;
 
-  function reset(initialBeforeOffset: number): void {
+  function captureScope(): () => boolean {
+    const epoch = generation;
+    const historyGeneration = store.historyGeneration;
+    const workspaceId = store.workspaceId;
+    const sessionId = store.currentSessionId;
+    return () =>
+      generation === epoch &&
+      store.historyGeneration === historyGeneration &&
+      store.workspaceId === workspaceId &&
+      store.currentSessionId === sessionId &&
+      store.switchingSessionId === null;
+  }
+
+  function cancelPrefetch(): void {
+    if (prefetchTimer !== null) clearTimeout(prefetchTimer);
+    prefetchTimer = null;
+  }
+
+  function reset(initialBeforeOffset: number | null): void {
+    generation += 1;
+    cancelPrefetch();
+    prefetchRemaining = PREFETCH_PAGES;
     earlier.value = [];
     loading.value = false;
     loadError.value = "";
-    reachedTop.value = initialBeforeOffset <= 0;
+    reachedTop.value = initialBeforeOffset === null || initialBeforeOffset <= 0;
     nextBeforeOffset.value = initialBeforeOffset;
     stickToBottom.value = true;
     unreadDivider.value = null;
@@ -101,20 +129,27 @@ export function useChatWindow(): ChatWindow {
   }
 
   function adoptOffset(offset: number): void {
-    if (requestCount.value > 0) return;
+    if (requestCount.value > 0 || store.historyBeforeOffset !== undefined) return;
     if (offset <= (nextBeforeOffset.value ?? 0)) return;
     nextBeforeOffset.value = offset;
     reachedTop.value = false;
   }
 
-  async function fetchPage(beforeOffset: number): Promise<SessionHistoryPage> {
-    requestCount.value++;
-    return window.piBuddy.sessions.readHistoryBefore({
-      workspaceId: store.workspaceId,
-      sessionId: store.currentSessionId,
-      beforeOffset,
-      limit: PAGE_SIZE,
-    });
+  function prefetch(): void {
+    if (
+      prefetchTimer !== null || prefetchRemaining <= 0 || reachedTop.value ||
+      loadError.value || store.items.length >= PREFETCH_TARGET || store.switchingSessionId !== null
+    ) return;
+    const isCurrent = captureScope();
+    prefetchTimer = setTimeout(async () => {
+      prefetchTimer = null;
+      if (!isCurrent() || loadError.value || store.items.length >= PREFETCH_TARGET) return;
+      if (!loading.value) {
+        prefetchRemaining -= 1;
+        await loadEarlier(1, Math.min(PAGE_SIZE, PREFETCH_TARGET - store.items.length));
+      }
+      if (isCurrent()) prefetch();
+    }, PREFETCH_DELAY_MS);
   }
 
   /**
@@ -123,8 +158,17 @@ export function useChatWindow(): ChatWindow {
    * 到顶 / 正在加载 / 上一次失败未重试时都直接返回 —— 尤其是「到顶」：滚动
    * 条停在顶部会持续触发 scroll 事件，少这一道判据就是无限请求。
    */
-  async function loadEarlier(): Promise<void> {
-    if (loading.value || reachedTop.value) return;
+  async function loadEarlier(maxPages = MAX_OVERLAP_PAGES, limit = PAGE_SIZE): Promise<void> {
+    if (loading.value || reachedTop.value || store.switchingSessionId !== null) return;
+    const isCurrent = captureScope();
+    const workspaceId = store.workspaceId;
+    const sessionId = store.currentSessionId;
+    const fetchPage = (beforeOffset: number): Promise<SessionHistoryPage> => {
+      requestCount.value++;
+      return window.piBuddy.sessions.readHistoryBefore({
+        workspaceId, sessionId, beforeOffset, limit,
+      });
+    };
     loading.value = true;
     loadError.value = "";
     try {
@@ -133,18 +177,22 @@ export function useChatWindow(): ChatWindow {
       // prependMessages 会把它们整批去重掉。此时若直接返回，用户点了一次
       // 「查看更早的消息」而界面纹丝不动。因此**整页都是重复**时再往前一页，
       // 上限 MAX_OVERLAP_PAGES 页 —— 无上限的话，一次点击可能把整个文件读完。
-      for (let i = 0; i < MAX_OVERLAP_PAGES; i++) {
+      for (let i = 0; i < maxPages; i++) {
         const offset = nextBeforeOffset.value;
         if (offset === null || offset <= 0) {
           reachedTop.value = true;
           break;
         }
         let page = await fetchPage(offset);
+        if (!isCurrent()) return;
         if (page.stale) {
           // 索引与磁盘对不上（会话在两次调用之间被追加过）。先同步一次索引，
           // 再**只重试一次** —— 会话正在流式写入时无限重试会把界面钉死。
-          await window.piBuddy.sessions.query(store.workspaceId);
+          await window.piBuddy.sessions.query(workspaceId);
+          if (!isCurrent()) return;
           page = await fetchPage(offset);
+          if (!isCurrent()) return;
+          if (page.stale) throw new Error("历史仍在更新，请重试");
         }
         earlier.value = [...page.entries, ...earlier.value];
         // **必须接进 items**：ChatView 渲染的是 store.items，`earlier` 全项目
@@ -152,7 +200,9 @@ export function useChatWindow(): ChatWindow {
         // 也加了，而界面上一条消息都不会多 —— 不报错、不失败类型检查，纯静默。
         const messages = store.entriesToMessages(page.entries);
         const added = store.prependMessages(messages);
+        if (added > 0 && stickToBottom.value) store.activityTick++;
         nextBeforeOffset.value = page.nextBeforeOffset;
+        store.historyBeforeOffset = page.nextBeforeOffset;
         if (page.nextBeforeOffset === null) {
           reachedTop.value = true;
           break;
@@ -162,9 +212,9 @@ export function useChatWindow(): ChatWindow {
         if (messages.length === 0 || added > 0) break;
       }
     } catch (err) {
-      loadError.value = err instanceof Error ? err.message : "加载更早的消息失败";
+      if (isCurrent()) loadError.value = err instanceof Error ? err.message : "加载更早的消息失败";
     } finally {
-      loading.value = false;
+      if (isCurrent()) loading.value = false;
     }
   }
 
@@ -203,6 +253,8 @@ export function useChatWindow(): ChatWindow {
   }
 
   function dispose(): void {
+    generation += 1;
+    cancelPrefetch();
     if (unreadTimer) {
       clearTimeout(unreadTimer);
       unreadTimer = null;
@@ -219,6 +271,7 @@ export function useChatWindow(): ChatWindow {
     unreadDivider,
     requestCount,
     reset,
+    prefetch,
     adoptOffset,
     loadEarlier,
     retry,

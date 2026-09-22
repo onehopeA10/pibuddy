@@ -8,8 +8,12 @@
 
 | 路径 | 怎么触发 | 产物 | 进自动更新 feed |
 |---|---|---|---|
-| **GitHub 未签名包**（默认） | 推 `v*` 标签，或手动跑 `GitHub Release (unsigned)` | Win NSIS / mac dmg+zip / Linux AppImage+deb，挂到该 Release | 否 |
-| **签名正式版** | Actions 手动跑 `Release`，渠道 `stable` | 签名安装包 + `latest*.yml` | 是，且必须凭据齐全 |
+| **GitHub 未签名包**（默认） | 推 `v*` 标签，或手动跑 `GitHub Release (unsigned)` | Win 本机 nsis+zip / mac 本机 dmg+zip / Linux 本机 AppImage+deb，先出包再单独挂 Release | 否 |
+| **签名正式版** | Actions 手动跑 `Release`，渠道 `stable`，指定已有 `vX.Y.Z` tag | 签名安装包 + `latest*.yml` | 是，且必须凭据齐全 |
+
+正式发布时填写 `tag` 输入，例如 `v0.1.3`（从对应 tag 触发时可省略）。回归、构建和发布均使用该 tag；tag 必须与 `packages/app/package.json` 版本一致，不能用分支名或预发布版本。`beta` / `nightly` 的产物只暂存在 Actions，不发布 stable 清单。
+
+打包冒烟使用本次子进程自动分配的 CDP 端口并核对 browser 身份；通过条件是打包页面加载完成、Vue 已挂载、preload 接口可用。向导页可以通过，但这不代表真实模型对话或安装更新已验证。
 
 没买证书时走第一行即可。用户安装时要自己过 SmartScreen / Gatekeeper。
 
@@ -157,7 +161,7 @@ job 里 `${{ secrets.X }}` 是空串，而不是一个明确的报错 —— 表
    无效值。
 2. 触发一次 `workflow_dispatch`，channel 选 `beta`。
 3. **期望结果**：`preflight` 通过（值非空），构建阶段公证失败，job 红。
-4. 再把该 secret 整个删掉，重跑，channel 选 `stable`。
+4. 再把该 secret 整个删掉，重跑，channel 选 `stable`，tag 填写版本匹配的正式标签。
 5. **期望结果**：`preflight` 直接 `exit 1`，一次构建都没开始。
 6. 恢复正确的值，重跑一次确认绿。
 
@@ -192,9 +196,8 @@ job 里 `${{ secrets.X }}` 是空串，而不是一个明确的报错 —— 表
 2. 只改导致问题的那一处。hotfix 分支上**不合并**任何其它 PR ——
    "顺便带上"是 hotfix 变成第二次事故的最常见原因。
 3. 本地跑：`pnpm test:regression`（要连打包冒烟再加 `pnpm test:regression:full`）。
-4. bump patch 版本，打 tag，push。`Release` workflow 会自动跑。
-5. **分阶段放量**：先把清单发到 `beta` 渠道，找 5~10 台机器验证
-   N→N+1 真的走通了，再切 `stable`。
+4. bump patch 版本，打 tag，push；这会触发未签名包流程。正式签名发布需要在 Actions 手动运行 `Release`，填写该 tag。
+5. 先以 `beta` 渠道构建并下载 Actions 产物进行机器验收；该渠道不自动发布更新清单。验收通过后，手动选择同一 tag、`stable` 渠道发布，再验证 N→N+1 更新。
 6. 回填到 `main`。
 
 ### 换域名的双写过渡

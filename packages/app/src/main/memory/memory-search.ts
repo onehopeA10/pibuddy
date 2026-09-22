@@ -29,10 +29,24 @@ import type {
 
 import { resolveEmbedder, type EmbeddingConfig, type Embedder } from "./memory-embed.js";
 import { extractTerms, memoryStore, type MemoryStore } from "./memory-store.js";
-import { cosine } from "./memory-vector.js";
+import { LOCAL_EMBED_DIM, LOCAL_EMBED_MODEL, cosine } from "./memory-vector.js";
+import { meaningfulLexicalOverlap } from "./query-compiler.js";
 
 const FTS_WEIGHT = 0.5;
 const VEC_WEIGHT = 0.5;
+/**
+ * local-hash-v1 has no semantic model: unrelated unit vectors have a
+ * per-coordinate collision scale of 1/sqrt(dim). Four such scales is a
+ * conservative collision guard, not a claim of semantic relatedness.
+ */
+const LOCAL_VECTOR_ADMISSION = 4 / Math.sqrt(LOCAL_EMBED_DIM);
+/**
+ * Provider embeddings may carry synonym meaning with no shared words. Requiring
+ * cosine >= 0.5 means the directions agree within 60 degrees before batch
+ * normalization can amplify the score. This is only an angular quality floor;
+ * model-specific calibration remains future work.
+ */
+const PROVIDER_VECTOR_ADMISSION = 0.5;
 /** 注入一轮最多几条（与 v1 一致）。 */
 export const MAX_INJECTED = 8;
 
@@ -60,6 +74,18 @@ function normalize(scores: Map<string, number>): Map<string, number> {
   return out;
 }
 
+function admitsRawVector(
+  embedder: Embedder,
+  similarity: number,
+  query: string,
+  content: string
+): boolean {
+  const isLocalHash = embedder.id === LOCAL_EMBED_MODEL;
+  const minimum = isLocalHash ? LOCAL_VECTOR_ADMISSION : PROVIDER_VECTOR_ADMISSION;
+  if (similarity < minimum) return false;
+  return !isLocalHash || meaningfulLexicalOverlap(query, content) > 0;
+}
+
 /**
  * 排序某工作区里与 `text` 最相关的记忆（供 memory:search 与注入共用）。
  *
@@ -74,11 +100,13 @@ export async function rankedMemories(
   const terms = extractTerms(text);
   const embedder = activeEmbedder(store);
 
-  // —— FTS 分 —— 命中词数
+  // —— FTS 分 —— 候选生成仍复用 FTS，准入按完整实词重新计分。
   const ftsRaw = new Map<string, number>();
   const records = new Map<string, MemoryRecord>();
   for (const cand of store.injectionCandidates(workspaceId, terms, 500)) {
-    ftsRaw.set(cand.id, cand.score);
+    const overlap = meaningfulLexicalOverlap(text, cand.content);
+    if (overlap <= 0) continue;
+    ftsRaw.set(cand.id, overlap);
     records.set(cand.id, cand);
   }
 
@@ -90,7 +118,7 @@ export async function rankedMemories(
     if (queryVec) {
       for (const { record, vec } of vectors) {
         const sim = Math.max(0, cosine(queryVec, vec));
-        if (sim > 0) {
+        if (admitsRawVector(embedder, sim, text, record.content)) {
           vecRaw.set(record.id, sim);
           if (!records.has(record.id)) records.set(record.id, record);
         }
@@ -139,8 +167,10 @@ export async function searchKnowledge(
 
   const ftsRaw = new Map<string, number>();
   const records = new Map<string, KnowledgeRecord>();
-  for (const [id, { record, hits }] of s.knowledgeFtsHits(workspaceId, terms)) {
-    ftsRaw.set(id, hits);
+  for (const [id, { record }] of s.knowledgeFtsHits(workspaceId, terms)) {
+    const overlap = meaningfulLexicalOverlap(query, record.content);
+    if (overlap <= 0) continue;
+    ftsRaw.set(id, overlap);
     records.set(id, record);
   }
 
@@ -151,7 +181,7 @@ export async function searchKnowledge(
     if (queryVec) {
       for (const { record, vec } of vectors) {
         const sim = Math.max(0, cosine(queryVec, vec));
-        if (sim > 0) {
+        if (admitsRawVector(embedder, sim, query, record.content)) {
           vecRaw.set(record.id, sim);
           if (!records.has(record.id)) records.set(record.id, record);
         }

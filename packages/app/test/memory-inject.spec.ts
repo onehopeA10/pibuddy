@@ -25,10 +25,11 @@ vi.mock("electron", () => ({
   app: { getPath: () => userData, isPackaged: false, getVersion: () => "0.0.0" },
 }));
 
+const { applyWorkMode } = await import("../src/lib/work-mode.js");
 const { __setMemoryDataDir, memoryStore } = await import("../src/main/memory/memory-store.js");
-const { injectMemory, memoryHitsFor, clearHitsForMemory, disposeMemoryInject } = await import(
-  "../src/main/memory/memory-inject.js"
-);
+const { embedMemory } = await import("../src/main/memory/memory-search.js");
+const { injectMemory, memoryHitsFor, clearHitsForMemory, disposeMemoryInject, getLastMemoryPrep } =
+  await import("../src/main/memory/memory-inject.js");
 const { applyCapabilityResolution, __resetCapabilityState } = await import(
   "../src/main/capability/capability-state.js"
 );
@@ -95,6 +96,88 @@ describe("零成本门：能力未启用时原样返回、不落命中", () => {
     const out = await injectMemory(PROMPT, WS);
     expect(out).toBe(PROMPT);
     expect(memoryHitsFor(WS)).toEqual([]);
+  });
+});
+
+describe("纯问候门", () => {
+  it("原样返回，且不访问注入开关、Working、检索或路由记录", async () => {
+    const store = memoryStore();
+    const injectionActive = vi.spyOn(store, "injectionActive");
+    const listWorkingItems = vi.spyOn(store, "listWorkingItems");
+    const injectionCandidates = vi.spyOn(store, "injectionCandidates");
+    const recordRouteEvent = vi.spyOn(store, "recordRouteEvent");
+
+    try {
+      const prompt = "  HELLO？！  ";
+      const modePrepared = applyWorkMode(prompt, "plan");
+      expect(modePrepared).toBe(prompt);
+      expect(await injectMemory(modePrepared, WS, "greeting-session")).toBe(prompt);
+      expect(injectionActive).not.toHaveBeenCalled();
+      expect(listWorkingItems).not.toHaveBeenCalled();
+      expect(injectionCandidates).not.toHaveBeenCalled();
+      expect(recordRouteEvent).not.toHaveBeenCalled();
+      expect(getLastMemoryPrep()).toBeNull();
+      expect(memoryHitsFor(WS)).toEqual([]);
+    } finally {
+      injectionActive.mockRestore();
+      listWorkingItems.mockRestore();
+      injectionCandidates.mockRestore();
+      recordRouteEvent.mockRestore();
+    }
+  });
+
+  it("问候后包含任务文本时不短路", async () => {
+    const store = memoryStore();
+    const injectionActive = vi.spyOn(store, "injectionActive");
+    const listWorkingItems = vi.spyOn(store, "listWorkingItems");
+
+    try {
+      const prompt = "你好，继续上次报告";
+      expect(await injectMemory(prompt, WS, "task-session")).toContain(prompt);
+      expect(injectionActive).toHaveBeenCalledOnce();
+      expect(listWorkingItems).toHaveBeenCalledOnce();
+      expect(getLastMemoryPrep()?.plannedMode).toBe("recall");
+    } finally {
+      injectionActive.mockRestore();
+      listWorkingItems.mockRestore();
+    }
+  });
+});
+
+describe("按用户原话决定背景需求", () => {
+  it("计划与动作包装不让独立问题变成项目/记忆任务", async () => {
+    const store = memoryStore();
+    store.upsertWorkingItem({ workspaceId: WS, sessionId: "s1", kind: "fact", content: "旧报告年份是2024" });
+    const working = vi.spyOn(store, "listWorkingItems");
+    const candidates = vi.spyOn(store, "injectionCandidates");
+    try {
+      const question = "今天天气如何";
+      const prepared = applyWorkMode(`${question}\n\n[宿主附加说明] 记住项目报告要求`, "plan");
+      expect(await injectMemory(prepared, WS, "s1", question)).toBe(prepared);
+      expect(getLastMemoryPrep()).toMatchObject({ mode: "none", fromWorking: 0, liveRefs: [] });
+      expect(working).not.toHaveBeenCalled();
+      expect(candidates).not.toHaveBeenCalled();
+      expect(store.listCandidates(WS)).toEqual([]);
+    } finally {
+      working.mockRestore();
+      candidates.mockRestore();
+    }
+  });
+});
+
+describe("检索准入先于 Envelope 与 Working", () => {
+  it("local hash 的无关财务/护照弱碰撞不进入注入", async () => {
+    const store = memoryStore();
+    for (const content of ["2024年财务收入同比增长百分之五", "护照到期需要办理续签"]) {
+      const saved = store.save({ workspaceId: WS, content, type: "fact", scope: "workspace" });
+      await embedMemory(store, saved.record!.id, WS, "workspace", content);
+    }
+
+    const prompt = "这个 repo 怎么 build？";
+    expect(await injectMemory(prompt, WS, "weak-vector-session")).toBe(prompt);
+    expect(getLastMemoryPrep()).toMatchObject({ recalled: 0, fromWorking: 0, admitted: 0 });
+    expect(memoryHitsFor(WS)).toEqual([]);
+    expect(store.listWorkingItems(WS, "weak-vector-session")).toEqual([]);
   });
 });
 

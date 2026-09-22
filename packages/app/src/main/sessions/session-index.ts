@@ -45,6 +45,7 @@ import type {
 } from "@pibuddy/contract";
 
 import { resolveSessionDir } from "./session-dir.js";
+import { isBrokenPiSessionFile } from "./pi-session-header.js";
 import { workspaceIdFor } from "../workspace-registry.js";
 
 /** 索引表结构的代际。改动 DDL 必须 +1，并在 migrate() 里补一条分支。 */
@@ -412,9 +413,10 @@ export class SessionIndex {
     // 先把要写的东西全算出来，再一次性入库：事务里不夹 await，
     // 回滚语义因此与「解析到第 N 个文件抛错」严格一致。
     const pending: IndexedSession[] = [];
+    const forgotten: string[] = [];
     let reparsed = 0;
     for (const file of files) {
-      const next = await this.planFile(file, workspaceRoot, workspaceId);
+      const next = await this.planFile(file, workspaceRoot, workspaceId, forgotten);
       if (!next) continue;
       pending.push(next);
       reparsed++;
@@ -423,6 +425,9 @@ export class SessionIndex {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const row of pending) this.upsert(row);
+      for (const file of forgotten) {
+        this.db.prepare("DELETE FROM sessions WHERE source_path = ?").run(file);
+      }
       this.db.exec("COMMIT");
     } catch (err) {
       this.db.exec("ROLLBACK");
@@ -438,7 +443,8 @@ export class SessionIndex {
   private async planFile(
     file: string,
     workspaceRoot: string,
-    workspaceId: string
+    workspaceId: string,
+    forgotten: string[]
   ): Promise<IndexedSession | null> {
     let st;
     try {
@@ -450,11 +456,21 @@ export class SessionIndex {
 
     const existing = this.bySourcePath(file);
     // 闸 1：mtime + size 双命中即整文件跳过。
+    // 零消息的坏文件（只有 loop-state、没有 session 头）也走这里：必须补一次
+    // 头部校验，否则会永远留在「未命名任务」里，一点就让 pi 退出。
     if (existing && existing.mtimeMs === st.mtimeMs && existing.sizeBytes === st.size) {
+      if (existing.messageCount === 0 && st.size > 0) {
+        const peek = await readRange(file, 0, Math.min(HASH_HEAD_BYTES, st.size) - 1);
+        if (isBrokenPiSessionFile(st.size, peek)) forgotten.push(file);
+      }
       return null;
     }
 
     const head = await readRange(file, 0, Math.min(HASH_HEAD_BYTES, st.size) - 1);
+    if (isBrokenPiSessionFile(st.size, head)) {
+      if (existing) forgotten.push(file);
+      return null;
+    }
     const contentHash = createHash("sha256").update(head).digest("hex").slice(0, 32);
 
     // 归属判定（SES-2）。**必须在算出任何一行之前**：settings.sessionDir 允许
@@ -635,6 +651,14 @@ export class SessionIndex {
       .prepare("SELECT * FROM sessions WHERE source_path = ?")
       .get(sourcePath) as Record<string, unknown> | undefined;
     return row ? fromDbRow(row) : null;
+  }
+
+  /**
+   * 只摘索引行，不动磁盘上的 jsonl。
+   * 坏文件不能交给 pi，但也不能悄悄删用户的文件。
+   */
+  forgetSource(sourcePath: string): void {
+    this.db.prepare("DELETE FROM sessions WHERE source_path = ?").run(sourcePath);
   }
 
   /**

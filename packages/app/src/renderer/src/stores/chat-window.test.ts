@@ -5,7 +5,7 @@
  * 所以这里 mock 的是 `sessions.readHistoryBefore`，也就是主进程按 JSONL
  * 字节 offset 本地读取的那条路。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { SessionHistoryPage } from "@contract";
 import { useAppStore } from "./app";
@@ -109,8 +109,162 @@ describe("useChatWindow · 向更早翻页", () => {
       workspaceId: "ws-1",
       sessionId: "sess-9",
       beforeOffset: 4096,
-      limit: 60,
+      limit: 7,
     });
+  });
+});
+
+describe("useChatWindow · 异步预读与会话隔离", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    readHistoryBefore = vi.fn();
+    query = vi.fn(async () => []);
+    installBridge();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  const entry = (text: string) => ({
+    type: "message", message: { role: "user", content: text },
+  });
+
+  function deferredPage() {
+    let resolve!: (value: SessionHistoryPage) => void;
+    const promise = new Promise<SessionHistoryPage>((done) => { resolve = done; });
+    return { promise, resolve };
+  }
+
+  it("首屏先返回，之后每批7条沿上页游标补载，并保留期间的新消息", async () => {
+    const store = useAppStore();
+    store.workspaceId = "ws";
+    store.currentSessionId = "s1";
+    store.historyBeforeOffset = 700;
+    store.items = [{ key: 100, message: { role: "user", content: "首屏" } }] as never;
+    const pending = deferredPage();
+    readHistoryBefore.mockReturnValueOnce(pending.promise);
+    const win = useChatWindow();
+    win.reset(store.historyBeforeOffset);
+    win.prefetch();
+    expect(readHistoryBefore).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(readHistoryBefore).toHaveBeenCalledWith({
+      workspaceId: "ws", sessionId: "s1", beforeOffset: 700, limit: 7,
+    });
+    store.items = [...store.items, { key: 101, message: { role: "user", content: "新消息" } }] as never;
+    pending.resolve(page([entry("更早历史")], null));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.items.map((item) => (item.message as { content: string }).content))
+      .toEqual(["更早历史", "首屏", "新消息"]);
+    expect(store.historyBeforeOffset).toBeNull();
+    expect(win.reachedTop.value).toBe(true);
+    win.dispose();
+  });
+
+  it("预读有批数上限，不会自动读完整个长会话", async () => {
+    let offset = 1000;
+    readHistoryBefore.mockImplementation(async () => {
+      offset -= 10;
+      return page([entry(`history-${offset}`)], offset);
+    });
+    const win = useChatWindow();
+    win.reset(1000);
+    win.prefetch();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(readHistoryBefore).toHaveBeenCalledTimes(8);
+    expect(readHistoryBefore.mock.calls.every(([args]) => args.limit === 7)).toBe(true);
+    win.dispose();
+  });
+
+  it("预读只补足60条，定时器等待期间新增消息也计入上限", async () => {
+    const store = useAppStore();
+    const win = useChatWindow();
+    win.reset(1000);
+    win.prefetch();
+    store.items = Array.from({ length: 59 }, (_, i) => ({
+      key: 1000 + i, message: { role: "user", content: `existing-${i}` },
+    })) as never;
+    readHistoryBefore.mockResolvedValueOnce(page([entry("older")], 900));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readHistoryBefore).toHaveBeenCalledTimes(1);
+    expect(readHistoryBefore.mock.calls[0][0].limit).toBe(1);
+    expect(store.items).toHaveLength(60);
+    win.dispose();
+  });
+
+  it("A的迟到结果不能写入B，也不能提前解除B的加载状态", async () => {
+    const store = useAppStore();
+    store.currentSessionId = "a";
+    const a = deferredPage();
+    const b = deferredPage();
+    readHistoryBefore.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
+    const win = useChatWindow();
+    win.reset(1000);
+    const loadingA = win.loadEarlier();
+    store.currentSessionId = "b";
+    win.reset(2000);
+    const loadingB = win.loadEarlier();
+    a.resolve(page([entry("from a")], null));
+    await loadingA;
+    expect(store.items).toHaveLength(0);
+    expect(win.loading.value).toBe(true);
+    expect(win.nextBeforeOffset.value).toBe(2000);
+    b.resolve(page([entry("from b")], 1000));
+    await loadingB;
+    expect(store.items[0].message).toMatchObject({ content: "from b" });
+    expect(win.loading.value).toBe(false);
+    win.dispose();
+  });
+
+  it.each(["workspace", "history-reset", "dispose"])("%s后忽略已经发出的补载", async (change) => {
+    const store = useAppStore();
+    store.workspaceId = "w1";
+    const pending = deferredPage();
+    readHistoryBefore.mockReturnValueOnce(pending.promise);
+    const win = useChatWindow();
+    win.reset(1000);
+    const loading = win.loadEarlier();
+    if (change === "workspace") store.workspaceId = "w2";
+    if (change === "history-reset") store.historyGeneration++;
+    if (change === "dispose") win.dispose();
+    pending.resolve(page([entry("outdated")], null));
+    await loading;
+    expect(store.items).toHaveLength(0);
+    expect(store.historyBeforeOffset).toBeUndefined();
+    win.dispose();
+  });
+
+  it("切换前撤销未开始的预读，文件变长不覆盖首屏游标", async () => {
+    const store = useAppStore();
+    store.historyBeforeOffset = 700;
+    const win = useChatWindow();
+    win.reset(700);
+    win.adoptOffset(5000);
+    expect(win.nextBeforeOffset.value).toBe(700);
+    win.prefetch();
+    win.reset(null);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readHistoryBefore).not.toHaveBeenCalled();
+    win.dispose();
+  });
+
+  it("预读失败保留现有消息和游标，重试仍从失败处读取", async () => {
+    const store = useAppStore();
+    store.items = [{ key: 50, message: { role: "user", content: "首屏" } }] as never;
+    readHistoryBefore.mockRejectedValueOnce(new Error("暂时失败"))
+      .mockResolvedValueOnce(page([entry("历史")], null));
+    const win = useChatWindow();
+    win.reset(700);
+    win.prefetch();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readHistoryBefore).toHaveBeenCalledTimes(1);
+    expect(store.items).toHaveLength(1);
+    expect(win.nextBeforeOffset.value).toBe(700);
+    expect(win.loadError.value).toBe("暂时失败");
+    await win.retry();
+    expect(readHistoryBefore.mock.calls[1][0].beforeOffset).toBe(700);
+    expect(store.items).toHaveLength(2);
+    win.dispose();
   });
 });
 

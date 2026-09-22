@@ -3,9 +3,9 @@
  *
  * ## 零成本门控（feature gate）
  *
- * `injectMemory` 的**第一行**就是能力启用判定：`common.memory` 未启用时立即
- * 原样返回，不碰记忆库、不开 sqlite、不抽词、不查询。这条钩子被挂在 pi:prompt
- * 这条热路径上，未启用时它必须等价于「不存在」——否则「关掉记忆」会变成
+ * `injectMemory` 先排除纯问候，再立即判断能力是否启用。两条路径都原样返回，
+ * 不碰记忆库、不开 sqlite、不抽词、不查询。这条钩子被挂在 pi:prompt
+ * 这条热路径上，跳过时它必须等价于「不存在」——否则「关掉记忆」会变成
  * 「关掉记忆但每发一句话还是白跑一遍检索」。对拍见 memory-inject.spec
  * （拆掉这道门 → disabled 路径也去开库 → 变红）。
  *
@@ -22,6 +22,7 @@
 import { randomUUID } from "node:crypto";
 import type { MemoryHit, MemoryRecord } from "@pibuddy/contract";
 
+import { isPureGreeting } from "../../lib/pure-greeting.js";
 import { isCapabilityEnabled } from "../capability/capability-state.js";
 import { MEMORY_CAPABILITY_ID } from "../capability/manifests/memory.manifest.js";
 import { resolveEnvelopes } from "./authority-resolver.js";
@@ -40,7 +41,7 @@ import { appendPrepLog, resetPrepLog } from "./prep-log.js";
 import { fastAnalyze } from "./memory-analyzer.js";
 import { envelopeFromRecord, envelopeFromWorking } from "./memory-normalizer.js";
 import { retainAsCandidate, shouldRetain } from "./memory-post-task.js";
-import { compileQuery } from "./query-compiler.js";
+import { compileQuery, meaningfulLexicalOverlap } from "./query-compiler.js";
 import { effectiveMode, planMemory } from "./memory-router.js";
 import { MAX_INJECTED, rankedMemories } from "./memory-search.js";
 import { memoryStore } from "./memory-store.js";
@@ -76,8 +77,11 @@ function previewOf(content: string): string {
 export async function injectMemory(
   message: string,
   workspaceId: string,
-  sessionId?: string
+  sessionId?: string,
+  requestText = message
 ): Promise<string> {
+  // 路由只看用户原话，不让计划约束或附件包装伪造记忆需求。
+  if (isPureGreeting(requestText)) return message;
   // —— 零成本门：未启用时到此为止，绝不触碰记忆库、绝不解 embedder ——
   const early = evaluateInjectPolicy({
     capabilityEnabled: isCapabilityEnabled(MEMORY_CAPABILITY_ID),
@@ -85,7 +89,7 @@ export async function injectMemory(
     injectionActive: true,
   });
   if (early.action === "skip") return message;
-  return prepareMemoryContext(message, workspaceId, sessionId);
+  return prepareMemoryContext(message, workspaceId, sessionId, requestText);
 }
 
 /**
@@ -95,8 +99,10 @@ export async function injectMemory(
 export async function prepareMemoryContext(
   message: string,
   workspaceId: string,
-  sessionId?: string
+  sessionId?: string,
+  requestText = message
 ): Promise<string> {
+  if (isPureGreeting(requestText)) return message;
   const store = memoryStore();
   const policy = evaluateInjectPolicy({
     capabilityEnabled: true,
@@ -108,19 +114,19 @@ export async function prepareMemoryContext(
     return message;
   }
 
-  const analysis = fastAnalyze(message, { hasActiveProject: true });
-  const plan = planMemory(analysis, message);
+  const analysis = fastAnalyze(requestText, { hasActiveProject: true });
+  const plan = planMemory(analysis, requestText);
   const mode = effectiveMode(plan.mode);
   const sid = sessionId || workspaceId;
 
-  if (shouldRetain(message)) {
-    const retained = retainAsCandidate(store, workspaceId, message);
+  if (shouldRetain(requestText)) {
+    const retained = retainAsCandidate(store, workspaceId, requestText);
     if (!retained.rejected && isHindsightAvailable()) {
       retainHindsight({
         bankId: "user",
         workspaceId: null,
         factType: "experience",
-        content: message,
+        content: requestText,
         tags: ["retain", "user"],
         observedAt: Date.now(),
       });
@@ -152,23 +158,33 @@ export async function prepareMemoryContext(
     return commitPrepared(workspaceId, sid, message, "");
   }
 
-  const working = plan.working.read ? refreshWorkingForSession(store, workspaceId, sid) : [];
+  const query = compileQuery(requestText, analysis) || requestText;
+  const recallQuery = plan.recalls[0]?.query || query;
+  const matchesQuery = (content: string) => meaningfulLexicalOverlap(query, content) > 0;
+  const hits =
+    plan.canonicalReads.length > 0 ? await rankedMemories(store, workspaceId, query, MAX_INJECTED) : [];
+  const relevantIds = new Set(hits.map((hit) => hit.record.id));
+  // Working 是缓存；每轮重新核对相关性，不能因同 session 就把整包背景再次注入。
+  const working = plan.working.read
+    ? refreshWorkingForSession(store, workspaceId, sid).filter((item) =>
+        item.sourceMemoryId ? relevantIds.has(item.sourceMemoryId) : matchesQuery(item.content)
+      )
+    : [];
   const already = new Set(
     plan.working.dedupeLoadedSources
       ? working.map((item) => item.sourceMemoryId).filter((id): id is string => Boolean(id))
       : []
   );
-  const query = compileQuery(message, analysis) || message;
-  const recallQuery = plan.recalls[0]?.query || query;
-  const hits =
-    plan.canonicalReads.length > 0 ? await rankedMemories(store, workspaceId, query, MAX_INJECTED) : [];
   const fresh = hits.map((h) => h.record).filter((r) => !already.has(r.id));
   const canonicalEnvs = fresh.map((r) => envelopeFromRecord(r));
   const liveRefs = plan.liveValidations.map((v) => v.ref);
-  const liveEnvs = [...listLiveEvidence(workspaceId), ...collectLiveEvidence(workspaceId, liveRefs)];
+  const liveEnvs = [
+    ...listLiveEvidence(workspaceId).filter((env) => matchesQuery(env.content)),
+    ...collectLiveEvidence(workspaceId, liveRefs),
+  ];
   const hindsightEnvs =
     plan.recalls.length > 0
-      ? recallHindsight(recallQuery, { workspaceId, preferObservations: /坑|失败|纠结/.test(message) })
+      ? recallHindsight(recallQuery, { workspaceId, preferObservations: /坑|失败|纠结/.test(requestText) })
       : [];
   const reflectEnvs =
     plan.reflections.length > 0

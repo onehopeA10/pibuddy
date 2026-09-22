@@ -1,6 +1,10 @@
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { PiRpcClient } from "../src/client.js";
+import {
+  DEFAULT_RPC_TIMEOUT_MS,
+  PiRpcClient,
+  STARTUP_HANDSHAKE_TIMEOUT_MS,
+} from "../src/client.js";
 import { RpcAbortedError, RpcTimeoutError } from "../src/errors.js";
 import { MAX_LINE_BYTES, attachJsonlReader } from "../src/jsonl.js";
 import { Readable } from "node:stream";
@@ -105,6 +109,18 @@ describe("请求级失败", () => {
       .catch((e: Error) => e);
 
     expect(err).toBeInstanceOf(RpcTimeoutError);
+    expect(pendingSize(client)).toBe(0);
+  });
+
+  it("getState 透传 timeoutMs：启动握手可以比默认 30s 等得更久", async () => {
+    const client = makeClient("timeout");
+    client.start();
+
+    const err = await client.getState({ timeoutMs: 150 }).catch((e: Error) => e);
+
+    expect(err).toBeInstanceOf(RpcTimeoutError);
+    expect((err as RpcTimeoutError).timeoutMs).toBe(150);
+    expect(STARTUP_HANDSHAKE_TIMEOUT_MS).toBeGreaterThan(DEFAULT_RPC_TIMEOUT_MS);
     expect(pendingSize(client)).toBe(0);
   });
 

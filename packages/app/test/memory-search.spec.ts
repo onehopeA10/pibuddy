@@ -27,10 +27,14 @@ vi.mock("electron", () => ({
 }));
 
 const { MemoryStore } = await import("../src/main/memory/memory-store.js");
-const { __setEmbedder, disposeEmbedder } = await import("../src/main/memory/memory-embed.js");
+const { __setEmbedder, disposeEmbedder, localEmbedder } = await import(
+  "../src/main/memory/memory-embed.js"
+);
 const { searchMemories, embedMemory, reembedWorkspace, embedStatus } = await import(
   "../src/main/memory/memory-search.js"
 );
+const { cosine, hashEmbed } = await import("../src/main/memory/memory-vector.js");
+const { meaningfulLexicalOverlap } = await import("../src/main/memory/query-compiler.js");
 const { DatabaseSync } = await import("node:sqlite");
 
 const WS = "ws-search";
@@ -93,11 +97,86 @@ describe("混合语义检索：近义不同词也能查到", () => {
     expect(result.backend).toBe("fake-concepts");
   });
 
-  it("FTS 命中的记录同样进结果（混合，不是二选一）", async () => {
-    const a = store.save({ workspaceId: WS, content: "回复统一用中文", type: "preference", scope: "workspace" });
-    await embedMemory(store, a.record!.id, WS, "workspace", a.record!.content);
+  it("无向量时保留有效 FTS 命中", async () => {
+    const saved = store.save({
+      workspaceId: WS,
+      content: "回复统一用中文",
+      type: "preference",
+      scope: "workspace",
+    });
     const result = await searchMemories(WS, "中文", undefined, 8, store);
-    expect(result.items.map((h) => h.record.id)).toContain(a.record!.id);
+    const hit = result.items.find((item) => item.record.id === saved.record!.id);
+    expect(hit?.ftsScore).toBeGreaterThan(0);
+    expect(hit?.vectorScore).toBe(0);
+  });
+
+  it("provider-like 合成向量保留强近义词、拒绝弱角度关联", async () => {
+    const providerLike = {
+      id: "fake-provider-angular",
+      dim: 2,
+      embed: (texts: string[]) =>
+        Promise.resolve(
+          texts.map((text) => {
+            if (text.includes("automobile")) return new Float32Array([1, 0]);
+            if (text.includes("sedan")) return new Float32Array([0.8, 0.6]);
+            return new Float32Array([0.4, Math.sqrt(0.84)]);
+          })
+        ),
+    };
+    __setEmbedder(providerLike);
+    const synonym = store.save({ workspaceId: WS, content: "choose a sedan", type: "fact", scope: "workspace" });
+    const weak = store.save({ workspaceId: WS, content: "renew passport", type: "fact", scope: "workspace" });
+    await embedMemory(store, synonym.record!.id, WS, "workspace", synonym.record!.content);
+    await embedMemory(store, weak.record!.id, WS, "workspace", weak.record!.content);
+
+    const result = await searchMemories(WS, "automobile", undefined, 8, store);
+    expect(result.items.map((item) => item.record.id)).toEqual([synonym.record!.id]);
+    expect(result.items[0]?.ftsScore).toBe(0);
+    expect(result.items[0]?.vectorScore).toBe(1);
+  });
+});
+
+describe("归一化前的相关性准入", () => {
+  it.each([
+    ["2024年财务收入同比增长百分之五", 0.102062],
+    ["护照到期需要办理续签", 0.121267],
+  ])("local hash 唯一弱候选不会被放大成命中：%s", async (content, expectedRaw) => {
+    __setEmbedder(localEmbedder());
+    const query = "这个 repo 怎么 build？";
+    const raw = cosine(hashEmbed(query), hashEmbed(content));
+    expect(raw).toBeCloseTo(expectedRaw, 5);
+    expect(raw).toBeGreaterThan(0);
+
+    const saved = store.save({ workspaceId: WS, content, type: "fact", scope: "workspace" });
+    await embedMemory(store, saved.record!.id, WS, "workspace", content);
+    const result = await searchMemories(WS, query, undefined, 8, store);
+    expect(result.items).toEqual([]);
+  });
+
+  it("local hash 高余弦也不能靠通用 project 词绕过词法准入", async () => {
+    __setEmbedder(localEmbedder());
+    const query = "project build";
+    const content = "project finance";
+    const raw = cosine(hashEmbed(query), hashEmbed(content));
+    expect(raw).toBeGreaterThan(0.25);
+    expect(meaningfulLexicalOverlap(query, content)).toBe(0);
+
+    const saved = store.save({ workspaceId: WS, content, type: "fact", scope: "workspace" });
+    await embedMemory(store, saved.record!.id, WS, "workspace", content);
+
+    const result = await searchMemories(WS, query, undefined, 8, store);
+    expect(result.items).toEqual([]);
+  });
+
+  it.each([
+    ["repo build", "季度 report 归档在 finance/report.xlsx", "repo"],
+    ["project build command", "project financial revenue grew five percent", "project"],
+  ])("英文完整实词边界挡掉子串或通用项目词：%s", async (query, content, broadTerm) => {
+    const saved = store.save({ workspaceId: WS, content, type: "fact", scope: "workspace" });
+    expect(store.injectionCandidates(WS, [broadTerm], 8).map((item) => item.id)).toContain(saved.record!.id);
+
+    const result = await searchMemories(WS, query, undefined, 8, store);
+    expect(result.items).toEqual([]);
   });
 });
 

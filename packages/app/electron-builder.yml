@@ -89,6 +89,8 @@ publish:
 win:
   target:
     - nsis
+    # 免安装 ZIP 分发包（绿色版），与 NSIS 安装包一起出
+    - zip
   # 任务栏 / 安装包 / 卸载列表图标（多尺寸 ico，由 scripts/make-icon.cjs 生成）
   icon: build/icon.ico
 

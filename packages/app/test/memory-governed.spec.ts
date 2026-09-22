@@ -152,6 +152,73 @@ describe("Phase 0 契约可实例化", () => {
 });
 
 describe("§27 本期实现", () => {
+  it.each([
+    "今天天气如何", "明天北京会下雨吗", "昨天北京天气如何", "今天几号",
+    "帮我翻译这句话：Good morning", "2+2等于多少", "为什么太阳总是东升西落",
+    "那明天呢", "再来一个", "继续",
+  ])("独立问题或裸承接不因打开工作区就拉取项目记忆：%s", (prompt) => {
+    const analysis = fastAnalyze(prompt, { hasActiveProject: true });
+    expect(analysis.scopes.project).toBe(false);
+    expect(planMemory(analysis, prompt)).toMatchObject({
+      mode: "none",
+      working: { read: false, write: false },
+      canonicalReads: [], recalls: [], reflections: [], liveValidations: [],
+    });
+  });
+
+  it("同一会话从项目问题转到天气不会复用旧 Working，返回原任务仍可复用", async () => {
+    memoryStore().save({
+      workspaceId: WS, content: "这个 repo 用 pnpm run build 构建", type: "instruction", scope: "workspace",
+    });
+    const project = "这个 repo 怎么 build？";
+    expect(await injectMemory(project, WS, SESS)).toContain("pnpm run build");
+    expect(memoryStore().listWorkingItems(WS, SESS).length).toBeGreaterThan(0);
+    for (const prompt of ["今天天气如何", "那明天呢", "昨天北京天气如何"]) {
+      expect(await injectMemory(prompt, WS, SESS)).toBe(prompt);
+      expect(getLastMemoryPrep()).toMatchObject({ mode: "none", fromWorking: 0, recalled: 0, liveRefs: [] });
+    }
+    expect(await injectMemory(project, WS, SESS)).toContain("pnpm run build");
+    expect(getLastMemoryPrep()?.fromWorking).toBeGreaterThan(0);
+  });
+
+  it("切换到明确但不同的项目问题也不整包复用旧 Working", async () => {
+    memoryStore().save({ workspaceId: WS, content: "本项目季度报告放在 finance/report.xlsx", type: "fact", scope: "workspace" });
+    memoryStore().save({ workspaceId: WS, content: "这个 repo 用 pnpm run build 构建", type: "instruction", scope: "workspace" });
+    expect(await injectMemory("本项目季度报告在哪", WS, SESS)).toContain("finance/report.xlsx");
+    const next = await injectMemory("这个 repo 怎么 build？", WS, SESS);
+    expect(next).toContain("pnpm run build");
+    expect(next).not.toContain("finance/report.xlsx");
+  });
+
+  it("0. 纯问候分析和路由都是 no-memory，带继续或显式记忆文本仍 recall", () => {
+    const greeting = "您好！";
+    const greetingAnalysis = fastAnalyze(greeting, { hasActiveProject: true });
+    const greetingPlan = planMemory(greetingAnalysis, greeting);
+    expect(greetingAnalysis).toMatchObject({
+      intent: "conversation",
+      memorySignal: "none",
+      historyNeed: "none",
+      currentStateNeed: "none",
+      scopes: { user: false, project: false, agent: false, organization: false },
+    });
+    expect(greetingPlan).toMatchObject({
+      mode: "none",
+      working: { read: false, write: false },
+      canonicalReads: [],
+      recalls: [],
+      reflections: [],
+      liveValidations: [],
+    });
+
+    const continuation = "你好，继续上次报告";
+    expect(fastAnalyze(continuation, { hasActiveProject: true }).historyNeed).toBe("continuation");
+    expect(planMemory(fastAnalyze(continuation, { hasActiveProject: true }), continuation).mode).toBe("recall");
+
+    const explicit = "你好，你还记得我之前的报告吗？";
+    expect(fastAnalyze(explicit, { hasActiveProject: true }).memorySignal).toBe("explicit");
+    expect(planMemory(fastAnalyze(explicit, { hasActiveProject: true }), explicit).mode).toBe("recall");
+  });
+
   it("1. Python GIL 是什么 → mode=none，不查长期记忆", async () => {
     memoryStore().save({ workspaceId: WS, content: "后端用 PostgreSQL", type: "fact", scope: "workspace" });
     const prompt = "Python GIL 是什么？";

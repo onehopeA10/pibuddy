@@ -3,11 +3,11 @@
  * 解包产物启动冒烟。
  *
  * verify-packaged-app.mjs 数的是文件；本脚本回答的是下一句：
- * 「afterPack 摆出来的那个 Electron 进程能不能 ready，并开出 BrowserWindow」。
- * 构建退出码 0 + 文件齐并不保证主进程不在启动时炸掉。
+ * 「Electron 能否加载打包页面、挂载 Vue，并暴露 preload 接口」。
+ * 构建退出码 0 + 文件齐并不保证主进程或渲染进程能启动。
  *
- * 不替代安装包签名、SmartScreen、真模型对话。首启允许停在向导页 ——
- * 窗口画出来就算过，不在这里伪造 onboardingCompletedAt。
+ * 不替代安装包签名、SmartScreen、真模型对话。首启允许停在向导页，
+ * 不在这里伪造 onboardingCompletedAt。
  *
  *   node packages/app/scripts/smoke-packaged-app.mjs [--dir release]
  */
@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { waitForApp, waitForChildCdp } from "./packaged-app-readiness.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(HERE, "..");
@@ -74,38 +75,8 @@ function findExecutables(outDir) {
   return [...new Set(found)];
 }
 
-function pickPort() {
-  return 9222 + Math.floor(Math.random() * 70);
-}
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForCdp(port, timeoutMs, child) {
-  const deadline = Date.now() + timeoutMs;
-  let lastErr = "";
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`进程在 CDP 就绪前退出，code=${child.exitCode}`);
-    }
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/json/version`);
-      if (res.ok) return await res.json();
-      lastErr = `HTTP ${res.status}`;
-    } catch (err) {
-      lastErr = err instanceof Error ? err.message : String(err);
-    }
-    await sleep(400);
-  }
-  throw new Error(`等待 CDP :${port} 超时（${timeoutMs}ms）：${lastErr}`);
-}
-
-async function listPages(port) {
-  const res = await fetch(`http://127.0.0.1:${port}/json/list`);
-  if (!res.ok) return [];
-  const targets = await res.json();
-  return Array.isArray(targets) ? targets : [];
 }
 
 function killTree(child) {
@@ -161,17 +132,17 @@ async function main() {
   }
 
   const exe = executables[0];
-  const port = pickPort();
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "pibuddy-smoke-"));
-  const logs = { stdout: "", stderr: "" };
+  const logs = { stdout: "", stderr: "", spawnError: null };
 
   console.log(`  启动 ${exe}`);
-  console.log(`  CDP :${port}  userData ${userData}`);
+  console.log(`  CDP 使用本次子进程自动分配的端口，userData ${userData}`);
 
   const child = spawn(
     exe,
     [
-      `--remote-debugging-port=${port}`,
+      "--remote-debugging-port=0",
+      "--remote-debugging-address=127.0.0.1",
       `--user-data-dir=${userData}`,
       "--disable-gpu",
       "--no-sandbox",
@@ -182,6 +153,7 @@ async function main() {
       env: { ...process.env, ELECTRON_ENABLE_LOGGING: "1" },
     },
   );
+  child.once("error", (error) => { logs.spawnError = error; });
   child.stdout?.on("data", (buf) => {
     logs.stdout += buf.toString();
   });
@@ -190,13 +162,10 @@ async function main() {
   });
 
   try {
-    const version = await waitForCdp(port, CDP_WAIT_MS, child);
-    const pages = await listPages(port);
-    const pageCount = pages.filter((t) => t.type === "page" || t.type === "webview").length;
-    if (pageCount < 1) {
-      throw new Error(`CDP 已就绪但没有任何 page/webview 目标（Browser=${version.Browser ?? "?"}）`);
-    }
-    console.log(`  ✓ Browser ${version.Browser ?? "unknown"}，${pageCount} 个窗口目标`);
+    const deadline = Date.now() + CDP_WAIT_MS;
+    const { version, port } = await waitForChildCdp(child, logs, CDP_WAIT_MS);
+    const app = await waitForApp(port, Math.max(0, deadline - Date.now()), child);
+    console.log(`  ✓ Browser ${version.Browser ?? "unknown"}，页面/Vue/preload 就绪：${app.url}`);
     console.log("\nsmoke-packaged-app: OK");
   } catch (err) {
     console.error("\nsmoke-packaged-app: FAIL");

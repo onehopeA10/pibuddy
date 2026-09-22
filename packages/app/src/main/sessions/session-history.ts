@@ -100,53 +100,74 @@ export async function readEntriesBefore(
   const upper = Math.min(beforeOffset, st.size);
   if (upper <= 0 || limit <= 0) return empty;
 
-  // 从 upper 往回按块累积，直到攒够 limit 个完整行或者到了文件头。
-  // 用 Buffer 而不是字符串拼接：块边界可能把一个 UTF-8 字符劈成两半，
-  // 先解码再拼会得到两个替换字符，而那一行从此再也 parse 不出来。
+  // 每个块只扫描一次，并记录换行符的绝对偏移。不能先解码各块：块边界
+  // 可能把一个 UTF-8 字符劈成两半，那会把原本合法的一行变成坏 JSON。
+  const chunks: { start: number; data: Buffer }[] = [];
+  const newlineOffsetsDescending: number[] = [];
   let regionStart = upper;
-  let region = Buffer.alloc(0);
-  let newlines: number[] = [];
   for (;;) {
     const nextStart = Math.max(0, regionStart - CHUNK_BYTES);
     const chunk = await readRange(sourcePath, nextStart, regionStart - 1);
-    region = Buffer.concat([chunk, region]);
+    chunks.push({ start: nextStart, data: chunk });
+
+    for (let i = chunk.length - 1; i >= 0; i--) {
+      if (chunk[i] === 0x0a) newlineOffsetsDescending.push(nextStart + i);
+    }
     regionStart = nextStart;
 
-    newlines = [];
-    for (let i = 0; i < region.length; i++) {
-      if (region[i] === 0x0a) newlines.push(i);
-    }
-    // regionStart > 0 时，region 里第一个换行符之前的那段是被块边界切开的
-    // 左半行，不算完整行。
-    const complete = regionStart === 0 ? newlines.length : Math.max(0, newlines.length - 1);
+    // regionStart > 0 时，最左侧换行符之前的那段可能被块边界切开，
+    // 必须再找到它前面的换行符，才能确定这一行的完整起点。
+    const complete =
+      regionStart === 0
+        ? newlineOffsetsDescending.length
+        : Math.max(0, newlineOffsetsDescending.length - 1);
     if (complete >= limit || regionStart === 0) break;
   }
 
   // 最后一个换行符之后还有字节 = 被 beforeOffset 从中间截断的半行。
-  const lastNl = newlines.length > 0 ? newlines[newlines.length - 1] : -1;
-  const skippedPartial = lastNl < region.length - 1 ? 1 : 0;
+  const lastNl = newlineOffsetsDescending[0] ?? -1;
+  const skippedPartial = lastNl < upper - 1 ? 1 : 0;
 
-  // 完整行的 [起, 止) 区间（相对 region）。
+  const newlineOffsets = newlineOffsetsDescending.reverse();
+  // 完整行的绝对 [起, 止) 字节区间。
   const spans: { from: number; to: number }[] = [];
-  for (let i = 0; i < newlines.length; i++) {
-    const from = i === 0 ? 0 : newlines[i - 1] + 1;
+  for (let i = 0; i < newlineOffsets.length; i++) {
+    const from = i === 0 ? regionStart : newlineOffsets[i - 1] + 1;
     if (i === 0 && regionStart > 0) continue; // 左半行，丢
-    spans.push({ from, to: newlines[i] });
+    spans.push({ from, to: newlineOffsets[i] });
   }
 
   const taken = spans.slice(Math.max(0, spans.length - limit));
   const entries: { type: string }[] = [];
-  for (const span of taken) {
-    const text = region.subarray(span.from, span.to).toString("utf8").trim();
-    if (!text) continue;
-    try {
-      entries.push(JSON.parse(text) as { type: string });
-    } catch {
-      // 单行坏掉只丢这一行：整页因为一行残缺而消失，比少一条难查得多。
+  if (taken.length > 0) {
+    const selectedStart = taken[0].from;
+    const selectedEnd = taken[taken.length - 1].to;
+    const pieces: Buffer[] = [];
+
+    // chunks 是由后往前读入的；倒序后只截取最终要解析的连续字节区间。
+    for (let i = chunks.length - 1; i >= 0; i--) {
+      const { start, data } = chunks[i];
+      const from = Math.max(selectedStart, start);
+      const to = Math.min(selectedEnd, start + data.length);
+      if (from < to) pieces.push(data.subarray(from - start, to - start));
+    }
+    const selected = Buffer.concat(pieces, selectedEnd - selectedStart);
+
+    for (const span of taken) {
+      const text = selected
+        .subarray(span.from - selectedStart, span.to - selectedStart)
+        .toString("utf8")
+        .trim();
+      if (!text) continue;
+      try {
+        entries.push(JSON.parse(text) as { type: string });
+      } catch {
+        // 单行坏掉只丢这一行：整页因为一行残缺而消失，比少一条难查得多。
+      }
     }
   }
 
-  const firstAbs = taken.length > 0 ? regionStart + taken[0].from : 0;
+  const firstAbs = taken.length > 0 ? taken[0].from : 0;
   return {
     entries,
     nextBeforeOffset: firstAbs > 0 ? firstAbs : null,

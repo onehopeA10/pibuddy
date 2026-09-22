@@ -161,7 +161,8 @@ jobs:
 
   # ---------------------------------------------------------------- 各系统安装包
   # package job 用 --dir 只验证 asar / extraResources / afterPack。
-  # 本 job 打出真正能下载的安装包：Windows NSIS、macOS dmg+zip、Linux AppImage+deb。
+  # 本 job 打出真正能下载的安装包：Windows 本机 nsis+zip --x64、
+  # macOS 本机 dmg+zip、Linux 本机 AppImage+deb --x64。不交叉编译。
   # 不签名、不公证、不进 GitHub Release / 更新 feed —— 那是 release.yml 的事。
   # 产物带 UNSIGNED，以免被当成正式版。
   artifacts:
@@ -173,13 +174,13 @@ jobs:
         include:
           - os: windows-latest
             platform: windows
-            builder_flags: --win nsis
+            builder_flags: --win nsis zip --x64
           - os: macos-latest
             platform: macos
             builder_flags: --mac dmg zip --config.mac.notarize=false
           - os: ubuntu-latest
             platform: linux
-            builder_flags: --linux AppImage deb
+            builder_flags: --linux AppImage deb --x64
 
     steps:
       # actions/checkout v4

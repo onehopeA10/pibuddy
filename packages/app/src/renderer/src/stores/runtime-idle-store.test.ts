@@ -161,10 +161,10 @@ describe("前台 runtime 空闲休眠 / 聚焦唤醒", () => {
     expect(store.started).toBe(true);
   });
 
-  it("进程已死时发送会拉活再重试一次 prompt", async () => {
+  it("main 确认尚未投递时发送会拉活再重试一次 prompt", async () => {
     const store = await boot();
     promptSpy
-      .mockRejectedValueOnce(new Error("智能体运行时不可用（phase=stopping）"))
+      .mockResolvedValueOnce({ success: false, notSent: true, error: "智能体运行时不可用" })
       .mockResolvedValueOnce({ success: true });
     startSpy.mockClear();
 

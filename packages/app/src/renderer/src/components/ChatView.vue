@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { NButton } from "naive-ui";
 import { useAppStore } from "../stores/app";
-import { useChatWindow } from "../stores/chat-window";
+import { PAGE_SIZE, useChatWindow } from "../stores/chat-window";
 import { groupVisualMessages, type VisualMessageItem } from "../message-groups";
 import MessageItem from "./MessageItem.vue";
 import Welcome from "./Welcome.vue";
@@ -21,20 +21,29 @@ const scrollEl = ref<HTMLElement | null>(null);
  */
 const stickToBottom = win.stickToBottom;
 
-// 长会话只渲染最近的一段消息，避免几百条消息全量渲染卡住主线程。
-const INITIAL_WINDOW = 60;
+const INITIAL_WINDOW = PAGE_SIZE;
 const visibleCount = ref(INITIAL_WINDOW);
+const expanding = ref(false);
+let viewGeneration = 0;
 
 watch(
-  () => store.currentSessionId,
-  () => {
+  () => [store.workspaceId, store.currentSessionId, store.historyGeneration, store.switchingSessionId],
+  async () => {
+    const generation = ++viewGeneration;
     visibleCount.value = INITIAL_WINDOW;
-    // **必须传真实的 sizeBytes**。写死 0 的话 chat-window 在 reset 那一刻就
-    // 判定 reachedTop（`initialBeforeOffset <= 0`），整条 JSONL 反向分页从此
-    // 永不执行 —— 压缩过的长会话里，pi 的 get_messages 只返回压缩后的上下文，
-    // 更早的消息只能从磁盘读，而那条路被这一个 0 关死了。
-    win.reset(store.currentSessionBytes);
-  }
+    expanding.value = false;
+    const switching = store.switchingSessionId !== null;
+    win.reset(switching ? 0 : (
+      store.historyBeforeOffset === undefined ? store.currentSessionBytes : store.historyBeforeOffset
+    ));
+    if (switching) return;
+    await nextTick();
+    if (generation !== viewGeneration) return;
+    const el = scrollEl.value;
+    if (el && stickToBottom.value) el.scrollTop = el.scrollHeight;
+    win.prefetch();
+  },
+  { immediate: true }
 );
 
 /**
@@ -46,7 +55,11 @@ watch(
  */
 watch(
   () => store.currentSessionBytes,
-  (bytes) => win.adoptOffset(bytes)
+  (bytes) => {
+    if (store.switchingSessionId !== null) return;
+    win.adoptOffset(bytes);
+    win.prefetch();
+  }
 );
 
 const hiddenCount = computed(() =>
@@ -65,6 +78,15 @@ function artifactsOf(item: VisualMessageItem) {
   ]);
 }
 
+function memoOf(item: VisualMessageItem): unknown[] {
+  return [
+    store.workspaceId, store.currentSessionId, item.streaming,
+    item.startedAt, item.endedAt, win.unreadDivider.value,
+    item.sourceMessages.length, ...item.sourceMessages,
+    ...artifactsOf(item).flatMap((link) => [link.artifactId, link.version, link.name]),
+  ];
+}
+
 /**
  * 向前扩窗的重入闸。
  *
@@ -73,15 +95,15 @@ function artifactsOf(item: VisualMessageItem) {
  * showEarlier，每份都拿着自己那一刻的 prevHeight 去补偿，同一段高度差被
  * 重复加好几次，视口就来回弹 —— 表现就是「一直在抖」。
  */
-const expanding = ref(false);
-
 /** 内存里还没铺完，或磁盘上还有更早的字节 —— 两者都没有就别再扩了。 */
 const canShowEarlier = computed(
   () => hiddenCount.value > 0 || !win.reachedTop.value
 );
 
 async function showEarlier(): Promise<void> {
-  if (expanding.value || !canShowEarlier.value) return;
+  if (expanding.value || !canShowEarlier.value || store.switchingSessionId !== null) return;
+  const generation = viewGeneration;
+  const targetCount = visibleCount.value + PAGE_SIZE;
   expanding.value = true;
   const el = scrollEl.value;
   const prevHeight = el?.scrollHeight ?? 0;
@@ -90,18 +112,21 @@ async function showEarlier(): Promise<void> {
     // 上界钉在真实条数上：早先是无条件 +100，全部铺完后仍一路涨，
     // 于是 hiddenCount 恒为 0 而扩窗永远「成功」，闸门就形同虚设。
     visibleCount.value = Math.min(
-      visibleCount.value + 100,
+      targetCount,
       Math.max(store.items.length, INITIAL_WINDOW)
     );
     // 内存里的还没铺完就先铺内存里的；铺完了才向主进程要更早的字节。
     if (hiddenCount.value === 0) await win.loadEarlier();
+    if (generation !== viewGeneration) return;
+    visibleCount.value = Math.min(targetCount, Math.max(store.items.length, INITIAL_WINDOW));
     await nextTick();
+    if (generation !== viewGeneration) return;
     // 扩窗后补偿滚动位置，视口停留在原来看到的消息上。
     // 高度没变就一个字节都不写：写 scrollTop 会再触发 scroll，白白多一轮。
     const grown = (el?.scrollHeight ?? 0) - prevHeight;
     if (el && grown > 0) el.scrollTop += grown;
   } finally {
-    expanding.value = false;
+    if (generation === viewGeneration) expanding.value = false;
   }
 }
 
@@ -128,11 +153,11 @@ async function jumpToBottom(): Promise<void> {
 
 // 新消息到达且视口不在底部 → 插一条未读分界线（只插第一条）
 watch(
-  () => store.items.length,
+  () => store.items.at(-1)?.key,
   (next, prev) => {
-    if (next <= (prev ?? 0)) return;
-    const last = store.items[store.items.length - 1];
-    if (last) win.onIncoming(last.key);
+    if (next === undefined || prev === undefined || next === prev) return;
+    if (store.switchingSessionId !== null) return;
+    win.onIncoming(next);
   }
 );
 
@@ -140,13 +165,18 @@ watch(
   () => store.activityTick,
   async () => {
     if (!stickToBottom.value) return;
+    const generation = viewGeneration;
     await nextTick();
+    if (generation !== viewGeneration || !stickToBottom.value) return;
     const el = scrollEl.value;
     if (el) el.scrollTop = el.scrollHeight;
   }
 );
 
-onBeforeUnmount(() => win.dispose());
+onBeforeUnmount(() => {
+  viewGeneration += 1;
+  win.dispose();
+});
 
 function resend(text: string): void {
   store.editorText = text;
@@ -166,7 +196,7 @@ function resend(text: string): void {
       </n-button>
     </div>
     <Welcome
-      v-if="store.items.length === 0 && !store.liveAssistant && !store.sessionLoadError && !store.switchingSessionId"
+      v-if="store.items.length === 0 && !store.liveAssistant && !store.sessionLoadError && !store.switchingSessionId && !canShowEarlier && !win.loadError.value && !win.loading.value"
     />
     <div
       v-else-if="store.items.length === 0 && store.switchingSessionId && !store.sessionLoadError"
@@ -202,7 +232,7 @@ function resend(text: string): void {
       <template
         v-for="item in visualItems"
         :key="item.key"
-        v-memo="[item.key, item.streaming, item.message, artifactsOf(item), win.unreadDivider.value]"
+        v-memo="memoOf(item)"
       >
         <div
           v-if="item.sourceKeys.includes(win.unreadDivider.value ?? -1)"

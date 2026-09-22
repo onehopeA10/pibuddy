@@ -28,6 +28,16 @@ describe("CT-07 stt:transcribe 的请求形状唯一", () => {
   });
 });
 
+describe("prompt 目标绑定", () => {
+  it("保留目标字段并兼容没有目标的旧调用方", () => {
+    const scoped = { message: "你好", workspaceId: "w1", sessionId: "a" };
+    expect(piPromptRequestSchema.parse(scoped)).toEqual(scoped);
+    expect(piPromptRequestSchema.parse({ message: "你好" })).toEqual({ message: "你好" });
+    expect(piPromptRequestSchema.safeParse({ ...scoped, sessionId: "" }).success).toBe(false);
+    expect(piPromptRequestSchema.safeParse({ ...scoped, workspaceId: "" }).success).toBe(false);
+  });
+});
+
 describe("SEC-005 prompt 资源 schema 上限", () => {
   const image = { type: "image" as const, data: "AAAA", mimeType: "image/png" as const };
 

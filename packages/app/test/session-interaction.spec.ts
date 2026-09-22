@@ -169,6 +169,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useAppStore().dispose();
   vi.useRealTimers();
 });
 
@@ -227,6 +228,7 @@ describe("extension veto（data.cancelled）", () => {
   });
 
   it("switch_session 被否决时消息不变且给出警告", async () => {
+    vi.useFakeTimers();
     const store = useAppStore();
     const warn = vi.fn();
     store.setNotifier({ info: vi.fn(), success: vi.fn(), warning: warn, error: vi.fn() });
@@ -237,6 +239,7 @@ describe("extension veto（data.cancelled）", () => {
         : defaultHandler(cmd);
 
     await store.openSession({ sessionId: "a" });
+    await vi.advanceTimersByTimeAsync(350);
 
     expect(store.items.length).toBe(1);
     expect(warn).toHaveBeenCalledTimes(1);
@@ -283,6 +286,7 @@ describe("extension veto（data.cancelled）", () => {
 
 describe("switch 成功但消息加载失败", () => {
   it("设置 sessionLoadError，且不保留旧会话的消息", async () => {
+    vi.useFakeTimers();
     const store = useAppStore();
     store.setNotifier({
       info: vi.fn(),
@@ -297,6 +301,7 @@ describe("switch 成功但消息加载失败", () => {
         : defaultHandler(cmd);
 
     await store.openSession({ sessionId: "a" });
+    await vi.advanceTimersByTimeAsync(350);
 
     expect(store.sessionLoadError).toBe("读取会话文件失败");
     expect(store.items.length).toBe(0);

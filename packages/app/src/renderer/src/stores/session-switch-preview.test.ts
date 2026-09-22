@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { nextTick } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import { useAppStore } from "./app";
 import { useSessionsStore } from "./sessions";
+import * as markdown from "../markdown";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -66,6 +67,13 @@ async function flushMicrotasks(): Promise<void> {
 describe("openSession local preview", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    useAppStore().dispose();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("预览落地后立刻显示，不阻塞在还没回来的 switchSession 上", async () => {
@@ -100,13 +108,19 @@ describe("openSession local preview", () => {
     expect(store.items.map((item) => item.message.role)).toEqual(["user"]);
     expect(store.switchingSessionId).toBeNull();
     expect(store.piLoadedSessionId).toBe("session-old");
+    expect(window.piBuddy.sessions.readHistoryBefore).toHaveBeenCalledWith({
+      workspaceId: "w1", sessionId: "session-target", beforeOffset: 999, limit: 7,
+    });
+    expect(store.historyBeforeOffset).toBeNull();
     expect(artifactsQuery).not.toHaveBeenCalled();
+    expect(switchSession).not.toHaveBeenCalled();
 
+    const ready = store.whenPiReady();
     await flushMicrotasks();
     expect(switchSession).toHaveBeenCalledTimes(1);
 
     switched.resolve({ success: true, data: {} });
-    await store.whenPiReady();
+    await ready;
     expect(store.piLoadedSessionId).toBe("session-target");
     expect(switchSession).toHaveBeenCalledTimes(1);
     expect(getState).not.toHaveBeenCalled();
@@ -122,6 +136,109 @@ describe("openSession local preview", () => {
     expect(getState).not.toHaveBeenCalled();
   });
 
+  it("A→B切换未完成就回A，你好只能发给实际装载的A", async () => {
+    const switchedB = deferred<void>();
+    let actualSession = "session-old";
+    const received: { sessionId: string; message: string }[] = [];
+    const switchSession = vi.fn(async (_workspace: string, sessionId: string) => {
+      if (sessionId === "session-b") await switchedB.promise;
+      actualSession = sessionId;
+      return { success: true, data: {} };
+    });
+    const prompt = vi.fn(async (payload: { message: string }) => {
+      received.push({ sessionId: actualSession, message: payload.message });
+      return { success: true };
+    });
+    (globalThis as unknown as { window: unknown }).window = {
+      piBuddy: {
+        sessions: { readHistoryBefore: vi.fn(async () => historyPage()), getDraft: vi.fn(async () => null) },
+        pi: { switchSession, prompt },
+      },
+    };
+    const store = seedPreviousState();
+    store.workspaceId = "w1";
+    await store.openSession({ sessionId: "session-b", sizeBytes: 999 });
+    const warmingB = store.whenPiReady();
+    await flushMicrotasks();
+    await store.openSession({ sessionId: "session-old", sizeBytes: 321 });
+    await store.send({ text: "你好" });
+    expect(prompt).not.toHaveBeenCalled();
+    switchedB.resolve();
+    await warmingB;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(received).toEqual([{ sessionId: "session-old", message: "你好" }]);
+    expect(prompt).toHaveBeenCalledWith({ message: "你好", sessionId: "session-old", workspaceId: "w1" });
+    expect(switchSession.mock.calls.map((call) => call[1])).toEqual(["session-b", "session-old"]);
+  });
+
+  it("切回缓存会话保留历史游标，并复用 Markdown 缓存", async () => {
+    const clearCache = vi.spyOn(markdown, "clearMarkdownCache");
+    const readHistoryBefore = vi.fn(async () => ({ ...historyPage(), nextBeforeOffset: 700 }));
+    (globalThis as unknown as { window: unknown }).window = {
+      piBuddy: { sessions: { readHistoryBefore, getDraft: vi.fn(async () => null) }, pi: {} },
+    };
+    const store = seedPreviousState();
+    store.workspaceId = "w1";
+    await store.openSession({ sessionId: "target", sizeBytes: 999 });
+    expect(store.historyBeforeOffset).toBe(700);
+    store.historyBeforeOffset = 350;
+    await store.openSession({ sessionId: "session-old", sizeBytes: 321 });
+    await store.openSession({ sessionId: "target", sizeBytes: 999 });
+    expect(readHistoryBefore).toHaveBeenCalledTimes(1);
+    expect(store.historyBeforeOffset).toBe(350);
+    expect(clearCache).not.toHaveBeenCalled();
+  });
+
+  it("首屏只有元数据也保留游标，允许后续异步补到消息", async () => {
+    (globalThis as unknown as { window: unknown }).window = {
+      piBuddy: {
+        sessions: {
+          readHistoryBefore: vi.fn(async () => ({
+            ...historyPage(), entries: [{ type: "model_change" }], nextBeforeOffset: 700,
+          })),
+          getDraft: vi.fn(async () => null),
+        },
+        pi: {},
+      },
+    };
+    const store = seedPreviousState();
+    await store.openSession({ sessionId: "target", sizeBytes: 999 });
+    expect(store.items).toHaveLength(0);
+    expect(store.historyBeforeOffset).toBe(700);
+    expect(store.currentSessionId).toBe("target");
+  });
+
+  it.each(["dispose", "history-reset"])("%s后丢弃迟到的首屏预览", async (change) => {
+    const preview = deferred<ReturnType<typeof historyPage>>();
+    (globalThis as unknown as { window: unknown }).window = {
+      piBuddy: { sessions: { readHistoryBefore: vi.fn(() => preview.promise) }, pi: {} },
+    };
+    const store = seedPreviousState();
+    const opening = store.openSession({ sessionId: "target", sizeBytes: 999 });
+    if (change === "dispose") store.dispose();
+    else store.historyGeneration++;
+    preview.resolve(historyPage("outdated preview"));
+    await opening;
+    expect(store.currentSessionId).toBe("session-old");
+    expect(store.items[0].message).toMatchObject({ content: "previous message" });
+  });
+
+  it("切工作区后丢弃迟到的首屏预览", async () => {
+    const preview = deferred<ReturnType<typeof historyPage>>();
+    (globalThis as unknown as { window: unknown }).window = {
+      piBuddy: { sessions: { readHistoryBefore: vi.fn(() => preview.promise) }, pi: {} },
+    };
+    const store = seedPreviousState();
+    store.workspaceId = "w1";
+    const opening = store.openSession({ sessionId: "target", sizeBytes: 999 });
+    store.adoptWorkspace({ workspaceId: "w2", displayPath: "new project" });
+    store.currentSessionId = "new-session";
+    preview.resolve(historyPage("old project history"));
+    await opening;
+    expect(store.currentSessionId).toBe("new-session");
+    expect(store.items[0].message).toMatchObject({ content: "previous message" });
+  });
+
   it("过期预览不能盖掉正在打开的另一个会话", async () => {
     const firstPreview = deferred<ReturnType<typeof historyPage>>();
     const secondPreview = deferred<ReturnType<typeof historyPage>>();
@@ -129,11 +246,12 @@ describe("openSession local preview", () => {
       .fn()
       .mockImplementationOnce(() => firstPreview.promise)
       .mockImplementationOnce(() => secondPreview.promise);
+    const switchSession = vi.fn(async () => ({ success: true, data: {} }));
     (globalThis as unknown as { window: unknown }).window = {
       piBuddy: {
         sessions: { readHistoryBefore },
         pi: {
-          switchSession: vi.fn(async () => ({ success: true, data: {} })),
+          switchSession,
           getState: vi.fn(async () => ({ success: true, data: { sessionId: "session-b" } })),
           getSessionStats: vi.fn(async () => ({ success: false })),
         },
@@ -141,6 +259,7 @@ describe("openSession local preview", () => {
     };
 
     const store = seedPreviousState();
+    store.workspaceId = "w1";
     const first = store.openSession({ sessionId: "session-a", sizeBytes: 100 });
     await flushMicrotasks();
     const second = store.openSession({ sessionId: "session-b", sizeBytes: 200 });
@@ -153,6 +272,10 @@ describe("openSession local preview", () => {
     expect(store.items.map((item) => (item.message as { content?: string }).content)).toEqual([
       "session b",
     ]);
+    expect(switchSession).not.toHaveBeenCalled();
+    await store.whenPiReady();
+    expect(switchSession).toHaveBeenCalledTimes(1);
+    expect(switchSession).toHaveBeenCalledWith("w1", "session-b");
   });
 
   it("切换成功后模型显示切到目标会话，不沿用上一个，也不另发 get_state", async () => {
@@ -246,8 +369,7 @@ describe("openSession local preview", () => {
     const store = seedPreviousState();
     store.workspaceId = "w1";
     const opening = store.openSession({ sessionId: "session-target" });
-    await nextTick();
-    await flushMicrotasks();
+    await opening;
 
     expect(store.currentSessionId).toBe("session-target");
     expect(store.switchingSessionId).toBeNull();

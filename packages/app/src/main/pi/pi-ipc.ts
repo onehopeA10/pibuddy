@@ -14,7 +14,11 @@
  */
 import { app, type WebContents } from "electron";
 import { stat } from "node:fs/promises";
-import type { ImageContent, PiRpcClient } from "@pibuddy/pi-sdk";
+import {
+  STARTUP_HANDSHAKE_TIMEOUT_MS,
+  type ImageContent,
+  type PiRpcClient,
+} from "@pibuddy/pi-sdk";
 import { attachSwitchTrace } from "./switch-session-trace.js";
 import {
   isForegroundClientUsable,
@@ -70,6 +74,11 @@ import {
   resolveSessionDir,
   sessionFilePath,
 } from "../sessions/session-dir.js";
+import {
+  assertLaunchablePiSessionFile,
+  INVALID_PI_SESSION_USER_MESSAGE,
+  isInvalidPiSessionError,
+} from "../sessions/pi-session-header.js";
 import { sessionIndex } from "../sessions/session-index.js";
 import { loadSettings } from "../settings.js";
 import { assertContained, requireWorkspaceRoot, workspaceIdFor } from "../workspace-registry.js";
@@ -363,6 +372,22 @@ async function sessionFileBytes(sessionPath: string): Promise<number> {
 }
 
 /**
+ * spawn / switch 之前拦坏 jsonl。文件本身不动，只从索引摘掉，避免列表里
+ * 再出现「未命名任务」，一点就把进程拉崩。
+ */
+async function assertSessionPathLaunchable(sessionPath: string): Promise<void> {
+  try {
+    await assertLaunchablePiSessionFile(sessionPath);
+  } catch (err) {
+    if (isInvalidPiSessionError(err)) {
+      sessionIndex().forgetSource(sessionPath);
+      log().warn("pi_session_file_invalid", { path: sessionPath });
+    }
+    throw err;
+  }
+}
+
+/**
  * 为窗口再起一个前台 runtime。
  *
  * `replace`：只拆当前前台（休眠 / 续接同一会话）。
@@ -371,13 +396,17 @@ async function sessionFileBytes(sessionPath: string): Promise<number> {
 async function spawnForeground(
   wc: WebContents,
   opts: { workspaceId: string; sessionId?: string },
-  mode: "replace" | "park"
+  mode: "replace" | "park",
+  launchEpoch: number
 ): Promise<{
   state: Awaited<ReturnType<PiRpcClient["getState"]>>;
   models: Awaited<ReturnType<PiRpcClient["getAvailableModels"]>>["models"];
   messages: Awaited<ReturnType<PiRpcClient["getMessages"]>>["messages"];
   modelsError?: string;
 }> {
+  const assertCurrentLaunch = () => {
+    if (launchEpoch !== currentPromptEpoch(wc.id)) throw new Error("启动已被新的会话操作取代");
+  };
   const root = requireWorkspaceRoot(opts.workspaceId);
   const settings = loadSettings();
   const sessionDir = resolveSessionDir(root, settings);
@@ -395,6 +424,7 @@ async function spawnForeground(
       }
     }
   }
+  if (sessionPath) await assertSessionPathLaunchable(sessionPath);
 
   const trust = await describeTrust({
     workspaceId: opts.workspaceId,
@@ -415,6 +445,7 @@ async function spawnForeground(
   });
   verifyRuntimeHandshake(spawn.runtime, log());
 
+  assertCurrentLaunch();
   const { client, handle } = supervisor().launch(
     wc,
     {
@@ -429,8 +460,19 @@ async function spawnForeground(
   );
   bindForegroundClient(wc.id, client, opts.workspaceId);
 
+  const launchedAt = Date.now();
   try {
-    const state = await client.getState();
+    // 第一条 get_state 实际是「等 pi 把 packages / extensions 加载完」，
+    // 用握手超时而不是普通命令的 30s：park 路径下旁边还有一个 pi 在跑。
+    const state = await client.getState({ timeoutMs: STARTUP_HANDSHAKE_TIMEOUT_MS });
+    assertCurrentLaunch();
+    if (clients.get(wc.id) !== client) throw new Error("启动已被新的运行时取代");
+    log().info("pi_runtime_ready", {
+      runtimeId: handle.runtimeId,
+      generation: handle.generation,
+      mode,
+      startupMs: Date.now() - launchedAt,
+    });
     supervisor().adoptSession(handle.runtimeId, state.sessionId);
     if (state.sessionId) agentPool().setFocused(state.sessionId);
     const [models, messages] = await Promise.all([
@@ -448,6 +490,8 @@ async function spawnForeground(
         );
       }),
     ]);
+    assertCurrentLaunch();
+    if (clients.get(wc.id) !== client) throw new Error("启动已被新的运行时取代");
     return {
       state,
       models: models.models,
@@ -461,11 +505,23 @@ async function spawnForeground(
       runtimeId: handle.runtimeId,
       generation: handle.generation,
       phase: client.phase,
+      mode,
+      startupMs: Date.now() - launchedAt,
       cause,
     });
-    supervisor().disposeTarget(wc.id);
+    // 迟到的 A 失败只能清理 A；窗口此时可能已经绑定了 B。
+    await supervisor().stop(handle.runtimeId).catch((stopError: unknown) => {
+      log().warn("pi_runtime_cleanup_failed", { runtimeId: handle.runtimeId, cause: String(stopError) });
+    });
     if (clients.get(wc.id) === client) clients.delete(wc.id);
-    throw new Error(`启动智能体失败：${cause}${tail ? `\n${tail}` : ""}`);
+    if (isInvalidPiSessionError(cause) || isInvalidPiSessionError(err)) {
+      if (sessionPath) sessionIndex().forgetSource(sessionPath);
+      throw new Error(INVALID_PI_SESSION_USER_MESSAGE);
+    }
+    const hint = /get_state 超时/.test(cause)
+      ? "\npi 启动太慢：~/.pi/agent/settings.json 里装的扩展包会拖长启动，可考虑精简。"
+      : "";
+    throw new Error(`启动智能体失败：${cause}${hint}${tail ? `\n${tail}` : ""}`);
   }
 }
 
@@ -504,6 +560,7 @@ export function registerPiIpc(): void {
 
   registerHandler(CHANNELS.piStart, piStartParamsSchema, async (opts, event) => {
     const wc = event.sender;
+    const epoch = bumpPromptEpoch(wc.id);
     if (opts.sessionId) {
       const live = supervisor().recordForSession(opts.sessionId);
       if (live) {
@@ -516,15 +573,19 @@ export function registerPiIpc(): void {
             attached.getAvailableModels().catch(() => ({ models: [] })),
             attached.getMessages().catch(() => ({ messages: [] })),
           ]);
+          if (epoch !== currentPromptEpoch(wc.id) || clients.get(wc.id) !== attached) {
+            throw new Error("启动已被新的会话操作取代");
+          }
           return { state, models: models.models, messages: messages.messages };
         }
       }
     }
-    return spawnForeground(wc, opts, "replace");
+    return spawnForeground(wc, opts, "replace", epoch);
   });
 
   registerHandler(CHANNELS.piStop, voidRequestSchema, (_payload, event) => {
     // 只停当前前台：后台挂起的会话继续跑。窗口关闭才 disposeClientFor。
+    bumpPromptEpoch(event.sender.id);
     supervisor().disposeTarget(event.sender.id);
     clients.delete(event.sender.id);
   });
@@ -567,16 +628,33 @@ export function registerPiIpc(): void {
     const senderId = event.sender.id;
     const promptEpoch = currentPromptEpoch(senderId);
     const sessionAtStart = supervisor().currentActive()?.sessionId;
+    const promptWorkspaceId = clientWorkspaces.get(senderId);
+    let client: PiRpcClient;
+    try {
+      client = clientFor(senderId);
+    } catch (error) {
+      // 只有预处理/投递之前的失败，才允许 renderer 唤醒后自动重试。
+      return { success: false, notSent: true, error: error instanceof Error ? error.message : String(error) };
+    }
+    if (
+      (payload.sessionId !== undefined && payload.sessionId !== sessionAtStart) ||
+      (payload.workspaceId !== undefined && payload.workspaceId !== promptWorkspaceId)
+    ) {
+      return { success: false, error: "目标会话尚未就绪，未发送" };
+    }
+    const isCurrent = () =>
+      promptEpoch === currentPromptEpoch(senderId) &&
+      sessionAtStart === supervisor().currentActive()?.sessionId &&
+      promptWorkspaceId === clientWorkspaces.get(senderId);
     const inlineImages = validateInlineImages(payload.images);
     const tokens = payload.attachmentTokens ?? [];
     const attachmentSnapshots = await resolvePromptAttachments(tokens);
-    const client = clientFor(senderId);
-    const promptWorkspaceId = clientWorkspaces.get(senderId);
+    if (!isCurrent()) return { success: false, error: "会话已切换，未发送" };
     // 对话即动作：在拼附件 / 注入记忆之前认「记住 / 定时 / 办公技能」。
     // 关掉对应能力时 applyConversationActions 原样返回，这段等价于不存在。
     const acted = applyConversationActions(payload.message, {
       workspaceId: promptWorkspaceId,
-      sessionId: supervisor().currentActive()?.sessionId,
+      sessionId: sessionAtStart,
       workMode: payload.workMode ?? "act",
     });
     // 非图片附件先在 main 内完成稳定读取与 immutable snapshot，再把 snapshot 路径
@@ -591,18 +669,10 @@ export function registerPiIpc(): void {
     // 后者内部再判一次注入总开关、抽词检索、落下命中记录（供隐私视图查看）。
     const memoryEnabled = isCapabilityEnabled(MEMORY_CAPABILITY_ID) && Boolean(promptWorkspaceId);
     if (memoryEnabled && promptWorkspaceId) {
-      message = await injectMemory(
-        message,
-        promptWorkspaceId,
-        supervisor().currentActive()?.sessionId
-      );
+      message = await injectMemory(message, promptWorkspaceId, sessionAtStart, payload.message);
     }
     const preprocessMs = Date.now() - preprocessStartedAt;
-    const sessionNow = supervisor().currentActive()?.sessionId;
-    if (
-      promptEpoch !== currentPromptEpoch(senderId) ||
-      (sessionAtStart && sessionNow && sessionAtStart !== sessionNow)
-    ) {
+    if (!isCurrent()) {
       return { success: false, error: "会话已切换，未发送" };
     }
     const rpcStartedAt = Date.now();
@@ -656,7 +726,10 @@ export function registerPiIpc(): void {
   });
 
   registerHandler(CHANNELS.piNewSession, voidRequestSchema, async (_p, event) => {
-    bumpPromptEpoch(event.sender.id);
+    const epoch = bumpPromptEpoch(event.sender.id);
+    const assertCurrent = () => {
+      if (epoch !== currentPromptEpoch(event.sender.id)) throw new Error("会话操作已被后续请求取代");
+    };
     // 不能走 clientFor()：phase≠running 时 assertUsable 会抛到渲染进程，
     // newTask 以前又没有 catch，按钮就像没点一样。
     const client = tryClientFor(event.sender.id);
@@ -684,7 +757,8 @@ export function registerPiIpc(): void {
       const launched = await spawnForeground(
         event.sender,
         { workspaceId },
-        "park"
+        "park",
+        epoch
       );
       return switchResponse("new_session", { sessionId: launched.state.sessionId });
     }
@@ -693,7 +767,9 @@ export function registerPiIpc(): void {
     } catch {
       // 没有在跑的回合，或 abort 已超时：下面仍尝试换会话。
     }
+    assertCurrent();
     const resp = await client.newSession();
+    assertCurrent();
     if (resp.success && (resp.data as { cancelled?: boolean } | undefined)?.cancelled !== true) {
       const nextId =
         resp.data && typeof resp.data === "object" && "sessionId" in resp.data
@@ -707,8 +783,11 @@ export function registerPiIpc(): void {
   });
 
   registerHandler(CHANNELS.piSwitchSession, piSwitchSessionRequestSchema, async (payload, event) => {
-    bumpPromptEpoch(event.sender.id);
+    const epoch = bumpPromptEpoch(event.sender.id);
     const wc = event.sender;
+    const assertCurrent = () => {
+      if (epoch !== currentPromptEpoch(wc.id)) throw new Error("会话操作已被后续请求取代");
+    };
     const live = supervisor().recordForSession(payload.sessionId);
     const foreground = supervisor().currentActive();
     if (live && foreground?.sessionId !== payload.sessionId) {
@@ -728,7 +807,8 @@ export function registerPiIpc(): void {
       await spawnForeground(
         wc,
         { workspaceId: payload.workspaceId, sessionId: payload.sessionId },
-        "park"
+        "park",
+        epoch
       );
       log().info("pi_switch_session_spawned", { sessionId: payload.sessionId });
       return switchResponse("switch_session", { sessionId: payload.sessionId });
@@ -744,14 +824,17 @@ export function registerPiIpc(): void {
     if (!real) {
       throw new Error("这条会话的文件已经不在了，请再开一条新对话");
     }
+    await assertSessionPathLaunchable(real);
     const resolveMs = Date.now() - resolveStartedAt;
     const fileBytes = await sessionFileBytes(real);
+    assertCurrent();
     const existing = tryClientFor(event.sender.id);
     if (!isForegroundClientUsable(existing)) {
       await spawnForeground(
         wc,
         { workspaceId: payload.workspaceId, sessionId: payload.sessionId },
-        "replace"
+        "replace",
+        epoch
       );
       log().info("pi_switch_session_respawned", { sessionId: payload.sessionId });
       return switchResponse("switch_session", { sessionId: payload.sessionId });
@@ -767,11 +850,13 @@ export function registerPiIpc(): void {
     try {
       resp = await client.switchSession(real);
     } catch (err) {
+      assertCurrent();
       if (shouldRespawnAfterSwitchFailure(err)) {
         await spawnForeground(
           wc,
           { workspaceId: payload.workspaceId, sessionId: payload.sessionId },
-          "replace"
+          "replace",
+          epoch
         );
         log().info("pi_switch_session_recovered", {
           sessionId: payload.sessionId,
@@ -791,6 +876,7 @@ export function registerPiIpc(): void {
         ...observed,
       });
     }
+    assertCurrent();
     if (!resp) throw new Error("switch_session 没有返回");
     if (resp.success && (resp.data as { cancelled?: boolean } | undefined)?.cancelled !== true) {
       clientWorkspaces.set(event.sender.id, payload.workspaceId);

@@ -29,12 +29,12 @@ function idOf(entry: unknown): string {
   return String((entry as { id?: unknown } | undefined)?.id);
 }
 
-function line(i: number): string {
+function line(i: number, text = PAD): string {
   return `${JSON.stringify({
     type: "message",
     id: `e${String(i).padStart(4, "0")}`,
     parentId: i === 0 ? null : `e${String(i - 1).padStart(4, "0")}`,
-    message: { role: i % 2 === 0 ? "user" : "assistant", content: [{ type: "text", text: PAD }] },
+    message: { role: i % 2 === 0 ? "user" : "assistant", content: [{ type: "text", text }] },
   })}\n`;
 }
 
@@ -92,9 +92,67 @@ describe("反向分页的顺序与完整性", () => {
     expect(__lastReadBytes()).toBeGreaterThan(0);
     expect(__lastReadBytes()).toBeLessThan(size * 0.2);
   });
+
+  it("跨多个 64KB 块的长行在 limit=7 时仍完整返回且可继续翻页", async () => {
+    const longText = "x".repeat(3 * 64 * 1024 + 17);
+    const content = Array.from({ length: 12 }, (_, i) =>
+      line(i, i === 8 ? longText : `short-${i}`)
+    ).join("");
+    await writeFile(file, content, "utf8");
+
+    const page = await readEntriesBefore({
+      sourcePath: file,
+      beforeOffset: Buffer.byteLength(content),
+      limit: 7,
+    });
+    expect(page.entries.map(idOf)).toEqual([
+      "e0005",
+      "e0006",
+      "e0007",
+      "e0008",
+      "e0009",
+      "e0010",
+      "e0011",
+    ]);
+    expect(page.nextBeforeOffset).toBe(
+      Buffer.byteLength(Array.from({ length: 5 }, (_, i) => line(i, `short-${i}`)).join(""))
+    );
+    expect(page.skippedPartial).toBe(0);
+
+    const earlier = await readEntriesBefore({
+      sourcePath: file,
+      beforeOffset: page.nextBeforeOffset!,
+      limit: 7,
+    });
+    expect(earlier.entries.map(idOf)).toEqual(["e0000", "e0001", "e0002", "e0003", "e0004"]);
+    expect(earlier.nextBeforeOffset).toBeNull();
+  });
 });
 
 describe("半行边界与一致性", () => {
+  it("坏行只丢该行，仍占用 limit 的物理行窗口并推进偏移", async () => {
+    const firstLine = line(0, "first");
+    const content = `${firstLine}{broken json}\n${line(2, "third")}${line(3, "fourth")}`;
+    await writeFile(file, content, "utf8");
+
+    const page = await readEntriesBefore({
+      sourcePath: file,
+      beforeOffset: Buffer.byteLength(content),
+      limit: 3,
+    });
+    expect(page.entries.map(idOf)).toEqual(["e0002", "e0003"]);
+    expect(page.nextBeforeOffset).toBe(Buffer.byteLength(firstLine));
+    expect(page.skippedPartial).toBe(0);
+
+    const earlier = await readEntriesBefore({
+      sourcePath: file,
+      beforeOffset: page.nextBeforeOffset!,
+      limit: 3,
+    });
+    expect(earlier.entries.map(idOf)).toEqual(["e0000"]);
+    expect(earlier.nextBeforeOffset).toBeNull();
+  });
+
   it("beforeOffset 落在行中间时不抛异常，半行被丢弃且 skippedPartial === 1", async () => {
     const size = await fileSize();
     // 最后一行的中间：整行约 700 字节，往回 300 字节必然落在行内

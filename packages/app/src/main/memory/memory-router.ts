@@ -13,27 +13,26 @@ export function effectiveMode(mode: MemoryPlan["mode"]): "none" | "canonical" | 
   return mode;
 }
 
+function planNeedsHistory(mode: MemoryPlan["mode"]): boolean {
+  return mode === "recall" || mode === "reflect";
+}
+
 /** @deprecated 用 effectiveMode；保留以免旧调用崩 */
 export function degradeMode(mode: MemoryPlan["mode"]): "none" | "canonical" {
   const next = effectiveMode(mode);
   return next === "none" ? "none" : "canonical";
 }
 
-function liveRefsFor(message: string, analysis: TaskAnalysis): Array<{ ref: string }> {
+function liveRefsFor(message: string): Array<{ ref: string }> {
   const refs: Array<{ ref: string }> = [];
   if (/会议|日程|calendar/i.test(message)) refs.push({ ref: "calendar" });
-  if (/package\.json|包管理器|node|版本/i.test(message) || analysis.currentStateNeed === "required") {
-    if (/会议|日程|calendar/i.test(message) && !/package\.json|包管理|node|版本/i.test(message)) {
-      return refs;
-    }
-    refs.push({ ref: "package.json" });
-  }
+  if (/package\.json|包管理器|\bnode\b/i.test(message)) refs.push({ ref: "package.json" });
   return refs;
 }
 
 export function planMemory(analysis: TaskAnalysis, message = ""): MemoryPlan {
   let mode: MemoryPlan["mode"] = "canonical";
-  if (analysis.genericKnowledge && analysis.memorySignal !== "explicit") {
+  if (analysis.memorySignal === "none" || (analysis.genericKnowledge && analysis.memorySignal !== "explicit")) {
     mode = "none";
   } else if (analysis.historyNeed === "pattern") {
     mode = "reflect";
@@ -43,7 +42,8 @@ export function planMemory(analysis: TaskAnalysis, message = ""): MemoryPlan {
 
   const query = compileQuery(message, analysis) || (analysis.genericKnowledge ? "" : message);
   const project = analysis.scopes.project;
-  const liveValidations = liveRefsFor(message, analysis);
+  const liveValidations = mode === "none" ? [] : liveRefsFor(message);
+  const readCanonical = mode !== "none" && (project || analysis.scopes.user || analysis.scopes.organization || planNeedsHistory(mode));
   return {
     mode,
     working: {
@@ -51,10 +51,10 @@ export function planMemory(analysis: TaskAnalysis, message = ""): MemoryPlan {
       write: mode !== "none",
       dedupeLoadedSources: true,
     },
-    canonicalReads: project
+    canonicalReads: readCanonical
       ? [
           {
-            scope: "project",
+            scope: project ? "project" : analysis.scopes.organization ? "organization" : "user",
             kind: analysis.logicalKinds.includes("procedure") ? "procedure" : "fact",
             route: "l1_pointer",
             key: query || "project",

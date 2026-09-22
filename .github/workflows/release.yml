@@ -27,16 +27,21 @@ on:
           - stable
           - beta
           - nightly
+      tag:
+        description: "已有版本 tag，例如 v0.1.3。stable 必须指定 tag 或从对应 tag 触发；beta/nightly 留空时构建所选 ref。"
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.channel }}
   cancel-in-progress: false
 
 env:
-  RELEASE_CHANNEL: ${{ github.event.inputs.channel || 'stable' }}
+  RELEASE_CHANNEL: ${{ inputs.channel }}
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   # ---------------------------------------------------------------- 闸门
@@ -59,16 +64,24 @@ jobs:
         env:
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           PIBUDDY_UPDATE_FEED_URL: ${{ secrets.PIBUDDY_UPDATE_FEED_URL }}
         run: |
           set -euo pipefail
+          if [ "${RELEASE_CHANNEL}" = "stable" ] && ! [[ "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::stable requires an existing vX.Y.Z tag; set the tag input"
+            exit 1
+          fi
           missing=0
 
           if [ -z "${WIN_CSC_LINK}" ]; then echo "::error::WIN_CSC_LINK missing - release blocked"; missing=1; fi
           if [ -z "${WIN_CSC_KEY_PASSWORD}" ]; then echo "::error::WIN_CSC_KEY_PASSWORD missing - release blocked"; missing=1; fi
+          if [ -z "${MAC_CSC_LINK}" ]; then echo "::error::MAC_CSC_LINK missing - release blocked"; missing=1; fi
+          if [ -z "${MAC_CSC_KEY_PASSWORD}" ]; then echo "::error::MAC_CSC_KEY_PASSWORD missing - release blocked"; missing=1; fi
           if [ -z "${APPLE_TEAM_ID}" ]; then echo "::error::APPLE_TEAM_ID missing - release blocked"; missing=1; fi
           if [ -z "${APPLE_ID}" ]; then echo "::error::APPLE_ID missing - release blocked"; missing=1; fi
           if [ -z "${APPLE_APP_SPECIFIC_PASSWORD}" ]; then echo "::error::APPLE_APP_SPECIFIC_PASSWORD missing - release blocked"; missing=1; fi
@@ -100,6 +113,8 @@ jobs:
       # actions/checkout v4
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ (inputs.channel == 'stable' || inputs.tag) && format('refs/tags/{0}', inputs.tag || github.ref_name) || github.ref }}
 
       # pnpm/action-setup v4
       - name: Setup pnpm
@@ -116,6 +131,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Validate release target
+        run: node packages/app/scripts/validate-release-target.mjs
 
       - name: Full automated regression
         run: node scripts/release-regression.mjs
@@ -136,18 +154,20 @@ jobs:
         include:
           - os: windows-latest
             platform: win
-            builder_flags: --win nsis
+            builder_flags: --win nsis zip --x64
           - os: macos-latest
             platform: mac
             builder_flags: --mac dmg zip
           - os: ubuntu-latest
             platform: linux
-            builder_flags: --linux AppImage deb
+            builder_flags: --linux AppImage deb --x64
 
     steps:
       # actions/checkout v4
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ (inputs.channel == 'stable' || inputs.tag) && format('refs/tags/{0}', inputs.tag || github.ref_name) || github.ref }}
 
       # pnpm/action-setup v4
       - name: Setup pnpm
@@ -240,10 +260,11 @@ jobs:
   # ------------------------------------------------- 最后一步才发布更新清单
   publish-manifest:
     name: publish-manifest
-    needs: upload-artifacts
-    # 只有 tag push 才发 feed。手动 dispatch 的 beta/nightly 到 upload-artifacts
-    # 为止，产物停在 Actions artifact 上并带 UNSIGNED 标记，进不了 stable feed。
-    if: github.event_name == 'push'
+    needs:
+      - preflight
+      - upload-artifacts
+    # 仅签名门通过的手动 stable 发布更新；beta/nightly 到构建产物为止。
+    if: github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && needs.preflight.outputs.signed == 'true'
     # publish 是唯一一个「做了就撤不回来」的动作，environment 的人工审批
     # 门禁在这里最有价值：清单一发，全网客户端下一次检查就看得到。
     environment: release
@@ -254,6 +275,8 @@ jobs:
       # actions/checkout v4
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ (inputs.channel == 'stable' || inputs.tag) && format('refs/tags/{0}', inputs.tag || github.ref_name) || github.ref }}
 
       # 第二道失败关闭闸。preflight 已经拦过一次，这里再拦一次的理由是：
       # publish 是唯一一个「做了就撤不回来」的动作，它不该依赖上游 job 的
@@ -297,11 +320,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --notes "PiBuddy ${GITHUB_REF_NAME}" --draft || true
+          if ! gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --title "${RELEASE_TAG}" --notes "PiBuddy ${RELEASE_TAG}" --verify-tag --draft
+          fi
           shopt -s nullglob
           payloads=(dist/*.exe dist/*.exe.blockmap dist/*.dmg dist/*.dmg.blockmap dist/*.zip dist/*.AppImage dist/*.deb)
           if [ ${#payloads[@]} -eq 0 ]; then echo "::error::no payloads to publish"; exit 1; fi
-          gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${payloads[@]}"
+          gh release upload "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --clobber "${payloads[@]}"
 
       # ⚠️ 本 step 必须是 publish-manifest 的**最后一个 step**。
       # 清单一旦发布，全网客户端在下一次检查时立刻看到新版本；上面任何一步
@@ -316,5 +341,5 @@ jobs:
           shopt -s nullglob
           manifests=(dist/latest*.yml)
           if [ ${#manifests[@]} -eq 0 ]; then echo "::error::no channel manifest to publish"; exit 1; fi
-          gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${manifests[@]}"
-          gh release edit "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --draft=false
+          gh release upload "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --clobber "${manifests[@]}"
+          gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease=false --latest

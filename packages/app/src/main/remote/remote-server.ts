@@ -84,7 +84,8 @@ export class RemoteServer {
   private readonly limiter = new RemoteRateLimiter(10_000, 120);
   private readonly uploads = new Map<string, Upload>();
   private pushTimer: NodeJS.Timeout | null = null;
-  private readonly sseClients = new Set<ServerResponse>();
+  /** SSE 也必须保留设备归属，设备撤销时才能与 WS 一起立即断开。 */
+  private readonly sseClients = new Map<ServerResponse, string>();
 
   constructor(
     private readonly registry: RemoteRegistry,
@@ -160,7 +161,7 @@ export class RemoteServer {
   async stop(): Promise<void> {
     this.stopPushLoop();
     this.hub.dropAll();
-    for (const res of [...this.sseClients]) {
+    for (const res of [...this.sseClients.keys()]) {
       try {
         res.end();
       } catch {
@@ -181,6 +182,15 @@ export class RemoteServer {
   /** 撤销 / 轮换某设备后，立即断开它的活跃连接。 */
   dropDevice(deviceId: string): void {
     this.hub.dropDevice(deviceId);
+    for (const [res, ownerDeviceId] of [...this.sseClients]) {
+      if (ownerDeviceId !== deviceId) continue;
+      this.sseClients.delete(res);
+      try {
+        res.end();
+      } catch {
+        /* 已断，忽略 */
+      }
+    }
   }
 
   // ---------------------------------------------------------------- 鉴权依赖
@@ -332,6 +342,7 @@ export class RemoteServer {
     if (!code) return this.deny(res, 400, "missing code");
     const result = consumePairing(this.registry, code, name, Date.now());
     if (!result) return this.deny(res, 401, "invalid or expired code");
+    if (result.rotated) this.dropDevice(result.deviceId);
     this.json(res, 200, {
       deviceId: result.deviceId,
       token: result.token, // 唯一一次外发，之后主进程只有 hash
@@ -433,7 +444,14 @@ export class RemoteServer {
   }
 
   private async routeSessionHistory(ctx: RouteCtx): Promise<void> {
-    const sessionId = ctx.url.pathname.split("/").pop() ?? "";
+    const match = /^\/api\/sessions\/([^/]+)\/history$/.exec(ctx.url.pathname);
+    let sessionId = "";
+    try {
+      sessionId = decodeURIComponent(match?.[1] ?? "");
+    } catch {
+      return this.deny(ctx.res, 400, "invalid sessionId");
+    }
+    if (!sessionId) return this.deny(ctx.res, 400, "invalid sessionId");
     const ws = ctx.url.searchParams.get("ws") ?? "";
     const limit = clampInt(ctx.url.searchParams.get("limit"), 50, 1, 200);
     const page = await this.backend.sessionHistory(sessionId, ws, limit);
@@ -514,7 +532,7 @@ export class RemoteServer {
       connection: "keep-alive",
     });
     ctx.res.write(`data: ${JSON.stringify(this.backend.poolSnapshot())}\n\n`);
-    this.sseClients.add(ctx.res);
+    this.sseClients.set(ctx.res, ctx.deviceId);
     ctx.res.on("close", () => this.sseClients.delete(ctx.res));
   }
 
@@ -589,7 +607,7 @@ export class RemoteServer {
       const snapshot = this.backend.poolSnapshot();
       const msg = JSON.stringify({ type: "pool", snapshot });
       this.hub.broadcast(msg);
-      for (const res of this.sseClients) {
+      for (const res of this.sseClients.keys()) {
         try {
           res.write(`data: ${JSON.stringify(snapshot)}\n\n`);
         } catch {

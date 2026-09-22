@@ -51,11 +51,13 @@ export const pi = {
    */
   prompt: (payload: {
     message: string;
+    workspaceId?: string;
+    sessionId?: string;
     images?: ImageContent[];
     attachmentTokens?: string[];
     streamingBehavior?: "steer" | "followUp";
     workMode?: "act" | "plan";
-  }) => invoke<RpcResponse>(CHANNELS.piPrompt, payload),
+  }) => invoke<RpcResponse & { notSent?: boolean }>(CHANNELS.piPrompt, payload),
   steer: (payload: { message: string; images?: ImageContent[] }) =>
     invoke<RpcResponse>(CHANNELS.piSteer, payload),
   followUp: (payload: { message: string; images?: ImageContent[] }) =>
