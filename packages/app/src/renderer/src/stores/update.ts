@@ -68,12 +68,18 @@ export const useUpdateStore = defineStore("update", () => {
   const cancelSupported = computed(() => state.value.cancelSupported);
   const blockers = computed(() => state.value.blockers);
 
-  /** 横幅是否该出现：状态对 + 用户没在本次会话里关掉它。 */
+  /** 主进程决定 24 小时抑制是否仍有效；主动检查仍应显示结果。 */
   const bannerVisible = computed(() => {
     if (bannerClosed.value) return false;
-    const s = state.value.status;
-    if (s === "error") return true;
-    return s === "available" || s === "downloading" || s === "downloaded";
+    const s = state.value;
+    if (s.status === "available") {
+      return (
+        s.checkSource === "manual" ||
+        !s.candidateVersion ||
+        s.dismissedVersion !== s.candidateVersion
+      );
+    }
+    return s.status === "error" || s.status === "downloading" || s.status === "downloaded";
   });
 
   function apply(next: UpdateState): void {

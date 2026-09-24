@@ -28,7 +28,7 @@ const lastCheckedText = computed(() => {
 const statusText = computed(() => {
   switch (s.value.status) {
     case "unsupported":
-      return "当前运行方式不支持自动更新（开发模式或商店分发）";
+      return "当前运行方式不支持签名自动更新（开发模式或未打包）";
     case "checking":
       return "正在检查…";
     case "available":
@@ -46,7 +46,7 @@ const statusText = computed(() => {
     case "error":
       return s.value.errorCode ? UPDATE_ERROR_MESSAGES[s.value.errorCode] : "更新失败";
     default:
-      return "空闲";
+      return "等待检查";
   }
 });
 
@@ -85,6 +85,9 @@ async function copyDiagnostics(): Promise<void> {
         <n-tag v-if="s.status === 'error'" size="small" type="error">出错</n-tag>
       </span>
     </div>
+
+    <h4>签名自动更新</h4>
+    <p class="hint">以下检查、下载与重启安装只针对已签名更新源，不包含 GitHub 预览版。</p>
 
     <div class="row">
       <span class="k">更新通道</span>
@@ -137,7 +140,7 @@ async function copyDiagnostics(): Promise<void> {
         :disabled="busy || s.status === 'unsupported'"
         @click="store.checkNow()"
       >
-        立即检查
+        检查签名更新
       </n-button>
       <n-button
         v-if="s.status === 'available'"
@@ -156,6 +159,20 @@ async function copyDiagnostics(): Promise<void> {
       </n-button>
       <n-button size="small" quaternary @click="copyDiagnostics">复制诊断信息</n-button>
     </n-space>
+
+    <div class="preview-release">
+      <h4>GitHub 预览版（未签名）</h4>
+      <p class="hint">预览版需从发布页手动下载并安装；不会出现在上方的签名更新检查结果中。</p>
+      <n-button
+        size="small"
+        tag="a"
+        href="https://github.com/onehopeA10/pibuddy/releases"
+        target="_blank"
+        rel="noreferrer"
+      >
+        查看 GitHub 发布页
+      </n-button>
+    </div>
   </section>
 </template>
 
@@ -169,6 +186,14 @@ async function copyDiagnostics(): Promise<void> {
   margin: 0 0 10px;
   font-size: var(--font-ui-13);
   color: var(--text-secondary);
+}
+.update-panel h4 {
+  margin: 12px 0 6px;
+  font-size: var(--font-ui-13);
+  color: var(--text-primary);
+}
+.update-panel p.hint {
+  margin: 0 0 10px;
 }
 .row {
   display: flex;
@@ -191,6 +216,11 @@ async function copyDiagnostics(): Promise<void> {
 .hint {
   font-size: var(--font-ui-12);
   color: var(--text-tertiary);
+}
+.preview-release {
+  border-top: var(--border-w) solid var(--border-subtle);
+  margin-top: 14px;
+  padding-top: 2px;
 }
 .notes {
   max-height: 120px;

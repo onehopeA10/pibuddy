@@ -193,6 +193,85 @@ describe("动作转发", () => {
   });
 });
 
+describe("更新横幅与主进程的稍后状态", () => {
+  it("reload 后自动发现的同版本在 24 小时内不弹横幅，其他版本正常显示", async () => {
+    api.getState.mockResolvedValue(
+      makeState({
+        status: "available",
+        stateSequence: 1,
+        candidateVersion: "2.0.0",
+        checkSource: "startup",
+        dismissedVersion: "2.0.0",
+      })
+    );
+    const store = useUpdateStore();
+    await store.init();
+    expect(store.bannerVisible).toBe(false);
+
+    store.apply(
+      makeState({
+        status: "available",
+        stateSequence: 2,
+        candidateVersion: "2.1.0",
+        dismissedVersion: "2.0.0",
+      })
+    );
+    expect(store.bannerVisible).toBe(true);
+  });
+
+  it("主动检查同一版本可见，随后自动检查仍遵守稍后状态", async () => {
+    api.getState.mockResolvedValue(
+      makeState({
+        status: "available",
+        stateSequence: 1,
+        candidateVersion: "2.0.0",
+        dismissedVersion: "2.0.0",
+      })
+    );
+    api.checkForUpdates.mockResolvedValue(
+      makeState({
+        status: "available",
+        stateSequence: 2,
+        candidateVersion: "2.0.0",
+        dismissedVersion: "2.0.0",
+        checkSource: "manual",
+      })
+    );
+    const store = useUpdateStore();
+    await store.init();
+    expect(store.bannerVisible).toBe(false);
+
+    await store.checkNow();
+    expect(store.bannerVisible).toBe(true);
+
+    store.apply(
+      makeState({
+        status: "available",
+        stateSequence: 3,
+        candidateVersion: "2.0.0",
+        dismissedVersion: "2.0.0",
+        checkSource: "auto",
+      })
+    );
+    expect(store.bannerVisible).toBe(false);
+  });
+
+  it("下载中、下载完成和错误不因已稍后而失去操作入口", () => {
+    const store = useUpdateStore();
+    for (const status of ["downloading", "downloaded", "error"] as const) {
+      store.apply(
+        makeState({
+          status,
+          stateSequence: store.state.stateSequence + 1,
+          candidateVersion: "2.0.0",
+          dismissedVersion: "2.0.0",
+        })
+      );
+      expect(store.bannerVisible, status).toBe(true);
+    }
+  });
+});
+
 describe("不碰浏览器存储", () => {
   it("store 源码里没有 localStorage / sessionStorage", async () => {
     const { readFileSync } = await import("node:fs");

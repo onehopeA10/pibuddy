@@ -75,6 +75,23 @@ describe("十个状态的渲染判据", () => {
     }
   });
 
+  it("稍后的自动可用结果不占据页面，下载完成与错误仍可见", async () => {
+    const { wrapper, store } = mountWith(
+      stateFor("available", { checkSource: "startup", dismissedVersion: "2.0.0" })
+    );
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".update-banner").exists()).toBe(false);
+
+    store.apply(stateFor("downloaded", { stateSequence: 2, dismissedVersion: "2.0.0" }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.text()).toContain("立即重启安装");
+
+    store.apply(stateFor("error", { stateSequence: 3, dismissedVersion: "2.0.0" }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.text()).toContain("重试");
+    wrapper.unmount();
+  });
+
   it("available 显示版本、发布时间、体积与净化后的说明", async () => {
     const { wrapper } = mountWith(stateFor("available"));
     await wrapper.vm.$nextTick();

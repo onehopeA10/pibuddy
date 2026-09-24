@@ -14,9 +14,11 @@
 本地优先 · 记忆可治理 · 模型自由 · Windows / macOS / Linux
 
 [![CI](https://github.com/onehopeA10/pibuddy/actions/workflows/ci.yml/badge.svg)](https://github.com/onehopeA10/pibuddy/actions/workflows/ci.yml)
+[![GitHub 预览版本](https://img.shields.io/github/v/release/onehopeA10/pibuddy?include_prereleases&label=preview)](https://github.com/onehopeA10/pibuddy/releases)
 [![Stars](https://img.shields.io/github/stars/onehopeA10/pibuddy?style=flat&label=stars)](https://github.com/onehopeA10/pibuddy/stargazers)
 
 **[从源码运行](#从安装到第一句对话)** ·
+[GitHub 预览版（未签名，手动安装）](https://github.com/onehopeA10/pibuddy/releases) ·
 [产品文档](pibuddy-docs/README.md) ·
 [架构](pibuddy-docs/docs/architecture/index.md) ·
 [English](README.en.md)

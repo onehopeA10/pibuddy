@@ -14,9 +14,11 @@
 Local-first · Governed memory · Model-agnostic · Windows / macOS / Linux
 
 [![CI](https://github.com/onehopeA10/pibuddy/actions/workflows/ci.yml/badge.svg)](https://github.com/onehopeA10/pibuddy/actions/workflows/ci.yml)
+[![GitHub preview version](https://img.shields.io/github/v/release/onehopeA10/pibuddy?include_prereleases&label=preview)](https://github.com/onehopeA10/pibuddy/releases)
 [![Stars](https://img.shields.io/github/stars/onehopeA10/pibuddy?style=flat&label=stars)](https://github.com/onehopeA10/pibuddy/stargazers)
 
 **[Run from source](#from-clone-to-first-reply)** ·
+[GitHub previews (unsigned, manual install)](https://github.com/onehopeA10/pibuddy/releases) ·
 [Docs](pibuddy-docs/README.md) ·
 [Architecture](pibuddy-docs/docs/en/architecture/index.md) ·
 [简体中文](README.md)

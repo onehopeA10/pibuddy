@@ -106,26 +106,34 @@ const items = computed<StatusItem[]>(() => {
     level: app.streaming ? "busy" : "ok",
   });
 
-  // 6. update —— store 未就绪时如实说 unsupported，不显示一个假的「最新版」
+  // 6. update —— 未检查或不支持时都不能声称已是最新
   out.push({
     key: "update",
     label: "应用更新",
-    text: update.status ? UPDATE_LABELS[update.status] ?? update.status : "unsupported",
-    level: update.status === "error" ? "error" : update.status === "downloading" ? "busy" : "ok",
+    text: UPDATE_LABELS[update.status] ?? "状态暂不可用",
+    level: update.status === "error"
+      ? "error"
+      : ["checking", "downloading", "installing"].includes(update.status)
+        ? "busy"
+        : ["idle", "unsupported"].includes(update.status)
+          ? "warn"
+          : "ok",
   });
 
   return out;
 });
 
 const UPDATE_LABELS: Record<string, string> = {
-  idle: "已是最新",
+  idle: "尚未检查更新",
   checking: "正在检查…",
   available: "有新版本",
+  "not-available": "签名源无更新",
   downloading: "正在下载…",
   downloaded: "下载完成，待重启",
-  error: "检查失败",
-  unsupported: "此平台不支持自动更新",
-  disabled: "已关闭自动更新",
+  "waiting-for-agent": "等待任务结束后安装",
+  installing: "正在安装…",
+  error: "更新失败",
+  unsupported: "当前运行方式不支持自动更新",
 };
 
 /** 顶栏那个点的颜色取全部条目里最严重的一档。 */

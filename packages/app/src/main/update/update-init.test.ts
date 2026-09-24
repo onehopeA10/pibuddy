@@ -240,4 +240,28 @@ describe("dismiss 归 main 持久化", () => {
     clock += 24 * 60 * 60 * 1000 + 1;
     expect(svc.shouldAnnounce("2.0.0")).toBe(true);
   });
+
+  it("可用版本的横幅抑制随 24h 到期，而非永久隐藏", () => {
+    const prefs = new MemoryPrefs();
+    let clock = 1_000_000;
+    const { deps, updater } = makeDeps({ prefs, now: () => clock });
+    const svc = new UpdateService(deps);
+
+    updater.emit("update-available", { version: "2.0.0" });
+    svc.dismissVersion("2.0.0");
+    const restarted = makeDeps({ prefs, now: () => clock });
+    const svc2 = new UpdateService(restarted.deps);
+    restarted.updater.emit("update-available", { version: "2.0.0" });
+    expect(svc2.getState().dismissedVersion).toBe("2.0.0");
+
+    const beforeExpiry = svc2.getState().stateSequence;
+    clock += 24 * 60 * 60 * 1000 + 1;
+    const fresh = svc2.getState();
+    expect(fresh.dismissedVersion).toBeNull();
+    expect(fresh.stateSequence).toBeGreaterThan(beforeExpiry);
+    expect(svc2.getState().stateSequence).toBe(fresh.stateSequence);
+    restarted.updater.emit("update-available", { version: "2.0.0" });
+    expect(svc2.getState().dismissedVersion).toBeNull();
+    expect(prefs.load().dismissedVersion).toBe("2.0.0");
+  });
 });

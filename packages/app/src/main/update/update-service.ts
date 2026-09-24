@@ -257,8 +257,15 @@ export class UpdateService {
     return this.state;
   }
 
-  /** 当前权威快照。 */
+  /** 过期的横幅抑制要提交成新状态，避免迟到事件覆盖刷新后的快照。 */
   getState(): UpdateState {
+    if (
+      this.state.status === "available" &&
+      this.state.candidateVersion === this.state.dismissedVersion &&
+      this.shouldAnnounce()
+    ) {
+      return this.commit({ dismissedVersion: null });
+    }
     return this.state;
   }
 
@@ -328,6 +335,7 @@ export class UpdateService {
     this.commit({
       status: "available",
       candidateVersion: version,
+      dismissedVersion: this.shouldAnnounce(version) ? null : this.prefs.dismissedVersion,
       releaseDate: info?.releaseDate ?? null,
       releaseNotes: sanitizeReleaseNotes(info?.releaseNotes),
       totalBytes: info?.files?.[0]?.size ?? 0,
